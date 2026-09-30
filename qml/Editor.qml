@@ -1,0 +1,666 @@
+pragma ComponentBehavior: Bound
+
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Shapes
+
+import "text.js" as Txt
+
+// The editor: a TextArea in a ScrollView, which vim drives. Vim's cursors,
+// the selection, search highlights, warnings and errors, and line numbers
+// are drawn over (or under) its text here, and the hover box shows what's
+// under the pointer.
+Item {
+    id: view
+
+    required property Vim vim
+    required property FindBar findBar
+    required property Theme theme
+    // System (main.qml), for the line format.
+    required property var system
+
+    readonly property alias textArea: editor
+    readonly property Flickable flickable: scrollView.contentItem as Flickable
+    readonly property alias metrics: metrics
+    // Every line is this tall, even one with an emoji (see fixLineFormat).
+    // The extra space keeps an emoji clear of the lines around it.
+    readonly property int lineHeight: Math.ceil(metrics.lineSpacing * 1.25)
+    // Where the baseline is in a line: the font's characters sit in the
+    // middle of it (see fixLineFormat).
+    readonly property real textBaseline: (lineHeight + metrics.ascent - metrics.descent) / 2
+    // Changes when the text or its layout does, and when the view scrolls
+    // or resizes: what the overlays are computed from (see Layer).
+    readonly property var layout: [editor.revision, editor.font, editor.contentWidth, editor.contentHeight, editor.leftPadding]
+    readonly property var viewport: [flickable.contentY, flickable.height]
+    // Set while the text changes in a way that isn't an edit.
+    property bool quiet: false
+
+    // The text changed, by vim or by typing (not by setText).
+    signal edited()
+
+    // Replaces the text (a file or a listing was opened); not an edit.
+    function setText(text) {
+        quiet = true;
+        editor.text = text;
+        quiet = false;
+        fixLineFormat(); // setting the text reset it
+    }
+
+    // An emoji comes from a taller font than the editor's, which makes its
+    // line taller. Give every line the same height instead. Qt puts a
+    // fixed-height line's baseline at 4/5 of it, so to center the text, the
+    // line is made shorter and a bottom margin makes up the rest. Qt counts
+    // the new block format as an edit, but it isn't one.
+    function fixLineFormat() {
+        // Not textBaseline, which may not have caught up with the font yet.
+        const baseline = (lineHeight + metrics.ascent - metrics.descent) / 2;
+        const height = Math.min(lineHeight, baseline * 5 / 4);
+        quiet = true;
+        system.setLineFormat(editor.textDocument, height, lineHeight - height);
+        quiet = false;
+    }
+
+    // The rectangle of the character at pos, as tall as the line. The
+    // cursors and highlights use it rather than positionToRectangle, which
+    // gives a line with an emoji its natural height, while every line is
+    // lineHeight tall (see fixLineFormat).
+    function cellAt(pos) {
+        const r = editor.positionToRectangle(pos);
+        const h = lineHeight;
+        const line = Math.round((r.y + r.height / 2 - editor.topPadding - h / 2) / h);
+        return Qt.rect(r.x, editor.topPadding + line * h, r.width, h);
+    }
+
+    // Where to draw a cursor at pos: { cell, character, main }, where
+    // character is the whole character there (an emoji, say), or "" for
+    // none (at a line's end or on a tab).
+    function spotAt(pos, main) {
+        const t = editor.text, p = Math.min(pos, editor.length);
+        const ch = t.slice(p, Txt.charEnd(t, p));
+        return {
+            cell: cellAt(p),
+            character: ch === "\t" || ch === "\n" || ch === "\u2029" ? "" : ch,
+            main: main
+        };
+    }
+
+    // The selection in the visible lines, as one { start, end, eol } span
+    // per line, where eol means it includes the line break. A visual block
+    // isn't the editor's selection, so vim gives it.
+    function selectionSpans() {
+        const block = vim.mode === "visualBlock";
+        const s = editor.selectionStart, e = editor.selectionEnd;
+        if (s === e && !block)
+            return [];
+        const t = editor.text, v = vim.visibleRange(t);
+        if (block)
+            return vim.blockSpans().filter(r => r.start >= v.from && r.start <= v.to);
+        const spans = [];
+        for (let p = Math.max(s, v.from); p <= Math.min(e, v.to); ) {
+            const le = Txt.lineEnd(t, p);
+            if (p === e)
+                break;
+            spans.push({
+                start: p,
+                end: Math.min(le, e),
+                eol: le < e
+            });
+            p = le + 1;
+        }
+        return spans;
+    }
+
+    // The warning or error with the character at pos, or null.
+    function diagnosticAt(pos) {
+        return diagnostics.at(pos);
+    }
+
+    // The message shown after a line's end at point p (in the editor), as
+    // { start, rect } (its diagnostic's start), or null.
+    function messageUnder(p) {
+        return diagnostics.messageUnder(p);
+    }
+
+    onLineHeightChanged: fixLineFormat()
+    onTextBaselineChanged: fixLineFormat()
+    Component.onCompleted: fixLineFormat()
+
+    FontMetrics {
+        id: metrics
+
+        font: editor.font
+    }
+
+    TextMetrics {
+        id: spaceMetrics
+
+        font: editor.font
+        text: " "
+    }
+
+    Connections {
+        target: view.vim
+
+        function onCursorChanged() {
+            hover.hide();
+        }
+        function onHoverRequested(at) {
+            hover.show(at, false);
+        }
+    }
+
+    Connections {
+        target: view.flickable
+
+        function onContentXChanged() {
+            hover.hide();
+        }
+        function onContentYChanged() {
+            hover.hide();
+        }
+    }
+
+    HoverBox {
+        id: hover
+
+        editor: view
+        vim: view.vim
+        theme: view.theme
+    }
+
+    // An overlay drawn from a model (spans, cursors), which it recomputes
+    // with `compute` once anything in `inputs` changed and the current edit
+    // is done: while editor.remove() runs, the document is already shorter
+    // but editor.length isn't updated yet, and asking for a position then
+    // warns.
+    component Layer: Item {
+        id: layer
+
+        property var inputs: []
+        property var compute: () => []
+        property var model: []
+
+        function refresh() {
+            // A Repeater keeps its delegates when the new model equals the
+            // old one, but after a relayout their rectangles must be
+            // recomputed, so always start from an empty model.
+            model = [];
+            model = compute();
+        }
+
+        onInputsChanged: Qt.callLater(refresh)
+    }
+
+    // A cursor over the character in `cell`: a bar, a block that shows
+    // the character, or an underline.
+    component Caret: Rectangle {
+        id: caret
+
+        required property rect cell
+        required property string character
+        required property string shape // "bar", "block" or "underline"
+        property bool shown: true
+
+        x: cell.x
+        y: shape === "underline" ? cell.y + cell.height - height : cell.y
+        width: shape === "bar" ? 2 : charMetrics.advanceWidth
+        height: shape === "underline" ? Math.max(2, Math.round(cell.height / 8)) : cell.height
+        color: editor.color
+        visible: shown && (shape !== "bar" || editor.activeFocus && editor.blinkOn)
+        opacity: editor.activeFocus ? 1 : 0.4
+
+        TextMetrics {
+            id: charMetrics
+
+            font: editor.font
+            text: caret.character || " "
+        }
+
+        Text {
+            y: view.textBaseline - baselineOffset
+            visible: caret.shape === "block"
+            text: caret.character
+            font: editor.font
+            color: view.theme.base
+            textFormat: Text.PlainText
+        }
+    }
+
+    // A line with a cursor, a shade off the background as in other editors.
+    component Band: Rectangle {
+        required property rect row
+
+        x: view.flickable.contentX
+        y: row.y
+        width: view.flickable.width
+        height: row.height
+        color: Qt.tint(view.theme.base, view.theme.dark ? "#19ffffff" : "#0f000000")
+    }
+
+    ScrollView {
+        id: scrollView
+
+        anchors.fill: parent
+
+        TextArea {
+            id: editor
+
+            // Bumped on every change to the text, for things that must
+            // refresh after one.
+            property int revision: 0
+            // Whether the insert-mode bars are in the visible half of a blink.
+            property bool blinkOn: true
+
+            font.family: view.vim.fontFamily
+            font.pointSize: view.vim.fontSize
+            textFormat: TextEdit.PlainText
+            wrapMode: TextEdit.NoWrap
+            selectByMouse: true
+            // The selection is drawn below (see `selection`), not by Qt.
+            selectionColor: "transparent"
+            selectedTextColor: color
+            readOnly: true // vim starts in normal mode
+            focus: true
+            onTextChanged: {
+                if (!view.quiet)
+                    view.edited();
+                revision++;
+            }
+            onCursorPositionChanged: {
+                blinkOn = true;
+                view.vim.syncFromEditor();
+            }
+            onSelectedTextChanged: view.vim.syncFromEditor()
+            onRevisionChanged: hover.hide()
+            onActiveFocusChanged: {
+                if (!activeFocus)
+                    hover.hide();
+            }
+            Component.onCompleted: {
+                // Make room for the line numbers beside the style's padding.
+                const base = leftPadding;
+                leftPadding = Qt.binding(() => base + gutter.columnWidth);
+                // Fusion (Windows and Linux) frames a TextArea like a text
+                // field, which doesn't suit a full-window editor.
+                if (Qt.platform.os !== "osx")
+                    background = plainBackground.createObject(editor);
+            }
+            Keys.onPressed: event => {
+                if (event.matches(StandardKey.Copy) && hover.copySelection()) {
+                    event.accepted = true;
+                    return;
+                }
+                // Not on a lone modifier, which may start Cmd+C.
+                if (![Qt.Key_Shift, Qt.Key_Control, Qt.Key_Meta, Qt.Key_Alt, Qt.Key_AltGr].includes(event.key))
+                    hover.hide(); // gh shows it again
+                event.accepted = view.vim.handleKey(event);
+            }
+
+            Component {
+                id: plainBackground
+
+                Rectangle {
+                    color: view.theme.base
+                }
+            }
+
+            // The pointer resting on an icon that hides text shows the
+            // text, and on a warning or error (or its message after the
+            // line) the message.
+            HoverHandler {
+                onPointChanged: hover.pointerAt(hovered ? point.position : null)
+                onHoveredChanged: hover.pointerAt(hovered ? point.position : null)
+            }
+
+            // Insert mode: a blinking bar. The editor puts the delegate at its
+            // cursor rectangle; the bar itself fills the line.
+            cursorDelegate: Item {
+                id: bar
+
+                width: 2
+                visible: view.vim.mode === "insert" && editor.activeFocus && editor.blinkOn
+
+                Rectangle {
+                    y: view.cellAt(editor.cursorPosition).y - bar.y
+                    width: parent.width
+                    height: view.lineHeight
+                    color: editor.color
+                }
+            }
+
+            // The bars blink together: the one above and the extra cursors'.
+            Timer {
+                interval: 530
+                repeat: true
+                running: view.vim.mode === "insert" && editor.activeFocus
+                onRunningChanged: editor.blinkOn = true
+                onTriggered: editor.blinkOn = !editor.blinkOn
+            }
+
+            // Alt+click adds a cursor (or removes one). A plain click goes
+            // back to one cursor and then does what it always does.
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.IBeamCursor
+                onPressed: mouse => {
+                    if (mouse.modifiers & Qt.AltModifier) {
+                        editor.forceActiveFocus();
+                        view.vim.toggleCursor(editor.positionAt(mouse.x, mouse.y));
+                    } else {
+                        view.vim.clearCursors();
+                        mouse.accepted = false;
+                    }
+                }
+            }
+
+            // The lines with a cursor, under the selection. Not while
+            // there's a selection.
+            Item {
+                z: -0.6
+                visible: !view.vim.isVisual
+
+                Repeater {
+                    model: carets.model
+
+                    Band {
+                        required property var modelData
+
+                        row: modelData.cell
+                    }
+                }
+            }
+
+            // The selection, drawn under the text (a negative z puts a child
+            // below its parent's content) with the same height on every line.
+            Layer {
+                id: selection
+
+                z: -0.5
+                inputs: [editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.layout, view.viewport]
+                compute: () => view.selectionSpans()
+
+                Repeater {
+                    model: selection.model
+
+                    Rectangle {
+                        required property var modelData
+                        readonly property rect startRect: view.cellAt(modelData.start)
+                        readonly property rect endRect: view.cellAt(modelData.end)
+
+                        x: startRect.x
+                        y: startRect.y
+                        // A selected line break shows as a space, as in Qt.
+                        width: endRect.x - startRect.x + (modelData.eol ? spaceMetrics.advanceWidth : 0)
+                        height: startRect.height
+                        color: view.theme.highlight
+                    }
+                }
+            }
+
+            // Search matches: the search being typed, else the find bar's
+            // while it's open, else the last search until Esc.
+            Layer {
+                id: highlights
+
+                inputs: [view.vim.commandLine, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
+                compute: () => view.vim.typedSearch() === null && view.findBar.active ? view.findBar.highlightSpans() : view.vim.searchHighlights()
+
+                Repeater {
+                    model: highlights.model
+
+                    Rectangle {
+                        id: match
+
+                        required property var modelData
+                        readonly property rect startRect: view.cellAt(modelData.start)
+                        readonly property rect endRect: view.cellAt(modelData.end)
+
+                        x: startRect.x
+                        y: startRect.y
+                        width: endRect.x - startRect.x
+                        height: startRect.height
+                        color: modelData.current ? "#ff9f1a" : "#f5d547"
+
+                        // Redraw the matched text on top, dark on the highlight.
+                        Text {
+                            y: view.textBaseline - baselineOffset
+                            text: editor.getText(match.modelData.start, match.modelData.end)
+                            font: editor.font
+                            color: "black"
+                            textFormat: Text.PlainText
+                        }
+                    }
+                }
+            }
+
+            // Every cursor: the main one, then the extra ones (Alt+click, or
+            // a block insert's lines), as spotAt gives them. After the search
+            // highlights, so they're drawn over them.
+            Layer {
+                id: carets
+
+                inputs: [view.vim.cursor, view.vim.cursors, editor.cursorRectangle, view.layout]
+                compute: () => [view.spotAt(view.vim.cursor, true)].concat(view.vim.cursors.map(c => view.spotAt(c.pos, false)))
+
+                // Shaped like the main one. In insert mode the main one is
+                // the editor's own bar (see cursorDelegate).
+                Repeater {
+                    model: carets.model
+
+                    Caret {
+                        required property var modelData
+
+                        cell: modelData.cell
+                        character: modelData.character
+                        shape: view.vim.cursorShape
+                        shown: !modelData.main || view.vim.mode !== "insert"
+                    }
+                }
+            }
+
+            // Warnings and errors, as in VS Code: a wavy underline, orange or
+            // red, and a message after the end of the line (an error's, if
+            // the line has both). The pointer resting on either (or gh)
+            // shows the message in the hover box. For now the whole words
+            // "warning" and "error", in any case, are the ones (see find).
+            Item {
+                id: diagnostics
+
+                readonly property int longest: 7 // "warning"
+                // The one whose message shows after its line's end, for each
+                // line in view.
+                readonly property var messages: {
+                    const shown = [];
+                    for (const d of squiggles.model) {
+                        const prev = shown[shown.length - 1];
+                        if (!prev || prev.lineEnd !== d.lineEnd)
+                            shown.push(d);
+                        else if (prev.severity !== "error" && d.severity === "error")
+                            shown[shown.length - 1] = d;
+                    }
+                    return shown;
+                }
+
+                // The warnings and errors within t from `from` to `to`, as
+                // { start, end, severity, message, lineEnd }.
+                function find(t, from, to) {
+                    const re = /warning|error/gi, part = t.slice(from, to), list = [];
+                    let m;
+                    while ((m = re.exec(part))) {
+                        const s = from + m.index, e = s + m[0].length;
+                        if (Txt.charClass(t[s - 1]) === 2 || Txt.charClass(t[e]) === 2)
+                            continue;
+                        const severity = m[0].toLowerCase();
+                        list.push({
+                            start: s,
+                            end: e,
+                            severity: severity,
+                            message: "“" + m[0] + "” is " + (severity === "error" ? "an error." : "a warning."),
+                            lineEnd: Txt.lineEnd(t, e)
+                        });
+                    }
+                    return list;
+                }
+
+                // The warning or error with the character at pos, or null.
+                function at(pos) {
+                    return find(editor.text, Math.max(0, pos - longest + 1), pos + longest).find(d => d.start <= pos && pos < d.end) || null;
+                }
+
+                // The message shown after a line's end at point p, as
+                // { start, rect } (its diagnostic's start), or null.
+                function messageUnder(p) {
+                    for (let i = 0; i < messageRepeater.count; i++) {
+                        const m = messageRepeater.itemAt(i), cell = view.cellAt(messages[i].lineEnd);
+                        if (m && p.x >= m.x && p.x < m.x + m.width && p.y >= cell.y && p.y < cell.y + cell.height)
+                            return {
+                                start: messages[i].start,
+                                rect: Qt.rect(m.x, cell.y, m.width, cell.height)
+                            };
+                    }
+                    return null;
+                }
+
+                // A zigzag `width` long, `step` high, with a peak every
+                // other step. The last step ends partway at `width`.
+                function wave(width, step) {
+                    let path = "M0 " + step;
+                    for (let x = step, up = true; x - step < width; x += step, up = !up) {
+                        const end = Math.min(x, width), part = (end - x + step) / step;
+                        path += " L" + end + " " + (up ? step * (1 - part) : step * part);
+                    }
+                    return path;
+                }
+
+                // The ones in the visible lines.
+                Layer {
+                    id: squiggles
+
+                    inputs: [view.layout, view.viewport]
+                    compute: () => {
+                        const v = view.vim.visibleRange(editor.text);
+                        return diagnostics.find(editor.text, v.from, v.to);
+                    }
+
+                    // Centered on the bottom of the font's descent.
+                    Repeater {
+                        model: squiggles.model
+
+                        Shape {
+                            id: squiggle
+
+                            required property var modelData
+                            readonly property rect startRect: view.cellAt(modelData.start)
+
+                            x: startRect.x
+                            y: startRect.y + view.textBaseline + metrics.descent - height / 2
+                            width: view.cellAt(modelData.end).x - startRect.x
+                            height: 3 * view.theme.zoom
+                            preferredRendererType: Shape.CurveRenderer
+
+                            ShapePath {
+                                strokeColor: view.theme.severityColor(squiggle.modelData.severity)
+                                strokeWidth: view.theme.zoom
+                                fillColor: "transparent"
+                                joinStyle: ShapePath.RoundJoin
+
+                                PathSvg {
+                                    path: diagnostics.wave(squiggle.width, squiggle.height)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Repeater {
+                    id: messageRepeater
+
+                    model: diagnostics.messages
+
+                    // Four spaces after the line's end.
+                    Text {
+                        required property var modelData
+                        readonly property rect cell: view.cellAt(modelData.lineEnd)
+
+                        x: cell.x + 4 * spaceMetrics.advanceWidth
+                        y: cell.y + view.textBaseline - baselineOffset
+                        text: modelData.message
+                        font: editor.font
+                        color: view.theme.severityColor(modelData.severity)
+                        textFormat: Text.PlainText
+                    }
+                }
+            }
+
+            // Line numbers (:set number / relativenumber) for the visible
+            // lines, in the left padding, two spaces before the text. It
+            // stays put when the text scrolls sideways, and covers the text
+            // that scrolls under it. As in vim, with both options the
+            // cursor's line shows its own number, on the left.
+            Rectangle {
+                id: gutter
+
+                readonly property bool shown: view.vim.number || view.vim.relativeNumber
+                property int digits: 3
+                // Room for the numbers and two spaces after them.
+                readonly property real columnWidth: shown ? (digits + 2) * digitMetrics.advanceWidth : 0
+                property var rows: []
+                readonly property var inputs: [shown, view.vim.number, view.vim.relativeNumber, view.vim.cursor, view.lineHeight, view.layout, view.viewport]
+
+                function refresh() {
+                    if (!shown) {
+                        rows = [];
+                        return;
+                    }
+                    const t = editor.text, v = view.vim.visibleLines();
+                    const count = Txt.countLines(t);
+                    digits = Math.max(3, String(count).length);
+                    const current = Txt.lineOf(t, view.vim.cursor) - 1;
+                    const list = [];
+                    for (let i = v.top; i <= Math.min(count - 1, v.bottom); i++) {
+                        const own = i === current && view.vim.number;
+                        list.push({
+                            line: i,
+                            current: i === current,
+                            left: own && view.vim.relativeNumber,
+                            label: String(view.vim.relativeNumber && !own ? Math.abs(i - current) : i + 1)
+                        });
+                    }
+                    rows = list;
+                }
+
+                onInputsChanged: Qt.callLater(refresh)
+
+                visible: shown
+                x: view.flickable.contentX
+                width: editor.leftPadding
+                height: editor.height
+                color: (editor.background as Rectangle).color
+
+                TextMetrics {
+                    id: digitMetrics
+
+                    font: editor.font
+                    text: "0"
+                }
+
+                Repeater {
+                    model: gutter.rows
+
+                    Text {
+                        required property var modelData
+
+                        x: editor.leftPadding - gutter.columnWidth
+                        y: editor.topPadding + modelData.line * view.lineHeight + view.textBaseline - baselineOffset
+                        width: gutter.digits * digitMetrics.advanceWidth
+                        horizontalAlignment: modelData.left ? Text.AlignLeft : Text.AlignRight
+                        text: modelData.label
+                        font: editor.font
+                        color: modelData.current ? editor.color : Qt.tint(view.theme.base, view.theme.dark ? "#80ffffff" : "#80000000")
+                        textFormat: Text.PlainText
+                    }
+                }
+            }
+        }
+    }
+}

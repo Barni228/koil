@@ -1,0 +1,47 @@
+//! The C++ helpers in `cpp/native.cpp`: what Qt offers only to C++.
+
+pub use bridge::*;
+
+#[cxx_qt::bridge]
+mod bridge {
+    unsafe extern "C++" {
+        include!(<QtCore/QObject>);
+        type QObject = cxx_qt::QObject;
+        include!("cxx-qt-lib/qstring.h");
+        type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qstringlist.h");
+        type QStringList = cxx_qt_lib::QStringList;
+
+        include!("native.h");
+
+        /// Titles the macOS app-menu PreferencesRole item "Settings…".
+        #[cxx_name = "useSettingsMenuTitle"]
+        fn use_settings_menu_title();
+
+        /// Sets the Qt Quick Controls style; call it before loading QML.
+        #[cxx_name = "setControlsStyle"]
+        #[allow(dead_code)] // used on Windows only
+        fn set_controls_style(style: &QString);
+
+        /// Reads the system clipboard (vim's "+ and "* registers).
+        #[cxx_name = "clipboardText"]
+        fn clipboard_text() -> QString;
+
+        /// Reads the Koil-only data stored with the clipboard text.
+        #[cxx_name = "clipboardData"]
+        fn clipboard_data() -> QString;
+
+        /// Writes the system clipboard, with Koil-only `data` if not empty.
+        #[cxx_name = "setClipboardText"]
+        fn set_clipboard_text(text: &QString, data: &QString);
+
+        /// The installed monospaced font families.
+        #[cxx_name = "monospaceFamilies"]
+        fn monospace_families() -> QStringList;
+
+        /// Gives every line of a QQuickTextDocument the same height, plus a
+        /// margin below it.
+        #[cxx_name = "setLineFormat"]
+        unsafe fn set_line_format(text_document: *mut QObject, height: f64, bottom_margin: f64);
+    }
+}
