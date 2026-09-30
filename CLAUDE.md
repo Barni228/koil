@@ -365,7 +365,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   and shrinks with View > Zoom (Cmd+ / Cmd- / Cmd+0), not just the editor:
   text in the editor's font uses `theme.font`, other UI scales its sizes by
   `theme.zoom`. New UI must do the same, and use `Panel` for a box over the
-  editor, `Tip` for tooltips and `IconButton` for small buttons.
+  editor, `Tip` for tooltips (keys that do the same go in its
+  `shortcut`, shown as code, not in the text) and `IconButton` for small
+  buttons.
 - **Overlays** (Editor.qml): the carets, selection, highlights and squiggles
   are each a `Layer`, which recomputes its model with Qt.callLater once its
   `inputs` change (`view.layout` for the text and its layout, `view.viewport`

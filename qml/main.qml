@@ -586,7 +586,8 @@ ApplicationWindow {
                 iconPath: "M1.5 8 C3.5 4.8 5.6 3.5 8 3.5 C10.4 3.5 12.5 4.8 14.5 8 C12.5 11.2 10.4 12.5 8 12.5 C5.6 12.5 3.5 11.2 1.5 8 Z M6 8 A2 2 0 1 0 10 8 A2 2 0 1 0 6 8 Z"
                 checkable: true
                 checked: vim.showHidden
-                tip: qsTr("Show Hidden Entries") + " (g.)"
+                tip: qsTr("Show Hidden Entries")
+                shortcut: "g."
                 onToggled: vim.showHidden = checked
             }
             IconButton {
@@ -594,7 +595,8 @@ ApplicationWindow {
                 iconPath: "M2 3.5 H14 L9.5 8.5 V13 L6.5 11.5 V8.5 Z"
                 checkable: true
                 checked: vim.gitignore
-                tip: qsTr("Hide Ignored Entries") + " (gi)"
+                tip: qsTr("Hide Ignored Entries")
+                shortcut: "gi"
                 onToggled: vim.gitignore = checked
             }
             IconButton {
@@ -602,7 +604,8 @@ ApplicationWindow {
                 label: ".*"
                 checkable: true
                 checked: vim.regex
-                tip: qsTr("Use Regular Expression") + " (gr)"
+                tip: qsTr("Use Regular Expression")
+                shortcut: "gr"
                 onToggled: vim.regex = checked
             }
         }

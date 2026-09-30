@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 
 // A small button with an icon (an SVG path, see Icon) or a short label, and
-// a tooltip below it.
+// a tooltip below it, with the keys that do the same, if any.
 AbstractButton {
     id: button
 
@@ -14,6 +14,7 @@ AbstractButton {
     property bool underline
     property color color: theme.text
     property string tip
+    property string shortcut
 
     implicitWidth: 22 * theme.zoom
     implicitHeight: 22 * theme.zoom
@@ -27,6 +28,7 @@ AbstractButton {
         theme: button.theme
         visible: button.hovered && button.tip !== ""
         text: button.tip
+        shortcut: button.shortcut
         x: Math.round((button.width - width) / 2)
         y: button.height + 6 * button.theme.zoom
     }

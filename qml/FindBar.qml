@@ -567,7 +567,8 @@ FocusScope {
                         label: "Aa"
                         checkable: true
                         checked: bar.matchCase
-                        tip: qsTr("Match Case") + " (" + caseShortcut.nativeText + ")"
+                        tip: qsTr("Match Case")
+                        shortcut: caseShortcut.nativeText
                         onToggled: bar.matchCase = checked
                     }
                     BarButton {
@@ -575,14 +576,16 @@ FocusScope {
                         underline: true
                         checkable: true
                         checked: bar.wholeWord
-                        tip: qsTr("Match Whole Word") + " (" + wordShortcut.nativeText + ")"
+                        tip: qsTr("Match Whole Word")
+                        shortcut: wordShortcut.nativeText
                         onToggled: bar.wholeWord = checked
                     }
                     BarButton {
                         label: ".*"
                         checkable: true
                         checked: bar.useRegex
-                        tip: qsTr("Use Regular Expression") + " (" + regexShortcut.nativeText + ")"
+                        tip: qsTr("Use Regular Expression")
+                        shortcut: regexShortcut.nativeText
                         onToggled: bar.useRegex = checked
                     }
                 }
@@ -603,18 +606,21 @@ FocusScope {
                 BarButton {
                     iconPath: "M8 13 V3 M4 7 L8 3 L12 7"
                     enabled: bar.matches.length > 0
-                    tip: qsTr("Previous Match") + (bar.isMac ? " (⇧Enter)" : " (Shift+Enter)")
+                    tip: qsTr("Previous Match")
+                    shortcut: bar.isMac ? "⇧Enter" : "Shift+Enter"
                     onClicked: bar.previous()
                 }
                 BarButton {
                     iconPath: "M8 3 V13 M4 9 L8 13 L12 9"
                     enabled: bar.matches.length > 0
-                    tip: qsTr("Next Match") + " (Enter)"
+                    tip: qsTr("Next Match")
+                    shortcut: "Enter"
                     onClicked: bar.next()
                 }
                 BarButton {
                     iconPath: "M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5"
-                    tip: qsTr("Close") + " (Escape)"
+                    tip: qsTr("Close")
+                    shortcut: "Escape"
                     onClicked: bar.close()
                 }
             }
@@ -637,13 +643,15 @@ FocusScope {
                 BarButton {
                     iconPath: "M2.5 4.5 H9 Q12 4.5 12 7.5 V12.5 M9.5 10 L12 12.5 L14.5 10"
                     enabled: bar.matches.length > 0
-                    tip: qsTr("Replace") + " (Enter)"
+                    tip: qsTr("Replace")
+                    shortcut: "Enter"
                     onClicked: bar.replaceOne()
                 }
                 BarButton {
                     iconPath: "M2.5 4.5 H9 Q12 4.5 12 7.5 V12.5 M9.5 10 L12 12.5 L14.5 10 M2.5 8.5 H8 M2.5 12.5 H8"
                     enabled: bar.matches.length > 0
-                    tip: qsTr("Replace All") + (bar.isMac ? " (⌘Enter)" : " (Ctrl+Alt+Enter)")
+                    tip: qsTr("Replace All")
+                    shortcut: bar.isMac ? "⌘Enter" : "Ctrl+Alt+Enter"
                     onClicked: bar.replaceAll()
                 }
             }
