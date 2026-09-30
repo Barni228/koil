@@ -45,6 +45,9 @@ Popup {
                 ["Shift+Enter", "Vim's Enter: the first character of the next line."],
                 ["-", "Open the dir above (`3-`: three dirs up). In a file: back to the listing, on the "
                     + "file's line (asking to save it first, if it has changes)."],
+                ["quitting", "In a file, while the listing has changes that aren't applied, `:q`, `:wq`, "
+                    + "`ZZ`, `:q!` and the rest (but `:qa!`) go back to the listing instead (saving or "
+                    + "dropping the file as they say). `:conf q` and `ZZ` then ask to apply the changes."],
                 ["path", "The first line: a dir, or a pattern of files, like `~/src/**/*.rs`, or a regex "
                     + "with `:set regex` (where `,` is any character but `/`), whose parts get colors."],
                 [(isMac ? "⇧⌘O" : "Ctrl+Shift+O"), "Open a folder. " + cmdKey + "O opens a file to edit "
@@ -110,9 +113,11 @@ Popup {
                 "nohlsearch", "help", "h", "history"],
             rows: [
                 [":w", "Save (in the listing: apply)."],
-                [":wq  :x  ZZ", "Save and quit."],
-                [":q", "Quit, unless there are unsaved changes."],
+                [":wq  :x", "Save and quit."],
+                ["ZZ", "Save and quit (in the listing: `:confirm q`)."],
+                [":q  :qa", "Quit, unless there are unsaved changes."],
                 [":q!  ZQ", "Quit without saving."],
+                [":qa!", "Quit without saving anything, also from a file while the listing has changes."],
                 [":conf q  :confirm q", "Quit, asking whether to save unsaved changes: `y`, `n`, or `c` (or "
                     + "Esc) to cancel. Left and Right pick a choice for Enter."],
                 [":42  :$", "Go to line 42, or the last line."],

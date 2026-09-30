@@ -134,16 +134,18 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   steps; koil refuses while changes are pending.
 - **Quitting**: `modified` is the file's unsaved changes, or in the listing,
   edits or pending changes (`koil.hasChanges()` after each update). `:q`
-  updates first (`unsaved`); `:confirm q` asks to apply the changes, where No
-  quits without them. `:wq` applies, then quits.
+  updates first (`unsaved`); `:confirm q` (and `ZZ` in the listing) asks to
+  apply the changes, where No quits without them. `:wq` applies, then quits.
 - **Files**: Enter on a file, File > Open (and a file on the command line)
   leave the listing (updating it first, so its edits stay in koil) for a
   plain editor: no colors or problems, only `-` of `commandKeys`, and `:w`
   saves. `-` goes back to what's still open in koil, on `openedFrom` (the
   entry Enter was on), or for a file opened otherwise, opens its dir. Unsaved
-  changes are asked about first (save, drop, or stay). `:q` in a file also
-  refuses while the listing has pending changes (E162), and `:confirm q`
-  goes back to the listing to ask about applying them. File > Open Folder
+  changes are asked about first (save, drop, or stay). While the listing has
+  pending changes, every quit command in a file (`quitApp`) goes back to the
+  listing instead, once the file is saved or dropped as the command says
+  (`:q` still fails on its unsaved changes); `:confirm q` and `ZZ` then ask
+  about applying them. `:qa!` and Cmd+Q still quit. File > Open Folder
   (Cmd+Shift+O) and a dir or pattern on the command line list it; with no
   argument Koil lists the home dir.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on

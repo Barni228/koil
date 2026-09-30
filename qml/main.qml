@@ -215,8 +215,8 @@ ApplicationWindow {
     }
 
     // Applies the listing's changes once the user confirms them (Space a,
-    // :w), then quits if `quit` is set. With `orQuit` (:confirm q), No quits
-    // without applying.
+    // :w), then quits if `quit` is set. With `orQuit` (:confirm q, ZZ), No
+    // quits without applying.
     function applyChanges(quit, orQuit) {
         if (!updateListing())
             return;
@@ -283,16 +283,35 @@ ApplicationWindow {
         return listing ? !updateListing() || koil.hasChanges() : modified || koil.hasChanges();
     }
 
+    // Quits, unless a file is open while the listing has changes that
+    // aren't applied: then it goes back to the listing instead (dropping
+    // the file's unsaved changes), so they aren't lost, and with `confirm`
+    // (:confirm q, ZZ) asks to apply them before quitting.
+    function quitApp(confirm) {
+        if (listing || !koil.hasChanges()) {
+            Qt.quit();
+            return;
+        }
+        leaveFile(true);
+        if (!listing)
+            return;
+        if (confirm)
+            applyChanges(true, true);
+        else
+            vim.showMessage("Not quitting: the listing has changes that aren't applied");
+    }
+
     function openFile() {
         openDialog.open();
     }
 
     // Saves the file, asking for a path if it has none, then quits if
-    // `quit` is set and the save worked. The listing's changes are applied
-    // instead, once they're confirmed.
-    function save(quit) {
+    // `quit` is set and the save worked (see quitApp, which `orQuit` is
+    // passed to). The listing's changes are applied instead, once they're
+    // confirmed; with `orQuit` (ZZ), No quits without applying.
+    function save(quit, orQuit) {
         if (listing) {
-            applyChanges(!!quit, false);
+            applyChanges(!!quit, !!orQuit);
             return;
         }
         if (!filePath) {
@@ -303,7 +322,7 @@ ApplicationWindow {
         if (doc.saveFile(filePath, editorView.textArea.text)) {
             modified = false;
             if (quit)
-                Qt.quit();
+                quitApp(orQuit);
         }
     }
 
@@ -417,23 +436,20 @@ ApplicationWindow {
             }) : ({})
 
         onFontFamiliesNeeded: root.loadFontFamilies()
-        onWriteRequested: quit => root.save(quit)
-        onQuitRequested: (force, confirm) => {
-            if (force || !root.unsaved()) {
+        onWriteRequested: (quit, confirm) => root.save(quit, confirm)
+        onQuitRequested: (force, confirm, all) => {
+            if (force && all) {
                 Qt.quit();
-            } else if (root.listing || !root.modified) {
-                // The listing's changes, maybe while a file is open.
-                if (!confirm) {
-                    vim.showError(root.listing ? "E37: No write since last change (add ! to override)"
-                        : "E162: No write since last change for the listing (add ! to override)");
-                } else {
-                    if (!root.listing)
-                        root.leaveFile(false);
-                    if (root.listing)
-                        root.applyChanges(true, true);
-                }
+            } else if (force || !root.unsaved()) {
+                root.quitApp(false);
+            } else if (!root.listing && !root.modified) {
+                // The listing's changes, while a file is open.
+                root.quitApp(confirm);
             } else if (confirm) {
-                confirmDialog.ask("Save changes to “" + root.fileName + "”?", "", () => root.save(true), () => Qt.quit());
+                if (root.listing)
+                    root.applyChanges(true, true);
+                else
+                    confirmDialog.ask("Save changes to “" + root.fileName + "”?", "", () => root.save(true, true), () => root.quitApp(true));
             } else {
                 vim.showError("E37: No write since last change (add ! to override)");
             }
@@ -603,7 +619,7 @@ ApplicationWindow {
                 root.filePath = path;
                 root.modified = false;
                 if (root.quitAfterSave)
-                    Qt.quit();
+                    root.quitApp(false);
             }
             root.quitAfterSave = false;
         }

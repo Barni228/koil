@@ -159,6 +159,20 @@ TestCase {
         signalName: "nothingToUndo"
     }
 
+    SignalSpy {
+        id: quits
+
+        target: vim
+        signalName: "quitRequested"
+    }
+
+    SignalSpy {
+        id: writes
+
+        target: vim
+        signalName: "writeRequested"
+    }
+
     FindBar {
         id: findBar
 
@@ -251,6 +265,19 @@ TestCase {
         verify(vim.showHidden && vim.gitignore && vim.regex);
         keys(":set nohidden gitignore& invregex<CR>");
         verify(!vim.showHidden && !vim.gitignore && !vim.regex);
+    }
+
+    // What the quit commands ask for: quitRequested's force, confirm and
+    // all, and writeRequested's quit and confirm.
+    function test_quitCommands() {
+        load("a");
+        quits.clear();
+        writes.clear();
+        keys(":q<CR>:qa<CR>:q!<CR>ZQ:qa!<CR>:conf q<CR>");
+        compare(quits.signalArguments.map(a => [a[0], a[1], a[2]]), [[false, false, false], [false, false, true],
+            [true, false, false], [true, false, false], [true, false, true], [false, true, false]]);
+        keys(":w<CR>:wq<CR>ZZ");
+        compare(writes.signalArguments.map(a => [a[0], a[1]]), [[false, false], [true, false], [true, true]]);
     }
 
     // ---- Koil's keys ---------------------------------------------------------

@@ -76,10 +76,12 @@ QtObject {
         .filter(s => s).join(" ")
 
     signal fontFamiliesNeeded
-    signal writeRequested(bool quit)
+    // `confirm` (ZZ): if writing asks first (Koil's apply), No quits
+    // without writing.
+    signal writeRequested(bool quit, bool confirm)
     // `confirm` (:confirm q): ask whether to save unsaved changes instead
-    // of failing.
-    signal quitRequested(bool force, bool confirm)
+    // of failing. `all` (:qa, :qa!): quit everything, not just what's shown.
+    signal quitRequested(bool force, bool confirm, bool all)
     // gh: show what's under the cursor at `at` (the text an icon hides, or a
     // warning or error), if anything.
     signal hoverRequested(int at)
@@ -1076,10 +1078,10 @@ QtObject {
             openCommandLine(cmd.action);
             break;
         case "ZZ":
-            writeRequested(true);
+            writeRequested(true, true);
             break;
         case "ZQ":
-            quitRequested(true, false);
+            quitRequested(true, false, false);
             break;
         case "zz":
         case "zt":
@@ -2322,13 +2324,13 @@ QtObject {
             return;
         }
         if (["w", "write"].includes(c))
-            writeRequested(false);
+            writeRequested(false, false);
         else if (["wq", "x", "wq!", "x!", "xit", "exit"].includes(c))
-            writeRequested(true);
+            writeRequested(true, false);
         else if (["q", "quit", "qa", "qall"].includes(c))
-            quitRequested(false, !!confirm);
+            quitRequested(false, !!confirm, c.startsWith("qa"));
         else if (["q!", "quit!", "qa!", "qall!"].includes(c))
-            quitRequested(true, false);
+            quitRequested(true, false, c.startsWith("qa"));
         else if (["noh", "nohl", "nohlsearch"].includes(c)) {
             highlightPattern = "";
             highlightsCleared();
