@@ -1,7 +1,8 @@
-//! Koil's listing, as the editor shows it: the open dir (or pattern) on the
-//! first line, a line of `=` under it, then a line per entry: its icon, which
+//! Koil's listing, as the editor shows it: a line per entry: its icon, which
 //! hides its ID (the editor's hidden text), two spaces, and its name, with a
 //! `/` after a dir's. A new entry has no ID, so the user writes just its name.
+//! The open dir (or pattern) is in the path field above it, which is read
+//! with it.
 //!
 //! Positions in the text are in UTF-16 code units, as QML counts them.
 
@@ -20,8 +21,6 @@ use serde::{Deserialize, Serialize};
 const FILE_ICON: char = '\u{f016}';
 /// The color devicons gives its default icons.
 const FILE_COLOR: &str = "#7e8ea8";
-/// The line of `=` under the path is at least this long, as in koil-cli.
-const RULE_WIDTH: usize = 42;
 
 /// An icon in the text that hides some text: an entry's ID.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,11 +53,12 @@ pub struct Problem {
 /// A listing as the editor shows it.
 #[derive(Debug, Default, Serialize)]
 pub struct Rendered {
+    /// What's open, for the path field.
+    pub path: String,
     pub text: String,
     /// The IDs, behind the icons.
     pub hidden: Vec<Hidden>,
-    /// The name on each line, with a `/` after a dir's ("" for the path and
-    /// the line under it).
+    /// The name on each line, with a `/` after a dir's.
     pub names: Vec<String>,
     /// The color of each icon, in a dark and in a light theme.
     pub colors: HashMap<String, [&'static str; 2]>,
@@ -66,30 +66,30 @@ pub struct Rendered {
 
 /// The listing of what `koil` has open.
 pub fn render(koil: &Koil) -> Rendered {
-    let location = show_path(&koil.location());
-    let rule = "=".repeat(location.chars().count().max(RULE_WIDTH));
     let mut rendered = Rendered {
-        text: format!("{location}\n{rule}"),
-        names: vec![String::new(), String::new()],
+        path: show_path(&koil.location()),
         ..Rendered::default()
     };
     // The text's length, kept rather than counted for each line.
-    let mut length = utf16_len(&rendered.text);
+    let mut length = 0;
     for entry in koil.listing() {
+        if !rendered.names.is_empty() {
+            rendered.text.push('\n');
+            length += 1;
+        }
         let name = entry_name(&entry);
         let (icon, colors) = icon(koil.current_dir(), &name);
         let line = format!("{icon}  {name}");
         if let Some(id) = entry.id {
             rendered.hidden.push(Hidden {
-                at: length + 1,
+                at: length,
                 icon: icon.to_string(),
                 text: id.0.to_string(),
             });
         }
         rendered.colors.entry(icon.to_string()).or_insert(colors);
-        rendered.text.push('\n');
         rendered.text.push_str(&line);
-        length += 1 + utf16_len(&line);
+        length += utf16_len(&line);
         rendered.names.push(name);
     }
     rendered
@@ -118,13 +118,11 @@ fn icon(dir: &Path, name: &str) -> (char, [&'static str; 2]) {
 /// A listing as the user edited it.
 #[derive(Debug, Default)]
 pub struct Parsed {
-    /// The path on the first line, as written.
-    pub location: String,
     pub entries: Vec<Entry>,
     /// Where each entry is: its line, and where its name starts on it.
     pub spots: Vec<(usize, usize)>,
-    /// Lines that can't be read: a missing path or line of `=`, or an icon
-    /// that hides something other than an ID.
+    /// Lines that can't be read: an icon that hides something other than an
+    /// ID.
     pub problems: Vec<Problem>,
 }
 
@@ -146,33 +144,11 @@ impl Parsed {
 pub fn parse(text: &str, hidden: &[Hidden]) -> Parsed {
     let hidden: HashMap<usize, &Hidden> = hidden.iter().map(|h| (h.at, h)).collect();
     let mut parsed = Parsed::default();
-    // Each line, and where it starts.
-    let mut lines = Vec::new();
-    let mut at = 0;
-    for line in text.split('\n') {
-        lines.push((at, line));
-        at += utf16_len(line) + 1;
-    }
-
-    let Some(rule) = lines.iter().position(|(_, line)| is_rule(line)) else {
-        parsed.problem(0, 0, "The path must be followed by a line of `=`");
-        return parsed;
-    };
-    let mut paths = (0..rule).filter(|&i| !lines[i].1.trim().is_empty());
-    match paths.next() {
-        Some(i) => parsed.location = lines[i].1.trim().to_string(),
-        None => parsed.problem(rule, 0, "Write the path to open above the line of `=`"),
-    }
-    if let Some(i) = paths.next() {
-        let column = utf16_len(indent(lines[i].1));
-        parsed.problem(
-            i,
-            column,
-            "Only one path can be written above the line of `=`",
-        );
-    }
-
-    for (i, &(start, line)) in lines.iter().enumerate().skip(rule + 1) {
+    // Where the next line starts.
+    let mut next = 0;
+    for (i, line) in text.split('\n').enumerate() {
+        let start = next;
+        next += utf16_len(line) + 1;
         if line.trim().is_empty() {
             continue;
         }
@@ -210,12 +186,6 @@ pub fn parse(text: &str, hidden: &[Hidden]) -> Parsed {
         parsed.spots.push((i, column));
     }
     parsed
-}
-
-/// Whether `line` is the line of `=` under the path.
-fn is_rule(line: &str) -> bool {
-    let line = line.trim();
-    line.len() >= 3 && line.chars().all(|c| c == '=')
 }
 
 /// The spaces at the start of `line`.
@@ -281,11 +251,15 @@ fn problem(parsed: &Parsed, entry: usize, severity: Severity, message: String) -
 
 /// What [`update`] did.
 #[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Updated {
     /// False if the listing wasn't read, or the location to open couldn't be
-    /// opened: `problems` and `message` say why.
+    /// opened: the problems and `message` say why.
     pub ok: bool,
+    /// The listing's.
     pub problems: Vec<Problem>,
+    /// The path field's: there's no path, or it can't be opened.
+    pub path_problems: Vec<Problem>,
     /// Whether a different dir (or pattern) is open now, or the settings
     /// changed which entries are shown.
     pub moved: bool,
@@ -298,23 +272,31 @@ pub struct Updated {
 
 /// Reads the edited listing into `koil` (see `Koil::update`), then uses
 /// `settings`, and then opens `open` (a dir, relative to the open one) if
-/// given, else the path on the first line if it changed. Like koil-cli, which
-/// reads the entries with the settings they were listed with.
+/// given, else `path` (the path field, as written) if it changed. Like
+/// koil-cli, which reads the entries with the settings they were listed
+/// with.
 pub fn update(
     koil: &mut Koil,
+    path: &str,
     text: &str,
     hidden: &[Hidden],
     settings: &Settings,
     open: Option<&str>,
 ) -> Updated {
     let parsed = parse(text, hidden);
-    let failed = |problems: Vec<Problem>, message: String| Updated {
+    let failed = |problems: Vec<Problem>, path_problems: Vec<Problem>, message: String| Updated {
         problems,
+        path_problems,
         message,
         ..Updated::default()
     };
     if let Some(p) = parsed.problems.first() {
-        return failed(parsed.problems.clone(), p.message.clone());
+        return failed(parsed.problems.clone(), Vec::new(), p.message.clone());
+    }
+    let location = path.trim();
+    if location.is_empty() {
+        let message = "Write the path to open".to_string();
+        return failed(Vec::new(), vec![path_problem(path, &message)], message);
     }
     let before = view(koil);
     let before_dir = koil.current_dir().to_path_buf();
@@ -328,7 +310,7 @@ pub fn update(
                 1 => problems[0].message.clone(),
                 _ => format!("{count} errors in the listing"),
             };
-            return failed(problems, message);
+            return failed(problems, Vec::new(), message);
         }
     };
 
@@ -339,22 +321,17 @@ pub fn update(
             Err(error) => messages.push(describe(&error)),
         }
     }
-    let target = open.or((parsed.location != shown).then_some(parsed.location.as_str()));
+    let target = open.or((location != shown).then_some(location));
     if let Some(target) = target {
         match koil.open(expand_home(target)) {
             Ok(warning) => messages.extend(warning.map(|w| w.to_string())),
             Err(error) => {
                 let message = describe(&error);
-                let problems = match open {
+                let path_problems = match open {
                     Some(_) => Vec::new(),
-                    None => vec![Problem {
-                        line: 0,
-                        column: 0,
-                        severity: Severity::Error,
-                        message: message.clone(),
-                    }],
+                    None => vec![path_problem(path, &message)],
                 };
-                return failed(problems, message);
+                return failed(problems, path_problems, message);
             }
         }
     }
@@ -368,6 +345,18 @@ pub fn update(
             .map(|dir| format!("{}/", dir.as_os_str().to_string_lossy()))
             .unwrap_or_default(),
         message: messages.join("; "),
+        ..Updated::default()
+    }
+}
+
+/// An error about the path field (`path`, as written), underlined from
+/// where the path starts.
+fn path_problem(path: &str, message: &str) -> Problem {
+    Problem {
+        line: 0,
+        column: utf16_len(indent(path)),
+        severity: Severity::Error,
+        message: message.to_string(),
     }
 }
 
@@ -454,7 +443,7 @@ const REGEX_SPECIAL: &[char] = &[
     '.', ',', '*', '+', '?', '(', ')', '[', ']', '{', '}', '|', '^', '$', '\\',
 ];
 
-/// A part of the path line to color: the `pattern` (all of it, after the
+/// A part of the path field to color: the `pattern` (all of it, after the
 /// dirs it's in), then its regex's parts: an `escape`, a `class`, a
 /// `quantifier`, a `group` (or `|`), or an `anchor` (`.`, `,`, `^` and `$`,
 /// which match any character, or a place).
@@ -465,7 +454,7 @@ pub struct Span {
     pub kind: &'static str,
 }
 
-/// The parts of the regex on the path line `line`, to color. None unless
+/// The parts of the regex in the path field `line`, to color. None unless
 /// the path is read as a regex: it's the regex that's open, or it changed
 /// and `regex` (the setting the next update uses) is on. As `Koil::open`
 /// reads it, the regex starts after the longest part of the path that's a
@@ -498,7 +487,7 @@ pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
         .collect()
 }
 
-/// Where the regex starts in `path` (as written on the path line, relative
+/// Where the regex starts in `path` (as written in the path field, relative
 /// to `dir`), as [`path_syntax`] says. None if it isn't a pattern.
 fn pattern_start(dir: &Path, path: &str) -> Option<usize> {
     // After the longest part that's a dir: each part ends at a separator, or

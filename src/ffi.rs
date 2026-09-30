@@ -52,12 +52,15 @@ mod bridge {
             text_document: *mut QObject,
             icon_colors: &QStringList,
             directory_color: &QString,
-            rule_color: &QString,
         );
 
-        /// Colors parts of the listing's path line (see native.h).
+        /// Colors the path field's QQuickTextDocument (see native.h).
         #[cxx_name = "setPathColors"]
-        unsafe fn set_path_colors(text_document: *mut QObject, spans: &QStringList);
+        unsafe fn set_path_colors(
+            text_document: *mut QObject,
+            directory_color: &QString,
+            spans: &QStringList,
+        );
 
         /// The installed monospaced font families.
         #[cxx_name = "monospaceFamilies"]

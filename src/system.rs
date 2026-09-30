@@ -4,7 +4,7 @@ use crate::ffi;
 
 /// What the QML needs from the system through Qt's C++ side: the clipboard,
 /// the installed fonts and the one Koil ships, and the editor's line height
-/// and listing colors.
+/// and the listing's and path field's colors.
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -48,23 +48,26 @@ pub mod qobject {
         );
 
         /// Colors Koil's listing in a TextEdit's `textDocument`: each icon in
-        /// `icon_colors` (icons and colors, alternating), the path and dirs
-        /// in `directory_color`, and the line of `=` in `rule_color`. No
-        /// `directory_color` takes the colors away.
+        /// `icon_colors` (icons and colors, alternating), and dirs in
+        /// `directory_color`. No `directory_color` takes the colors away.
         #[qinvokable]
         unsafe fn set_listing_colors(
             self: &System,
             text_document: *mut QObject,
             icon_colors: &QStringList,
             directory_color: &QString,
-            rule_color: &QString,
         );
 
-        /// Colors parts of the listing's path line (a regex's), over the
-        /// colors `set_listing_colors` gives it: `spans` holds a start, a
-        /// length and a color for each part.
+        /// Colors the path field's `textDocument`: all of it in
+        /// `directory_color`, and parts of it (a regex's) over that: `spans`
+        /// holds a start, a length and a color for each part.
         #[qinvokable]
-        unsafe fn set_path_colors(self: &System, text_document: *mut QObject, spans: &QStringList);
+        unsafe fn set_path_colors(
+            self: &System,
+            text_document: *mut QObject,
+            directory_color: &QString,
+            spans: &QStringList,
+        );
     }
 }
 
@@ -112,22 +115,19 @@ impl qobject::System {
         text_document: *mut qobject::QObject,
         icon_colors: &QStringList,
         directory_color: &QString,
-        rule_color: &QString,
     ) {
-        unsafe {
-            ffi::set_listing_colors(
-                text_document.cast(),
-                icon_colors,
-                directory_color,
-                rule_color,
-            )
-        };
+        unsafe { ffi::set_listing_colors(text_document.cast(), icon_colors, directory_color) };
     }
 
     /// # Safety
     ///
     /// `text_document` must be null or point to a live QObject.
-    unsafe fn set_path_colors(&self, text_document: *mut qobject::QObject, spans: &QStringList) {
-        unsafe { ffi::set_path_colors(text_document.cast(), spans) };
+    unsafe fn set_path_colors(
+        &self,
+        text_document: *mut qobject::QObject,
+        directory_color: &QString,
+        spans: &QStringList,
+    ) {
+        unsafe { ffi::set_path_colors(text_document.cast(), directory_color, spans) };
     }
 }

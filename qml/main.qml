@@ -10,8 +10,8 @@ import Koil
 
 import "text.js" as Txt
 
-// The app's window: the editor and its status line, Koil's listing, the find
-// bar, the dialogs, the menus and the settings.
+// The app's window: the editor and its status line, Koil's listing and the
+// path field over it, the find bar, the dialogs, the menus and the settings.
 ApplicationWindow {
     id: root
 
@@ -22,13 +22,18 @@ ApplicationWindow {
     // file.
     property bool listing: false
     property string location: ""
-    // Koil's warnings and errors about the listing (see Editor.problems).
+    // Koil's warnings and errors about the listing, and about the path
+    // field (see Editor.problems).
     property var problems: []
+    property var pathProblems: []
+    // The editor vim edits: the listing's (or the file's), or the path
+    // field (see activate).
+    property Editor activeView: editorView
     // The colors of the icons the listings have shown (see
     // Editor.iconColors).
     property var iconColors: ({})
-    // The parts of the regex on the path line (see Editor.pathSyntax), and
-    // the line they're for.
+    // The parts of the regex in the path field (see Editor.pathSyntax), and
+    // the path they're for.
     property var pathSyntax: []
     property string pathLine: ""
     // The listing's entry a file was opened from (with Enter), which `-`
@@ -62,6 +67,7 @@ ApplicationWindow {
     // Shows `text` as a new document, whose icons hide the texts in
     // `entries` (see Hidden text in Vim.qml). `path` is its file, if any.
     function load(text, entries, path) {
+        activate(editorView);
         editorView.setText(text);
         vim.reset(entries);
         filePath = path;
@@ -96,16 +102,19 @@ ApplicationWindow {
             vim.showMessage(r.message);
     }
 
-    // Shows Koil's listing of what's open (see listing.rs). For the same
-    // listing as before (`moved` false), the new text replaces the old as an
-    // edit, which undo can take back, and the cursor stays on its line.
-    // Otherwise it starts over: undo mustn't bring back another dir's
-    // entries, which Koil would read as this one's. The cursor goes to the
-    // entry `from` (the dir `-` came from), or else to the first one.
+    // Shows Koil's listing of what's open (see listing.rs), and its path in
+    // the path field. For the same listing as before (`moved` false), the
+    // new text replaces the old as an edit, which undo can take back, and
+    // the cursor stays on its line. Otherwise it starts over: undo mustn't
+    // bring back another dir's entries, which Koil would read as this one's.
+    // The cursor goes to the entry `from` (the dir `-` came from), or else
+    // to the first one. Vim stays in the path field if it was there.
     function showListing(moved, from) {
         const r = JSON.parse(koil.render());
         iconColors = Object.assign({}, iconColors, r.colors);
-        location = koil.location();
+        location = r.path;
+        const inPath = listing && activeView === pathView;
+        activate(editorView);
         let line, column;
         if (listing && !moved) {
             const t = editorView.textArea.text;
@@ -115,27 +124,44 @@ ApplicationWindow {
         } else {
             listing = true;
             load(r.text, r.hidden, "");
-            const i = from ? r.names.indexOf(from) : -1;
-            line = Math.min(i >= 0 ? i : 2, r.names.length - 1);
-            column = line >= 2 ? 3 : 0; // after the icon and two spaces
+            line = Math.max(0, from ? r.names.indexOf(from) : 0);
+            column = r.names.length ? 3 : 0; // after the icon and two spaces
         }
         const t = editorView.textArea.text;
-        const ls = Txt.lineToPos(t, Math.min(line, r.names.length - 1) + 1);
+        const ls = Txt.lineToPos(t, Math.min(line + 1, Txt.countLines(t)));
         vim.jumpTo(Txt.atColumn(t, ls, column));
+        showPath(r.path);
         modified = koil.hasChanges();
         checkListing();
         updatePathSyntax(true);
+        if (inPath)
+            activate(pathView);
+    }
+
+    // Puts `path` in the path field (while vim edits the listing), unless
+    // it's there already: then it keeps its undo history.
+    function showPath(path) {
+        pathProblems = [];
+        if (pathView.textArea.text === path)
+            return;
+        pathView.setText(path);
+        // A new buffer, with the cursor at the end.
+        pathView.saved = {
+            cursor: path.length
+        };
     }
 
     // Reads the edited listing into Koil, then opens `open` (a dir, relative
-    // to the open one) if given, else the path on the first line if it
+    // to the open one) if given, else the path in the path field if it
     // changed, and shows the listing again. False if it can't (the problems
     // and the status line say why).
     function updateListing(open) {
-        const r = JSON.parse(koil.update(editorView.textArea.text, JSON.stringify(vim.hidden), open || ""));
+        const r = JSON.parse(koil.update(pathView.textArea.text, editorView.textArea.text, JSON.stringify(editorView.hidden), open || ""));
         if (!r.ok) {
             if (r.problems.length)
                 problems = r.problems;
+            if (r.pathProblems.length)
+                pathProblems = r.pathProblems;
             vim.showError(r.message);
             return false;
         }
@@ -145,11 +171,10 @@ ApplicationWindow {
         return true;
     }
 
-    // Finds the parts of the regex on the path line again, if the line
+    // Finds the parts of the regex in the path field again, if the path
     // changed (or `force`, when the regex setting did).
     function updatePathSyntax(force) {
-        const t = editorView.textArea.text, nl = t.indexOf("\n");
-        const line = listing ? (nl < 0 ? t : t.slice(0, nl)) : "";
+        const line = listing ? pathView.textArea.text : "";
         if (line === pathLine && !force)
             return;
         pathLine = line;
@@ -158,10 +183,29 @@ ApplicationWindow {
 
     function checkListing() {
         checkTimer.stop();
-        problems = listing ? JSON.parse(koil.check(editorView.textArea.text, JSON.stringify(vim.hidden))) : [];
+        problems = listing ? JSON.parse(koil.check(editorView.textArea.text, JSON.stringify(editorView.hidden))) : [];
     }
 
-    // Koil's keys in the listing (see Vim.commandKeys).
+    // Makes vim edit `view`: the listing's editor or the path field. It
+    // keeps the other one's cursor and undo history for when it's back (see
+    // Buffers in Vim.qml).
+    function activate(view) {
+        if (view === activeView)
+            return;
+        activeView.saved = vim.leaveBuffer();
+        activeView = view; // which vim's editor follows
+        vim.enterBuffer(view.saved);
+        view.textArea.forceActiveFocus();
+    }
+
+    // Enter in the path field: opens the path (or reads the listing again,
+    // if it didn't change), then goes to the listing.
+    function openPath() {
+        if (updateListing())
+            activate(editorView);
+    }
+
+    // Koil's keys in the listing and the path field (see Vim.commandKeys).
     function runKeyCommand(name, count) {
         if (name === "update")
             updateListing();
@@ -171,15 +215,25 @@ ApplicationWindow {
             updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
         else if (name === "open")
             openLine(count);
+        else if (name === "openPath")
+            openPath();
+        else if (name === "switch")
+            activate(activeView === pathView ? editorView : pathView);
+        else if (name === "hidden")
+            vim.showHidden = !vim.showHidden;
+        else if (name === "gitignore")
+            vim.gitignore = !vim.gitignore;
+        else if (name === "regex")
+            vim.regex = !vim.regex;
         else if (name === "back")
             leaveFile(false);
     }
 
-    // Enter: opens the dir or file on the cursor's line, or the path on the
-    // first line. On a line without an entry it's vim's Enter.
+    // Enter in the listing: opens the dir or file on the cursor's line. On a
+    // line without an entry it's vim's Enter.
     function openLine(count) {
         const t = editorView.textArea.text, line = Txt.lineOf(t, vim.cursor) - 1;
-        const target = line === 0 ? { dir: "" } : JSON.parse(koil.targetOnLine(t, JSON.stringify(vim.hidden), line));
+        const target = JSON.parse(koil.targetOnLine(t, JSON.stringify(vim.hidden), line));
         if (!target) {
             vim.runMotion("<CR>", count);
         } else if (target.dir !== undefined) {
@@ -412,8 +466,9 @@ ApplicationWindow {
     Vim {
         id: vim
 
-        editor: editorView.textArea
-        flickable: editorView.flickable
+        editor: root.activeView.textArea
+        flickable: root.activeView.flickable
+        singleLine: root.activeView === pathView
         clipboard: system
         lineHeight: editorView.lineHeight
         number: settings.number
@@ -431,7 +486,11 @@ ApplicationWindow {
                 "  ": "update",
                 " a": "apply",
                 "-": "parent",
-                "<CR>": "open"
+                "<CR>": root.activeView === pathView ? "openPath" : "open",
+                "<Tab>": "switch",
+                "g.": "hidden",
+                "gi": "gitignore",
+                "gr": "regex"
             }) : root.filePath ? ({
                 "-": "back"
             }) : ({})
@@ -457,7 +516,7 @@ ApplicationWindow {
         }
         onKeyCommand: (name, count) => root.runKeyCommand(name, count)
         onNothingToUndo: {
-            if (root.listing)
+            if (root.listing && root.activeView === editorView)
                 root.undoApply();
         }
         onShowHiddenChanged: root.settingChanged()
@@ -469,10 +528,95 @@ ApplicationWindow {
         }
     }
 
+    // Behind the path field and the space under it, as behind the text.
+    Rectangle {
+        anchors.fill: parent
+        color: (editorView.textArea.background as Rectangle).color
+    }
+
+    // Over the listing, a field with the path of what's listed, which vim
+    // edits like the listing (Tab goes from one to the other, and Enter
+    // opens the path), and Koil's options beside it, which g., gi and gr
+    // toggle too.
+    Rectangle {
+        id: pathBar
+
+        visible: root.listing
+        x: 8 * theme.zoom
+        y: 6 * theme.zoom
+        width: parent.width - 2 * x
+        height: pathView.height + 6 * theme.zoom
+        radius: 3 * theme.zoom
+        color: theme.field
+        border.color: pathView.textArea.activeFocus ? theme.accent : theme.dark ? "transparent" : "#cecece"
+
+        Editor {
+            id: pathView
+
+            anchors.left: parent.left
+            anchors.right: options.left
+            anchors.leftMargin: 1
+            anchors.rightMargin: 4 * theme.zoom
+            anchors.verticalCenter: parent.verticalCenter
+            height: lineHeight
+            pathField: true
+            vim: vim
+            findBar: findBar
+            theme: theme
+            system: system
+            pathSyntax: root.pathSyntax
+            problems: root.pathProblems
+            onActivated: root.activate(pathView)
+            onEdited: {
+                root.pathProblems = [];
+                root.updatePathSyntax();
+            }
+        }
+
+        Row {
+            id: options
+
+            anchors.right: parent.right
+            anchors.rightMargin: 3 * theme.zoom
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 1 * theme.zoom
+
+            IconButton {
+                theme: theme
+                iconPath: "M1.5 8 C3.5 4.8 5.6 3.5 8 3.5 C10.4 3.5 12.5 4.8 14.5 8 C12.5 11.2 10.4 12.5 8 12.5 C5.6 12.5 3.5 11.2 1.5 8 Z M6 8 A2 2 0 1 0 10 8 A2 2 0 1 0 6 8 Z"
+                checkable: true
+                checked: vim.showHidden
+                tip: qsTr("Show Hidden Entries") + " (g.)"
+                onToggled: vim.showHidden = checked
+            }
+            IconButton {
+                theme: theme
+                iconPath: "M2 3.5 H14 L9.5 8.5 V13 L6.5 11.5 V8.5 Z"
+                checkable: true
+                checked: vim.gitignore
+                tip: qsTr("Hide Ignored Entries") + " (gi)"
+                onToggled: vim.gitignore = checked
+            }
+            IconButton {
+                theme: theme
+                label: ".*"
+                checkable: true
+                checked: vim.regex
+                tip: qsTr("Use Regular Expression") + " (gr)"
+                onToggled: vim.regex = checked
+            }
+        }
+    }
+
     Editor {
         id: editorView
 
-        anchors.fill: parent
+        anchors.top: root.listing ? pathBar.bottom : parent.top
+        // A line's height between the field and the listing's first line.
+        anchors.topMargin: root.listing ? lineHeight - textArea.topPadding : 0
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
         vim: vim
         findBar: findBar
         theme: theme
@@ -481,6 +625,7 @@ ApplicationWindow {
         iconColors: root.iconColors
         pathSyntax: root.pathSyntax
         problems: root.problems
+        onActivated: root.activate(editorView)
         onEdited: {
             root.modified = true;
             if (root.listing) {
@@ -500,7 +645,7 @@ ApplicationWindow {
 
             anchors.right: parent.right
             anchors.rightMargin: 16 // clear of the scroll bar
-            editor: editorView.textArea
+            editor: root.activeView.textArea
             vim: vim
             theme: theme
         }
@@ -511,7 +656,7 @@ ApplicationWindow {
 
         theme: theme
         defaultFontFamily: root.defaultFontFamily
-        onClosed: editorView.textArea.forceActiveFocus()
+        onClosed: root.activeView.textArea.forceActiveFocus()
     }
 
     // :confirm q with unsaved changes, and applying the listing's changes
@@ -520,7 +665,7 @@ ApplicationWindow {
         id: confirmDialog
 
         theme: theme
-        onClosed: editorView.textArea.forceActiveFocus()
+        onClosed: root.activeView.textArea.forceActiveFocus()
     }
 
     SettingsWindow {

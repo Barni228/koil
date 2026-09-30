@@ -19,8 +19,8 @@ fn koil() -> (TempDir, Koil) {
 }
 
 /// The rendered listing with each line changed by `edit`, which gets the
-/// line's name ("" for the first two) and returns the new line, or `None` to
-/// remove it. The hidden texts stay with their lines.
+/// line's name and returns the new line, or `None` to remove it. The hidden
+/// texts stay with their lines.
 fn edited(
     rendered: &Rendered,
     edit: impl Fn(&str, &str) -> Option<String>,
@@ -49,9 +49,11 @@ fn edited(
     (text, hidden)
 }
 
+/// Updates with the path that's open.
 fn update_listing(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Updated {
     let settings = koil.settings().clone();
-    update(koil, text, hidden, &settings, None)
+    let path = show_path(&koil.location());
+    update(koil, &path, text, hidden, &settings, None)
 }
 
 #[test]
@@ -59,12 +61,11 @@ fn test_render() {
     let (_temp, koil) = koil();
     let rendered = render(&koil);
     let lines: Vec<&str> = rendered.text.split('\n').collect();
-    let location = show_path(koil.current_dir());
-    assert_eq!(lines[0], location);
-    assert_eq!(lines[1], "=".repeat(location.chars().count().max(42)));
-    assert_eq!(rendered.names, ["", "", "dir/", "file.rs", "notes"]);
+    assert_eq!(rendered.path, show_path(koil.current_dir()));
+    assert_eq!(rendered.names, ["dir/", "file.rs", "notes"]);
     // dirs first, each line an icon, two spaces and the name
-    for (line, name) in lines.iter().zip(&rendered.names).skip(2) {
+    assert_eq!(lines.len(), 3);
+    for (line, name) in lines.iter().zip(&rendered.names) {
         let icon = line.chars().next().unwrap();
         assert!(is_private_use(icon), "{line}");
         assert_eq!(&line[icon.len_utf8()..], format!("  {name}"));
@@ -86,15 +87,25 @@ fn test_parse_rendered() {
     let rendered = render(&koil);
     let parsed = parse(&rendered.text, &rendered.hidden);
     assert_eq!(parsed.problems, []);
-    assert_eq!(parsed.location, show_path(koil.current_dir()));
     assert_eq!(parsed.entries, koil.listing());
     // the names start after the icon and two spaces
-    assert_eq!(parsed.spots, [(2, 3), (3, 3), (4, 3)]);
+    assert_eq!(parsed.spots, [(0, 3), (1, 3), (2, 3)]);
+}
+
+#[test]
+fn test_render_empty() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut koil = Koil::default();
+    koil.open(temp.path()).unwrap();
+    let rendered = render(&koil);
+    assert_eq!(rendered.text, "");
+    assert_eq!(rendered.names, Vec::<String>::new());
+    assert_eq!(parse(&rendered.text, &rendered.hidden).entries, []);
 }
 
 #[test]
 fn test_parse_new_entries() {
-    let text = "/dir\n===\n  new.txt  \n\n\u{f016}  icon but no ID\nsub/dir/\n../";
+    let text = "  new.txt  \n\n\u{f016}  icon but no ID\nsub/dir/\n../";
     let parsed = parse(text, &[]);
     assert_eq!(parsed.problems, []);
     let new = |name: &str, is_dir| Entry {
@@ -111,53 +122,23 @@ fn test_parse_new_entries() {
             Entry::parent()
         ]
     );
-    assert_eq!(parsed.spots, [(2, 2), (4, 3), (5, 0), (6, 0)]);
-}
-
-#[test]
-fn test_parse_header_problems() {
-    let lines = |text: &str| -> Vec<(usize, String)> {
-        let parsed = parse(text, &[]);
-        parsed
-            .problems
-            .into_iter()
-            .map(|p| (p.line, p.message))
-            .collect()
-    };
-    assert_eq!(
-        lines("/dir\nfile"),
-        [(0, "The path must be followed by a line of `=`".to_string())]
-    );
-    assert_eq!(
-        lines("\n===\nfile"),
-        [(
-            1,
-            "Write the path to open above the line of `=`".to_string()
-        )]
-    );
-    assert_eq!(
-        lines("/a\n/b\n===\nfile"),
-        [(
-            1,
-            "Only one path can be written above the line of `=`".to_string()
-        )]
-    );
+    assert_eq!(parsed.spots, [(0, 2), (2, 3), (3, 0), (4, 0)]);
 }
 
 #[test]
 fn test_parse_not_an_id() {
     let hidden = [Hidden {
-        at: 9,
+        at: 5,
         icon: "\u{f016}".into(),
         text: "Poppy".into(),
     }];
-    let parsed = parse("/dir\n===\n\u{f016}  file", &hidden);
-    assert_eq!(parsed.problems[0].line, 2);
+    let parsed = parse("new/\n\u{f016}  file", &hidden);
+    assert_eq!(parsed.problems[0].line, 1);
     assert_eq!(
         parsed.problems[0].message,
         "The icon hides `Poppy`, which isn't an ID"
     );
-    assert_eq!(parsed.entries, []);
+    assert_eq!(parsed.entries.len(), 1);
 }
 
 #[test]
@@ -186,7 +167,7 @@ fn test_update_actions() {
     );
     // the listing shows the changes, and reads back the same
     let rendered = render(&koil);
-    assert_eq!(rendered.names, ["", "", "dir/", "main.rs", "new/"]);
+    assert_eq!(rendered.names, ["dir/", "main.rs", "new/"]);
     let parsed = parse(&rendered.text, &rendered.hidden);
     assert_eq!(parsed.entries, koil.listing());
 }
@@ -211,10 +192,10 @@ fn test_update_errors() {
     assert_eq!(
         problems,
         [(
-            4,
+            2,
             3,
             Severity::Error,
-            "`notes` appears more than once, first on line 4"
+            "`notes` appears more than once, first on line 2"
         )]
     );
     assert_eq!(updated.message, problems[0].3);
@@ -228,7 +209,7 @@ fn test_check_warnings() {
     let text = format!("{}\n-dash", render(&koil).text);
     let problems = check(&koil, &text, &render(&koil).hidden);
     assert_eq!(problems.len(), 1);
-    assert_eq!(problems[0].line, 5);
+    assert_eq!(problems[0].line, 3);
     assert_eq!(problems[0].severity, Severity::Warning);
 }
 
@@ -237,58 +218,62 @@ fn test_navigate() {
     let (temp, mut koil) = koil();
     let root = koil.current_dir().to_path_buf();
     let settings = Settings::default();
-    let rendered = render(&koil);
+    // Updates with `path` in the path field, opening `open`.
+    let navigate = |koil: &mut Koil, path: &str, open| {
+        let rendered = render(koil);
+        update(
+            koil,
+            path,
+            &rendered.text,
+            &rendered.hidden,
+            &settings,
+            open,
+        )
+    };
 
     // Enter on a dir
-    let target =
-        |koil: &Koil, text: &str, hidden: &[Hidden], line| target_on_line(koil, text, hidden, line);
+    let rendered = render(&koil);
     assert_eq!(
-        target(&koil, &rendered.text, &rendered.hidden, 2),
+        target_on_line(&koil, &rendered.text, &rendered.hidden, 0),
         Some(Target::Dir("dir".into()))
     );
-    let updated = update(
-        &mut koil,
-        &rendered.text,
-        &rendered.hidden,
-        &settings,
-        Some("dir"),
-    );
+    let updated = navigate(&mut koil, &rendered.path, Some("dir"));
     assert!(updated.ok && updated.moved, "{updated:?}");
     assert_eq!(koil.current_dir(), root.join("dir"));
-
     assert_eq!(updated.from, "");
 
     // `-`, which comes from `dir/`
-    let rendered = render(&koil);
-    let updated = update(
-        &mut koil,
-        &rendered.text,
-        &rendered.hidden,
-        &settings,
-        Some(".."),
-    );
+    let path = show_path(&koil.location());
+    let updated = navigate(&mut koil, &path, Some(".."));
     assert!(updated.ok && updated.moved);
     assert_eq!(koil.current_dir(), root);
     assert_eq!(updated.from, "dir/");
 
-    // a changed path on the first line
-    let rendered = render(&koil);
-    let text = rendered
-        .text
-        .replacen(&show_path(&root), &show_path(&temp.path().join("dir")), 1);
-    let updated = update(&mut koil, &text, &rendered.hidden, &settings, None);
+    // a changed path, even with spaces around it
+    let path = format!("  {}  ", show_path(&temp.path().join("dir")));
+    let updated = navigate(&mut koil, &path, None);
     assert!(updated.ok && updated.moved);
     assert_eq!(koil.current_dir(), root.join("dir"));
 
-    // one that can't be opened
-    let rendered = render(&koil);
-    let text = rendered
-        .text
-        .replacen(&show_path(koil.current_dir()), "[", 1);
-    let updated = update(&mut koil, &text, &rendered.hidden, &settings, None);
+    // the same path reads the listing again, without moving
+    let path = show_path(&koil.location());
+    let updated = navigate(&mut koil, &path, None);
+    assert!(updated.ok && !updated.moved);
+
+    // one that can't be opened, which the path field says
+    let updated = navigate(&mut koil, " [", None);
     assert!(!updated.ok);
-    assert_eq!(updated.problems[0].line, 0);
+    assert_eq!(updated.problems, []);
+    assert_eq!(updated.path_problems.len(), 1);
+    assert_eq!(updated.path_problems[0].column, 1);
+    assert_eq!(updated.path_problems[0].message, updated.message);
     assert_eq!(koil.current_dir(), root.join("dir"));
+
+    // no path at all
+    let updated = navigate(&mut koil, "  ", None);
+    assert!(!updated.ok);
+    assert_eq!(updated.message, "Write the path to open");
+    assert_eq!(updated.path_problems[0].line, 0);
 }
 
 #[test]
@@ -302,29 +287,29 @@ fn test_target_on_line() {
         _ => Some(line.to_string()),
     });
     let target = |line| target_on_line(&koil, &text, &hidden, line);
-    assert_eq!(target(0), None);
-    assert_eq!(target(1), None);
-    assert_eq!(target(2), Some(Target::Dir("dir".into())));
+    assert_eq!(target(0), Some(Target::Dir("dir".into())));
     assert_eq!(
-        target(3),
+        target(1),
         Some(Target::File {
             path: root.join("file.rs"),
             name: "main.rs".into()
         })
     );
-    assert_eq!(target(4), Some(Target::New("new.txt".into())));
-    // `..`, and a dir whose `/` was taken off
-    let text = format!("/\n===\n../\n{}dir", rendered.hidden[0].icon);
+    assert_eq!(target(2), Some(Target::New("new.txt".into())));
+    assert_eq!(target(4), None);
+    // `..`, a blank line, and a dir whose `/` was taken off
+    let text = format!("../\n\n{}dir", rendered.hidden[0].icon);
     let hidden = [Hidden {
-        at: 10,
+        at: 5,
         ..rendered.hidden[0].clone()
     }];
     assert_eq!(
-        target_on_line(&koil, &text, &hidden, 2),
+        target_on_line(&koil, &text, &hidden, 0),
         Some(Target::Dir("..".into()))
     );
+    assert_eq!(target_on_line(&koil, &text, &hidden, 1), None);
     assert_eq!(
-        target_on_line(&koil, &text, &hidden, 3),
+        target_on_line(&koil, &text, &hidden, 2),
         Some(Target::Dir("dir".into()))
     );
 }
@@ -337,11 +322,18 @@ fn test_settings() {
         show_hidden: true,
         ..Settings::default()
     };
-    let updated = update(&mut koil, &rendered.text, &rendered.hidden, &settings, None);
+    let updated = update(
+        &mut koil,
+        &rendered.path,
+        &rendered.text,
+        &rendered.hidden,
+        &settings,
+        None,
+    );
     assert!(updated.ok && updated.moved);
     assert_eq!(
         render(&koil).names,
-        ["", "", "../", "dir/", ".hidden", "file.rs", "notes"]
+        ["../", "dir/", ".hidden", "file.rs", "notes"]
     );
 
     // regex changes how the path is read, not what's shown
@@ -350,7 +342,14 @@ fn test_settings() {
         regex: true,
         ..settings
     };
-    let updated = update(&mut koil, &rendered.text, &rendered.hidden, &settings, None);
+    let updated = update(
+        &mut koil,
+        &rendered.path,
+        &rendered.text,
+        &rendered.hidden,
+        &settings,
+        None,
+    );
     assert!(updated.ok && !updated.moved);
     assert!(koil.settings().regex);
 }

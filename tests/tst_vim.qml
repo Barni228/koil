@@ -117,10 +117,52 @@ TestCase {
         textFormat: TextEdit.PlainText
         wrapMode: TextEdit.NoWrap
         readOnly: true
-        onCursorPositionChanged: vim.syncFromEditor()
-        onSelectedTextChanged: vim.syncFromEditor()
+        onCursorPositionChanged: {
+            if (vim.editor === editor)
+                vim.syncFromEditor();
+        }
+        onSelectedTextChanged: {
+            if (vim.editor === editor)
+                vim.syncFromEditor();
+        }
         Keys.onPressed: event => {
             event.accepted = vim.handleKey(event);
+        }
+    }
+
+    // Another buffer (as Koil's path field is), see switchTo.
+    TextArea {
+        id: other
+
+        x: 410
+        width: 80
+        height: 30
+        textFormat: TextEdit.PlainText
+        wrapMode: TextEdit.NoWrap
+        readOnly: true
+        onCursorPositionChanged: {
+            if (vim.editor === other)
+                vim.syncFromEditor();
+        }
+        Keys.onPressed: event => {
+            event.accepted = vim.handleKey(event);
+        }
+    }
+
+    // A buffer too narrow for its line, which vim scrolls (see switchTo).
+    ScrollView {
+        id: narrow
+
+        y: 260
+        width: 100
+        height: 30
+
+        TextArea {
+            id: narrowText
+
+            textFormat: TextEdit.PlainText
+            wrapMode: TextEdit.NoWrap
+            readOnly: true
         }
     }
 
@@ -180,6 +222,27 @@ TestCase {
         editor: editor
         vim: vim
         theme: theme
+    }
+
+    // Back to the editor, after a test that switched buffers.
+    function cleanup() {
+        if (vim.editor !== editor)
+            switchTo(editor, null);
+        vim.flickable = null;
+        vim.singleLine = false;
+        vim.commandKeys = {};
+    }
+
+    // Makes vim edit `to` (the editor, `other` or `narrowText`, scrolled by
+    // `flickable`) from `state`, as main.qml does, and returns the state of
+    // the one it left.
+    function switchTo(to, state, flickable) {
+        const left = vim.leaveBuffer();
+        vim.editor = to;
+        vim.flickable = flickable || null;
+        vim.enterBuffer(state);
+        to.forceActiveFocus();
+        return left;
     }
 
     // ---- Vim -----------------------------------------------------------------
@@ -314,11 +377,114 @@ TestCase {
         compare(keyCommands.count, 4);
     }
 
+    // Koil's g. and the like leave vim's own g commands alone.
+    function test_commandKeysAfterG() {
+        load("one two\nthree");
+        vim.commandKeys = {
+            "g.": "hidden",
+            "gi": "gitignore"
+        };
+        keyCommands.clear();
+        keys("jgg");
+        compare(vim.cursor, 0);
+        keys("gUiw");
+        compare(render(), "ONE two\nthree");
+        keys("3g.gi");
+        compare(keyCommands.signalArguments.map(a => [a[0], a[1]]), [["hidden", 3], ["gitignore", 0]]);
+        keys("gx");
+        compare(vim.pendingKeys, "");
+        compare(keyCommands.count, 2);
+    }
+
     // Shift+Enter in insert mode is a line break, not Qt's line separator.
     function test_shiftEnterInInsert() {
         load("ab");
         keys("a<S-CR><Esc>");
         compare(render(), "a\nb");
+    }
+
+    // Each buffer has its own text, cursor, undo history and hidden text;
+    // registers are shared.
+    function test_buffers() {
+        load("one M\ntwo");
+        keys("jdd0yw");
+        other.text = "path";
+        const listing = switchTo(other, null);
+        compare(vim.cursor, 0);
+        compare(vim.hidden, []);
+        keys("$p");
+        compare(other.text, "pathone ");
+        keys("uu");
+        compare(other.text, "path");
+        compare(vim.message, "Already at oldest change");
+        keys("0xA!");
+        compare(vim.mode, "insert");
+
+        // Leaving a buffer leaves insert mode.
+        const path = switchTo(editor, listing);
+        compare(vim.mode, "normal");
+        compare(other.text, "ath!");
+        verify(other.readOnly);
+        compare(render(), "one <M:h1>");
+        compare(vim.cursor, 0);
+        keys("u");
+        compare(render(), "one <M:h1>\ntwo");
+        keys("vj");
+
+        // So does visual mode, and the cursor comes back where it was left.
+        switchTo(other, path);
+        compare(vim.mode, "normal");
+        compare(vim.cursor, 3);
+        keys("uu");
+        compare(other.text, "path");
+        compare(editor.text, "one " + mushroom + "\ntwo");
+    }
+
+    // Entering a buffer with the cursor past the right edge scrolls to all
+    // of the character it's on, not just to the edge of its cursor
+    // rectangle (a bar).
+    function test_enterShowsWholeCursor() {
+        load("one");
+        narrowText.text = "x".repeat(60);
+        waitForRendering(narrow);
+        const f = narrow.contentItem;
+        switchTo(narrowText, {
+            cursor: 59
+        }, f);
+        compare(vim.cursor, 59);
+        verify(f.contentX > 0);
+        verify(f.contentX + f.width >= narrowText.positionToRectangle(60).x, "the last x is cut off");
+    }
+
+    // A one-line buffer (Koil's path field) gets spaces for line breaks,
+    // and Enter while typing does what it does in normal mode.
+    function test_singleLine() {
+        load("one\ntwo");
+        keys("yj");
+        other.text = "a b";
+        switchTo(other, null);
+        vim.singleLine = true;
+        keys("p");
+        compare(other.text, "a b one two");
+        keys("ox<Esc>");
+        compare(other.text, "a b one two x");
+        vim.commandKeys = {
+            "<CR>": "open"
+        };
+        keyCommands.clear();
+        keys("Ay<CR>");
+        compare(other.text, "a b one two xy");
+        compare(vim.mode, "normal");
+        compare(keyCommands.signalArguments.map(a => a[0]), ["open"]);
+        keys("Rz<S-CR>");
+        compare(other.text, "a b one two xz");
+        compare(vim.mode, "normal");
+        compare(keyCommands.count, 2);
+        // Without a command for Enter, it's only Esc.
+        vim.commandKeys = {};
+        keys("a!<CR>");
+        compare(other.text, "a b one two xz!");
+        compare(vim.mode, "normal");
     }
 
     function test_nothingToUndo() {

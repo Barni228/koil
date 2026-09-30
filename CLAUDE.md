@@ -12,7 +12,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   Nerd Font, sets the Windows style, loads `qml/main.qml`.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
-  lines (`actions`, `undo_steps`) and the path line's regex parts
+  lines (`actions`, `undo_steps`) and the path field's regex parts
   (`path_syntax`). Its tests (`src/listing/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore` and `regex`
@@ -24,19 +24,22 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   line format and colors.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
-  Nerd Font, line format, the listing's `QSyntaxHighlighter`).
-- `qml/main.qml`: the window: settings, menus, dialogs, status line, and
-  Koil's listing (`showListing`, `updateListing`, `applyChanges`,
-  `undoApply`) or a file (`loadFile`). It wires the pieces together; no
-  editing logic lives here.
+  Nerd Font, line format, the listing's and path field's
+  `QSyntaxHighlighter`).
+- `qml/main.qml`: the window: settings, menus, dialogs, status line, the
+  path field and its option buttons, and Koil's listing (`showListing`,
+  `updateListing`, `applyChanges`, `undoApply`) or a file (`loadFile`), and
+  which of the two editors vim edits (`activate`). It wires the pieces
+  together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
   with it: cursors, selection, search highlights, warnings and errors, line
-  numbers, and the `HoverBox`.
+  numbers, and the `HoverBox`. Both the listing (or file) and the path field
+  are one (`pathField`).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID), or a warning's or error's message.
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
-  undo, macros, visual block, multiple cursors, hidden text, `:` and `/`).
-  It drives the `TextArea` through `insert`/`remove`/`select`.
+  undo, macros, visual block, multiple cursors, hidden text, `:` and `/`,
+  buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects),
   imported as `Txt` by Vim.qml and the views.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
@@ -81,43 +84,66 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `:`), so wait a moment first.
   Screen capture isn't permitted; to see the UI, temporarily add a `Timer`
   that saves `root.Overlay.overlay.parent.grabToImage(...)` to a file, and
-  remove it after. The window opens over the user's work, so keep such
-  sessions short. A menu shortcut sent this way runs after the keys that
+  remove it after (saving to one file at every tick lets you read it half
+  written: number the files and read the one before the newest). The window
+  opens over the user's work, so keep such sessions short. System Events'
+  `click at` doesn't reach Qt as a mouse press; post a `CGEvent` (a few
+  lines of Swift) to click. A menu shortcut sent this way runs after the keys that
   follow it, and Cmd+= doesn't reach Zoom In at all (neither in vim-edit).
 
 ## Koil
 
-- **The listing** (listing.rs): the location (`~` for the home dir) on the
-  first line, a line of `=` (at least 42, as in koil-cli), then per entry its
-  devicons icon, two spaces and its name (`/` after a dir's). The icon hides
-  the entry's ID (`Id.0`, as text) as vim's hidden text, so it yanks, pastes
-  and undoes with its line. `parse` reads a line as an existing entry if its
-  first character is an icon with a hidden entry, else as a new one; a
-  Private Use Area character first (the icon `render` gives a new entry) is
-  dropped, and names are trimmed. Header problems (no `=` line, no path, two
-  paths) and an icon hiding something that isn't a number are errors, which
-  block an update like koil's own. devicons' default file icon is `*` (a
-  glob character), so `FILE_ICON` replaces it.
+- **The listing** (listing.rs): per entry its devicons icon, two spaces and
+  its name (`/` after a dir's), one per line. The location (`~` for the home
+  dir) is apart, in the path field over it (`Rendered.path`), which `update`
+  takes as `path`. The icon hides the entry's ID (`Id.0`, as text) as vim's
+  hidden text, so it yanks, pastes and undoes with its line. `parse` reads a
+  line as an existing entry if its first character is an icon with a hidden
+  entry, else as a new one; a Private Use Area character first (the icon
+  `render` gives a new entry) is dropped, and names are trimmed. An icon
+  hiding something that isn't a number is an error, and so is an empty path;
+  both block an update like koil's own. devicons' default file icon is `*`
+  (a glob character), so `FILE_ICON` replaces it.
 - **Problems**: `Koil::check` runs 200 ms after the last edit
   (`checkTimer`), and gives `{ line, column, severity, message }`; Editor.qml
   draws each from `column` (where the name starts) to the line's end.
   Everything else (squiggles, the message after the line, the hover, `gh`)
-  works as before. A failed update also shows the path line's open error,
-  until the next check.
-- **Keys** (`commandKeys` in Vim.qml, only while a listing is shown): `Space
-  Space` updates, `Space a` applies, `-` opens `..` (`3-`: `../../..`), and
-  Enter opens the dir or file on its line (`listing::target_on_line`: a dir
-  if the name ends with `/`, else the file its ID points to on disk, even if
-  the line renames it; a new entry isn't there to open) or the path line.
-  On a line without an entry it's vim's Enter. In a file with a path, `-` is
-  Koil's too (`leaveFile`): back to the listing, on the file's line.
+  works as before. A failed update gives the path's problems apart
+  (`pathProblems`: none, or it can't be opened), which the path field shows
+  until the path is edited or an update works.
+- **The path field** (`pathView` in main.qml, over the listing): an Editor
+  with `pathField` set, one line in a field, with the option buttons (the
+  find bar's `IconButton`s) on its right. It's hidden while a file is open.
+  One `Vim` edits both it and the listing, one at a time (see Buffers under
+  Non-obvious decisions): `activeView` is the one it edits, which vim's
+  `editor`, `flickable`, `singleLine` and the find bar's `editor` follow.
+  Everything that changes the listing (`showListing`) switches vim to it,
+  and back to the path field after if it was there, so a setting toggled in
+  the field (`g.`, a button) leaves vim in it (insert mode ends, though).
+  When the location changes, the field gets a new buffer, with the cursor
+  at the end; otherwise it keeps its text and undo history.
+- **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
+  listing and the path field): `Space Space` updates, `Space a` applies, `-`
+  opens `..` (`3-`: `../../..`), Tab goes to the other editor (`activate`),
+  and `g.`, `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex`
+  (like the buttons). Enter in the listing opens the dir or file on its line
+  (`listing::target_on_line`: a dir if the name ends with `/`, else the file
+  its ID points to on disk, even if the line renames it; a new entry isn't
+  there to open); on a line without an entry it's vim's Enter. Enter in the
+  path field (`openPath`, also from insert mode: see `singleLine`) updates
+  and goes to the listing, unless the update fails. In a file with a path,
+  `-` is Koil's too (`leaveFile`): back to the listing, on the file's line.
   They're only matched at the start of a normal-mode command (so `d-` and
-  visual `-` are vim's), with a count; a Space followed by anything else is a
-  bad command. Shift+Enter is its own token, `<S-CR>`, a motion like `<CR>`,
-  and plain `<CR>` everywhere else (insert mode, the command line).
+  visual `-` are vim's), with a count; keys that start one and go on
+  differently are a bad command (Space l), unless they go on as a name of
+  vim's (`gg`, `gU`). Shift+Enter is its own token, `<S-CR>`, a motion like
+  `<CR>`, and plain `<CR>` everywhere else (insert mode, the command line).
 - **Update** (`updateListing`): koil reads the entries with the settings they
   were shown with, then takes vim's `:set hidden/gitignore/regex`, then opens
-  the Enter/`-` target, else the path line if it changed (like koil-cli).
+  the Enter/`-` target, else the path field's path if it changed (like
+  koil-cli, where it's the first line). The field is read with the listing
+  wherever the update comes from, so a path typed there and left without
+  Enter is opened by the next update.
   The listing is then shown again. If what's shown stayed the same (same
   location, same hidden/gitignore; `moved` is false), the new text replaces
   the old as one vim change (`vim.replaceText`, which changes only the span
@@ -133,7 +159,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   for renamed paths). `u` or Cmd+Z with nothing left to undo in vim emits
   `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
   buffer back past an update) and asks to run koil's undo, listing its
-  steps; koil refuses while changes are pending.
+  steps; koil refuses while changes are pending. Not from the path field,
+  whose undo history is its own.
 - **Quitting**: `modified` is the file's unsaved changes, or in the listing,
   edits or pending changes (`koil.hasChanges()` after each update). `:q`
   updates first (`unsaved`); `:confirm q` (and `ZZ` in the listing) asks to
@@ -152,16 +179,17 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   argument Koil lists the home dir.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
   the editor's document colors each line's icon (colors from devicons,
-  gathered from every listing shown, `iconColors`, dark or light by theme),
-  the path line and `/`-ending names (`theme.directory`), and the `=` line.
-  It's text-based, so it follows edits. It's found by object name (no moc
-  for native.cpp). Highlighting counts as a text change to Qt (as
-  `fixLineFormat` does), so Editor.qml only emits `edited` when the text
-  really changed (`lastText`). While the path is read as a regex (`:set
-  regex` and the path changed, or a regex is open), `pathSyntax` gives its
-  parts (`listing::path_syntax`: after the longest existing dir, from the
-  first part with a special character, as koil splits it), which
-  `setPathColors` draws over the path's color in `theme.regexColors`.
+  gathered from every listing shown, `iconColors`, dark or light by theme)
+  and `/`-ending names (`theme.directory`). It's text-based, so it follows
+  edits. It's found by object name (no moc for native.cpp). Highlighting
+  counts as a text change to Qt (as `fixLineFormat` does), so Editor.qml
+  only emits `edited` when the text really changed (`lastText`). The path
+  field's document has one too (`setPathColors`, `isPath`): all of it in
+  `theme.directory`, and while the path is read as a regex (`:set regex` and
+  the path changed, or a regex is open), `pathSyntax` gives its parts
+  (`listing::path_syntax`: after the longest existing dir, from the first
+  part with a special character, as koil splits it), drawn over that in
+  `theme.regexColors`.
 - **Icon font**: devicons' icons are Nerd Font glyphs in the Private Use
   Area. Koil ships one, JetBrains Mono NL Nerd Font (Nerd Fonts v3.5.1,
   `fonts/`), compiled into the binary (`include_bytes!` in main.rs), so no
@@ -216,13 +244,34 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   copied app-locally, so no VC++ Redistributable is needed.
   `package-windows.ps1` loads the VS dev shell itself; `ilammy/msvc-dev-cmd`
   was removed because it's stuck on Node 20.
+- **Buffers** (Vim.qml): vim edits one editor at a time, the listing or the
+  path field. `leaveBuffer` ends insert or visual mode and the command line,
+  and returns the buffer's state (cursor, `wantCol`, undo and redo stacks,
+  `hidden`, `lastVisual`); `enterBuffer` takes it back once `editor` and
+  `flickable` point at that buffer (`null`, or anything missing, starts
+  empty). Registers, searches, macros, `.`, the command line and the options
+  are shared. The editor vim doesn't edit (`Editor.active` false) keeps the
+  state in `saved`, from which it draws a dimmed block cursor (none in the
+  path field) and its hover finds hidden text (`Editor.hidden`); vim's own
+  overlays (selection, highlights, extra cursors) are drawn only in the
+  active one, and its diagnostics and line numbers use its own
+  `visibleLines`. A press on the other editor switches before the
+  `TextArea` handles it (the `MouseArea`), since the `TextArea` moves its
+  cursor before it takes focus; taking focus any other way switches too
+  (`activated`). `singleLine` (the path field) makes `replaceRange` turn line
+  breaks into spaces (the same length, so positions stay right), and Enter
+  while typing leave insert mode and then run normal mode's Enter. The
+  macOS style doesn't let a `TextArea`'s background be replaced (it warns
+  and keeps it; it's `palette.light`, not `base`), so the path field hides
+  it, and the window behind the field uses the listing's background color.
 - **Vim**: `Vim.qml` owns the cursor (`vim.cursor` is the character under the
   block), which Editor.qml draws. Insert mode uses the `TextArea`'s own cursor
   (`cursorDelegate`). Outside insert mode the `TextArea` is `readOnly`, so macOS
   doesn't open the accent picker on held keys and only vim edits the text.
   Changing `readOnly` makes the editor scroll to a stale cursor position, so
   `setMode` restores the view and then scrolls only if the cursor is out of it
-  (`showCursor`). Vim keeps its own undo stack (diffs per change), so native
+  (`showCursor`: to all of the character under the block, and the padding
+  after it, since Qt's cursor rectangle is a thin bar). Vim keeps its own undo stack (diffs per change), so native
   undo (Cmd+Z) is routed to it. Only the `"+`/`"*` registers use the system
   clipboard.
 - **Macros**: typed keys are recorded as tokens (`"<Esc>"`, `"x"`); the register

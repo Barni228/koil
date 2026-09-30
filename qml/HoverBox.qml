@@ -13,10 +13,9 @@ Item {
     id: hover
 
     // The Editor it shows things in: its textArea, cellAt, lineHeight and
-    // metrics, and the warnings and errors. Untyped, since Editor.qml can't
-    // name its own type.
+    // metrics, its hidden text, and the warnings and errors. Untyped, since
+    // Editor.qml can't name its own type.
     required property var editor
-    required property Vim vim
     required property Theme theme
     readonly property TextArea textArea: editor.textArea
 
@@ -66,7 +65,7 @@ Item {
     // icon that starts there and what it hides (with no severity), or the
     // warning or error with the character there. Null if nothing.
     function targetAt(pos) {
-        const h = vim.hiddenAt(pos);
+        const h = editor.hiddenAt(pos);
         if (h)
             return {
                 start: pos,

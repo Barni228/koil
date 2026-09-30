@@ -6,10 +6,11 @@ import QtQuick.Shapes
 
 import "text.js" as Txt
 
-// The editor: a TextArea in a ScrollView, which vim drives. Vim's cursors,
-// the selection, search highlights, Koil's warnings and errors, and line
-// numbers are drawn over (or under) its text here, and the hover box shows
-// what's under the pointer.
+// An editor: a TextArea in a ScrollView, which vim drives while it's the
+// one vim edits (`active`: there's also the path field over the listing).
+// Vim's cursors, the selection, search highlights, Koil's warnings and
+// errors, and line numbers are drawn over (or under) its text here, and the
+// hover box shows what's under the pointer.
 Item {
     id: view
 
@@ -23,13 +24,24 @@ Item {
     // its dirs'.
     property bool listing: false
     property var iconColors: ({})
-    // The parts of the listing's path line to color (a regex's), as { start,
-    // length, kind } (see listing::Span).
+    // Whether this is the path field over the listing: one line, in the
+    // dirs' color, with no line numbers. `pathSyntax` holds the parts of it
+    // to color (a regex's), as { start, length, kind } (see listing::Span).
+    property bool pathField: false
     property var pathSyntax: []
-    // Koil's warnings and errors about the listing's lines, as { line,
+    // Koil's warnings and errors about the text's lines, as { line,
     // column, severity, message } (see listing::Problem): drawn from the
     // column to the line's end.
     property var problems: []
+    // Vim's state for this editor while it edits another one (see
+    // Vim.leaveBuffer), kept here for main.qml to give back.
+    property var saved: null
+
+    // Whether vim edits this editor. The other one keeps its cursor where
+    // vim left it (`cursorPos`), and its hidden text.
+    readonly property bool active: vim.editor === editor
+    readonly property int cursorPos: active ? vim.cursor : saved && saved.cursor || 0
+    readonly property var hidden: active ? vim.hidden : saved && saved.hidden || []
 
     readonly property alias textArea: editor
     readonly property Flickable flickable: scrollView.contentItem as Flickable
@@ -52,6 +64,9 @@ Item {
 
     // The text changed, by vim or by typing (not by setText).
     signal edited()
+    // The editor was clicked (or given the keyboard) while vim edits the
+    // other one, which should switch.
+    signal activated()
 
     // Replaces the text (a file or a listing was opened); not an edit.
     function setText(text) {
@@ -61,26 +76,25 @@ Item {
         fixLineFormat(); // setting the text reset it
     }
 
-    // Colors the listing (see `listing`), in the light or dark theme's
-    // colors; a file gets none.
+    // Colors the listing (see `listing`) or the path field, in the light or
+    // dark theme's colors; a file gets none.
     function applyColors() {
+        if (pathField) {
+            const spans = [];
+            for (const s of pathSyntax)
+                spans.push(String(s.start), String(s.length), theme.regexColors[s.kind]);
+            system.setPathColors(editor.textDocument, String(theme.directory), spans);
+            return;
+        }
         const colors = [];
         for (const icon in iconColors)
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
-        system.setListingColors(editor.textDocument, colors, listing ? String(theme.directory) : "", String(theme.dim));
-        applyPathColors();
-    }
-
-    function applyPathColors() {
-        const spans = [];
-        for (const s of pathSyntax)
-            spans.push(String(s.start), String(s.length), theme.regexColors[s.kind]);
-        system.setPathColors(editor.textDocument, spans);
+        system.setListingColors(editor.textDocument, colors, listing ? String(theme.directory) : "");
     }
 
     onListingChanged: applyColors()
     onIconColorsChanged: applyColors()
-    onPathSyntaxChanged: applyPathColors()
+    onPathSyntaxChanged: applyColors()
 
     // An emoji comes from a taller font than the editor's, which makes its
     // line taller. Give every line the same height instead. Qt puts a
@@ -126,9 +140,9 @@ Item {
     function selectionSpans() {
         const block = vim.mode === "visualBlock";
         const s = editor.selectionStart, e = editor.selectionEnd;
-        if (s === e && !block)
+        if (!active || s === e && !block)
             return [];
-        const t = editor.text, v = vim.visibleRange(t);
+        const t = editor.text, v = visibleRange();
         if (block)
             return vim.blockSpans().filter(r => r.start >= v.from && r.start <= v.to);
         const spans = [];
@@ -149,6 +163,32 @@ Item {
     // The warning or error with the character at pos, or null.
     function diagnosticAt(pos) {
         return diagnostics.at(pos);
+    }
+
+    // The entry of the icon at p that hides text, or null (see Hidden text
+    // in Vim.qml).
+    function hiddenAt(p) {
+        return hidden.find(h => h.at === p) || null;
+    }
+
+    // The lines in view, even partly, as { top, bottom } counted from 0
+    // (bottom can be past the last line), as vim's visibleLines would give
+    // them if it edited this editor.
+    function visibleLines() {
+        const y = flickable.contentY - editor.topPadding;
+        return {
+            top: Math.max(0, Math.floor(y / lineHeight)),
+            bottom: Math.max(0, Math.ceil((y + flickable.height) / lineHeight))
+        };
+    }
+
+    // The part of the text [from, to] in the visible lines.
+    function visibleRange() {
+        const t = editor.text, v = visibleLines();
+        return {
+            from: Txt.lineToPos(t, v.top + 1),
+            to: Txt.lineEnd(t, Txt.lineToPos(t, v.bottom + 1))
+        };
     }
 
     // The message shown after a line's end at point p (in the editor), as
@@ -176,6 +216,7 @@ Item {
 
     Connections {
         target: view.vim
+        enabled: view.active
 
         function onCursorChanged() {
             hover.hide();
@@ -208,7 +249,6 @@ Item {
         id: hover
 
         editor: view
-        vim: view.vim
         theme: view.theme
     }
 
@@ -285,6 +325,9 @@ Item {
         id: scrollView
 
         anchors.fill: parent
+        // The path field scrolls with vim's cursor, or the wheel.
+        ScrollBar.horizontal.policy: view.pathField ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
+        ScrollBar.vertical.policy: view.pathField ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
 
         TextArea {
             id: editor
@@ -313,22 +356,38 @@ Item {
             }
             onCursorPositionChanged: {
                 blinkOn = true;
-                view.vim.syncFromEditor();
+                if (view.active)
+                    view.vim.syncFromEditor();
             }
-            onSelectedTextChanged: view.vim.syncFromEditor()
+            onSelectedTextChanged: {
+                if (view.active)
+                    view.vim.syncFromEditor();
+            }
             onRevisionChanged: hover.hide()
+            // Given the keyboard some other way than a click (see the
+            // MouseArea), it switches too.
             onActiveFocusChanged: {
                 if (!activeFocus)
                     hover.hide();
+                else if (!view.active)
+                    view.activated();
             }
             Component.onCompleted: {
                 // Make room for the line numbers beside the style's padding.
                 const base = leftPadding;
                 leftPadding = Qt.binding(() => base + gutter.columnWidth);
-                // Fusion (Windows and Linux) frames a TextArea like a text
-                // field, which doesn't suit a full-window editor.
-                if (Qt.platform.os !== "osx")
+                // The path field is a line in a field (which main.qml
+                // draws), with no room around it. The macOS style doesn't
+                // let the background be replaced, only hidden.
+                if (view.pathField) {
+                    topPadding = 0;
+                    bottomPadding = 0;
+                    background.visible = false;
+                } else if (Qt.platform.os !== "osx") {
+                    // Fusion (Windows and Linux) frames a TextArea like a
+                    // text field, which doesn't suit a full-window editor.
                     background = plainBackground.createObject(editor);
+                }
             }
             Keys.onPressed: event => {
                 if (event.matches(StandardKey.Copy) && hover.copySelection()) {
@@ -338,7 +397,9 @@ Item {
                 // Not on a lone modifier, which may start Cmd+C.
                 if (![Qt.Key_Shift, Qt.Key_Control, Qt.Key_Meta, Qt.Key_Alt, Qt.Key_AltGr].includes(event.key))
                     hover.hide(); // gh shows it again
-                event.accepted = view.vim.handleKey(event);
+                // Keys for an editor vim doesn't edit (which it should, see
+                // onActiveFocusChanged) go nowhere.
+                event.accepted = !view.active || view.vim.handleKey(event);
             }
 
             Component {
@@ -383,11 +444,15 @@ Item {
             }
 
             // Alt+click adds a cursor (or removes one). A plain click goes
-            // back to one cursor and then does what it always does.
+            // back to one cursor and then does what it always does. Either
+            // one on the editor vim doesn't edit switches to it first, so
+            // the click moves its cursor.
             MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.IBeamCursor
                 onPressed: mouse => {
+                    if (!view.active)
+                        view.activated();
                     if (mouse.modifiers & Qt.AltModifier) {
                         editor.forceActiveFocus();
                         view.vim.toggleCursor(editor.positionAt(mouse.x, mouse.y));
@@ -399,10 +464,10 @@ Item {
             }
 
             // The lines with a cursor, under the selection. Not while
-            // there's a selection.
+            // there's a selection, nor in the path field.
             Item {
                 z: -0.6
-                visible: !view.vim.isVisual
+                visible: !view.pathField && !(view.active && view.vim.isVisual)
 
                 Repeater {
                     model: carets.model
@@ -421,7 +486,7 @@ Item {
                 id: selection
 
                 z: -0.5
-                inputs: [editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.layout, view.viewport]
+                inputs: [view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.layout, view.viewport]
                 compute: () => view.selectionSpans()
 
                 Repeater {
@@ -447,8 +512,8 @@ Item {
             Layer {
                 id: highlights
 
-                inputs: [view.vim.commandLine, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
-                compute: () => view.vim.typedSearch() === null && view.findBar.active ? view.findBar.highlightSpans() : view.vim.searchHighlights()
+                inputs: [view.active, view.vim.commandLine, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
+                compute: () => !view.active ? [] : view.vim.typedSearch() === null && view.findBar.active ? view.findBar.highlightSpans() : view.vim.searchHighlights()
 
                 Repeater {
                     model: highlights.model
@@ -480,12 +545,15 @@ Item {
 
             // Every cursor: the main one, then the extra ones (Alt+click, or
             // a block insert's lines), as spotAt gives them. After the search
-            // highlights, so they're drawn over them.
+            // highlights, so they're drawn over them. While vim edits the
+            // other editor, where it left the cursor (the path field shows
+            // none).
             Layer {
                 id: carets
 
-                inputs: [view.vim.cursor, view.vim.cursors, editor.cursorRectangle, view.layout]
-                compute: () => [view.spotAt(view.vim.cursor, true)].concat(view.vim.cursors.map(c => view.spotAt(c.pos, false)))
+                inputs: [view.active, view.cursorPos, view.vim.cursors, editor.cursorRectangle, view.layout]
+                compute: () => !view.active ? (view.pathField ? [] : [view.spotAt(view.cursorPos, true)])
+                    : [view.spotAt(view.vim.cursor, true)].concat(view.vim.cursors.map(c => view.spotAt(c.pos, false)))
 
                 // Shaped like the main one. In insert mode the main one is
                 // the editor's own bar (see cursorDelegate).
@@ -497,8 +565,8 @@ Item {
 
                         cell: modelData.cell
                         character: modelData.character
-                        shape: view.vim.cursorShape
-                        shown: !modelData.main || view.vim.mode !== "insert"
+                        shape: view.active ? view.vim.cursorShape : "block"
+                        shown: !modelData.main || !view.active || view.vim.mode !== "insert"
                     }
                 }
             }
@@ -580,7 +648,7 @@ Item {
 
                     inputs: [view.problems, view.layout, view.viewport]
                     compute: () => {
-                        const v = view.vim.visibleRange(editor.text);
+                        const v = view.visibleRange();
                         return diagnostics.find(editor.text, v.from, v.to);
                     }
 
@@ -642,22 +710,22 @@ Item {
             Rectangle {
                 id: gutter
 
-                readonly property bool shown: view.vim.number || view.vim.relativeNumber
+                readonly property bool shown: !view.pathField && (view.vim.number || view.vim.relativeNumber)
                 property int digits: 3
                 // Room for the numbers and two spaces after them.
                 readonly property real columnWidth: shown ? (digits + 2) * digitMetrics.advanceWidth : 0
                 property var rows: []
-                readonly property var inputs: [shown, view.vim.number, view.vim.relativeNumber, view.vim.cursor, view.lineHeight, view.layout, view.viewport]
+                readonly property var inputs: [shown, view.vim.number, view.vim.relativeNumber, view.cursorPos, view.lineHeight, view.layout, view.viewport]
 
                 function refresh() {
                     if (!shown) {
                         rows = [];
                         return;
                     }
-                    const t = editor.text, v = view.vim.visibleLines();
+                    const t = editor.text, v = view.visibleLines();
                     const count = Txt.countLines(t);
                     digits = Math.max(3, String(count).length);
-                    const current = Txt.lineOf(t, view.vim.cursor) - 1;
+                    const current = Txt.lineOf(t, view.cursorPos) - 1;
                     const list = [];
                     for (let i = v.top; i <= Math.min(count - 1, v.bottom); i++) {
                         const own = i === current && view.vim.number;

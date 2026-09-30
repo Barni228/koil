@@ -13,6 +13,7 @@ import "text.js" as Txt
 FocusScope {
     id: bar
 
+    // The editor vim edits.
     required property TextArea editor
     required property Vim vim
     required property Theme theme
@@ -355,6 +356,8 @@ FocusScope {
     }
 
     onQueryChanged: search()
+    // Vim went to the other editor (the path field or the listing).
+    onEditorChanged: refresh()
     onMatchCaseChanged: search()
     onWholeWordChanged: search()
     onUseRegexChanged: search()

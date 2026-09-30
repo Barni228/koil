@@ -34,17 +34,13 @@ pub mod qobject {
         #[qinvokable]
         fn open(self: Pin<&mut Koil>, location: &QString) -> QString;
 
-        /// The listing of what's open: `{ text, hidden, names, colors }` (see
-        /// `listing::Rendered`).
+        /// The listing of what's open: `{ path, text, hidden, names, colors }`
+        /// (see `listing::Rendered`).
         #[qinvokable]
         fn render(self: &Koil) -> QString;
 
-        /// What's open, as the listing's first line shows it.
-        #[qinvokable]
-        fn location(self: &Koil) -> QString;
-
-        /// The parts of the regex on the path line `line` to color, as a list
-        /// of `listing::Span`: none unless it's read as a regex.
+        /// The parts of the regex in the path field `line` to color, as a
+        /// list of `listing::Span`: none unless it's read as a regex.
         #[qinvokable]
         fn path_syntax(self: &Koil, line: &QString) -> QString;
 
@@ -54,11 +50,12 @@ pub mod qobject {
         fn check(self: &Koil, text: &QString, hidden: &QString) -> QString;
 
         /// Reads the listing `text` (with `hidden`), uses the settings, and
-        /// opens `open` (relative to the open dir) if it isn't empty, else the
-        /// path on the first line if it changed. Returns `listing::Updated`.
+        /// opens `open` (relative to the open dir) if it isn't empty, else
+        /// `path` (the path field) if it changed. Returns `listing::Updated`.
         #[qinvokable]
         fn update(
             self: Pin<&mut Koil>,
+            path: &QString,
             text: &QString,
             hidden: &QString,
             open: &QString,
@@ -156,10 +153,6 @@ impl qobject::Koil {
         to_json(&listing::render(&self.koil))
     }
 
-    fn location(&self) -> QString {
-        QString::from(listing::show_path(&self.koil.location()).as_str())
-    }
-
     fn path_syntax(&self, line: &QString) -> QString {
         to_json(&listing::path_syntax(
             &self.koil,
@@ -176,7 +169,13 @@ impl qobject::Koil {
         ))
     }
 
-    fn update(self: Pin<&mut Self>, text: &QString, hidden: &QString, open: &QString) -> QString {
+    fn update(
+        self: Pin<&mut Self>,
+        path: &QString,
+        text: &QString,
+        hidden: &QString,
+        open: &QString,
+    ) -> QString {
         let mut rust = self.rust_mut();
         let settings = rust.settings();
         let open = open.to_string();
@@ -184,6 +183,7 @@ impl qobject::Koil {
         let hidden = read_hidden(hidden);
         to_json(&listing::update(
             &mut rust.koil,
+            &path.to_string(),
             &text.to_string(),
             &hidden,
             &settings,

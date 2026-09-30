@@ -66,41 +66,39 @@ hasFixedWidthText(const QString& family)
 
 const QString highlighterName = QStringLiteral("koilListingHighlighter");
 
-// See setListingColors.
+// See setListingColors and setPathColors.
 class ListingHighlighter : public QSyntaxHighlighter
 {
 public:
   using QSyntaxHighlighter::QSyntaxHighlighter;
 
+  // Whether it colors the path field (setPathColors) rather than the
+  // listing.
+  bool isPath = false;
   QHash<QString, QTextCharFormat> icons;
   QTextCharFormat directory;
-  QTextCharFormat rule;
   struct Span
   {
     int start;
     int length;
     QTextCharFormat format;
   };
-  QList<Span> path;
+  QList<Span> spans;
 
 protected:
   void highlightBlock(const QString& text) override
   {
+    if (isPath) {
+      setFormat(0, text.size(), directory);
+      if (currentBlock().blockNumber() == 0)
+        for (const auto& span : std::as_const(spans))
+          setFormat(span.start, span.length, span.format);
+      return;
+    }
     const QStringView trimmed = QStringView(text).trimmed();
     if (trimmed.isEmpty())
       return;
-    if (trimmed.size() >= 3 &&
-        std::all_of(trimmed.begin(), trimmed.end(), [](QChar c) { return c == u'='; })) {
-      setFormat(0, text.size(), rule);
-      return;
-    }
     qsizetype start = text.indexOf(trimmed.front());
-    if (currentBlock().blockNumber() == 0) {
-      setFormat(start, text.size() - start, directory);
-      for (const auto& span : std::as_const(path))
-        setFormat(span.start, span.length, span.format);
-      return;
-    }
     const qsizetype length =
       text.at(start).isHighSurrogate() && start + 1 < text.size() ? 2 : 1;
     const auto icon = icons.constFind(text.mid(start, length));
@@ -113,15 +111,23 @@ protected:
   }
 };
 
+// The highlighter of a TextEdit's document (a QQuickTextDocument), if it
+// has one, or else a new one if `create` is set.
 ListingHighlighter*
-highlighterOf(QObject* textDocument)
+highlighterOf(QObject* textDocument, bool create)
 {
   auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
   if (!quickDocument)
     return nullptr;
+  auto* document = quickDocument->textDocument();
   // No Q_OBJECT (so no moc), so it's found by name rather than by type.
-  return static_cast<ListingHighlighter*>(quickDocument->textDocument()->findChild<QSyntaxHighlighter*>(
-    highlighterName, Qt::FindDirectChildrenOnly));
+  auto* highlighter = static_cast<ListingHighlighter*>(
+    document->findChild<QSyntaxHighlighter*>(highlighterName, Qt::FindDirectChildrenOnly));
+  if (!highlighter && create) {
+    highlighter = new ListingHighlighter(document);
+    highlighter->setObjectName(highlighterName);
+  }
+  return highlighter;
 }
 
 QTextCharFormat
@@ -209,40 +215,34 @@ setLineFormat(QObject* textDocument, double height, double bottomMargin)
 void
 setListingColors(QObject* textDocument,
                  const QStringList& iconColors,
-                 const QString& directoryColor,
-                 const QString& ruleColor)
+                 const QString& directoryColor)
 {
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
+  auto* highlighter = highlighterOf(textDocument, !directoryColor.isEmpty());
+  if (!highlighter)
     return;
-  auto* document = quickDocument->textDocument();
-  auto* highlighter = highlighterOf(textDocument);
   if (directoryColor.isEmpty()) {
     delete highlighter; // which takes its colors away
     return;
-  }
-  if (!highlighter) {
-    highlighter = new ListingHighlighter(document);
-    highlighter->setObjectName(highlighterName);
   }
   highlighter->icons.clear();
   for (qsizetype i = 0; i + 1 < iconColors.size(); i += 2)
     highlighter->icons.insert(iconColors.at(i), colored(iconColors.at(i + 1)));
   highlighter->directory = colored(directoryColor);
-  highlighter->rule = colored(ruleColor);
   highlighter->rehighlight();
 }
 
 void
-setPathColors(QObject* textDocument, const QStringList& spans)
+setPathColors(QObject* textDocument, const QString& directoryColor, const QStringList& spans)
 {
-  auto* highlighter = highlighterOf(textDocument);
+  auto* highlighter = highlighterOf(textDocument, true);
   if (!highlighter)
     return;
-  highlighter->path.clear();
+  highlighter->isPath = true;
+  highlighter->directory = colored(directoryColor);
+  highlighter->spans.clear();
   for (qsizetype i = 0; i + 2 < spans.size(); i += 3)
-    highlighter->path.append({ spans.at(i).toInt(), spans.at(i + 1).toInt(), colored(spans.at(i + 2)) });
-  highlighter->rehighlightBlock(highlighter->document()->firstBlock());
+    highlighter->spans.append({ spans.at(i).toInt(), spans.at(i + 1).toInt(), colored(spans.at(i + 2)) });
+  highlighter->rehighlight();
 }
 
 QStringList

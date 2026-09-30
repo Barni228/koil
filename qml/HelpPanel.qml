@@ -30,28 +30,34 @@ Popup {
         {
             title: "The listing",
             tags: ["koil", "listing", "list", "entry", "entries", "space", "update", "apply", "-", "enter",
-                "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo"],
-            intro: "Koil shows a dir as text: its path, a line of `=`, then a line per entry: its icon (which "
-                + "hides its ID), two spaces, and its name, with `/` after a dir's. Edit the names to "
+                "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
+                "gr"],
+            intro: "Koil shows a dir as text: its path in a field at the top, then a line per entry: its icon "
+                + "(which hides its ID), two spaces, and its name, with `/` after a dir's. Edit the names to "
                 + "rename, delete lines to delete, copy lines (icon and all) to copy, and write lines "
                 + "without an icon to create, like `new.txt` or `new/dir/`. A line cut here and pasted in "
                 + "another dir moves the entry. Nothing changes on disk until it's applied.",
             rows: [
                 ["Space Space", "Update: Koil reads the listing (keeping the changes, also in other dirs) "
-                    + "and shows it again, opening the path on the first line if it changed."],
+                    + "and shows it again, opening the path in the field if it changed."],
                 ["Space a  :w", "Apply the changes, after showing what they'll do. `:wq` quits afterwards."],
                 ["u", "With no edit left to undo: undo the last apply, after showing what that will do. "
                     + "Deleted entries come back from the trash."],
-                ["Enter", "Open the dir or file on the cursor's line, or the path on the first line. A "
-                    + "file opens as it is on disk, even if its line renames it."],
+                ["Enter", "Open the dir or file on the cursor's line. A file opens as it is on disk, even "
+                    + "if its line renames it."],
                 ["Shift+Enter", "Vim's Enter: the first character of the next line."],
                 ["-", "Open the dir above (`3-`: three dirs up). In a file: back to the listing, on the "
                     + "file's line (asking to save it first, if it has changes)."],
                 ["quitting", "In a file, while the listing has changes that aren't applied, `:q`, `:wq`, "
                     + "`ZZ`, `:q!` and the rest (but `:qa!`) go back to the listing instead (saving or "
                     + "dropping the file as they say). `:conf q` and `ZZ` then ask to apply the changes."],
-                ["path", "The first line: a dir, or a pattern of files, like `~/src/**/*.rs`, or a regex "
-                    + "with `:set regex` (where `,` is any character but `/`), whose parts get colors."],
+                ["path", "The field at the top: a dir, or a pattern of files, like `~/src/**/*.rs`, or a "
+                    + "regex with `:set regex` (where `,` is any character but `/`), whose parts get colors. "
+                    + "It's one line, edited with vim's keys too; Enter (also in insert mode) opens it and "
+                    + "goes back to the listing."],
+                ["Tab", "In normal mode: go from the listing to the path field, or back. So does a click."],
+                ["g.  gi  gr", "Turn `:set hidden`, `gitignore` and `regex` on or off, like the buttons beside "
+                    + "the path."],
                 [(isMac ? "⇧⌘O" : "Ctrl+Shift+O"), "Open a folder. " + cmdKey + "O opens a file to edit "
                     + "instead."]
             ]
@@ -72,7 +78,7 @@ Popup {
                     + "the cursor's line shows its own number."],
                 ["hidden, hid", "Show hidden entries (starting with `.`), and `../` to open the dir above."],
                 ["gitignore, ignore", "Hide what git ignores, and `.git`."],
-                ["regex, re", "Read the path on the first line as a regex, not a glob."]
+                ["regex, re", "Read the path as a regex, not a glob."]
             ],
             note: "An entry with changes is shown even if it's hidden or ignored."
         },

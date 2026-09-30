@@ -60,6 +60,10 @@ QtObject {
     // Space and "<CR>" Enter. Only at the start of a command, so "d-" still
     // deletes up a line. Typing one emits keyCommand.
     property var commandKeys: ({})
+    // A buffer of one line (Koil's path field): a line break put in it
+    // becomes a space, and Enter while typing leaves insert mode, then does
+    // what it does in normal mode.
+    property bool singleLine: false
 
     readonly property bool isVisual: mode === "visual" || mode === "visualLine" || mode === "visualBlock"
     // Insert or replace mode: typing edits the text, at the editor's cursor.
@@ -175,7 +179,7 @@ QtObject {
     // ---- Entry points ------------------------------------------------------
 
     // Starts over with the editor's new text, whose icons hide the texts in
-    // `entries` (see Hidden text).
+    // `entries` (see Hidden text). Leaves other buffers alone (see Buffers).
     function reset(entries) {
         keys = [];
         pendingKeys = "";
@@ -197,6 +201,10 @@ QtObject {
     // Returns whether the key was consumed; unconsumed keys go to the editor.
     function handleKey(event) {
         const tok = tokenFor(event);
+        // Enter with a modifier vim doesn't know (Cmd+Enter), which the
+        // editor would make a line break.
+        if (singleLine && tok === null && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter))
+            return true;
         if (commandLine !== "")
             return typedKey(tok, event);
         if (!isVisual && mode !== "insert")
@@ -284,6 +292,11 @@ QtObject {
             tok = "<CR>";
         if (commandLine !== "")
             return commandLineKey(tok);
+        if (singleLine && inserting && tok === "<CR>") {
+            leaveInsert();
+            feed(tok);
+            return true;
+        }
         if (mode === "insert")
             return insertKey(tok, event);
         if (tok === null)
@@ -407,6 +420,51 @@ QtObject {
     function showMessage(text) {
         message = text;
         messageIsError = false;
+    }
+
+    // ---- Buffers -----------------------------------------------------------
+    // Vim can edit several editors (buffers, in vim's words), one at a time:
+    // Koil's path field and its listing. To switch, leaveBuffer the one it
+    // edits, give vim the other one's `editor` and `flickable`, and
+    // enterBuffer it. Registers, searches, macros, the command line and the
+    // options are shared; each buffer has its own cursor, undo history and
+    // hidden text, which leaveBuffer gives back.
+
+    // Leaves the buffer vim edits in normal mode, and returns its state for
+    // enterBuffer: { cursor, wantCol, undoStack, redoStack, hidden,
+    // lastVisual }.
+    function leaveBuffer() {
+        if (commandLine !== "")
+            commandLineKey("<Esc>");
+        if (inserting)
+            leaveInsert();
+        if (isVisual) {
+            setMode("normal");
+            setCursor(Txt.clampNormal(editor.text, cursor));
+        }
+        commitChange();
+        clearCursors();
+        keys = [];
+        pendingKeys = "";
+        awaitingReplaceChar = false;
+        return { cursor: cursor, wantCol: wantCol, undoStack: undoStack, redoStack: redoStack,
+            hidden: hidden, lastVisual: lastVisual };
+    }
+
+    // Edits the buffer vim was just given, from the state leaveBuffer gave
+    // for it. Whatever `state` leaves out starts empty (all of it for null),
+    // and the cursor at 0.
+    function enterBuffer(state) {
+        const s = state || {}, t = editor.text;
+        undoStack = s.undoStack || [];
+        redoStack = s.redoStack || [];
+        hidden = s.hidden || [];
+        lastVisual = s.lastVisual || null;
+        trackedText = t;
+        cursor = Txt.clampNormal(t, s.cursor || 0);
+        setMode("normal");
+        setCursor(cursor);
+        wantCol = s.wantCol === undefined ? Txt.column(t, cursor) : s.wantCol;
     }
 
     // ---- Keys --------------------------------------------------------------
@@ -660,8 +718,13 @@ QtObject {
             }
             if (c)
                 return more;
-            // Keys that started one, then went on differently.
-            if (keys.length - i > 1 && commandFor([keys[i]]))
+            // Keys that started one, then went on differently, are bad
+            // (Space l), unless they went on as a name of vim's (gg, where
+            // g. is one).
+            let started = 0;
+            while (commandFor(keys.slice(i, i + started + 1)))
+                started++;
+            if (started && readName(keys, i).next - i <= started)
                 return bad;
         }
         const w = readName(keys, i);
@@ -1776,6 +1839,9 @@ QtObject {
 
     // `entries` are the hidden-text entries for `text`, if it has any.
     function replaceRange(start, end, text, entries) {
+        // A space is as long as a line break, so positions stay right.
+        if (singleLine)
+            text = text.replace(new RegExp("[\\r\\n\\u2028\\u2029]", "g"), " ");
         syncing = true;
         editing = true;
         if (end > start)
@@ -2770,12 +2836,17 @@ QtObject {
         flickable.contentY = Math.max(0, Math.min(flickable.contentY + lines * lineHeight, max));
     }
 
-    // Scrolls as little as shows the cursor.
+    // Scrolls as little as shows the cursor: all of the character it's on,
+    // and the padding after it, as the editor does for its own cursor (its
+    // rectangle is a bar, only as wide as a line).
     function showCursor() {
         if (!flickable)
             return;
-        const f = flickable, r = editor.positionToRectangle(Math.min(cursor, editor.length));
-        const top = editor.topPadding + (Txt.lineOf(editor.text, cursor) - 1) * lineHeight;
+        const t = editor.text, p = Math.min(cursor, editor.length);
+        const f = flickable, r = editor.positionToRectangle(p);
+        const right = (p < Txt.lineEnd(t, p) ? editor.positionToRectangle(Txt.charEnd(t, p)).x : r.x + r.width)
+            + editor.rightPadding;
+        const top = editor.topPadding + (Txt.lineOf(t, cursor) - 1) * lineHeight;
         const maxY = Math.max(0, f.contentHeight - f.height);
         if (top < f.contentY)
             f.contentY = top <= editor.topPadding ? 0 : top;
@@ -2785,8 +2856,8 @@ QtObject {
         const maxX = Math.max(0, f.contentWidth - f.width);
         if (r.x < f.contentX + editor.leftPadding)
             f.contentX = Math.max(0, r.x - editor.leftPadding);
-        else if (r.x + r.width > f.contentX + f.width)
-            f.contentX = Math.min(maxX, r.x + r.width - f.width);
+        else if (right > f.contentX + f.width)
+            f.contentX = Math.min(maxX, right - f.width);
     }
 
     // Ctrl-E and Ctrl-Y: scrolls the view `lines` whole lines (down if
