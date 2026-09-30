@@ -109,21 +109,16 @@ ApplicationWindow {
 
     onColorSchemeChanged: applyColorScheme()
 
-    // Changes a setting now and saves it: one of vimSettings, or colorScheme.
+    // Saves a setting and uses it now: one of vimSettings, or colorScheme.
     function changeSetting(name, value) {
         (vimSettings.includes(name) ? vim : root)[name] = value;
         settings[name] = value;
     }
 
-    // Saves a setting vim changed (the zoom or :set), if keepChanges says to.
-    function keepChange(name) {
-        if (settings.keepChanges)
-            settings[name] = vim[name];
-    }
-
-    // The saved settings. The Settings window changes them along with the
-    // ones in use; the zoom and :set change them only with keepChanges, and
-    // otherwise just for this session.
+    // The saved settings, which Koil starts with. The Settings window shows
+    // and changes them (along with the ones in use); the zoom and :set change
+    // only the ones in use, until Koil quits, and Cmd+0 or :set fs& goes back
+    // to the saved ones.
     Settings {
         id: settings
 
@@ -132,30 +127,6 @@ ApplicationWindow {
         property string colorScheme: "system"
         property bool number: false
         property bool relativeNumber: false
-        property bool keepChanges: false
-
-        // Turning it on saves what's in use, as if it had been on.
-        onKeepChangesChanged: {
-            if (keepChanges)
-                root.vimSettings.forEach(name => root.keepChange(name));
-        }
-    }
-
-    Connections {
-        target: vim
-
-        function onFontSizeChanged() {
-            root.keepChange("fontSize");
-        }
-        function onFontFamilyChanged() {
-            root.keepChange("fontFamily");
-        }
-        function onNumberChanged() {
-            root.keepChange("number");
-        }
-        function onRelativeNumberChanged() {
-            root.keepChange("relativeNumber");
-        }
     }
 
     Theme {
@@ -188,13 +159,15 @@ ApplicationWindow {
         clipboard: system
         lineHeight: editorView.lineHeight
         number: settings.number
+        defaultNumber: settings.number
         relativeNumber: settings.relativeNumber
+        defaultRelativeNumber: settings.relativeNumber
         fontSize: settings.fontSize
-        defaultFontSize: root.defaultFontSize
+        defaultFontSize: settings.fontSize
         minFontSize: root.minFontSize
         maxFontSize: root.maxFontSize
         fontFamily: settings.fontFamily
-        defaultFontFamily: root.defaultFontFamily
+        defaultFontFamily: settings.fontFamily
         fontFamilies: root.fontFamilies
 
         onFontFamiliesNeeded: root.loadFontFamilies()
@@ -261,7 +234,6 @@ ApplicationWindow {
         id: settingsWindow
 
         app: root
-        vim: vim
         settings: settings
         theme: theme
     }
@@ -437,7 +409,7 @@ ApplicationWindow {
                 Platform.MenuItem {
                     text: qsTr("Actual Size")
                     shortcut: "Ctrl+0" // no StandardKey; Qt maps Ctrl to Cmd
-                    onTriggered: vim.fontSize = root.defaultFontSize
+                    onTriggered: vim.fontSize = settings.fontSize
                 }
             }
         }
@@ -524,7 +496,7 @@ ApplicationWindow {
                 Action {
                     text: qsTr("&Actual Size")
                     shortcut: "Ctrl+0" // no StandardKey for this
-                    onTriggered: vim.fontSize = root.defaultFontSize
+                    onTriggered: vim.fontSize = settings.fontSize
                 }
             }
         }

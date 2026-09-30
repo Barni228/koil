@@ -247,9 +247,10 @@ koil-core yet: it starts with a sample listing (see Koil integration).
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
   `relativeNumber`, which `:set` changes: `root.vimSettings`) and
   `root.colorScheme`, bound to the saved ones at startup. The Settings window
-  shows the ones in use and changes both (`changeSetting`). The zoom and `:set`
-  change only the ones in use, and `keepChange` saves them when
-  `settings.keepChanges` is on (the "Zoom and :set" setting, off by default).
+  shows the saved ones and changes both (`changeSetting`). The zoom and `:set`
+  change only the ones in use, until Koil quits, so the Settings window
+  doesn't show them. Their defaults (Cmd+0, `:set fs&`) are the saved values
+  (vim's `default*` properties are bound to `settings`), not Koil's defaults.
   The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
   also switches the palette, title bar and menus; "system" unsets it. The
   Settings window's size follows the zoom, so it isn't resizable. They're

@@ -48,7 +48,7 @@ Popup {
                 [":set nonu", "Turn it off."],
                 [":set nu!  :set invnu", "Toggle it."],
                 [":set nu?", "Show it: `number` or `nonumber`."],
-                [":set nu&", "Back to the default (off)."]
+                [":set nu&", "Back to what Settings says."]
             ]
         },
         {
@@ -58,7 +58,7 @@ Popup {
                 [":set fs=16  :set fs:16", "Set it."],
                 [":set fs+=2  fs-=2  fs^=2", "Add, subtract, multiply."],
                 [":set fs  :set fs?", "Show it: `fontsize=16`."],
-                [":set fs&", "Back to the default (16)."]
+                [":set fs&", "Back to the size in Settings."]
             ]
         },
         {
@@ -68,10 +68,10 @@ Popup {
                 [":set gfn=Monaco", "Set it."],
                 [":set gfn=Fira\\ Code", "A backslash before a space."],
                 [":set gfn  :set gfn?", "Show it: `guifont=Monaco`."],
-                [":set gfn&  :set gfn=", "Back to the default."]
+                [":set gfn&  :set gfn=", "Back to the font in Settings."]
             ],
-            note: "Zoom and `:set` changes last until Koil quits, unless Settings (" + cmdKey
-                + ",) > Zoom and :set is Change Settings."
+            note: "Zoom and `:set` last until Koil quits, and don't change Settings (" + cmdKey
+                + ",), which Koil starts with and `&` goes back to."
         },
         {
             title: "Commands",
@@ -169,7 +169,7 @@ Popup {
                 ["zz  zt  zb", "Scroll the cursor's line to the middle, top or bottom."],
                 ["gv", "Select the last visual selection again."],
                 [isMac ? "⌘Z  ⇧⌘Z" : "Ctrl+Z  Ctrl+Shift+Z", "Undo and redo, the same as `u` and `Ctrl-R`."],
-                [isMac ? "⌘+  ⌘-  ⌘0" : "Ctrl+=  Ctrl+-  Ctrl+0", "Zoom in, out, back to the default size."],
+                [isMac ? "⌘+  ⌘-  ⌘0" : "Ctrl+=  Ctrl+-  Ctrl+0", "Zoom in, out, back to the size in Settings."],
                 [cmdKey + ",", "Settings: font size, line numbers, theme."]
             ]
         }

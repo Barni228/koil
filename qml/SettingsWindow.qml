@@ -5,19 +5,18 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Templates as T
 
-// The Settings window (Cmd+,): font, font size, line numbers and theme, and
-// whether the zoom and :set change them. It shows the settings in use, and
-// changes here apply at once and are saved (app.changeSetting). Each setting
-// has a button that resets it to its default, and Restore Defaults resets
-// them all.
+// The Settings window (Cmd+,): font, font size, line numbers and theme. It
+// shows the saved settings, which Koil starts with; changes here are saved
+// and apply at once (app.changeSetting). The zoom and :set change only the
+// settings in use, so they don't show here. Each setting has a button that
+// resets it to its default, and Restore Defaults resets them all.
 Window {
     id: win
 
-    // main.qml's window: colorScheme, the fonts, changeSetting.
+    // main.qml's window: the defaults, the fonts, changeSetting.
     required property var app
-    // The settings in use: fontSize, fontFamily, number, relativeNumber.
-    required property Vim vim
-    // The saved settings: keepChanges.
+    // The saved settings: fontSize, fontFamily, number, relativeNumber,
+    // colorScheme.
     required property var settings
     required property Theme theme
 
@@ -34,32 +33,30 @@ Window {
         { label: qsTr("Hybrid"), number: true, relative: true }
     ]
     readonly property int lineNumberMode: lineNumberModes.findIndex(
-        m => m.number === vim.number && m.relative === vim.relativeNumber)
+        m => m.number === settings.number && m.relative === settings.relativeNumber)
     readonly property var colorSchemes: [
         { label: qsTr("System"), value: "system" },
         { label: qsTr("Light"), value: "light" },
         { label: qsTr("Dark"), value: "dark" }
     ]
 
-    readonly property bool customFontFamily: vim.fontFamily !== vim.defaultFontFamily
-    readonly property bool customFontSize: vim.fontSize !== vim.defaultFontSize
+    readonly property bool customFontFamily: settings.fontFamily !== app.defaultFontFamily
+    readonly property bool customFontSize: settings.fontSize !== app.defaultFontSize
     readonly property bool customLineNumbers: lineNumberMode !== 0
-    readonly property bool customColorScheme: app.colorScheme !== "system"
-    readonly property bool customKeepChanges: settings.keepChanges
+    readonly property bool customColorScheme: settings.colorScheme !== "system"
 
     function setFontSize(size) {
-        app.changeSetting("fontSize", Math.max(vim.minFontSize, Math.min(vim.maxFontSize, size)));
+        app.changeSetting("fontSize", Math.max(app.minFontSize, Math.min(app.maxFontSize, size)));
     }
     function setLineNumberMode(i) {
         app.changeSetting("number", lineNumberModes[i].number);
         app.changeSetting("relativeNumber", lineNumberModes[i].relative);
     }
     function restoreDefaults() {
-        app.changeSetting("fontFamily", vim.defaultFontFamily);
-        setFontSize(vim.defaultFontSize);
+        app.changeSetting("fontFamily", app.defaultFontFamily);
+        setFontSize(app.defaultFontSize);
         setLineNumberMode(0);
         app.changeSetting("colorScheme", "system");
-        settings.keepChanges = false;
     }
 
     // Shows the window, centered near the top of the main window the first
@@ -207,7 +204,7 @@ Window {
                 function showList() {
                     win.app.loadFontFamilies();
                     matches = win.app.fontFamilies;
-                    highlighted = matches.indexOf(win.vim.fontFamily);
+                    highlighted = matches.indexOf(win.settings.fontFamily);
                     fontList.open();
                     fontListView.positionViewAtIndex(Math.max(0, highlighted), ListView.Center);
                 }
@@ -256,8 +253,8 @@ Window {
                     width: parent.width - x - fontButton.width - 2 * win.zoom
                     height: parent.height
                     clip: true
-                    text: win.vim.fontFamily
-                    font.family: fontPicker.searching ? Application.font.family : win.vim.fontFamily
+                    text: win.settings.fontFamily
+                    font.family: fontPicker.searching ? Application.font.family : win.settings.fontFamily
                     font.pixelSize: Math.round(13 * win.zoom)
                     color: win.textColor
                     verticalAlignment: TextInput.AlignVCenter
@@ -330,7 +327,7 @@ Window {
                     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
                     onClosed: {
                         fontPicker.searching = false;
-                        fontSearch.text = Qt.binding(() => win.vim.fontFamily);
+                        fontSearch.text = Qt.binding(() => win.settings.fontFamily);
                     }
 
                     contentItem: ListView {
@@ -391,7 +388,7 @@ Window {
             }
             ResetButton {
                 enabled: win.customFontFamily
-                onClicked: win.app.changeSetting("fontFamily", win.vim.defaultFontFamily)
+                onClicked: win.app.changeSetting("fontFamily", win.app.defaultFontFamily)
             }
 
             SettingLabel {
@@ -413,15 +410,15 @@ Window {
                     SettingButton {
                         iconPath: "M4 8 H12"
                         tip: qsTr("Smaller")
-                        enabled: win.vim.fontSize > win.vim.minFontSize
-                        onClicked: win.setFontSize(win.vim.fontSize - 1)
+                        enabled: win.settings.fontSize > win.app.minFontSize
+                        onClicked: win.setFontSize(win.settings.fontSize - 1)
                     }
                     TextInput {
                         id: sizeInput
 
                         width: 36 * win.zoom
                         height: 22 * win.zoom
-                        text: win.vim.fontSize
+                        text: win.settings.fontSize
                         font.pixelSize: Math.round(13 * win.zoom)
                         color: win.textColor
                         horizontalAlignment: TextInput.AlignHCenter
@@ -439,20 +436,20 @@ Window {
                             const size = parseInt(text);
                             if (!isNaN(size))
                                 win.setFontSize(size);
-                            text = Qt.binding(() => win.vim.fontSize);
+                            text = Qt.binding(() => win.settings.fontSize);
                         }
                     }
                     SettingButton {
                         iconPath: "M4 8 H12 M8 4 V12"
                         tip: qsTr("Larger")
-                        enabled: win.vim.fontSize < win.vim.maxFontSize
-                        onClicked: win.setFontSize(win.vim.fontSize + 1)
+                        enabled: win.settings.fontSize < win.app.maxFontSize
+                        onClicked: win.setFontSize(win.settings.fontSize + 1)
                     }
                 }
             }
             ResetButton {
                 enabled: win.customFontSize
-                onClicked: win.setFontSize(win.vim.defaultFontSize)
+                onClicked: win.setFontSize(win.app.defaultFontSize)
             }
 
             SettingLabel {
@@ -473,27 +470,12 @@ Window {
             }
             Segmented {
                 options: win.colorSchemes
-                current: win.colorSchemes.findIndex(t => t.value === win.app.colorScheme)
+                current: win.colorSchemes.findIndex(t => t.value === win.settings.colorScheme)
                 onPicked: index => win.app.changeSetting("colorScheme", win.colorSchemes[index].value)
             }
             ResetButton {
                 enabled: win.customColorScheme
                 onClicked: win.app.changeSetting("colorScheme", "system")
-            }
-
-            // Whether Cmd+ / Cmd- and :set nu / rnu change the settings, or
-            // only last until Koil quits.
-            SettingLabel {
-                text: qsTr("Zoom and :set")
-            }
-            Segmented {
-                options: [{ label: qsTr("This Session Only") }, { label: qsTr("Change Settings") }]
-                current: win.settings.keepChanges ? 1 : 0
-                onPicked: index => win.settings.keepChanges = index === 1
-            }
-            ResetButton {
-                enabled: win.customKeepChanges
-                onClicked: win.settings.keepChanges = false
             }
         }
 
@@ -503,7 +485,7 @@ Window {
             Layout.alignment: Qt.AlignRight
             implicitWidth: restoreText.implicitWidth + 24 * win.zoom
             implicitHeight: 26 * win.zoom
-            enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme || win.customKeepChanges
+            enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme
             opacity: enabled ? 1 : 0.4
             focusPolicy: Qt.TabFocus
             hoverEnabled: true

@@ -26,7 +26,12 @@ TestCase {
         for (const ch of spec) {
             if (ch === "M" || ch === "C") {
                 const icon = ch === "M" ? mushroom : chair;
-                entries.push({ at: text.length, icon: icon, text: "h" + ++n });
+                n += 1;
+                entries.push({
+                    at: text.length,
+                    icon: icon,
+                    text: "h" + n
+                });
                 text += icon;
             } else {
                 text += ch === "m" ? mushroom : ch;
@@ -56,8 +61,15 @@ TestCase {
     // <D-c> (Cmd on macOS, Ctrl elsewhere).
     function keys(s) {
         const named = {
-            "Esc": Qt.Key_Escape, "CR": Qt.Key_Return, "BS": Qt.Key_Backspace, "Del": Qt.Key_Delete,
-            "Tab": Qt.Key_Tab, "Left": Qt.Key_Left, "Right": Qt.Key_Right, "Up": Qt.Key_Up, "Down": Qt.Key_Down
+            "Esc": Qt.Key_Escape,
+            "CR": Qt.Key_Return,
+            "BS": Qt.Key_Backspace,
+            "Del": Qt.Key_Delete,
+            "Tab": Qt.Key_Tab,
+            "Left": Qt.Key_Left,
+            "Right": Qt.Key_Right,
+            "Up": Qt.Key_Up,
+            "Down": Qt.Key_Down
         };
         const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
         for (const m of s.match(/<[^<>]+>|[\s\S]/g)) {
@@ -203,6 +215,19 @@ TestCase {
         verify(vim.messageIsError);
     }
 
+    // & goes back to the defaults Koil gives (the saved settings).
+    function test_setDefault() {
+        load("a");
+        vim.defaultNumber = true;
+        vim.defaultFontSize = 20;
+        keys(":set nonu fs=12<CR>:set nu& fs&<CR>");
+        verify(vim.number);
+        compare(vim.fontSize, 20);
+        vim.defaultNumber = false;
+        vim.defaultFontSize = 16;
+        keys(":set nu& fs&<CR>");
+    }
+
     // ---- Hidden text ---------------------------------------------------------
 
     function test_hiddenAt() {
@@ -308,7 +333,13 @@ TestCase {
         load("M  a");
         keys("\"+yy");
         compare(clipboard.text, "h1  a\n");
-        compare(JSON.parse(clipboard.data).hidden, [{ at: 0, icon: mushroom, text: "h1" }]);
+        compare(JSON.parse(clipboard.data).hidden, [
+            {
+                at: 0,
+                icon: mushroom,
+                text: "h1"
+            }
+        ]);
         keys("\"+p");
         compare(render(), "<M:h1>  a\n<M:h1>  a");
         keys("v<D-c>$<D-v>");
@@ -318,13 +349,40 @@ TestCase {
     function test_invalidClipboardData() {
         load("x");
         clipboard.text = "y" + mushroom;
-        clipboard.data = JSON.stringify({ text: "y" + mushroom, hidden: [{ at: 0, icon: mushroom, text: "no" }] });
+        clipboard.data = JSON.stringify({
+            text: "y" + mushroom,
+            hidden: [
+                {
+                    at: 0,
+                    icon: mushroom,
+                    text: "no"
+                }
+            ]
+        });
         keys("\"+p");
         compare(render(), "xyM");
-        clipboard.data = JSON.stringify({ text: "y" + mushroom, hidden: [{ at: 1, icon: "💩", text: "no" }] });
+        clipboard.data = JSON.stringify({
+            text: "y" + mushroom,
+            hidden: [
+                {
+                    at: 1,
+                    icon: "💩",
+                    text: "no"
+                }
+            ]
+        });
         keys("u\"+p");
         compare(render(), "xyM");
-        clipboard.data = JSON.stringify({ text: "y" + mushroom, hidden: [{ at: 1, icon: mushroom, text: "ok" }] });
+        clipboard.data = JSON.stringify({
+            text: "y" + mushroom,
+            hidden: [
+                {
+                    at: 1,
+                    icon: mushroom,
+                    text: "ok"
+                }
+            ]
+        });
         keys("u\"+p");
         compare(render(), "xy<M:ok>");
     }

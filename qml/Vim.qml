@@ -31,9 +31,12 @@ QtObject {
     property int commandCursor: 1
     property string message: ""
     property bool messageIsError: false
-    // :set number and :set relativenumber (the view draws the line numbers).
+    // :set number and :set relativenumber (the view draws the line numbers),
+    // with their defaults.
     property bool number: false
+    property bool defaultNumber: false
     property bool relativeNumber: false
+    property bool defaultRelativeNumber: false
     // :set fontsize, in points (the view sets the editor's font), with its
     // default and range.
     property int fontSize: 16
@@ -2275,8 +2278,8 @@ QtObject {
         { name: "fontsize", short: "fs", property: "fontSize", default: defaultFontSize,
             min: minFontSize, max: maxFontSize },
         { name: "guifont", short: "gfn", property: "fontFamily", default: defaultFontFamily },
-        { name: "number", short: "nu", property: "number", default: false },
-        { name: "relativenumber", short: "rnu", property: "relativeNumber", default: false }
+        { name: "number", short: "nu", property: "number", default: defaultNumber },
+        { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber }
     ]
 
     // An option as :set shows it: "  nu", "nonu", "  fs=16" or
