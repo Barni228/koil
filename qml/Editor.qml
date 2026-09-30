@@ -7,17 +7,29 @@ import QtQuick.Shapes
 import "text.js" as Txt
 
 // The editor: a TextArea in a ScrollView, which vim drives. Vim's cursors,
-// the selection, search highlights, warnings and errors, and line numbers
-// are drawn over (or under) its text here, and the hover box shows what's
-// under the pointer.
+// the selection, search highlights, Koil's warnings and errors, and line
+// numbers are drawn over (or under) its text here, and the hover box shows
+// what's under the pointer.
 Item {
     id: view
 
     required property Vim vim
     required property FindBar findBar
     required property Theme theme
-    // System (main.qml), for the line format.
+    // System (main.qml), for the line format and the listing's colors.
     required property var system
+    // Whether the text is Koil's listing (rather than a file), which gets
+    // colors: its icons' (`iconColors`, as { icon: [dark, light] }), and
+    // its dirs'.
+    property bool listing: false
+    property var iconColors: ({})
+    // The parts of the listing's path line to color (a regex's), as { start,
+    // length, kind } (see listing::Span).
+    property var pathSyntax: []
+    // Koil's warnings and errors about the listing's lines, as { line,
+    // column, severity, message } (see listing::Problem): drawn from the
+    // column to the line's end.
+    property var problems: []
 
     readonly property alias textArea: editor
     readonly property Flickable flickable: scrollView.contentItem as Flickable
@@ -34,6 +46,9 @@ Item {
     readonly property var viewport: [flickable.contentY, flickable.height]
     // Set while the text changes in a way that isn't an edit.
     property bool quiet: false
+    // The text as of its last change, to tell edits from changes to its
+    // format (fixLineFormat, colors), which Qt reports as text changes too.
+    property string lastText: ""
 
     // The text changed, by vim or by typing (not by setText).
     signal edited()
@@ -45,6 +60,27 @@ Item {
         quiet = false;
         fixLineFormat(); // setting the text reset it
     }
+
+    // Colors the listing (see `listing`), in the light or dark theme's
+    // colors; a file gets none.
+    function applyColors() {
+        const colors = [];
+        for (const icon in iconColors)
+            colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
+        system.setListingColors(editor.textDocument, colors, listing ? String(theme.directory) : "", String(theme.dim));
+        applyPathColors();
+    }
+
+    function applyPathColors() {
+        const spans = [];
+        for (const s of pathSyntax)
+            spans.push(String(s.start), String(s.length), theme.regexColors[s.kind]);
+        system.setPathColors(editor.textDocument, spans);
+    }
+
+    onListingChanged: applyColors()
+    onIconColorsChanged: applyColors()
+    onPathSyntaxChanged: applyPathColors()
 
     // An emoji comes from a taller font than the editor's, which makes its
     // line taller. Give every line the same height instead. Qt puts a
@@ -146,6 +182,14 @@ Item {
         }
         function onHoverRequested(at) {
             hover.show(at, false);
+        }
+    }
+
+    Connections {
+        target: view.theme
+
+        function onDarkChanged() {
+            view.applyColors();
         }
     }
 
@@ -262,8 +306,9 @@ Item {
             readOnly: true // vim starts in normal mode
             focus: true
             onTextChanged: {
-                if (!view.quiet)
+                if (!view.quiet && text !== view.lastText)
                     view.edited();
+                view.lastText = text;
                 revision++;
             }
             onCursorPositionChanged: {
@@ -458,15 +503,13 @@ Item {
                 }
             }
 
-            // Warnings and errors, as in VS Code: a wavy underline, orange or
-            // red, and a message after the end of the line (an error's, if
-            // the line has both). The pointer resting on either (or gh)
-            // shows the message in the hover box. For now the whole words
-            // "warning" and "error", in any case, are the ones (see find).
+            // Koil's warnings and errors, as in VS Code: a wavy underline,
+            // orange or red, and a message after the end of the line (an
+            // error's, if the line has both). The pointer resting on either
+            // (or gh) shows the message in the hover box.
             Item {
                 id: diagnostics
 
-                readonly property int longest: 7 // "warning"
                 // The one whose message shows after its line's end, for each
                 // line in view.
                 readonly property var messages: {
@@ -481,30 +524,29 @@ Item {
                     return shown;
                 }
 
-                // The warnings and errors within t from `from` to `to`, as
-                // { start, end, severity, message, lineEnd }.
+                // The warnings and errors on the lines of t from `from` to
+                // `to`, as { start, end, severity, message, lineEnd }, in
+                // order.
                 function find(t, from, to) {
-                    const re = /warning|error/gi, part = t.slice(from, to), list = [];
-                    let m;
-                    while ((m = re.exec(part))) {
-                        const s = from + m.index, e = s + m[0].length;
-                        if (Txt.charClass(t[s - 1]) === 2 || Txt.charClass(t[e]) === 2)
+                    const first = Txt.lineOf(t, from) - 1, last = Txt.lineOf(t, to) - 1, list = [];
+                    for (const p of view.problems) {
+                        if (p.line < first || p.line > last)
                             continue;
-                        const severity = m[0].toLowerCase();
+                        const ls = Txt.lineToPos(t, p.line + 1), le = Txt.lineEnd(t, ls);
                         list.push({
-                            start: s,
-                            end: e,
-                            severity: severity,
-                            message: "“" + m[0] + "” is " + (severity === "error" ? "an error." : "a warning."),
-                            lineEnd: Txt.lineEnd(t, e)
+                            start: Math.min(ls + p.column, le),
+                            end: le,
+                            severity: p.severity,
+                            message: p.message,
+                            lineEnd: le
                         });
                     }
-                    return list;
+                    return list.sort((a, b) => a.start - b.start);
                 }
 
                 // The warning or error with the character at pos, or null.
                 function at(pos) {
-                    return find(editor.text, Math.max(0, pos - longest + 1), pos + longest).find(d => d.start <= pos && pos < d.end) || null;
+                    return find(editor.text, pos, pos).find(d => d.start <= pos && pos < d.end) || null;
                 }
 
                 // The message shown after a line's end at point p, as
@@ -536,7 +578,7 @@ Item {
                 Layer {
                     id: squiggles
 
-                    inputs: [view.layout, view.viewport]
+                    inputs: [view.problems, view.layout, view.viewport]
                     compute: () => {
                         const v = view.vim.visibleRange(editor.text);
                         return diagnostics.find(editor.text, v.from, v.to);

@@ -8,14 +8,31 @@ import Qt.labs.platform as Platform
 
 import Koil
 
-// The app's window: the editor and its status line, the find bar, the
-// dialogs, the menus and the settings.
+import "text.js" as Txt
+
+// The app's window: the editor and its status line, Koil's listing, the find
+// bar, the dialogs, the menus and the settings.
 ApplicationWindow {
     id: root
 
     readonly property bool isMac: Qt.platform.os === "osx"
     property string filePath: ""
     readonly property string fileName: filePath ? filePath.split(/[\\/]/).pop() : "Untitled"
+    // Whether the editor shows Koil's listing of `location`, rather than a
+    // file.
+    property bool listing: false
+    property string location: ""
+    // Koil's warnings and errors about the listing (see Editor.problems).
+    property var problems: []
+    // The colors of the icons the listings have shown (see
+    // Editor.iconColors).
+    property var iconColors: ({})
+    // The parts of the regex on the path line (see Editor.pathSyntax), and
+    // the line they're for.
+    property var pathSyntax: []
+    property string pathLine: ""
+    // A file's unsaved changes, or the listing's edits and changes that
+    // aren't applied.
     property bool modified: false
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
@@ -36,7 +53,7 @@ ApplicationWindow {
     width: 900
     height: 650
     visible: true
-    title: fileName + (modified ? " •" : "") + " — Koil"
+    title: (listing ? location : fileName) + (modified ? " •" : "") + " — Koil"
 
     // Shows `text` as a new document, whose icons hide the texts in
     // `entries` (see Hidden text in Vim.qml). `path` is its file, if any.
@@ -48,22 +65,188 @@ ApplicationWindow {
         editorView.textArea.forceActiveFocus();
     }
 
-    // Shows a listing (see Document.listing): each line is an icon, which
-    // hides some text, then two spaces and the line's text.
-    function showListing(lines) {
-        let text = "";
-        const entries = [];
-        lines.forEach((line, i) => {
-            if (i > 0)
-                text += "\n";
-            entries.push({
-                at: text.length,
-                icon: line.icon,
-                text: line.hidden
-            });
-            text += line.icon + "  " + line.text;
+    // Shows a file that was read, leaving the listing (whose edits Koil
+    // keeps, if they can be read).
+    function loadFile(text, path) {
+        if (listing && !updateListing())
+            return;
+        listing = false;
+        problems = [];
+        load(text, [], path);
+        updatePathSyntax();
+    }
+
+    // Lists the dir (or pattern) `path`: File > Open Folder, and at startup.
+    function openFolder(path) {
+        if (listing) {
+            updateListing(path);
+            return;
+        }
+        const r = JSON.parse(koil.open(path));
+        if (!r.ok) {
+            vim.showError(r.message);
+            return;
+        }
+        showListing(true, "");
+        if (r.message)
+            vim.showMessage(r.message);
+    }
+
+    // Shows Koil's listing of what's open (see listing.rs). For the same
+    // listing as before (`moved` false), the new text replaces the old as an
+    // edit, which undo can take back, and the cursor stays on its line.
+    // Otherwise it starts over: undo mustn't bring back another dir's
+    // entries, which Koil would read as this one's. The cursor goes to the
+    // entry `from` (the dir `-` came from), or else to the first one.
+    function showListing(moved, from) {
+        const r = JSON.parse(koil.render());
+        iconColors = Object.assign({}, iconColors, r.colors);
+        location = koil.location();
+        let line, column;
+        if (listing && !moved) {
+            const t = editorView.textArea.text;
+            line = Txt.lineOf(t, vim.cursor) - 1;
+            column = Txt.column(t, vim.cursor);
+            vim.replaceText(r.text, r.hidden);
+        } else {
+            listing = true;
+            load(r.text, r.hidden, "");
+            const i = from ? r.names.indexOf(from) : -1;
+            line = Math.min(i >= 0 ? i : 2, r.names.length - 1);
+            column = line >= 2 ? 3 : 0; // after the icon and two spaces
+        }
+        const t = editorView.textArea.text;
+        const ls = Txt.lineToPos(t, Math.min(line, r.names.length - 1) + 1);
+        vim.jumpTo(Txt.atColumn(t, ls, column));
+        modified = koil.hasChanges();
+        checkListing();
+        updatePathSyntax(true);
+    }
+
+    // Reads the edited listing into Koil, then opens `open` (a dir, relative
+    // to the open one) if given, else the path on the first line if it
+    // changed, and shows the listing again. False if it can't (the problems
+    // and the status line say why).
+    function updateListing(open) {
+        const r = JSON.parse(koil.update(editorView.textArea.text, JSON.stringify(vim.hidden), open || ""));
+        if (!r.ok) {
+            if (r.problems.length)
+                problems = r.problems;
+            vim.showError(r.message);
+            return false;
+        }
+        showListing(r.moved, r.from);
+        if (r.message)
+            vim.showMessage(r.message);
+        return true;
+    }
+
+    // Finds the parts of the regex on the path line again, if the line
+    // changed (or `force`, when the regex setting did).
+    function updatePathSyntax(force) {
+        const t = editorView.textArea.text, nl = t.indexOf("\n");
+        const line = listing ? (nl < 0 ? t : t.slice(0, nl)) : "";
+        if (line === pathLine && !force)
+            return;
+        pathLine = line;
+        pathSyntax = listing ? JSON.parse(koil.pathSyntax(line)) : [];
+    }
+
+    function checkListing() {
+        checkTimer.stop();
+        problems = listing ? JSON.parse(koil.check(editorView.textArea.text, JSON.stringify(vim.hidden))) : [];
+    }
+
+    // Koil's keys in the listing (see Vim.commandKeys).
+    function runKeyCommand(name, count) {
+        if (name === "update")
+            updateListing();
+        else if (name === "apply")
+            applyChanges(false, false);
+        else if (name === "parent")
+            updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
+        else if (name === "open")
+            openLine(count);
+    }
+
+    // Enter: opens the dir on the cursor's line, or the path on the first
+    // line. On any other line it's vim's Enter.
+    function openLine(count) {
+        const t = editorView.textArea.text, line = Txt.lineOf(t, vim.cursor) - 1;
+        const dir = line === 0 ? "" : koil.dirOnLine(t, JSON.stringify(vim.hidden), line);
+        if (line === 0 || dir)
+            updateListing(dir);
+        else
+            vim.runMotion("<CR>", count);
+    }
+
+    // Applies the listing's changes once the user confirms them (Space a,
+    // :w), then quits if `quit` is set. With `orQuit` (:confirm q), No quits
+    // without applying.
+    function applyChanges(quit, orQuit) {
+        if (!updateListing())
+            return;
+        const actions = JSON.parse(koil.actions());
+        if (!actions.length) {
+            if (quit)
+                Qt.quit();
+            else
+                vim.showMessage("Nothing to apply");
+            return;
+        }
+        const what = actions.length === 1 ? "this change" : "these " + actions.length + " changes";
+        confirmDialog.ask("Apply " + what + (orQuit ? " before quitting?" : "?"), actions.join("\n"), () => {
+            const r = JSON.parse(koil.apply());
+            showListing(true, "");
+            report(r);
+            if (r.ok && quit)
+                Qt.quit();
+        }, orQuit ? () => Qt.quit() : null);
+    }
+
+    // u with no change left to undo: undoes Koil's last apply, once the user
+    // confirms it.
+    function undoApply() {
+        // Undo may have taken the listing back to before an update, which
+        // Koil must see before anything can be undone.
+        if (!updateListing())
+            return;
+        const r = JSON.parse(koil.undoSteps());
+        if (r.message) {
+            vim.showError(r.message);
+            return;
+        }
+        if (!r.steps.length)
+            return;
+        vim.showMessage("");
+        confirmDialog.ask("Undo the last apply?", r.steps.join("\n"), () => {
+            const u = JSON.parse(koil.undo());
+            showListing(true, "");
+            report(u);
         });
-        load(text, entries, "");
+    }
+
+    // Shows what apply or undo did, `{ ok, message }`.
+    function report(r) {
+        if (r.ok)
+            vim.showMessage(r.message);
+        else
+            vim.showError(r.message);
+    }
+
+    // :set hidden, gitignore or regex. As in koil-cli, the listing is read
+    // with the settings it was shown with, and then shown with the new ones.
+    function settingChanged() {
+        if (listing)
+            Qt.callLater(updateListing);
+        // Even if the listing can't be read yet.
+        Qt.callLater(updatePathSyntax, true);
+    }
+
+    // Whether quitting would lose something: a file's unsaved changes, or
+    // the listing's changes that aren't applied (which it reads first).
+    function unsaved() {
+        return listing ? !updateListing() || koil.hasChanges() : modified;
     }
 
     function openFile() {
@@ -71,8 +254,13 @@ ApplicationWindow {
     }
 
     // Saves the file, asking for a path if it has none, then quits if
-    // `quit` is set and the save worked.
+    // `quit` is set and the save worked. The listing's changes are applied
+    // instead, once they're confirmed.
     function save(quit) {
+        if (listing) {
+            applyChanges(!!quit, false);
+            return;
+        }
         if (!filePath) {
             saveAs();
             quitAfterSave = !!quit;
@@ -144,11 +332,27 @@ ApplicationWindow {
     Document {
         id: doc
 
-        onLoaded: (path, text) => root.load(text, [], path)
+        onLoaded: (path, text) => root.loadFile(text, path)
         onFailed: message => {
             errorDialog.text = message;
             errorDialog.open();
         }
+    }
+
+    Koil {
+        id: koil
+
+        showHidden: vim.showHidden
+        gitignore: vim.gitignore
+        regex: vim.regex
+    }
+
+    // Checks the listing for problems once typing stops for a moment.
+    Timer {
+        id: checkTimer
+
+        interval: 200
+        onTriggered: root.checkListing()
     }
 
     Vim {
@@ -169,17 +373,33 @@ ApplicationWindow {
         fontFamily: settings.fontFamily
         defaultFontFamily: settings.fontFamily
         fontFamilies: root.fontFamilies
+        commandKeys: root.listing ? ({
+                "  ": "update",
+                " a": "apply",
+                "-": "parent",
+                "<CR>": "open"
+            }) : ({})
 
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: quit => root.save(quit)
         onQuitRequested: (force, confirm) => {
-            if (force || !root.modified)
+            if (force || !root.unsaved())
                 Qt.quit();
+            else if (confirm && root.listing)
+                root.applyChanges(true, true);
             else if (confirm)
-                confirmDialog.ask("Save changes to “" + root.fileName + "”?");
+                confirmDialog.ask("Save changes to “" + root.fileName + "”?", "", () => root.save(true), () => Qt.quit());
             else
                 vim.showError("E37: No write since last change (add ! to override)");
         }
+        onKeyCommand: (name, count) => root.runKeyCommand(name, count)
+        onNothingToUndo: {
+            if (root.listing)
+                root.undoApply();
+        }
+        onShowHiddenChanged: root.settingChanged()
+        onGitignoreChanged: root.settingChanged()
+        onRegexChanged: root.settingChanged()
         onHelpRequested: topic => {
             if (!help.show(topic))
                 vim.showError("E149: Sorry, no help for " + topic);
@@ -194,7 +414,17 @@ ApplicationWindow {
         findBar: findBar
         theme: theme
         system: system
-        onEdited: root.modified = true
+        listing: root.listing
+        iconColors: root.iconColors
+        pathSyntax: root.pathSyntax
+        problems: root.problems
+        onEdited: {
+            root.modified = true;
+            if (root.listing) {
+                checkTimer.restart();
+                root.updatePathSyntax();
+            }
+        }
     }
 
     // Clips the find bar as it slides in from above the editor.
@@ -220,13 +450,12 @@ ApplicationWindow {
         onClosed: editorView.textArea.forceActiveFocus()
     }
 
-    // :confirm q with unsaved changes.
+    // :confirm q with unsaved changes, and applying the listing's changes
+    // (or undoing them).
     ConfirmDialog {
         id: confirmDialog
 
         theme: theme
-        onYes: root.save(true)
-        onNo: Qt.quit()
         onClosed: editorView.textArea.forceActiveFocus()
     }
 
@@ -309,6 +538,12 @@ ApplicationWindow {
         onAccepted: doc.openFile(doc.urlToPath(selectedFile))
     }
 
+    FolderDialog {
+        id: folderDialog
+
+        onAccepted: root.openFolder(doc.urlToPath(selectedFolder))
+    }
+
     FileDialog {
         id: saveDialog
 
@@ -347,12 +582,18 @@ ApplicationWindow {
                     onTriggered: root.openFile()
                 }
                 Platform.MenuItem {
-                    text: qsTr("Save")
+                    text: qsTr("Open Folder…")
+                    shortcut: "Ctrl+Shift+O"
+                    onTriggered: folderDialog.open()
+                }
+                Platform.MenuItem {
+                    text: root.listing ? qsTr("Apply Changes…") : qsTr("Save")
                     shortcut: StandardKey.Save
                     onTriggered: root.save()
                 }
                 Platform.MenuItem {
                     text: qsTr("Save As…")
+                    enabled: !root.listing
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }
@@ -429,12 +670,18 @@ ApplicationWindow {
                     onTriggered: root.openFile()
                 }
                 Action {
-                    text: qsTr("&Save")
+                    text: qsTr("Open &Folder…")
+                    shortcut: "Ctrl+Shift+O"
+                    onTriggered: folderDialog.open()
+                }
+                Action {
+                    text: root.listing ? qsTr("&Apply Changes…") : qsTr("&Save")
                     shortcut: StandardKey.Save
                     onTriggered: root.save()
                 }
                 Action {
                     text: qsTr("Save &As…")
+                    enabled: !root.listing
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }
@@ -536,11 +783,13 @@ ApplicationWindow {
             root.menuBar = windowMenuBar.createObject(root);
 
         applyColorScheme();
-        const startup = doc.startupFile();
-        if (startup)
-            doc.openFile(startup);
+        // A file opens as a file; anything else (a dir, a pattern) Koil
+        // lists, and with nothing given, the home dir.
+        const start = doc.startupPath();
+        if (start && doc.isFile(start))
+            doc.openFile(start);
         else
-            showListing(JSON.parse(doc.listing()));
+            openFolder(start || doc.homeDir());
         // The editor sits in a ScrollView, which is its own focus scope, so
         // `focus: true` alone doesn't give it the keyboard.
         editorView.textArea.forceActiveFocus();

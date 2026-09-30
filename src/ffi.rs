@@ -18,6 +18,10 @@ mod bridge {
         #[cxx_name = "useSettingsMenuTitle"]
         fn use_settings_menu_title();
 
+        /// Makes an installed Nerd Font the fallback for the listing's icons.
+        #[cxx_name = "useIconFallbackFont"]
+        fn use_icon_fallback_font();
+
         /// Sets the Qt Quick Controls style; call it before loading QML.
         #[cxx_name = "setControlsStyle"]
         #[allow(dead_code)] // used on Windows only
@@ -34,6 +38,19 @@ mod bridge {
         /// Writes the system clipboard, with Koil-only `data` if not empty.
         #[cxx_name = "setClipboardText"]
         fn set_clipboard_text(text: &QString, data: &QString);
+
+        /// Colors Koil's listing in a QQuickTextDocument (see native.h).
+        #[cxx_name = "setListingColors"]
+        unsafe fn set_listing_colors(
+            text_document: *mut QObject,
+            icon_colors: &QStringList,
+            directory_color: &QString,
+            rule_color: &QString,
+        );
+
+        /// Colors parts of the listing's path line (see native.h).
+        #[cxx_name = "setPathColors"]
+        unsafe fn set_path_colors(text_document: *mut QObject, spans: &QStringList);
 
         /// The installed monospaced font families.
         #[cxx_name = "monospaceFamilies"]

@@ -3,10 +3,17 @@
 Koil's desktop app: a vim-style editor in Rust + Qt 6
 ([CXX-Qt](https://github.com/KDAB/cxx-qt)) and QML.
 
-For now it opens with a sample listing, where each line starts with an icon
-(🍄 or 🪑) that hides some text. Rest the mouse on an icon, or press `gh` on
-it, to see what it hides. `:help` (or `:h`) lists everything that isn't
-standard vim.
+It edits a directory as text, like [oil.nvim](https://github.com/stevearc/oil.nvim):
+the first line is the directory (or a glob or regex of files), then each entry
+is a line with its icon and name. Rename, delete, copy and create entries by
+editing the lines, and move them by cutting a line in one directory and
+pasting it in another. `Space Space` updates the listing, `Space a` applies
+the changes once you confirm them (deleted files go to the trash), and `u`
+after that undoes them. Enter opens a directory, and `-` the one above.
+`:help` (or `:h`) lists everything that isn't standard vim.
+
+The icons are [Nerd Font](https://www.nerdfonts.com) glyphs: they show with a
+Nerd Font installed (any one is used for them, whatever the editor's font).
 
 ## Install
 
@@ -28,7 +35,9 @@ xattr -cr "/Applications/Koil.app"
 Needs Rust and Qt 6 with `qmake` on `PATH` (macOS: `brew install qtbase qtdeclarative`).
 
 ```sh
-cargo run
+cargo run                    # lists your home directory
+cargo run -- path            # a directory, a pattern, or a file to edit
+cargo test                   # the listing's tests
 qmltestrunner -input tests   # the editor's tests
 ```
 

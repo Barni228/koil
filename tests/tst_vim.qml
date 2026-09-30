@@ -57,8 +57,8 @@ TestCase {
         return (r + t.slice(i)).split(mushroom).join("M").split(chair).join("C");
     }
 
-    // Types keys: characters, and names like <Esc>, <CR>, <C-v> (Ctrl) or
-    // <D-c> (Cmd on macOS, Ctrl elsewhere).
+    // Types keys: characters, and names like <Esc>, <CR>, <S-CR>
+    // (Shift+Enter), <C-v> (Ctrl) or <D-c> (Cmd on macOS, Ctrl elsewhere).
     function keys(s) {
         const named = {
             "Esc": Qt.Key_Escape,
@@ -79,6 +79,8 @@ TestCase {
                 const name = m.slice(1, -1);
                 if (named[name] !== undefined)
                     keyClick(named[name]);
+                else if (name === "S-CR")
+                    keyClick(Qt.Key_Return, Qt.ShiftModifier);
                 else if (/^C-[a-z]$/.test(name))
                     keyClick(Qt.Key_A + name.charCodeAt(2) - 97, ctrl);
                 else if (/^D-[a-z]$/.test(name))
@@ -141,6 +143,20 @@ TestCase {
 
         palette: editor.palette
         font: editor.font
+    }
+
+    SignalSpy {
+        id: keyCommands
+
+        target: vim
+        signalName: "keyCommand"
+    }
+
+    SignalSpy {
+        id: nothingToUndo
+
+        target: vim
+        signalName: "nothingToUndo"
     }
 
     FindBar {
@@ -226,6 +242,66 @@ TestCase {
         vim.defaultNumber = false;
         vim.defaultFontSize = 16;
         keys(":set nu& fs&<CR>");
+    }
+
+    // Koil's :set options.
+    function test_setKoilOptions() {
+        load("a");
+        keys(":set hid ignore re<CR>");
+        verify(vim.showHidden && vim.gitignore && vim.regex);
+        keys(":set nohidden gitignore& invregex<CR>");
+        verify(!vim.showHidden && !vim.gitignore && !vim.regex);
+    }
+
+    // ---- Koil's keys ---------------------------------------------------------
+
+    function test_commandKeys() {
+        load("one\n  two\nthree");
+        vim.commandKeys = {
+            "  ": "update",
+            " a": "apply",
+            "-": "parent",
+            "<CR>": "open"
+        };
+        keyCommands.clear();
+        keys("  ");
+        keys(" a");
+        keys("3-");
+        keys("<CR>");
+        compare(keyCommands.signalArguments.map(a => [a[0], a[1]]), [["update", 0], ["apply", 0], ["parent", 3], ["open", 0]]);
+        compare(vim.cursor, 0);
+        // Space then anything else is a mistake, as vim's own bad keys are.
+        keys(" l");
+        compare(keyCommands.count, 4);
+        compare(vim.cursor, 0);
+        compare(vim.pendingKeys, "");
+        // Shift+Enter is vim's Enter, and so is "-" after an operator or in
+        // visual mode.
+        keys("<S-CR>");
+        compare(vim.cursor, 6);
+        keys("d-");
+        compare(render(), "three");
+        compare(keyCommands.count, 4);
+        vim.commandKeys = {};
+        keys("<CR>");
+        compare(keyCommands.count, 4);
+    }
+
+    // Shift+Enter in insert mode is a line break, not Qt's line separator.
+    function test_shiftEnterInInsert() {
+        load("ab");
+        keys("a<S-CR><Esc>");
+        compare(render(), "a\nb");
+    }
+
+    function test_nothingToUndo() {
+        load("ab");
+        nothingToUndo.clear();
+        keys("xu");
+        compare(nothingToUndo.count, 0);
+        keys("u");
+        compare(nothingToUndo.count, 1);
+        compare(vim.message, "Already at oldest change");
     }
 
     // ---- Hidden text ---------------------------------------------------------
@@ -346,6 +422,49 @@ TestCase {
         compare(render(), "<M:h1>  a\n<M:h1>  <M:h1>a");
     }
 
+    // Koil's listing read again, as one undo step.
+    function test_replaceText() {
+        load("M a\nC b");
+        const entries = [
+            {
+                at: 0,
+                icon: chair,
+                text: "h2"
+            },
+            {
+                at: chair.length + 3,
+                icon: mushroom,
+                text: "h3"
+            }
+        ];
+        vim.replaceText(chair + " b\n" + mushroom + " c", entries);
+        compare(render(), "<C:h2> b\n<M:h3> c");
+        keys("u");
+        compare(render(), "<M:h1> a\n<C:h2> b");
+        keys("<C-r>");
+        compare(render(), "<C:h2> b\n<M:h3> c");
+    }
+
+    // Any one character can be an icon, like the Nerd Font ones Koil uses
+    // (one outside the BMP here), and it's one character to vim.
+    function test_anyIcon() {
+        const icon = "\u{f0868}";
+        load("");
+        editor.text = icon + "  a";
+        vim.reset([
+            {
+                at: 0,
+                icon: icon,
+                text: "7"
+            }
+        ]);
+        keys("l");
+        compare(vim.cursor, 2);
+        keys("0\"+yy\"+p");
+        compare(vim.hidden.map(h => h.text), ["7", "7"]);
+        compare(vim.hiddenAt(icon.length + 4).icon, icon);
+    }
+
     function test_invalidClipboardData() {
         load("x");
         clipboard.text = "y" + mushroom;
@@ -373,6 +492,7 @@ TestCase {
         });
         keys("u\"+p");
         compare(render(), "xyM");
+        // Another Koil's hidden texts (IDs) mean other things.
         clipboard.data = JSON.stringify({
             text: "y" + mushroom,
             hidden: [
@@ -382,6 +502,19 @@ TestCase {
                     text: "ok"
                 }
             ]
+        });
+        keys("u\"+p");
+        compare(render(), "xyM");
+        clipboard.data = JSON.stringify({
+            text: "y" + mushroom,
+            hidden: [
+                {
+                    at: 1,
+                    icon: mushroom,
+                    text: "ok"
+                }
+            ],
+            session: vim.clipboardSession
         });
         keys("u\"+p");
         compare(render(), "xy<M:ok>");

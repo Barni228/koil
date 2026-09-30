@@ -19,7 +19,12 @@ fn main() {
         .qt_module("Gui")
         .qt_module("Quick")
         .qt_module("QuickControls2")
-        .files(["src/document.rs", "src/ffi.rs", "src/system.rs"])
+        .files([
+            "src/document.rs",
+            "src/ffi.rs",
+            "src/koil.rs",
+            "src/system.rs",
+        ])
         .cpp_file("cpp/native.cpp")
         .include_dir("cpp")
         .build();

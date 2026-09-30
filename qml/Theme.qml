@@ -60,6 +60,25 @@ QtObject {
     readonly property color panelBorder: Qt.tint(base, dark ? "#40ffffff" : "#30000000")
     // A text field.
     readonly property color field: dark ? Qt.tint(base, "#1effffff") : base
+    // A dir's name in Koil's listing, and the path it lists.
+    readonly property color directory: dark ? "#6cb6ff" : "#0b62c4"
+    // The parts of a regex on the listing's path line (see listing::Span),
+    // as VS Code colors them.
+    readonly property var regexColors: dark ? {
+        pattern: String(text),
+        escape: "#d7ba7d",
+        class: "#ce9178",
+        quantifier: "#dcdcaa",
+        group: "#c586c0",
+        anchor: "#4ec9b0"
+    } : {
+        pattern: String(text),
+        escape: "#ee0000",
+        class: "#a31515",
+        quantifier: "#795e26",
+        group: "#af00db",
+        anchor: "#267f99"
+    }
 
     // The color of a warning's or an error's squiggle, message and icon.
     function severityColor(severity) {

@@ -1,31 +1,38 @@
 # CLAUDE.md
 
 Koil's desktop app: a vim-style editor in Rust + Qt 6 via cxx-qt 0.10, with the
-UI in QML. Koil itself is `../koil-core`, a library for editing a directory as
-a list of entries (like oil.nvim); `../koil-cli` is its CLI. This app is the
-editor from `~/projects/vim-edit`, cleaned up, and isn't connected to
-koil-core yet: it starts with a sample listing (see Koil integration).
+UI in QML, that edits a directory as text (like oil.nvim) through koil-core
+(`../koil-core`, a library; `../koil-cli` is its CLI; read their CLAUDE.md for
+how Koil works). The editor is the one from `~/projects/vim-edit`, cleaned up.
+It shows Koil's listing (see Koil), or a file opened with File > Open.
 
 ## Layout
 
-- `src/main.rs`: creates the app, installs the "Settings…" translator, sets
-  the Windows style, loads `qml/main.qml`.
-- `src/document.rs`: `Document` (QML element): the listing the editor starts
-  with (`listing()`, JSON), reading and writing files, the path on the
-  command line.
+- `src/main.rs`: creates the app, installs the "Settings…" translator and the
+  icon fallback font, sets the Windows style, loads `qml/main.qml`.
+- `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
+  `check`, `update` (read it into koil, then navigate), the confirmations'
+  lines (`actions`, `undo_steps`) and the path line's regex parts
+  (`path_syntax`). Its tests (`src/listing/tests.rs`) use a temp dir.
+- `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
+  listing.rs, taking and giving JSON. `showHidden`, `gitignore` and `regex`
+  are properties, bound to vim's `:set` options.
+- `src/document.rs`: `Document` (QML element): reading and writing files, the
+  path on the command line.
 - `src/system.rs`: `System` (QML element): the system clipboard, the
-  installed monospaced fonts, and the editor's line format.
+  installed monospaced fonts, and the editor's line format and colors.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
-  `main.rs` (menu title translator, Controls style, clipboard, fonts, line
-  format).
+  `main.rs` (menu title translator, Controls style, clipboard, fonts, icon
+  fallback font, line format, the listing's `QSyntaxHighlighter`).
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, and
-  loading a listing or file (`load`, `showListing`). It wires the pieces
-  together; no editing logic lives here.
+  Koil's listing (`showListing`, `updateListing`, `applyChanges`,
+  `undoApply`) or a file (`loadFile`). It wires the pieces together; no
+  editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
   with it: cursors, selection, search highlights, warnings and errors, line
   numbers, and the `HoverBox`.
-- `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides, or
-  a warning's or error's message.
+- `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
+  ID), or a warning's or error's message.
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, hidden text, `:` and `/`).
   It drives the `TextArea` through `insert`/`remove`/`select`.
@@ -33,7 +40,8 @@ koil-core yet: it starts with a sample listing (see Koil integration).
   imported as `Txt` by Vim.qml and the views.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious.
-- `qml/ConfirmDialog.qml`: `:confirm q`'s [Y]es/(N)o/(C)ancel box.
+- `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
+  the question: `:confirm q`, applying, undoing an apply.
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
   look the app's own controls share (see Theme).
@@ -46,7 +54,16 @@ koil-core yet: it starts with a sample listing (see Koil integration).
 ## Build and test
 
 - Local Qt comes from Homebrew (`qtbase`, `qtdeclarative`); `qmake` must be on
-  `PATH`. `cargo build`, `cargo run` (or `cargo run -- file` to open a file).
+  `PATH`. `cargo build`, `cargo run` (lists the home dir), `cargo run -- dir`
+  (or a pattern), `cargo run -- file` to open a file. Try applying in a
+  scratch dir: it really moves and trashes files.
+- `cargo test` runs listing.rs's tests; `cargo clippy --all-targets`,
+  `cargo fmt`.
+- koil-core comes from GitHub (CI checks out only this repo), locked in
+  `Cargo.lock`; `cargo update -p koil-core` takes its latest commit. To try
+  local changes to `../koil-core`, patch it in `.cargo/config.toml` (not
+  committed) with `[patch."https://github.com/Barni228/koil-core"]
+  koil-core = { path = "../koil-core" }`.
 - `build.rs` adds every `.qml` and `.js` in `qml/` to the QML module. A file
   whose name starts with an uppercase letter becomes a type (and must end in
   `.qml`, or cxx-qt-build panics); `main.qml` and `text.js` stay lowercase.
@@ -58,30 +75,90 @@ koil-core yet: it starts with a sample listing (see Koil integration).
 - Checking the real app: `osascript` / System Events can send keys, click
   menus (process `koil`, or `Koil` from the bundle) and read the status
   line and the editor's text (`value of every UI element of window 1`).
+  Keys sent right after launch can arrive out of order (an Enter before the
+  `:`), so wait a moment first.
   Screen capture isn't permitted; to see the UI, temporarily add a `Timer`
   that saves `root.Overlay.overlay.parent.grabToImage(...)` to a file, and
   remove it after. The window opens over the user's work, so keep such
   sessions short. A menu shortcut sent this way runs after the keys that
   follow it, and Cmd+= doesn't reach Zoom In at all (neither in vim-edit).
 
-## Koil integration (not done yet)
+## Koil
 
-- **Dependency**: `koil-core = { path = "../koil-core" }` isn't in
-  `Cargo.toml`, because CI checks out only this repository and koil-core has
-  no remote. When integrating, depend on it by git (or check it out in CI).
-- **Listing**: `Document.listing()` returns lines as `{ icon, hidden, text }`
-  and `showListing` in main.qml turns them into the text (icon, two spaces,
-  text) and hidden-text entries. Koil's `Entry { id, name, is_dir }` fits
-  this: the ID hidden behind the icon, the name as the text. Reading the
-  edited lines back (each line's leading icon and what it hides, then the
-  rest) isn't written yet; `vim.hidden` has what it needs.
-- **Problems**: `find` in Editor.qml's `diagnostics` is the only source of
-  warnings and errors (for now the words "warning" and "error"). Everything
-  else (squiggles, the message after the line, the hover, `gh`) takes its
-  `{ start, end, severity, message, lineEnd }`, so koil's `EntryError` and
-  `EntryWarning` (which point at an entry, i.e. a line) can replace it.
-- **Actions**: `ConfirmDialog` is where confirming koil's actions would go.
-- `:w` and File > Open/Save still read and write files.
+- **The listing** (listing.rs): the location (`~` for the home dir) on the
+  first line, a line of `=` (at least 42, as in koil-cli), then per entry its
+  devicons icon, two spaces and its name (`/` after a dir's). The icon hides
+  the entry's ID (`Id.0`, as text) as vim's hidden text, so it yanks, pastes
+  and undoes with its line. `parse` reads a line as an existing entry if its
+  first character is an icon with a hidden entry, else as a new one; a
+  Private Use Area character first (the icon `render` gives a new entry) is
+  dropped, and names are trimmed. Header problems (no `=` line, no path, two
+  paths) and an icon hiding something that isn't a number are errors, which
+  block an update like koil's own. devicons' default file icon is `*` (a
+  glob character), so `FILE_ICON` replaces it.
+- **Problems**: `Koil::check` runs 200 ms after the last edit
+  (`checkTimer`), and gives `{ line, column, severity, message }`; Editor.qml
+  draws each from `column` (where the name starts) to the line's end.
+  Everything else (squiggles, the message after the line, the hover, `gh`)
+  works as before. A failed update also shows the path line's open error,
+  until the next check.
+- **Keys** (`commandKeys` in Vim.qml, only while a listing is shown): `Space
+  Space` updates, `Space a` applies, `-` opens `..` (`3-`: `../../..`), and
+  Enter opens the dir on its line (or the path line), else it's vim's Enter.
+  They're only matched at the start of a normal-mode command (so `d-` and
+  visual `-` are vim's), with a count; a Space followed by anything else is a
+  bad command. Shift+Enter is its own token, `<S-CR>`, a motion like `<CR>`,
+  and plain `<CR>` everywhere else (insert mode, the command line).
+- **Update** (`updateListing`): koil reads the entries with the settings they
+  were shown with, then takes vim's `:set hidden/gitignore/regex`, then opens
+  the Enter/`-` target, else the path line if it changed (like koil-cli).
+  The listing is then shown again. If what's shown stayed the same (same
+  location, same hidden/gitignore; `moved` is false), the new text replaces
+  the old as one vim change (`vim.replaceText`, which changes only the span
+  that differs), so `u` can take it back: Koil reads the buffer as a whole
+  each time, so undoing to an earlier listing of the same view is safe.
+  Otherwise vim starts over (`vim.reset`): undo must never bring back
+  another view's entries, which Koil would read as this one's (missing
+  hidden entries would be deleted, other dirs' IDs moved here). `from` puts
+  the cursor on the dir `-` came from.
+- **Apply and undo**: `Space a`, `:w`, File > Save (renamed Apply Changes…)
+  update, then `ConfirmDialog` lists `listing::actions` (paths relative to
+  the open dir); yes applies, then vim starts over (koil refreshed: new IDs
+  for renamed paths). `u` or Cmd+Z with nothing left to undo in vim emits
+  `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
+  buffer back past an update) and asks to run koil's undo, listing its
+  steps; koil refuses while changes are pending.
+- **Quitting**: `modified` is the file's unsaved changes, or in the listing,
+  edits or pending changes (`koil.hasChanges()` after each update). `:q`
+  updates first (`unsaved`); `:confirm q` asks to apply the changes, where No
+  quits without them. `:wq` applies, then quits.
+- **Files**: File > Open (and a file on the command line) leaves the listing
+  (updating it first, so its edits stay in koil) for a plain editor: no
+  `commandKeys`, colors or problems, and `:w` saves. File > Open Folder
+  (Cmd+Shift+O) and a dir or pattern on the command line list it; with no
+  argument Koil lists the home dir.
+- **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
+  the editor's document colors each line's icon (colors from devicons,
+  gathered from every listing shown, `iconColors`, dark or light by theme),
+  the path line and `/`-ending names (`theme.directory`), and the `=` line.
+  It's text-based, so it follows edits. It's found by object name (no moc
+  for native.cpp). Highlighting counts as a text change to Qt (as
+  `fixLineFormat` does), so Editor.qml only emits `edited` when the text
+  really changed (`lastText`). While the path is read as a regex (`:set
+  regex` and the path changed, or a regex is open), `pathSyntax` gives its
+  parts (`listing::path_syntax`: after the longest existing dir, from the
+  first part with a special character, as koil splits it), which
+  `setPathColors` draws over the path's color in `theme.regexColors`.
+- **Icon font**: devicons' icons are Nerd Font glyphs in the Private Use
+  Area. `useIconFallbackFont` makes an installed Nerd Font (preferably
+  Symbols Nerd Font Mono) Qt's fallback for them (Qt 6.8+; Qt only takes
+  application fallbacks for real scripts, and treats these as
+  `Script_Common`), so they show in fonts like Menlo. With no Nerd Font
+  installed they're boxes.
+- **Clipboard**: the `"+` data carries `session`, random per run; another
+  Koil's hidden texts (IDs, which mean other paths there) are dropped on
+  paste, so its lines become new entries rather than copies of whatever has
+  that ID here.
 
 ## Non-obvious decisions
 
@@ -152,12 +229,13 @@ koil-core yet: it starts with a sample listing (see Koil integration).
   `everyCursorActions` once per cursor (`atEveryCursor`), swapping in each
   extra cursor's own `registers`. They're drawn like the main one, blinking
   with the real bar via `editor.blinkOn`.
-- **Hidden text**: an icon (`vim.icons`: 🍄 or 🪑) can hide some text. The
-  document holds the plain icon, and `vim.hidden` keeps the text as
-  `{ at, icon, text }` entries sorted by position (`at` is a UTF-16 index).
-  Only the text the editor starts with has entries (`vim.reset(entries)`); the
-  user can't hide or reveal text, and an icon without an entry is a plain
-  emoji. `hidden` is replaced, never changed in place, so a reference is a
+- **Hidden text**: an icon (any one character; in the listing, a file's
+  icon, hiding its ID) can hide some text. The document holds the plain
+  icon, and `vim.hidden` keeps the text as `{ at, icon, text }` entries
+  sorted by position (`at` is a UTF-16 index). Only text the editor is given
+  has entries (`vim.reset(entries)`, `vim.replaceText`); the user can't hide
+  or reveal text, and an icon without an entry is a plain character. The
+  tests use 🍄 and 🪑. `hidden` is replaced, never changed in place, so a reference is a
   snapshot (undo relies on this).
   - Vim's own edits go through `replaceRange(start, end, text, entries)`, which
     shifts the entries (`shiftHidden`): one whose icon the edit touches is
@@ -176,8 +254,9 @@ koil-core yet: it starts with a sample listing (see Koil integration).
     whose whole icon is in a range, `shifted` moves them).
   - The `"+` register (and Cmd+C/X/V in every mode) writes the text with every
     icon replaced by what it hides (`revealed`), for other apps, and JSON
-    `{ text, hidden, block }` as `application/x-koil-data`, which Koil reads
-    back (`validHidden` checks it first: any app can write the clipboard).
+    `{ text, hidden, block, session }` as `application/x-koil-data`, which
+    Koil reads back (`validHidden` checks it first: any app can write the
+    clipboard; see Clipboard under Koil for `session`).
   - Qt's native Backspace deletes one code point, so vim handles Backspace in
     insert mode, and cursor steps go through `Txt.charStart`/`charEnd` (never
     `±1`), which treat an emoji with its modifiers as one character, as Qt
@@ -188,15 +267,15 @@ koil-core yet: it starts with a sample listing (see Koil integration).
     with the editor, which forwards Copy to it. Any other key, a scroll or an
     edit hides it; one the mouse opened also hides 300 ms after the pointer is
     on neither the target nor the box (and isn't dragging a selection).
-- **Warnings and errors** (`diagnostics` in Editor.qml): the whole words
-  "warning" and "error", in any case, get a VS Code-style squiggle, found in
-  the visible lines, and their line shows a message four spaces after its end
-  (an error's before a warning's). The hover box shows the message (with an
-  icon) as it does an icon's text; `targetUnder` also finds the message after
-  the line.
+- **Warnings and errors** (`diagnostics` in Editor.qml): Koil's problems
+  (see Koil) get a VS Code-style squiggle in the visible lines, and their
+  line shows a message four spaces after its end (an error's before a
+  warning's). The hover box shows the message (with an icon) as it does an
+  icon's text; `targetUnder` also finds the message after the line.
 - **Quitting**: `:q` with unsaved changes fails (E37); `:confirm q` asks
   instead, in a `ConfirmDialog` rather than a `MessageDialog` (which is native
-  on macOS, can't use the editor's font or vim's keys). Saving a file that has
+  on macOS, can't use the editor's font or vim's keys). `ConfirmDialog.ask`
+  takes what Yes and No do; without a No action it offers only [Y]es/(N)o. Saving a file that has
   no path opens the Save dialog, so `root.save(quit)` sets `quitAfterSave` to
   quit once it's saved (also for `:wq`).
 - **Find bar**: moving to a match moves vim's cursor to its start
@@ -251,7 +330,8 @@ koil-core yet: it starts with a sample listing (see Koil integration).
   change only the ones in use, until Koil quits, so the Settings window
   doesn't show them. Their defaults (Cmd+0, `:set fs&`) are the saved values
   (vim's `default*` properties are bound to `settings`), not Koil's defaults.
-  The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
+  Koil's own options (`:set hidden`, `gitignore`, `regex`) aren't saved, and
+  start off. The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
   also switches the palette, title bar and menus; "system" unsets it. The
   Settings window's size follows the zoom, so it isn't resizable. They're
   stored in `~/Library/Preferences/com.koil.Koil.plist` on macOS, the registry

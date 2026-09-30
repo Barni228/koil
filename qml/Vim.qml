@@ -49,6 +49,17 @@ QtObject {
     property string fontFamily: ""
     property string defaultFontFamily: ""
     property var fontFamilies: []
+    // Koil's :set hidden, gitignore and regex: show hidden entries (and
+    // ../), hide what git ignores, and read the path to open as a regex
+    // (see Settings in koil-core). The view applies them to the listing.
+    property bool showHidden: false
+    property bool gitignore: false
+    property bool regex: false
+    // Keys that run one of Koil's commands in normal mode instead of what
+    // they do in vim, as { keys: name }, like { "-": "parent" }: " " is
+    // Space and "<CR>" Enter. Only at the start of a command, so "d-" still
+    // deletes up a line. Typing one emits keyCommand.
+    property var commandKeys: ({})
 
     readonly property bool isVisual: mode === "visual" || mode === "visualLine" || mode === "visualBlock"
     // Insert or replace mode: typing edits the text, at the editor's cursor.
@@ -76,12 +87,17 @@ QtObject {
     signal highlightsCleared()
     // :help, or :help topic.
     signal helpRequested(string topic)
+    // One of commandKeys was typed, with its count (0 if none).
+    signal keyCommand(string name, int count)
+    // u (or Cmd+Z) with no change left to undo: Koil offers to undo its last
+    // apply.
+    signal nothingToUndo()
 
     readonly property bool isMac: Qt.platform.os === "osx"
     readonly property var operators: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?"]
     readonly property var motions: ["h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ",
         "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G",
-        ";", ",", "%", "{", "}", "+", "-", "_", "<CR>", "|", "n", "N", "*", "#", "H", "M", "L",
+        ";", ",", "%", "{", "}", "+", "-", "_", "<CR>", "<S-CR>", "|", "n", "N", "*", "#", "H", "M", "L",
         "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>"]
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
@@ -93,6 +109,9 @@ QtObject {
     readonly property var everyCursorActions: ["i", "a", "I", "A", "gI", "o", "O", "x", "<Del>", "X", "s",
         "S", "C", "D", "Y", "p", "P", "J", "gJ", "~", "r", "R", "<C-a>", "<C-x>"]
     readonly property var visualModes: ({ "v": "visual", "V": "visualLine", "<C-v>": "visualBlock" })
+    // Marks the clipboard data this Koil writes. Another Koil's hidden texts
+    // (IDs) mean other things, so its icons are pasted without them.
+    readonly property string clipboardSession: Math.random().toString(36).slice(2)
     // Normal-mode commands that modify the text (and so can be repeated with ".").
     readonly property var changeActions: ["i", "a", "I", "A", "gI", "o", "O", "x", "<Del>", "X", "s", "S",
         "C", "D", "p", "P", "J", "gJ", "~", "r", "R", "<C-a>", "<C-x>"]
@@ -257,6 +276,10 @@ QtObject {
 
     // Runs a typed key, or one from a macro (with no event).
     function runKey(tok, event) {
+        // Shift+Enter is Enter, except as a motion: then it's vim's Enter
+        // where Koil's does something else (see commandKeys).
+        if (tok === "<S-CR>" && (commandLine !== "" || inserting))
+            tok = "<CR>";
         if (commandLine !== "")
             return commandLineKey(tok);
         if (mode === "insert")
@@ -362,6 +385,12 @@ QtObject {
         wantCol = Txt.column(t, p);
     }
 
+    // Runs a motion from outside vim, as if typed (Koil's Enter, on a line
+    // it doesn't open).
+    function runMotion(name, count) {
+        execute({ reg: null, count: count, motion: { name: name } });
+    }
+
     function positionLabel() {
         const t = editor.text;
         return Txt.lineOf(t, cursor) + ":" + (Txt.column(t, cursor) + 1);
@@ -409,6 +438,8 @@ QtObject {
             [Qt.Key_PageUp]: "<PageUp>",
             [Qt.Key_PageDown]: "<PageDown>"
         }[event.key];
+        if (named === "<CR>" && event.modifiers & Qt.ShiftModifier)
+            return "<S-CR>";
         if (named)
             return named;
         const text = event.text;
@@ -436,8 +467,9 @@ QtObject {
         else if (s && !s.broken && typed)
             s.keys.push(tok);
         // A macro has no event for the editor to handle, and the editor
-        // knows only one cursor, so vim does it.
-        if (!event || cursors.length && (move || typed)) {
+        // knows only one cursor, so vim does it. Shift+Enter too, which the
+        // editor would make a line separator rather than a line break.
+        if (!event || cursors.length && (move || typed) || tok === "<CR>" && event.modifiers & Qt.ShiftModifier) {
             if (move)
                 insertMove(tok);
             else if (typed)
@@ -618,6 +650,18 @@ QtObject {
         const c1 = readCount(keys, i);
         cmd.count = c1.count;
         i = c1.next;
+        if (!visual && i < keys.length) {
+            const c = commandFor(keys.slice(i));
+            if (c && c.name) {
+                cmd.command = c.name;
+                return { status: "ok", cmd };
+            }
+            if (c)
+                return more;
+            // Keys that started one, then went on differently.
+            if (keys.length - i > 1 && commandFor([keys[i]]))
+                return bad;
+        }
         const w = readName(keys, i);
         if (!w)
             return more;
@@ -703,6 +747,17 @@ QtObject {
         return { status: "ok", cmd };
     }
 
+    // The command of commandKeys that `keys` type, as { name }, where name
+    // is "" while they're only the start of its keys. Null if none.
+    function commandFor(keys) {
+        for (const k in commandKeys) {
+            const ks = macroKeys(k);
+            if (keys.length <= ks.length && keys.every((t, j) => t === ks[j]))
+                return { name: keys.length === ks.length ? commandKeys[k] : "" };
+        }
+        return null;
+    }
+
     function parseMotion(keys, i) {
         const w = readName(keys, i);
         if (!w)
@@ -743,7 +798,7 @@ QtObject {
     function charArg(tok, allowNewline) {
         if (tok === "<Tab>")
             return "\t";
-        if (tok === "<CR>")
+        if (tok === "<CR>" || tok === "<S-CR>")
             return allowNewline ? "\n" : null;
         return isSpecial(tok) ? null : tok;
     }
@@ -758,6 +813,10 @@ QtObject {
     }
 
     function execute(cmd) {
+        if (cmd.command) {
+            keyCommand(cmd.command, cmd.count);
+            return;
+        }
         const changing = isChange(cmd);
         if (changing) {
             beginChange();
@@ -1666,7 +1725,7 @@ QtObject {
     // Splits register text into keys.
     function macroKeys(text) {
         const named = { "\n": "<CR>", "\r": "<CR>", "\t": "<Tab>", "\x1b": "<Esc>" };
-        const re = /<(?:Esc|CR|BS|Del|Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z])>|[\s\S]/gu;
+        const re = /<(?:Esc|CR|S-CR|BS|Del|Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z])>|[\s\S]/gu;
         return (text.match(re) || []).map(k => named[k] || k);
     }
 
@@ -1818,6 +1877,7 @@ QtObject {
         }
         if (!last) {
             showMessage("Already at oldest change");
+            nothingToUndo();
             return;
         }
         const p = Math.min(last.cursor, editor.length);
@@ -1856,7 +1916,7 @@ QtObject {
         if (name === "+" || name === "*") {
             if (clipboard)
                 clipboard.setClipboardText(revealed(text, entries), entries.length || blockwise
-                    ? JSON.stringify({ text: text, hidden: entries, block: blockwise }) : "");
+                    ? JSON.stringify({ text: text, hidden: entries, block: blockwise, session: clipboardSession }) : "");
             return;
         }
         const entry = { text: text, linewise: linewise, hidden: entries, blockwise: blockwise };
@@ -1885,8 +1945,8 @@ QtObject {
             try {
                 const d = JSON.parse(clipboard.clipboardData() || "null");
                 if (d && typeof d.text === "string" && validHidden(d.text, d.hidden))
-                    return { text: d.text, linewise: !d.block && d.text.endsWith("\n"), hidden: shifted(d.hidden, 0),
-                        blockwise: !!d.block };
+                    return { text: d.text, linewise: !d.block && d.text.endsWith("\n"),
+                        hidden: d.session === clipboardSession ? shifted(d.hidden, 0) : [], blockwise: !!d.block };
             } catch (e) {
                 // not ours after all: use the text
             }
@@ -1964,18 +2024,17 @@ QtObject {
     }
 
     // ---- Hidden text -------------------------------------------------------
-    // An icon (🍄 or 🪑) can hide some text: the document holds the plain
-    // icon, and the text is kept beside it in `hidden`, a list of
-    // { at, icon, text } sorted by position. Only the text the editor starts
-    // with has them (see reset); nothing makes new ones, and an icon without
-    // an entry is a plain emoji. Every edit shifts the list: vim's own in
-    // replaceRange, the editor's (typing in insert mode) by diffing the
-    // text. Registers, undo steps and the clipboard carry the entries for the
-    // text they hold (with `at` from its start), so an icon yanks, pastes and
-    // undoes like any character. Files get the plain icon.
+    // An icon (one character, like a file's icon in Koil's listing, whose ID
+    // it hides) can hide some text: the document holds the plain icon, and
+    // the text is kept beside it in `hidden`, a list of { at, icon, text }
+    // sorted by position. Only the text the editor is given has them (see
+    // reset and replaceText); the user can't make new ones, and an icon
+    // without an entry is a plain character. Every edit shifts the list:
+    // vim's own in replaceRange, the editor's (typing in insert mode) by
+    // diffing the text. Registers, undo steps and the clipboard carry the
+    // entries for the text they hold (with `at` from its start), so an icon
+    // yanks, pastes and undoes like any character. Files get the plain icon.
 
-    // The icons that can hide text: 🍄 and 🪑.
-    readonly property var icons: ["🍄", "🪑"]
     // Replaced, never changed in place, so a copy of the reference is a snapshot.
     property var hidden: []
     // The text `hidden` and `cursors` match, to diff the editor's own edits
@@ -2098,6 +2157,17 @@ QtObject {
         return hidden.find(h => h.at === p) || null;
     }
 
+    // Replaces the whole text with `text`, whose icons hide `entries`, as
+    // one undo step (Koil's listing, read again). Only the part that differs
+    // changes, so the view stays where it is.
+    function replaceText(text, entries) {
+        externalEdit(() => {
+            const d = diff(editor.text, text, hidden, entries);
+            if (d)
+                replaceRange(d.start, d.end1, text.slice(d.start, d.end2), hiddenIn(entries, d.start, d.end2));
+        });
+    }
+
     // `text` with the icons of its entries `list` replaced by what they hide.
     function revealed(text, list) {
         let r = "", i = 0;
@@ -2115,8 +2185,9 @@ QtObject {
             return false;
         let next = 0; // where the next entry can start
         for (const h of list) {
-            if (!h || !Number.isInteger(h.at) || h.at < next || !icons.includes(h.icon)
-                    || !text.startsWith(h.icon, h.at) || typeof h.text !== "string")
+            if (!h || !Number.isInteger(h.at) || h.at < next || typeof h.icon !== "string" || h.icon === ""
+                    || Txt.charEnd(h.icon, 0) !== h.icon.length || !text.startsWith(h.icon, h.at)
+                    || typeof h.text !== "string")
                 return false;
             next = h.at + h.icon.length;
         }
@@ -2274,12 +2345,16 @@ QtObject {
     // and for a number option its range. fontsize isn't vim's (gvim has
     // guifont); its short name is vim's for fsync, which Koil hasn't.
     // guifont is only the family (gvim's also takes a size, like Menlo:h14).
+    // hidden, gitignore and regex are Koil's (vim's hidden is about buffers).
     readonly property var options: [
         { name: "fontsize", short: "fs", property: "fontSize", default: defaultFontSize,
             min: minFontSize, max: maxFontSize },
         { name: "guifont", short: "gfn", property: "fontFamily", default: defaultFontFamily },
         { name: "number", short: "nu", property: "number", default: defaultNumber },
-        { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber }
+        { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber },
+        { name: "hidden", short: "hid", property: "showHidden", default: false },
+        { name: "gitignore", short: "ignore", property: "gitignore", default: false },
+        { name: "regex", short: "re", property: "regex", default: false }
     ]
 
     // An option as :set shows it: "  nu", "nonu", "  fs=16" or
@@ -2379,6 +2454,7 @@ QtObject {
             return lineMotion(t, p, -count);
         case "+":
         case "<CR>":
+        case "<S-CR>":
         case "-": {
             const r = lineMotion(t, p, m.name === "-" ? -count : count);
             return r && { pos: Txt.firstNonBlank(t, r.pos), type: "linewise" };

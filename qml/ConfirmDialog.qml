@@ -5,10 +5,12 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // A question with vim's :confirm choices, [Y]es, (N)o and (C)ancel, in a box
-// over the editor like :help's. y answers yes, n no, and c or Esc cancels;
-// Left and Right (or h and l, Tab and Shift+Tab) move the highlight, which
-// starts on Yes, and Enter answers the highlighted choice. Its text is in
-// the editor's font and can be selected and copied.
+// over the editor like :help's, with an optional list under it (what
+// applying would do, say), which scrolls if it's long. y answers yes, n no,
+// and c or Esc cancels; Left and Right (or h and l, Tab and Shift+Tab) move
+// the highlight, which starts on Yes, Enter answers the highlighted choice,
+// and j and k (or Up and Down) scroll. Its text is in the editor's font and
+// can be selected and copied.
 Popup {
     id: dialog
 
@@ -16,35 +18,46 @@ Popup {
 
     readonly property real zoom: theme.zoom
     property string text
+    property string details
+    // What the answers do (see ask).
+    property var yesAction: null
+    property var noAction: null
+    // Without anything for No to do, No is the same as Cancel, so it's
+    // offered alone.
     readonly property var choices: [
         { label: "[Y]es", answer: "yes" },
-        { label: "(N)o", answer: "no" },
-        { label: "(C)ancel", answer: "cancel" }
-    ]
+        { label: "(N)o", answer: "no" }
+    ].concat(noAction ? [{ label: "(C)ancel", answer: "cancel" }] : [])
     // The highlighted choice, which Enter answers.
     property int current: 0
 
-    signal yes()
-    signal no()
-
-    function ask(question) {
+    // Asks `question`, with `details` (a list, maybe "") under it. `yes` is
+    // what Yes does, and `no` what No does, if anything.
+    function ask(question, details, yes, no) {
         text = question;
+        dialog.details = details || "";
+        yesAction = yes;
+        noAction = no || null;
         current = 0;
+        scroller.contentY = 0;
         open();
     }
 
     function answer(choice) {
         close();
-        if (choice === "yes")
-            yes();
-        else if (choice === "no")
-            no();
+        const action = choice === "yes" ? yesAction : choice === "no" ? noAction : null;
+        if (action)
+            action();
+    }
+
+    function scrollBy(dy) {
+        scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + dy));
     }
 
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(parent ? parent.width - 48 * zoom : 500,
-        Math.max(label.implicitWidth, buttons.implicitWidth) + 2 * padding)
+        Math.max(label.implicitWidth + scrollBar.width, buttons.implicitWidth) + 2 * padding)
     padding: 16 * zoom
     modal: true
     focus: true
@@ -96,6 +109,7 @@ Popup {
         focus: true
 
         Keys.onPressed: event => {
+            const step = label.implicitHeight / Math.max(1, label.lineCount);
             if (event.matches(StandardKey.Copy))
                 label.copy();
             else if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
@@ -104,6 +118,10 @@ Popup {
                 dialog.current = Math.max(0, dialog.current - 1);
             else if (event.key === Qt.Key_Right || event.key === Qt.Key_L || event.key === Qt.Key_Tab)
                 dialog.current = Math.min(dialog.choices.length - 1, dialog.current + 1);
+            else if (event.key === Qt.Key_Down || event.key === Qt.Key_J)
+                dialog.scrollBy(step);
+            else if (event.key === Qt.Key_Up || event.key === Qt.Key_K)
+                dialog.scrollBy(-step);
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                 dialog.answer(dialog.choices[dialog.current].answer);
             else if (event.key === Qt.Key_Y)
@@ -117,25 +135,49 @@ Popup {
             event.accepted = true;
         }
 
-        TextEdit {
-            id: label
+        // Not interactive, since a drag selects text; the wheel scrolls it.
+        Flickable {
+            id: scroller
 
             Layout.fillWidth: true
-            text: dialog.text
-            font: dialog.theme.font
-            color: dialog.theme.text
-            textFormat: TextEdit.PlainText
-            wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-            readOnly: true
-            selectByMouse: true
-            // Keys stay with the dialog, which forwards Copy.
-            activeFocusOnPress: false
-            persistentSelection: true
-            selectionColor: dialog.theme.highlight
-            selectedTextColor: dialog.theme.highlightedText
+            // As tall as the text, but no taller than the window has room for.
+            Layout.preferredHeight: Math.min(label.implicitHeight, (dialog.parent ? dialog.parent.height : 500)
+                - 48 * dialog.zoom - 2 * dialog.padding - buttons.implicitHeight - parent.spacing)
+            contentWidth: width
+            contentHeight: label.implicitHeight
+            interactive: false
+            clip: true
 
-            HoverHandler {
-                cursorShape: Qt.IBeamCursor
+            ScrollBar.vertical: ScrollBar {
+                id: scrollBar
+            }
+
+            WheelHandler {
+                onWheel: event => dialog.scrollBy(-(event.pixelDelta.y || event.angleDelta.y / 120 * 60 * dialog.zoom))
+            }
+
+            TextEdit {
+                id: label
+
+                // Room for the scroll bar, which the width can't depend on
+                // needing: that depends on the height, which depends on it.
+                width: scroller.width - scrollBar.width
+                text: dialog.details ? dialog.text + "\n\n" + dialog.details : dialog.text
+                font: dialog.theme.font
+                color: dialog.theme.text
+                textFormat: TextEdit.PlainText
+                wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+                readOnly: true
+                selectByMouse: true
+                // Keys stay with the dialog, which forwards Copy.
+                activeFocusOnPress: false
+                persistentSelection: true
+                selectionColor: dialog.theme.highlight
+                selectedTextColor: dialog.theme.highlightedText
+
+                HoverHandler {
+                    cursorShape: Qt.IBeamCursor
+                }
             }
         }
 

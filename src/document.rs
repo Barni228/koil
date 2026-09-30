@@ -2,11 +2,7 @@ use std::pin::Pin;
 
 use cxx_qt_lib::{QString, QUrl};
 
-/// The icons that hide text in the editor (`Vim.icons` in qml/Vim.qml).
-const MUSHROOM: &str = "🍄";
-const CHAIR: &str = "🪑";
-
-/// What the editor shows and saves: the listing it starts with, and files.
+/// Files the editor opens and saves, and the path on the command line.
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -30,21 +26,25 @@ pub mod qobject {
         #[qsignal]
         fn failed(self: Pin<&mut Document>, message: QString);
 
-        /// The lines the editor starts with, as a JSON array of
-        /// `{ icon, hidden, text }`: the line shows `icon`, which hides
-        /// `hidden`, then `text`.
-        #[qinvokable]
-        fn listing(self: &Document) -> QString;
-
         #[qinvokable]
         fn open_file(self: Pin<&mut Document>, path: &QString);
 
         #[qinvokable]
         fn save_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
 
-        /// The path passed on the command line, if any.
+        /// The path passed on the command line, if any: a file to open, or a
+        /// dir (or pattern) for Koil to list.
         #[qinvokable]
-        fn startup_file(self: &Document) -> QString;
+        fn startup_path(self: &Document) -> QString;
+
+        /// Whether `path` is a file (or a link to one), rather than a dir or
+        /// nothing.
+        #[qinvokable]
+        fn is_file(self: &Document, path: &QString) -> bool;
+
+        /// The home dir, which Koil lists when no path is given.
+        #[qinvokable]
+        fn home_dir(self: &Document) -> QString;
 
         #[qinvokable]
         fn url_to_path(self: &Document, url: &QUrl) -> QString;
@@ -55,16 +55,6 @@ pub mod qobject {
 pub struct DocumentRust;
 
 impl qobject::Document {
-    // A sample until Koil lists a directory here.
-    fn listing(&self) -> QString {
-        let lines = serde_json::json!([
-            { "icon": MUSHROOM, "hidden": "Poppy", "text": "some other text" },
-            { "icon": MUSHROOM, "hidden": "Other one", "text": "maybe-dir/" },
-            { "icon": CHAIR, "hidden": "what", "text": "this" },
-        ]);
-        QString::from(lines.to_string().as_str())
-    }
-
     fn open_file(self: Pin<&mut Self>, path: &QString) {
         match std::fs::read_to_string(path.to_string()) {
             Ok(text) => self.loaded(path.clone(), QString::from(text.as_str())),
@@ -86,12 +76,21 @@ impl qobject::Document {
         }
     }
 
-    fn startup_file(&self) -> QString {
+    fn startup_path(&self) -> QString {
         std::env::args()
             .skip(1)
             .find(|arg| !arg.starts_with('-'))
             .map(|arg| QString::from(arg.as_str()))
             .unwrap_or_default()
+    }
+
+    fn is_file(&self, path: &QString) -> bool {
+        std::path::Path::new(&path.to_string()).is_file()
+    }
+
+    fn home_dir(&self) -> QString {
+        let home = std::env::home_dir().unwrap_or_default();
+        QString::from(home.to_string_lossy().as_ref())
     }
 
     fn url_to_path(&self, url: &QUrl) -> QString {

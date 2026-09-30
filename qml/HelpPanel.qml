@@ -3,9 +3,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 
-// :help, a box over the editor with what isn't obvious: :set and its forms,
-// the commands, search, registers and macros, visual block and multiple
-// cursors, hidden text and other keys. :help topic scrolls to a section.
+// :help, a box over the editor with what isn't obvious: Koil's listing,
+// :set and its forms, the commands, search, registers and macros, visual
+// block and multiple cursors, hidden text and other keys. :help topic scrolls to a section.
 // Keys scroll it as in a vim help buffer; Esc or q closes it. Its text can be
 // selected with the mouse and copied.
 Popup {
@@ -26,9 +26,34 @@ Popup {
     // shown in the editor's font.
     readonly property var sections: [
         {
+            title: "The listing",
+            tags: ["koil", "listing", "list", "entry", "entries", "space", "update", "apply", "-", "enter",
+                "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo"],
+            intro: "Koil shows a dir as text: its path, a line of `=`, then a line per entry: its icon (which "
+                + "hides its ID), two spaces, and its name, with `/` after a dir's. Edit the names to "
+                + "rename, delete lines to delete, copy lines (icon and all) to copy, and write lines "
+                + "without an icon to create, like `new.txt` or `new/dir/`. A line cut here and pasted in "
+                + "another dir moves the entry. Nothing changes on disk until it's applied.",
+            rows: [
+                ["Space Space", "Update: Koil reads the listing (keeping the changes, also in other dirs) "
+                    + "and shows it again, opening the path on the first line if it changed."],
+                ["Space a  :w", "Apply the changes, after showing what they'll do. `:wq` quits afterwards."],
+                ["u", "With no edit left to undo: undo the last apply, after showing what that will do. "
+                    + "Deleted entries come back from the trash."],
+                ["Enter", "Open the dir on the cursor's line, or the path on the first line."],
+                ["Shift+Enter", "Vim's Enter: the first character of the next line."],
+                ["-", "Open the dir above (`3-`: three dirs up)."],
+                ["path", "The first line: a dir, or a pattern of files, like `~/src/**/*.rs`, or a regex "
+                    + "with `:set regex` (where `,` is any character but `/`), whose parts get colors."],
+                [(isMac ? "⇧⌘O" : "Ctrl+Shift+O"), "Open a folder. " + cmdKey + "O opens a file to edit "
+                    + "instead."]
+            ]
+        },
+        {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
-                "number", "nu", "relativenumber", "rnu"],
+                "number", "nu", "relativenumber", "rnu", "hidden", "hid", "gitignore", "ignore", "regex",
+                "re"],
             intro: "`:set` with no arguments lists the options that aren't at their default. "
                 + "Several can be set at once: `:set nu rnu fs=18`.",
             rows: [
@@ -37,8 +62,12 @@ Popup {
                     + (isMac ? "Menlo" : "Consolas") + "."],
                 ["number, nu", "Line numbers."],
                 ["relativenumber, rnu", "Line numbers counted from the cursor's line. With `nu` too, "
-                    + "the cursor's line shows its own number."]
-            ]
+                    + "the cursor's line shows its own number."],
+                ["hidden, hid", "Show hidden entries (starting with `.`), and `../` to open the dir above."],
+                ["gitignore, ignore", "Hide what git ignores, and `.git`."],
+                ["regex, re", "Read the path on the first line as a regex, not a glob."]
+            ],
+            note: "An entry with changes is shown even if it's hidden or ignored."
         },
         {
             title: "Setting an on/off option",
@@ -78,7 +107,7 @@ Popup {
             tags: ["commands", "command", "ex", "w", "write", "quit", "wq", "x", "confirm", "conf", "noh",
                 "nohlsearch", "help", "h", "history"],
             rows: [
-                [":w", "Save."],
+                [":w", "Save (in the listing: apply)."],
                 [":wq  :x  ZZ", "Save and quit."],
                 [":q", "Quit, unless there are unsaved changes."],
                 [":q!  ZQ", "Quit without saving."],
@@ -140,10 +169,10 @@ Popup {
         },
         {
             title: "Hidden text",
-            tags: ["hidden", "hide", "reveal", "icon", "icons", "🍄", "🪑", "gh"],
+            tags: ["hide", "reveal", "icon", "icons", "id", "gh"],
             rows: [
-                ["🍄  🪑", "Each hides some text. It acts like any other character: move over it, select, "
-                    + "delete, yank and paste it."],
+                ["icons", "In the listing, each icon hides its entry's ID. It acts like any other character: "
+                    + "move over it, select, delete, yank and paste it."],
                 ["gh", "Show the text behind the icon under the cursor (so does resting the mouse on it)."],
                 ["", "Yanks, undo and copying keep the hidden text. Other apps get the text revealed."]
             ]
@@ -152,8 +181,9 @@ Popup {
             title: "Warnings and errors",
             tags: ["warning", "warnings", "error", "errors", "diagnostics", "squiggle"],
             rows: [
-                ["", "The words `warning` and `error` (in any case) get a wavy underline, orange or red, "
-                    + "and a message after the end of their line, as in VS Code."],
+                ["", "Koil's problems with the listing get a wavy underline, orange or red, and a message "
+                    + "after the end of their line, as in VS Code. An error (like a name written twice) "
+                    + "stops Space Space and applying; a warning (like a name Windows can't use) doesn't."],
                 ["gh", "Show the message of the warning or error under the cursor (so does resting the "
                     + "mouse on it, or on the message)."]
             ]

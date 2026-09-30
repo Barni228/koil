@@ -3,7 +3,7 @@ use cxx_qt_lib::{QString, QStringList};
 use crate::ffi;
 
 /// What the QML needs from the system through Qt's C++ side: the clipboard,
-/// the installed fonts, and the editor's line height.
+/// the installed fonts, and the editor's line height and listing colors.
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -41,6 +41,25 @@ pub mod qobject {
             height: f64,
             bottom_margin: f64,
         );
+
+        /// Colors Koil's listing in a TextEdit's `textDocument`: each icon in
+        /// `icon_colors` (icons and colors, alternating), the path and dirs
+        /// in `directory_color`, and the line of `=` in `rule_color`. No
+        /// `directory_color` takes the colors away.
+        #[qinvokable]
+        unsafe fn set_listing_colors(
+            self: &System,
+            text_document: *mut QObject,
+            icon_colors: &QStringList,
+            directory_color: &QString,
+            rule_color: &QString,
+        );
+
+        /// Colors parts of the listing's path line (a regex's), over the
+        /// colors `set_listing_colors` gives it: `spans` holds a start, a
+        /// length and a color for each part.
+        #[qinvokable]
+        unsafe fn set_path_colors(self: &System, text_document: *mut QObject, spans: &QStringList);
     }
 }
 
@@ -74,5 +93,32 @@ impl qobject::System {
         bottom_margin: f64,
     ) {
         unsafe { ffi::set_line_format(text_document.cast(), height, bottom_margin) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn set_listing_colors(
+        &self,
+        text_document: *mut qobject::QObject,
+        icon_colors: &QStringList,
+        directory_color: &QString,
+        rule_color: &QString,
+    ) {
+        unsafe {
+            ffi::set_listing_colors(
+                text_document.cast(),
+                icon_colors,
+                directory_color,
+                rule_color,
+            )
+        };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn set_path_colors(&self, text_document: *mut qobject::QObject, spans: &QStringList) {
+        unsafe { ffi::set_path_colors(text_document.cast(), spans) };
     }
 }
