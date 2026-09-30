@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QtCore/QByteArray>
 #include <QtCore/QObject>
 #include <QtCore/QString>
 #include <QtCore/QStringList>
@@ -8,11 +9,14 @@
 // Rename it to "Settings…" to match current macOS conventions.
 void useSettingsMenuTitle();
 
-// Lets the icons in Koil's listing (Nerd Font icons, in a Private Use Area)
-// show in fonts that don't have them, like Menlo: an installed Nerd Font
-// becomes the fallback for them. Does nothing before Qt 6.8, or with no Nerd
-// Font installed.
-void useIconFallbackFont();
+// Adds the Nerd Font Koil ships (`data`, the font file), the editor's default
+// font, and lets the icons in Koil's listing (Nerd Font icons, in a Private
+// Use Area) show in fonts that don't have them, like Menlo: it becomes the
+// fallback for them. The fallback needs Qt 6.8.
+void useNerdFont(const QByteArray& data);
+
+// The family of the font useNerdFont added, as Qt names it.
+QString nerdFontFamily();
 
 // Sets the Qt Quick Controls style. Must run before QML is loaded.
 void setControlsStyle(const QString& style);

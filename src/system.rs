@@ -3,7 +3,8 @@ use cxx_qt_lib::{QString, QStringList};
 use crate::ffi;
 
 /// What the QML needs from the system through Qt's C++ side: the clipboard,
-/// the installed fonts, and the editor's line height and listing colors.
+/// the installed fonts and the one Koil ships, and the editor's line height
+/// and listing colors.
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -31,6 +32,10 @@ pub mod qobject {
         /// The installed monospaced font families (the fonts the editor offers).
         #[qinvokable]
         fn monospace_families(self: &System) -> QStringList;
+
+        /// The family of the Nerd Font Koil ships, the editor's default font.
+        #[qinvokable]
+        fn nerd_font_family(self: &System) -> QString;
 
         /// Gives every line of a TextEdit's `textDocument` the same height,
         /// plus a margin below it.
@@ -81,6 +86,10 @@ impl qobject::System {
 
     fn monospace_families(&self) -> QStringList {
         ffi::monospace_families()
+    }
+
+    fn nerd_font_family(&self) -> QString {
+        ffi::nerd_font_family()
     }
 
     /// # Safety

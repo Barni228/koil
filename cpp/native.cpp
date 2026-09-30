@@ -20,6 +20,9 @@ namespace {
 
 const QString dataFormat = QStringLiteral("application/x-koil-data");
 
+// The font useNerdFont added (-1: none).
+int nerdFontId = -1;
+
 class MacMenuTranslator : public QTranslator
 {
 public:
@@ -139,29 +142,23 @@ useSettingsMenuTitle()
 }
 
 void
-useIconFallbackFont()
+useNerdFont(const QByteArray& data)
 {
+  nerdFontId = QFontDatabase::addApplicationFontFromData(data);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 8, 0)
-  // Every Nerd Font has the same icons. The symbols-only one has nothing
-  // else, and a "Mono" one's icons are one column wide, as the text is.
-  const QStringList families = QFontDatabase::families();
-  QString family;
-  for (const auto& wanted : { QStringLiteral("Symbols Nerd Font Mono"),
-                              QStringLiteral("Symbols Nerd Font"),
-                              QStringLiteral("Nerd Font Mono"),
-                              QStringLiteral("Nerd Font") }) {
-    const auto found = std::find_if(families.cbegin(), families.cend(), [&](const QString& f) {
-      return f.contains(wanted, Qt::CaseInsensitive);
-    });
-    if (found != families.cend()) {
-      family = *found;
-      break;
-    }
-  }
   // Private use characters have no script, which Qt treats as common.
+  const QString family = nerdFontFamily();
   if (!family.isEmpty())
     QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Common, family);
 #endif
+}
+
+QString
+nerdFontFamily()
+{
+  // The font has a family name for old systems and one for new ones, and
+  // which one Qt uses depends on the platform.
+  return QFontDatabase::applicationFontFamilies(nerdFontId).value(0);
 }
 
 void

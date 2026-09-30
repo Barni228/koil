@@ -12,6 +12,8 @@ Popup {
     id: help
 
     required property Theme theme
+    // The font Koil ships, for :set guifont.
+    property string defaultFontFamily
 
     readonly property real zoom: theme.zoom
     readonly property bool isMac: Qt.platform.os === "osx"
@@ -63,8 +65,8 @@ Popup {
                 + "Several can be set at once: `:set nu rnu fs=18`.",
             rows: [
                 ["fontsize, fs", "Font size in points, 6 to 72. Default 16."],
-                ["guifont, gfn", "Font: an installed monospaced one, in any case. Default "
-                    + (isMac ? "Menlo" : "Consolas") + "."],
+                ["guifont, gfn", "Font: an installed monospaced one, in any case. Default `"
+                    + defaultFontFamily + "`, which comes with Koil. Any font shows the listing's icons."],
                 ["number, nu", "Line numbers."],
                 ["relativenumber, rnu", "Line numbers counted from the cursor's line. With `nu` too, "
                     + "the cursor's line shows its own number."],

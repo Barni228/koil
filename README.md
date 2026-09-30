@@ -13,8 +13,9 @@ after that undoes them. Enter opens a directory or a file, and `-` the
 directory above (or, in a file, goes back to the listing).
 `:help` (or `:h`) lists everything that isn't standard vim.
 
-The icons are [Nerd Font](https://www.nerdfonts.com) glyphs: they show with a
-Nerd Font installed (any one is used for them, whatever the editor's font).
+The icons are [Nerd Font](https://www.nerdfonts.com) glyphs. Koil comes with
+one, JetBrains Mono NL (its default font), which shows them whatever the
+editor's font. It's under the [SIL Open Font License](fonts/OFL.txt).
 
 ## Install
 

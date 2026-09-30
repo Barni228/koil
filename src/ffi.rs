@@ -7,6 +7,8 @@ mod bridge {
     unsafe extern "C++" {
         include!(<QtCore/QObject>);
         type QObject = cxx_qt::QObject;
+        include!("cxx-qt-lib/qbytearray.h");
+        type QByteArray = cxx_qt_lib::QByteArray;
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qstringlist.h");
@@ -18,9 +20,14 @@ mod bridge {
         #[cxx_name = "useSettingsMenuTitle"]
         fn use_settings_menu_title();
 
-        /// Makes an installed Nerd Font the fallback for the listing's icons.
-        #[cxx_name = "useIconFallbackFont"]
-        fn use_icon_fallback_font();
+        /// Adds the Nerd Font Koil ships (`data`, the font file) and makes it
+        /// the fallback for the listing's icons.
+        #[cxx_name = "useNerdFont"]
+        fn use_nerd_font(data: &QByteArray);
+
+        /// The family of the font `use_nerd_font` added.
+        #[cxx_name = "nerdFontFamily"]
+        fn nerd_font_family() -> QString;
 
         /// Sets the Qt Quick Controls style; call it before loading QML.
         #[cxx_name = "setControlsStyle"]

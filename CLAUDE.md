@@ -9,7 +9,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 ## Layout
 
 - `src/main.rs`: creates the app, installs the "Settings…" translator and the
-  icon fallback font, sets the Windows style, loads `qml/main.qml`.
+  Nerd Font, sets the Windows style, loads `qml/main.qml`.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `undo_steps`) and the path line's regex parts
@@ -20,10 +20,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - `src/document.rs`: `Document` (QML element): reading and writing files, the
   path on the command line.
 - `src/system.rs`: `System` (QML element): the system clipboard, the
-  installed monospaced fonts, and the editor's line format and colors.
+  installed monospaced fonts and the Nerd Font's family, and the editor's
+  line format and colors.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
-  `main.rs` (menu title translator, Controls style, clipboard, fonts, icon
-  fallback font, line format, the listing's `QSyntaxHighlighter`).
+  `main.rs` (menu title translator, Controls style, clipboard, fonts, the
+  Nerd Font, line format, the listing's `QSyntaxHighlighter`).
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, and
   Koil's listing (`showListing`, `updateListing`, `applyChanges`,
   `undoApply`) or a file (`loadFile`). It wires the pieces together; no
@@ -50,6 +51,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup installer).
 - `packaging/`: `Info.plist` (with a `@VERSION@` placeholder) and
   `installer.iss`.
+- `fonts/`: the Nerd Font Koil ships (see Icon font) and its license.
 
 ## Build and test
 
@@ -161,11 +163,19 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   first part with a special character, as koil splits it), which
   `setPathColors` draws over the path's color in `theme.regexColors`.
 - **Icon font**: devicons' icons are Nerd Font glyphs in the Private Use
-  Area. `useIconFallbackFont` makes an installed Nerd Font (preferably
-  Symbols Nerd Font Mono) Qt's fallback for them (Qt 6.8+; Qt only takes
-  application fallbacks for real scripts, and treats these as
-  `Script_Common`), so they show in fonts like Menlo. With no Nerd Font
-  installed they're boxes.
+  Area. Koil ships one, JetBrains Mono NL Nerd Font (Nerd Fonts v3.5.1,
+  `fonts/`), compiled into the binary (`include_bytes!` in main.rs), so no
+  packaging script copies it. Every character advances one column, but the
+  icons are drawn up to ~1.75 columns wide, over the next one: that's why an
+  entry has two spaces after its icon. Not the "Mono" variant, which shrinks
+  the icons to one column. "NL" is no ligatures, which would draw several
+  characters, like the `=` line, as one. `useNerdFont` adds it and makes it
+  Qt's fallback for the icons (Qt 6.8+; Qt only takes application fallbacks
+  for real scripts, and treats these as `Script_Common`), so they show in
+  fonts like Menlo. It's also the editor's default font
+  (`defaultFontFamily`), by the family Qt gives it (`System.nerdFontFamily`,
+  as the font has two names, and which one Qt uses depends on the
+  platform). Only the regular weight is shipped: the editor draws no bold.
 - **Clipboard**: the `"+` data carries `session`, random per run; another
   Koil's hidden texts (IDs, which mean other paths there) are dropped on
   paste, so its lines become new entries rather than copies of whatever has

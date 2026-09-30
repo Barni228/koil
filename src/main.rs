@@ -7,7 +7,14 @@ mod koil;
 mod listing;
 mod system;
 
-use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+use cxx_qt_lib::{QByteArray, QGuiApplication, QQmlApplicationEngine, QString, QUrl};
+
+/// JetBrains Mono NL from Nerd Fonts, so the listing's icons always show.
+/// Every character is one column wide, but the icons are drawn bigger, over
+/// the space after them (not the "Mono" variant, which shrinks them to one
+/// column). It has no ligatures, which would draw several characters, like
+/// the `=` line, as one. It's the editor's default font.
+const NERD_FONT: &[u8] = include_bytes!("../fonts/JetBrainsMonoNLNerdFont-Regular.ttf");
 
 fn main() {
     let mut app = QGuiApplication::new();
@@ -16,7 +23,7 @@ fn main() {
         app.set_organization_name(&QString::from("Koil"));
     }
     ffi::use_settings_menu_title();
-    ffi::use_icon_fallback_font();
+    ffi::use_nerd_font(&QByteArray::from(NERD_FONT));
 
     // Qt Quick's default Windows style has no dark theme. Fusion follows the
     // system's light or dark mode, title bar and menus included (FluentWinUI3

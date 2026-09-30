@@ -43,7 +43,8 @@ ApplicationWindow {
     readonly property int defaultFontSize: 16
     readonly property int minFontSize: 6
     readonly property int maxFontSize: 72
-    readonly property string defaultFontFamily: isMac ? "Menlo" : "Consolas"
+    // The Nerd Font Koil ships (JetBrains Mono NL), which has the icons.
+    readonly property string defaultFontFamily: system.nerdFontFamily()
     // The fonts the editor offers: the installed monospaced ones. Finding
     // them loads every font, which takes a moment, so it waits until
     // they're needed (loadFontFamilies).
@@ -509,6 +510,7 @@ ApplicationWindow {
         id: help
 
         theme: theme
+        defaultFontFamily: root.defaultFontFamily
         onClosed: editorView.textArea.forceActiveFocus()
     }
 
