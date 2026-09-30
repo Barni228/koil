@@ -60,11 +60,17 @@ Window {
     }
 
     // Shows the window, centered near the top of the main window the first
-    // time and whenever it was closed.
+    // time and whenever it was closed. It opens with no field focused or
+    // selected (a closed window keeps its focus item, which would get the
+    // keys again, and the field its selection).
     function open() {
         if (!visible) {
             x = app.x + Math.round((app.width - width) / 2);
             y = app.y + Math.round(Math.min(80 * zoom, Math.max(0, (app.height - height) / 2)));
+            fontSearch.focus = false;
+            fontSearch.deselect();
+            sizeInput.focus = false;
+            sizeInput.deselect();
         }
         show();
         raise();
@@ -262,10 +268,25 @@ Window {
                     selectionColor: win.theme.highlight
                     selectedTextColor: win.theme.highlightedText
                     Accessible.name: qsTr("Font")
+
+                    // Selects the whole name with the cursor at its start, so
+                    // the field shows the start of a long one.
+                    function selectFromStart() {
+                        select(text.length, 0);
+                    }
+
                     onTextEdited: fontPicker.search(text)
+                    // Setting the text puts the cursor at its end, which the
+                    // field scrolls to; a long name shows its start instead.
+                    // (An edit always changes the text, so this skips typing.)
+                    onTextChanged: {
+                        if (!fontPicker.searching && text === win.settings.fontFamily)
+                            cursorPosition = 0;
+                    }
+                    Component.onCompleted: cursorPosition = 0
                     onActiveFocusChanged: {
                         if (activeFocus)
-                            selectAll();
+                            fontSearch.selectFromStart();
                         else
                             fontPicker.finish();
                     }
@@ -281,7 +302,7 @@ Window {
                         onTapped: {
                             if (!fontList.visible) {
                                 fontPicker.showList();
-                                fontSearch.selectAll();
+                                fontSearch.selectFromStart();
                             }
                         }
                     }
