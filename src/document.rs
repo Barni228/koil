@@ -42,6 +42,10 @@ pub mod qobject {
         #[qinvokable]
         fn is_file(self: &Document, path: &QString) -> bool;
 
+        /// The dir `path` is in, as an absolute path.
+        #[qinvokable]
+        fn dir_of(self: &Document, path: &QString) -> QString;
+
         /// The home dir, which Koil lists when no path is given.
         #[qinvokable]
         fn home_dir(self: &Document) -> QString;
@@ -86,6 +90,12 @@ impl qobject::Document {
 
     fn is_file(&self, path: &QString) -> bool {
         std::path::Path::new(&path.to_string()).is_file()
+    }
+
+    fn dir_of(&self, path: &QString) -> QString {
+        let path = std::path::absolute(path.to_string()).unwrap_or_default();
+        let dir = path.parent().unwrap_or(&path);
+        QString::from(dir.to_string_lossy().as_ref())
     }
 
     fn home_dir(&self) -> QString {

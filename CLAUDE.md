@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Koil's desktop app: a vim-style editor in Rust + Qt 6 via cxx-qt 0.10, with the
+Koil desktop app: a vim-style editor in Rust + Qt 6 via cxx-qt 0.10, with the
 UI in QML, that edits a directory as text (like oil.nvim) through koil-core
 (`../koil-core`, a library; `../koil-cli` is its CLI; read their CLAUDE.md for
 how Koil works). The editor is the one from `~/projects/vim-edit`, cleaned up.
@@ -104,7 +104,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   until the next check.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown): `Space
   Space` updates, `Space a` applies, `-` opens `..` (`3-`: `../../..`), and
-  Enter opens the dir on its line (or the path line), else it's vim's Enter.
+  Enter opens the dir or file on its line (`listing::target_on_line`: a dir
+  if the name ends with `/`, else the file its ID points to on disk, even if
+  the line renames it; a new entry isn't there to open) or the path line.
+  On a line without an entry it's vim's Enter. In a file with a path, `-` is
+  Koil's too (`leaveFile`): back to the listing, on the file's line.
   They're only matched at the start of a normal-mode command (so `d-` and
   visual `-` are vim's), with a count; a Space followed by anything else is a
   bad command. Shift+Enter is its own token, `<S-CR>`, a motion like `<CR>`,
@@ -132,9 +136,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   edits or pending changes (`koil.hasChanges()` after each update). `:q`
   updates first (`unsaved`); `:confirm q` asks to apply the changes, where No
   quits without them. `:wq` applies, then quits.
-- **Files**: File > Open (and a file on the command line) leaves the listing
-  (updating it first, so its edits stay in koil) for a plain editor: no
-  `commandKeys`, colors or problems, and `:w` saves. File > Open Folder
+- **Files**: Enter on a file, File > Open (and a file on the command line)
+  leave the listing (updating it first, so its edits stay in koil) for a
+  plain editor: no colors or problems, only `-` of `commandKeys`, and `:w`
+  saves. `-` goes back to what's still open in koil, on `openedFrom` (the
+  entry Enter was on), or for a file opened otherwise, opens its dir. Unsaved
+  changes are asked about first (save, drop, or stay). `:q` in a file also
+  refuses while the listing has pending changes (E162), and `:confirm q`
+  goes back to the listing to ask about applying them. File > Open Folder
   (Cmd+Shift+O) and a dir or pattern on the command line list it; with no
   argument Koil lists the home dir.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on

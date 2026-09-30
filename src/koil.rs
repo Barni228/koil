@@ -64,9 +64,10 @@ pub mod qobject {
             open: &QString,
         ) -> QString;
 
-        /// The dir that Enter on `line` (from 0) opens, or "".
+        /// What Enter on `line` (from 0) opens, as `listing::Target` (like
+        /// `{ "dir": "src" }`), or null.
         #[qinvokable]
-        fn dir_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
+        fn target_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
         /// What applying would do, as a list of lines like `MOVE a -> b`.
         #[qinvokable]
@@ -190,12 +191,11 @@ impl qobject::Koil {
         ))
     }
 
-    fn dir_on_line(&self, text: &QString, hidden: &QString, line: i32) -> QString {
-        let Ok(line) = usize::try_from(line) else {
-            return QString::default();
-        };
-        let dir = listing::dir_on_line(&text.to_string(), &read_hidden(hidden), line);
-        QString::from(dir.unwrap_or_default().as_str())
+    fn target_on_line(&self, text: &QString, hidden: &QString, line: i32) -> QString {
+        let target = usize::try_from(line).ok().and_then(|line| {
+            listing::target_on_line(&self.koil, &text.to_string(), &read_hidden(hidden), line)
+        });
+        to_json(&target)
     }
 
     fn actions(&self) -> QString {

@@ -31,6 +31,9 @@ ApplicationWindow {
     // the line they're for.
     property var pathSyntax: []
     property string pathLine: ""
+    // The listing's entry a file was opened from (with Enter), which `-`
+    // goes back to; "" for a file opened otherwise.
+    property string openedFrom: ""
     // A file's unsaved changes, or the listing's edits and changes that
     // aren't applied.
     property bool modified: false
@@ -167,17 +170,48 @@ ApplicationWindow {
             updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
         else if (name === "open")
             openLine(count);
+        else if (name === "back")
+            leaveFile(false);
     }
 
-    // Enter: opens the dir on the cursor's line, or the path on the first
-    // line. On any other line it's vim's Enter.
+    // Enter: opens the dir or file on the cursor's line, or the path on the
+    // first line. On a line without an entry it's vim's Enter.
     function openLine(count) {
         const t = editorView.textArea.text, line = Txt.lineOf(t, vim.cursor) - 1;
-        const dir = line === 0 ? "" : koil.dirOnLine(t, JSON.stringify(vim.hidden), line);
-        if (line === 0 || dir)
-            updateListing(dir);
-        else
+        const target = line === 0 ? { dir: "" } : JSON.parse(koil.targetOnLine(t, JSON.stringify(vim.hidden), line));
+        if (!target) {
             vim.runMotion("<CR>", count);
+        } else if (target.dir !== undefined) {
+            updateListing(target.dir);
+        } else if (target.new !== undefined) {
+            vim.showError("“" + target.new + "” isn't there until the changes are applied (Space a)");
+        } else {
+            // The file on disk, even if the line renames it; loadFile updates
+            // the listing first.
+            openedFrom = target.file.name;
+            doc.openFile(target.file.path);
+        }
+    }
+
+    // `-` in a file: back to the listing it was opened from, or else its
+    // dir's, with the cursor on its entry. Unsaved changes are saved (or
+    // dropped) first, if the user says so.
+    function leaveFile(force) {
+        if (modified && !force) {
+            confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => {
+                if (doc.saveFile(filePath, editorView.textArea.text))
+                    leaveFile(true);
+            }, () => leaveFile(true));
+            return;
+        }
+        if (!openedFrom) {
+            const r = JSON.parse(koil.open(doc.dirOf(filePath)));
+            if (!r.ok) {
+                vim.showError(r.message);
+                return;
+            }
+        }
+        showListing(true, openedFrom || fileName);
     }
 
     // Applies the listing's changes once the user confirms them (Space a,
@@ -246,7 +280,7 @@ ApplicationWindow {
     // Whether quitting would lose something: a file's unsaved changes, or
     // the listing's changes that aren't applied (which it reads first).
     function unsaved() {
-        return listing ? !updateListing() || koil.hasChanges() : modified;
+        return listing ? !updateListing() || koil.hasChanges() : modified || koil.hasChanges();
     }
 
     function openFile() {
@@ -378,19 +412,31 @@ ApplicationWindow {
                 " a": "apply",
                 "-": "parent",
                 "<CR>": "open"
+            }) : root.filePath ? ({
+                "-": "back"
             }) : ({})
 
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: quit => root.save(quit)
         onQuitRequested: (force, confirm) => {
-            if (force || !root.unsaved())
+            if (force || !root.unsaved()) {
                 Qt.quit();
-            else if (confirm && root.listing)
-                root.applyChanges(true, true);
-            else if (confirm)
+            } else if (root.listing || !root.modified) {
+                // The listing's changes, maybe while a file is open.
+                if (!confirm) {
+                    vim.showError(root.listing ? "E37: No write since last change (add ! to override)"
+                        : "E162: No write since last change for the listing (add ! to override)");
+                } else {
+                    if (!root.listing)
+                        root.leaveFile(false);
+                    if (root.listing)
+                        root.applyChanges(true, true);
+                }
+            } else if (confirm) {
                 confirmDialog.ask("Save changes to “" + root.fileName + "”?", "", () => root.save(true), () => Qt.quit());
-            else
+            } else {
                 vim.showError("E37: No write since last change (add ! to override)");
+            }
         }
         onKeyCommand: (name, count) => root.runKeyCommand(name, count)
         onNothingToUndo: {
@@ -535,7 +581,10 @@ ApplicationWindow {
         id: openDialog
 
         fileMode: FileDialog.OpenFile
-        onAccepted: doc.openFile(doc.urlToPath(selectedFile))
+        onAccepted: {
+            root.openedFrom = "";
+            doc.openFile(doc.urlToPath(selectedFile));
+        }
     }
 
     FolderDialog {

@@ -40,9 +40,11 @@ Popup {
                 ["Space a  :w", "Apply the changes, after showing what they'll do. `:wq` quits afterwards."],
                 ["u", "With no edit left to undo: undo the last apply, after showing what that will do. "
                     + "Deleted entries come back from the trash."],
-                ["Enter", "Open the dir on the cursor's line, or the path on the first line."],
+                ["Enter", "Open the dir or file on the cursor's line, or the path on the first line. A "
+                    + "file opens as it is on disk, even if its line renames it."],
                 ["Shift+Enter", "Vim's Enter: the first character of the next line."],
-                ["-", "Open the dir above (`3-`: three dirs up)."],
+                ["-", "Open the dir above (`3-`: three dirs up). In a file: back to the listing, on the "
+                    + "file's line (asking to save it first, if it has changes)."],
                 ["path", "The first line: a dir, or a pattern of files, like `~/src/**/*.rs`, or a regex "
                     + "with `:set regex` (where `,` is any character but `/`), whose parts get colors."],
                 [(isMac ? "⇧⌘O" : "Ctrl+Shift+O"), "Open a folder. " + cmdKey + "O opens a file to edit "

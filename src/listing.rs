@@ -382,15 +382,42 @@ fn view(koil: &Koil) -> (PathBuf, bool, bool) {
     )
 }
 
-/// The dir that Enter on `line` opens, relative to the open dir: the entry's
-/// name there, if it ends with `/`.
-pub fn dir_on_line(text: &str, hidden: &[Hidden], line: usize) -> Option<String> {
+/// What Enter on a line of the listing opens (see [`target_on_line`]).
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Target {
+    /// A dir, relative to the open one.
+    Dir(String),
+    /// A file on disk, and its name on the line.
+    File { path: PathBuf, name: String },
+    /// A new file, which isn't there until the changes are applied.
+    New(String),
+}
+
+/// What Enter on `line` opens: the dir of an entry whose name ends with `/`,
+/// or else the file the entry is on disk (where its ID points, even if the
+/// line renames it). None on a line without an entry, or with an ID koil
+/// doesn't know.
+pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> Option<Target> {
     let parsed = parse(text, hidden);
     let i = parsed.spots.iter().position(|&(l, _)| l == line)?;
     let entry = &parsed.entries[i];
-    entry
-        .is_dir
-        .then(|| entry.name.to_string_lossy().into_owned())
+    let name = entry.name.to_string_lossy().into_owned();
+    if entry.is_dir {
+        return Some(Target::Dir(name));
+    }
+    let Some(id) = entry.id else {
+        return Some(Target::New(name));
+    };
+    let path = koil.path_of(id)?;
+    Some(match path.is_dir() {
+        // a dir with the `/` taken off its name
+        true => Target::Dir(name),
+        false => Target::File {
+            path: path.to_path_buf(),
+            name,
+        },
+    })
 }
 
 /// What `Koil::apply` would do, as the user sees it, like `MOVE a -> b`.

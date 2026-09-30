@@ -240,11 +240,12 @@ fn test_navigate() {
     let rendered = render(&koil);
 
     // Enter on a dir
+    let target =
+        |koil: &Koil, text: &str, hidden: &[Hidden], line| target_on_line(koil, text, hidden, line);
     assert_eq!(
-        dir_on_line(&rendered.text, &rendered.hidden, 2).as_deref(),
-        Some("dir")
+        target(&koil, &rendered.text, &rendered.hidden, 2),
+        Some(Target::Dir("dir".into()))
     );
-    assert_eq!(dir_on_line(&rendered.text, &rendered.hidden, 3), None);
     let updated = update(
         &mut koil,
         &rendered.text,
@@ -288,6 +289,44 @@ fn test_navigate() {
     assert!(!updated.ok);
     assert_eq!(updated.problems[0].line, 0);
     assert_eq!(koil.current_dir(), root.join("dir"));
+}
+
+#[test]
+fn test_target_on_line() {
+    let (_temp, koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    let rendered = render(&koil);
+    // file.rs renamed on its line, and a new file
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "file.rs" => Some(format!("{}\nnew.txt", line.replace("file.rs", "main.rs"))),
+        _ => Some(line.to_string()),
+    });
+    let target = |line| target_on_line(&koil, &text, &hidden, line);
+    assert_eq!(target(0), None);
+    assert_eq!(target(1), None);
+    assert_eq!(target(2), Some(Target::Dir("dir".into())));
+    assert_eq!(
+        target(3),
+        Some(Target::File {
+            path: root.join("file.rs"),
+            name: "main.rs".into()
+        })
+    );
+    assert_eq!(target(4), Some(Target::New("new.txt".into())));
+    // `..`, and a dir whose `/` was taken off
+    let text = format!("/\n===\n../\n{}dir", rendered.hidden[0].icon);
+    let hidden = [Hidden {
+        at: 10,
+        ..rendered.hidden[0].clone()
+    }];
+    assert_eq!(
+        target_on_line(&koil, &text, &hidden, 2),
+        Some(Target::Dir("..".into()))
+    );
+    assert_eq!(
+        target_on_line(&koil, &text, &hidden, 3),
+        Some(Target::Dir("dir".into()))
+    );
 }
 
 #[test]
