@@ -640,7 +640,6 @@ ApplicationWindow {
         iconColors: root.iconColors
         pendingIconColor: root.pendingIconColor
         pendingLines: root.pendingLines
-        pathSyntax: root.pathSyntax
         problems: root.problems
         onActivated: root.activate(editorView)
         onEdited: {

@@ -195,7 +195,12 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   lines' icons (`setPendingLines`). The highlighter is found by object name
   (no moc for native.cpp). Highlighting counts as a text change to Qt (as
   `fixLineFormat` does), so Editor.qml only emits `edited` when the text
-  really changed (`lastText`). The path field's document has one too
+  really changed (`lastText`), and `trackEdit` returns at once. Coloring
+  again goes through `recolor`: only the lines whose pending state changed,
+  nothing if the colors are the same, and as one edit, with layout off for
+  more than a few lines (`QSyntaxHighlighter` lays the document out after
+  each line, so coloring a 3000-line listing again took a second, and `-`
+  out of it two). The path field's document has one too
   (`setPathColors`, `isPath`): all of it in `theme.directory`, and while the
   path is read as a regex (`:set regex` and the path changed, or a regex is
   open), `pathSyntax` gives its parts (`listing::path_syntax`: after the
@@ -304,7 +309,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   knows one cursor, so with extras vim handles insert-mode typing and arrows
   itself: `editAll` runs an edit at every cursor from last to first, and
   `replaceRange` (or `trackEdit`, for the editor's own edits) moves the cursors
-  after each edit. Leaving insert mode removes them. In normal mode `moveBy`
+  after each edit. Each edit goes over all the text and hidden text, so a key
+  typed at cursors close together is one edit over all of them instead
+  (`editAtOnce`, `replaceRanges`: a block insert over 3000 lines took 12 s
+  a key), and so is a count's repeat of an insert (`repeatInsert`: `10000o`).
+  Leaving insert mode removes them. In normal mode `moveBy`
   moves them too (`moveCursors`; each keeps its own `col` for j/k, and
   `motion(..., quiet)` doesn't scroll), and `execute` runs operators and
   `everyCursorActions` once per cursor (`atEveryCursor`), swapping in each

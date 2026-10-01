@@ -297,6 +297,41 @@ TestCase {
         compare(vim.cursors.length, 0);
     }
 
+    function test_countedInsert() {
+        load("1");
+        keys("3oab<Esc>");
+        compare(render(), "1\nab\nab\nab");
+        compare(vim.cursor, 9);
+        load("x");
+        keys("2ia<CR>b<Esc>");
+        compare(render(), "a\nba\nbx");
+        load("x");
+        keys("3iab<BS>c<Esc>"); // typed again key by key
+        compare(render(), "acacacx");
+        keys("u");
+        compare(render(), "x");
+    }
+
+    function test_blockEditKeepsHidden() {
+        load("Mab\nCcd\nMef");
+        keys("l<C-v>jjIXY<BS><Esc>");
+        compare(render(), "<M:h1>Xab\n<C:h2>Xcd\n<M:h3>Xef");
+        keys("ugg0<C-v>jjIZ<Esc>");
+        compare(render(), "Z<M:h1>ab\nZ<C:h2>cd\nZ<M:h3>ef");
+        keys("ugg0<C-v>jjI<Del><Esc>");
+        compare(render(), "ab\ncd\nef");
+        keys("u");
+        compare(render(), "<M:h1>ab\n<C:h2>cd\n<M:h3>ef");
+        load("Mab\nC\nMef");
+        keys("l<C-v>jjAX<Esc>"); // pads the short line
+        compare(render(), "<M:h1>aXb\n<C:h2> X\n<M:h3>eXf");
+        // Cursors far apart edit one by one.
+        load("a" + "x".repeat(3000) + "\nb");
+        vim.toggleCursor(3002);
+        keys("iZ<Esc>");
+        compare(render(), "Za" + "x".repeat(3000) + "\nZb");
+    }
+
     function test_setAndSearch() {
         load("a b a b");
         keys(":set nu fs+=2<CR>");
@@ -337,8 +372,7 @@ TestCase {
         quits.clear();
         writes.clear();
         keys(":q<CR>:qa<CR>:q!<CR>ZQ:qa!<CR>:conf q<CR>");
-        compare(quits.signalArguments.map(a => [a[0], a[1], a[2]]), [[false, false, false], [false, false, true],
-            [true, false, false], [true, false, false], [true, false, true], [false, true, false]]);
+        compare(quits.signalArguments.map(a => [a[0], a[1], a[2]]), [[false, false, false], [false, false, true], [true, false, false], [true, false, false], [true, false, true], [false, true, false]]);
         keys(":w<CR>:wq<CR>ZZ");
         compare(writes.signalArguments.map(a => [a[0], a[1]]), [[false, false], [true, false], [true, true]]);
     }
@@ -447,7 +481,7 @@ TestCase {
         load("one");
         narrowText.text = "x".repeat(60);
         waitForRendering(narrow);
-        const f = narrow.contentItem;
+        const f = narrow.contentItem as Flickable;
         switchTo(narrowText, {
             cursor: 59
         }, f);

@@ -1365,17 +1365,7 @@ QtObject {
     function leaveInsert() {
         const s = insertSession;
         if (s && !s.broken) {
-            for (let i = 1; i < s.count; i++) {
-                if (s.openLine) {
-                    setCursor(editAll(q => {
-                        const le = Txt.lineEnd(editor.text, q);
-                        replaceRange(le, le, "\n");
-                        return le + 1;
-                    }));
-                }
-                for (const k of s.keys)
-                    typeKey(k);
-            }
+            repeatInsert(s);
             if (s.dot)
                 s.dot.insertKeys = s.keys.slice();
         }
@@ -1395,6 +1385,42 @@ QtObject {
         wantCol = Txt.column(t, cursor);
     }
 
+    // Types what the insert `s` typed count - 1 more times (3ix<Esc>), each
+    // time on a new line for o and O. Text alone goes in as one edit at each
+    // cursor rather than key by key, as each edit has Qt and vim go over all
+    // the text (10000osome text<Esc> took about two minutes).
+    function repeatInsert(s) {
+        const n = s.count - 1;
+        if (n <= 0)
+            return;
+        if (mode === "insert" && !s.keys.some(k => k === "<BS>" || k === "<Del>")) {
+            const typed = s.keys.map(typedText).join("");
+            const text = (s.openLine ? "\n" + typed : typed).repeat(n);
+            setCursor(editAll(q => {
+                const at = s.openLine ? Txt.lineEnd(editor.text, q) : q;
+                replaceRange(at, at, text);
+                return at + text.length;
+            }));
+            return;
+        }
+        for (let i = 0; i < n; i++) {
+            if (s.openLine) {
+                setCursor(editAll(q => {
+                    const le = Txt.lineEnd(editor.text, q);
+                    replaceRange(le, le, "\n");
+                    return le + 1;
+                }));
+            }
+            for (const k of s.keys)
+                typeKey(k);
+        }
+    }
+
+    // The text an insert-mode key types (one that isn't <BS> or <Del>).
+    function typedText(tok) {
+        return tok === "<CR>" ? "\n" : tok === "<Tab>" ? "\t" : tok;
+    }
+
     // Types an insert-mode key at every cursor (for extra cursors, macros,
     // "." and counts; otherwise the editor does it).
     function typeKey(tok) {
@@ -1402,23 +1428,81 @@ QtObject {
             replaceKey(tok);
             return;
         }
+        // What the key does at p in t: replaces [start, end) with text.
+        const edit = (t, p) => {
+            if (tok === "<BS>")
+                return p > 0 ? { start: Txt.charStart(t, p - 1), end: p, text: "" } : null;
+            if (tok === "<Del>")
+                return p < t.length ? { start: p, end: Txt.charEnd(t, p), text: "" } : null;
+            return { start: p, end: p, text: typedText(tok) };
+        };
+        if (cursors.length && editAtOnce(edit))
+            return;
         setCursor(editAll(p => {
-            if (tok === "<BS>") {
-                if (p === 0)
-                    return p;
-                const q = Txt.charStart(editor.text, p - 1);
-                replaceRange(q, p, "");
-                return q;
-            }
-            if (tok === "<Del>") {
-                if (p < editor.length)
-                    replaceRange(p, Txt.charEnd(editor.text, p), "");
+            const e = edit(editor.text, p);
+            if (!e)
                 return p;
-            }
-            const s = tok === "<CR>" ? "\n" : tok === "<Tab>" ? "\t" : tok;
-            replaceRange(p, p, s);
-            return p + s.length;
+            replaceRange(e.start, e.end, e.text);
+            return e.start + e.text.length;
         }));
+    }
+
+    // Makes the edit `edit(text, pos)` gives ({ start, end, text }, or null)
+    // at every cursor, as one edit from the first to the last, and puts each
+    // cursor after its text. One edit per cursor (editAll) has Qt and vim go
+    // over all the text and hidden text each time, so with thousands of
+    // cursors (a block insert in a long listing) typing a key took seconds.
+    // Not for edits that overlap, or cursors over 1000 characters apart on
+    // average, where the one edit would be long: returns whether it made it.
+    function editAtOnce(edit) {
+        const t = editor.text;
+        const all = [{ pos: cursor, main: true }].concat(cursors.filter(c => c.pos !== cursor))
+            .map(c => ({ c: c, e: edit(t, c.pos) || { start: c.pos, end: c.pos, text: "" } }))
+            .sort((a, b) => a.e.start - b.e.start);
+        for (let i = 1; i < all.length; i++) {
+            if (all[i].e.start < all[i - 1].e.end)
+                return false;
+        }
+        if (all[all.length - 1].e.end - all[0].e.start > 1000 * all.length)
+            return false;
+        const ends = replaceRanges(all.map(x => x.e));
+        const placed = all.map((x, i) => Object.assign({}, x.c, { pos: ends[i] }));
+        const main = placed.find(c => c.main);
+        setCursors(placed.filter(c => c !== main), main.pos);
+        setCursor(main.pos);
+        showCursor();
+        return true;
+    }
+
+    // Makes `edits` ({ start, end, text }, in order and not overlapping) as
+    // one replaceRange, keeping the hidden text between them, and returns
+    // where each one's text ends.
+    function replaceRanges(edits) {
+        const t = editor.text, first = edits[0].start, last = edits[edits.length - 1].end;
+        // The new text, with the entries of the icons it keeps (hidden is
+        // sorted, so one pass finds them).
+        const parts = [], entries = [], ends = [];
+        let at = first, length = 0, k = 0;
+        for (const e of edits) {
+            for (; k < hidden.length && hidden[k].at < e.start; k++) {
+                const h = hidden[k];
+                if (h.at >= at && h.at + h.icon.length <= e.start)
+                    entries.push({ at: h.at - at + length, icon: h.icon, text: h.text });
+            }
+            parts.push(t.slice(at, e.start), e.text);
+            length += e.start - at + e.text.length;
+            ends.push(first + length);
+            at = e.end;
+        }
+        // The editor's cursor moves to the end of the new text, and the view
+        // follows it: keep the view where it was.
+        const view = flickable && { x: flickable.contentX, y: flickable.contentY };
+        replaceRange(first, last, parts.join(""), entries);
+        if (view) {
+            flickable.contentX = view.x;
+            flickable.contentY = view.y;
+        }
+        return ends;
     }
 
     // Types a replace-mode key at every cursor. Each cursor keeps what it
@@ -1668,14 +1752,18 @@ QtObject {
     // in pad are added there first, to line the cursors up), the first being
     // the main one.
     function startBlockInsert(points) {
+        // The lines' starts, in one pass (the points are in order of their
+        // lines; lineToPos goes over every line before), then the padding,
+        // as one edit.
+        const t = editor.text, starts = [];
+        let line = points[0].line, ls = Txt.lineToPos(t, line);
         for (const q of points) {
-            if (q.pad) {
-                const at = Txt.lineToPos(editor.text, q.line) + q.offset;
-                replaceRange(at, at, q.pad);
-            }
+            for (; line < q.line; line++)
+                ls = Txt.lineEnd(t, ls) + 1;
+            starts.push(ls);
         }
-        const t = editor.text;
-        const at = points.map(q => Txt.lineToPos(t, q.line) + q.offset + q.pad.length);
+        const pads = points.map((q, i) => ({ start: starts[i] + q.offset, end: starts[i] + q.offset, text: q.pad }));
+        const at = pads.some(e => e.text) ? replaceRanges(pads) : pads.map(e => e.start);
         startInsert(1, at[0], null);
         insertSession.dot = null;
         setCursors(at.slice(1).map(p => ({ pos: p })));
@@ -2152,6 +2240,8 @@ QtObject {
         if (editing || !hidden.length && !cursors.length)
             return;
         const before = trackedText, after = editor.text;
+        if (after === before)
+            return; // only its colors changed
         trackedText = after;
         const d = diff(before, after, [], []);
         if (d) {

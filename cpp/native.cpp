@@ -1,6 +1,7 @@
 #include "native.h"
 
 #include <algorithm>
+#include <optional>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
@@ -145,6 +146,32 @@ colored(const QString& color)
   return format;
 }
 
+// Colors the document's lines again: the ones in `lines` (numbers, from
+// 0), or all of them. It's one edit, so the text's change signals (and what
+// QML does on them) come once, not once a line. QSyntaxHighlighter also
+// lays the document out again after each line whose colors change, which
+// took a second for all of a few thousand lines, so for more than a few the
+// layout waits until the end, and is done once.
+void
+recolor(QSyntaxHighlighter* highlighter, const std::optional<QSet<int>>& lines = std::nullopt)
+{
+  auto* document = highlighter->document();
+  const bool many = !lines || lines->size() > 20;
+  if (many)
+    document->setLayoutEnabled(false);
+  if (lines) {
+    QTextCursor cursor(document);
+    cursor.beginEditBlock();
+    for (const int line : *lines)
+      highlighter->rehighlightBlock(document->findBlockByNumber(line));
+    cursor.endEditBlock();
+  } else {
+    highlighter->rehighlight();
+  }
+  if (many)
+    document->setLayoutEnabled(true);
+}
+
 } // namespace
 
 void
@@ -250,12 +277,18 @@ setListingColors(QObject* textDocument,
     delete highlighter; // which takes its colors away
     return;
   }
-  highlighter->icons.clear();
+  QHash<QString, QTextCharFormat> icons;
   for (qsizetype i = 0; i + 1 < iconColors.size(); i += 2)
-    highlighter->icons.insert(iconColors.at(i), colored(iconColors.at(i + 1)));
-  highlighter->pendingIcon = colored(pendingIconColor);
-  highlighter->directory = colored(directoryColor);
-  highlighter->rehighlight();
+    icons.insert(iconColors.at(i), colored(iconColors.at(i + 1)));
+  const auto pendingIcon = colored(pendingIconColor);
+  const auto directory = colored(directoryColor);
+  if (icons == highlighter->icons && pendingIcon == highlighter->pendingIcon &&
+      directory == highlighter->directory)
+    return;
+  highlighter->icons = icons;
+  highlighter->pendingIcon = pendingIcon;
+  highlighter->directory = directory;
+  recolor(highlighter);
 }
 
 void
@@ -269,8 +302,12 @@ setPendingLines(QObject* textDocument, const QStringList& lines)
     pending.insert(line.toInt());
   if (pending == highlighter->pending)
     return;
+  // The lines that were pending or are now, but not both.
+  QSet<int> changed = pending;
+  changed.unite(highlighter->pending);
+  changed.subtract(QSet<int>(pending).intersect(highlighter->pending));
   highlighter->pending = pending;
-  highlighter->rehighlight();
+  recolor(highlighter, changed);
 }
 
 void
@@ -284,7 +321,7 @@ setPathColors(QObject* textDocument, const QString& directoryColor, const QStrin
   highlighter->spans.clear();
   for (qsizetype i = 0; i + 2 < spans.size(); i += 3)
     highlighter->spans.append({ spans.at(i).toInt(), spans.at(i + 1).toInt(), colored(spans.at(i + 2)) });
-  highlighter->rehighlight();
+  recolor(highlighter);
 }
 
 QStringList
