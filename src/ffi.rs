@@ -51,8 +51,13 @@ mod bridge {
         unsafe fn set_listing_colors(
             text_document: *mut QObject,
             icon_colors: &QStringList,
+            pending_icon_color: &QString,
             directory_color: &QString,
         );
+
+        /// The listing's lines whose entries are pending (see native.h).
+        #[cxx_name = "setPendingLines"]
+        unsafe fn set_pending_lines(text_document: *mut QObject, lines: &QStringList);
 
         /// Colors the path field's QQuickTextDocument (see native.h).
         #[cxx_name = "setPathColors"]

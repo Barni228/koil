@@ -21,6 +21,12 @@ use serde::{Deserialize, Serialize};
 const FILE_ICON: char = '\u{f016}';
 /// The color devicons gives its default icons.
 const FILE_COLOR: &str = "#7e8ea8";
+/// The color of a pending entry's icon (see [`pending_lines`]), in a dark
+/// and in a light theme, which no other icon comes near (see [`apart`]).
+const PENDING_COLOR: [&str; 2] = ["#ffffff", "#000000"];
+/// How far every other icon stays from a pending entry's color, in some
+/// channel.
+const APART: u8 = 0x33;
 
 /// An icon in the text that hides some text: an entry's ID.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +58,7 @@ pub struct Problem {
 
 /// A listing as the editor shows it.
 #[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Rendered {
     /// What's open, for the path field.
     pub path: String,
@@ -61,13 +68,16 @@ pub struct Rendered {
     /// The name on each line, with a `/` after a dir's.
     pub names: Vec<String>,
     /// The color of each icon, in a dark and in a light theme.
-    pub colors: HashMap<String, [&'static str; 2]>,
+    pub colors: HashMap<String, [String; 2]>,
+    /// The color of a pending entry's icon (see `PENDING_COLOR`).
+    pub pending_color: [&'static str; 2],
 }
 
 /// The listing of what `koil` has open.
 pub fn render(koil: &Koil) -> Rendered {
     let mut rendered = Rendered {
         path: show_path(&koil.location()),
+        pending_color: PENDING_COLOR,
         ..Rendered::default()
     };
     // The text's length, kept rather than counted for each line.
@@ -103,16 +113,45 @@ fn entry_name(entry: &Entry) -> String {
 
 /// The icon of the entry `name` in `dir`, and its color in a dark and in a
 /// light theme.
-fn icon(dir: &Path, name: &str) -> (char, [&'static str; 2]) {
+fn icon(dir: &Path, name: &str) -> (char, [String; 2]) {
     // A dir's name ends with `/`, which tells devicons it's a dir without
     // asking the filesystem.
     let path = dir.join(name);
     let dark = devicons::icon_for_file(&path, &Some(Theme::Dark));
     let light = devicons::icon_for_file(&path, &Some(Theme::Light));
     if dark.icon == '*' {
-        return (FILE_ICON, [FILE_COLOR, FILE_COLOR]);
+        return (FILE_ICON, [FILE_COLOR.into(), FILE_COLOR.into()]);
     }
-    (dark.icon, [dark.color, light.color])
+    (
+        dark.icon,
+        [apart(dark.color, true), apart(light.color, false)],
+    )
+}
+
+/// `color` (like `#rrggbb`, for a dark theme if `dark`), unless it's within
+/// `APART` of a pending entry's icon color (see `PENDING_COLOR`) in every
+/// channel, like devicons' white icons: then a fifth of the way from it,
+/// darker in a dark theme and lighter in a light one.
+fn apart(color: &str, dark: bool) -> String {
+    let channel = |i: usize| u8::from_str_radix(color.get(1 + 2 * i..3 + 2 * i)?, 16).ok();
+    let Some(channels) = [channel(0), channel(1), channel(2)]
+        .into_iter()
+        .collect::<Option<Vec<u8>>>()
+    else {
+        return color.to_string();
+    };
+    let near = match dark {
+        true => channels.iter().all(|&c| c > u8::MAX - APART),
+        false => channels.iter().all(|&c| c < APART),
+    };
+    if !near {
+        return color.to_string();
+    }
+    let moved = channels.iter().map(|&c| match dark {
+        true => c - c / 5,
+        false => c + (u8::MAX - c) / 5,
+    });
+    format!("#{}", moved.map(|c| format!("{c:02x}")).collect::<String>())
 }
 
 /// A listing as the user edited it.
@@ -247,6 +286,24 @@ fn problem(parsed: &Parsed, entry: usize, severity: Severity, message: String) -
         severity,
         message,
     }
+}
+
+/// The lines (from 0) of entries that aren't on disk as the listing shows
+/// them yet, which applying would change: new ones (but `../`), and ones
+/// whose path isn't their ID's (renamed, copied, or moved here from another
+/// dir). Their icons get `PENDING_COLOR`.
+pub fn pending_lines(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
+    let parsed = parse(text, hidden);
+    let dir = koil.current_dir();
+    let pending = |entry: &Entry| match entry.id {
+        None => !entry.is_parent(),
+        Some(id) => koil.path_of(id) != Some(dir.join(&entry.name).as_path()),
+    };
+    let entries = parsed.entries.iter().zip(&parsed.spots);
+    entries
+        .filter(|(entry, _)| pending(entry))
+        .map(|(_, &(line, _))| line)
+        .collect()
 }
 
 /// What [`update`] did.

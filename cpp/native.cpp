@@ -4,6 +4,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
+#include <QtCore/QSet>
 #include <QtCore/QTranslator>
 #include <QtGui/QClipboard>
 #include <QtGui/QFontDatabase>
@@ -76,6 +77,10 @@ public:
   // listing.
   bool isPath = false;
   QHash<QString, QTextCharFormat> icons;
+  // The icon of a pending entry: one on a line in `pending` (see
+  // setPendingLines).
+  QTextCharFormat pendingIcon;
+  QSet<int> pending;
   QTextCharFormat directory;
   struct Span
   {
@@ -103,7 +108,7 @@ protected:
       text.at(start).isHighSurrogate() && start + 1 < text.size() ? 2 : 1;
     const auto icon = icons.constFind(text.mid(start, length));
     if (icon != icons.cend()) {
-      setFormat(start, length, *icon);
+      setFormat(start, length, pending.contains(currentBlock().blockNumber()) ? pendingIcon : *icon);
       start += length;
     }
     if (trimmed.endsWith(u'/'))
@@ -215,6 +220,7 @@ setLineFormat(QObject* textDocument, double height, double bottomMargin)
 void
 setListingColors(QObject* textDocument,
                  const QStringList& iconColors,
+                 const QString& pendingIconColor,
                  const QString& directoryColor)
 {
   auto* highlighter = highlighterOf(textDocument, !directoryColor.isEmpty());
@@ -227,7 +233,23 @@ setListingColors(QObject* textDocument,
   highlighter->icons.clear();
   for (qsizetype i = 0; i + 1 < iconColors.size(); i += 2)
     highlighter->icons.insert(iconColors.at(i), colored(iconColors.at(i + 1)));
+  highlighter->pendingIcon = colored(pendingIconColor);
   highlighter->directory = colored(directoryColor);
+  highlighter->rehighlight();
+}
+
+void
+setPendingLines(QObject* textDocument, const QStringList& lines)
+{
+  auto* highlighter = highlighterOf(textDocument, false);
+  if (!highlighter || highlighter->isPath)
+    return;
+  QSet<int> pending;
+  for (const auto& line : lines)
+    pending.insert(line.toInt());
+  if (pending == highlighter->pending)
+    return;
+  highlighter->pending = pending;
   highlighter->rehighlight();
 }
 

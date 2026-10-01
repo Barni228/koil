@@ -181,15 +181,25 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   the editor's document colors each line's icon (colors from devicons,
   gathered from every listing shown, `iconColors`, dark or light by theme)
   and `/`-ending names (`theme.directory`). It's text-based, so it follows
-  edits. It's found by object name (no moc for native.cpp). Highlighting
-  counts as a text change to Qt (as `fixLineFormat` does), so Editor.qml
-  only emits `edited` when the text really changed (`lastText`). The path
-  field's document has one too (`setPathColors`, `isPath`): all of it in
-  `theme.directory`, and while the path is read as a regex (`:set regex` and
-  the path changed, or a regex is open), `pathSyntax` gives its parts
-  (`listing::path_syntax`: after the longest existing dir, from the first
-  part with a special character, as koil splits it), drawn over that in
-  `theme.regexColors`.
+  edits. A pending entry's icon (one applying would change: new, but not
+  `../`, or at a path that isn't its ID's on disk, so renamed, copied or
+  moved here; `listing::pending_lines`) is pure white in a dark theme and
+  pure black in a light one (`PENDING_COLOR`, sent as `pendingColor`), and
+  `listing::apart` moves devicons' colors that come within `APART` of those
+  (its white icons, like `vercel.json`'s) a fifth away. main.qml finds the
+  pending lines after every edit of the listing (`updatePendingLines`, with
+  `Qt.callLater`: halfway through vim's `replaceRange` its hidden text isn't
+  up to date, and coloring is a text change to Qt, which would make
+  `trackEdit` shift the hidden text again), and the highlighter colors those
+  lines' icons (`setPendingLines`). The highlighter is found by object name
+  (no moc for native.cpp). Highlighting counts as a text change to Qt (as
+  `fixLineFormat` does), so Editor.qml only emits `edited` when the text
+  really changed (`lastText`). The path field's document has one too
+  (`setPathColors`, `isPath`): all of it in `theme.directory`, and while the
+  path is read as a regex (`:set regex` and the path changed, or a regex is
+  open), `pathSyntax` gives its parts (`listing::path_syntax`: after the
+  longest existing dir, from the first part with a special character, as koil
+  splits it), drawn over that in `theme.regexColors`.
 - **Icon font**: devicons' icons are Nerd Font glyphs in the Private Use
   Area. Koil ships one, JetBrains Mono NL Nerd Font (Nerd Fonts v3.5.1,
   `fonts/`), compiled into the binary (`include_bytes!` in main.rs), so no

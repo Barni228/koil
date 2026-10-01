@@ -29,9 +29,11 @@ ApplicationWindow {
     // The editor vim edits: the listing's (or the file's), or the path
     // field (see activate).
     property Editor activeView: editorView
-    // The colors of the icons the listings have shown (see
-    // Editor.iconColors).
+    // The colors of the icons the listings have shown, and of a pending
+    // entry's, and the lines of the pending ones (see Editor.iconColors).
     property var iconColors: ({})
+    property var pendingIconColor: ["", ""]
+    property var pendingLines: []
     // The parts of the regex in the path field (see Editor.pathSyntax), and
     // the path they're for.
     property var pathSyntax: []
@@ -112,6 +114,7 @@ ApplicationWindow {
     function showListing(moved, from) {
         const r = JSON.parse(koil.render());
         iconColors = Object.assign({}, iconColors, r.colors);
+        pendingIconColor = r.pendingColor;
         location = r.path;
         const inPath = listing && activeView === pathView;
         activate(editorView);
@@ -133,6 +136,7 @@ ApplicationWindow {
         showPath(r.path);
         modified = koil.hasChanges();
         checkListing();
+        updatePendingLines();
         updatePathSyntax(true);
         if (inPath)
             activate(pathView);
@@ -179,6 +183,14 @@ ApplicationWindow {
             return;
         pathLine = line;
         pathSyntax = listing ? JSON.parse(koil.pathSyntax(line)) : [];
+    }
+
+    // Finds the listing's lines whose entries applying would change, after
+    // every edit. Called later after vim's: halfway through one, its hidden
+    // text isn't up to date, and coloring counts as a text change, which
+    // would make it shift that text again.
+    function updatePendingLines() {
+        pendingLines = listing ? JSON.parse(koil.pendingLines(editorView.textArea.text, JSON.stringify(editorView.hidden))) : [];
     }
 
     function checkListing() {
@@ -626,6 +638,8 @@ ApplicationWindow {
         system: system
         listing: root.listing
         iconColors: root.iconColors
+        pendingIconColor: root.pendingIconColor
+        pendingLines: root.pendingLines
         pathSyntax: root.pathSyntax
         problems: root.problems
         onActivated: root.activate(editorView)
@@ -633,7 +647,7 @@ ApplicationWindow {
             root.modified = true;
             if (root.listing) {
                 checkTimer.restart();
-                root.updatePathSyntax();
+                Qt.callLater(root.updatePendingLines);
             }
         }
     }

@@ -61,6 +61,11 @@ pub mod qobject {
             open: &QString,
         ) -> QString;
 
+        /// The lines of the listing `text` (with `hidden`) whose entries
+        /// applying would change (see `listing::pending_lines`), as a list.
+        #[qinvokable]
+        fn pending_lines(self: &Koil, text: &QString, hidden: &QString) -> QString;
+
         /// What Enter on `line` (from 0) opens, as `listing::Target` (like
         /// `{ "dir": "src" }`), or null.
         #[qinvokable]
@@ -188,6 +193,14 @@ impl qobject::Koil {
             &hidden,
             &settings,
             open,
+        ))
+    }
+
+    fn pending_lines(&self, text: &QString, hidden: &QString) -> QString {
+        to_json(&listing::pending_lines(
+            &self.koil,
+            &text.to_string(),
+            &read_hidden(hidden),
         ))
     }
 

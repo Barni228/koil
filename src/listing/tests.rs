@@ -82,6 +82,100 @@ fn test_render() {
 }
 
 #[test]
+fn test_pending_color_apart() {
+    // devicons' white and near-white icons, and its darkest light ones
+    assert_eq!(apart("#ffffff", true), "#cccccc");
+    assert_eq!(apart("#fff2f2", true), "#ccc2c2");
+    assert_eq!(apart("#ffffcd", true), "#cccca4");
+    assert_eq!(apart("#2f2f2f", false), "#585858");
+    assert_eq!(apart("#000000", false), "#333333");
+    // the rest stay
+    assert_eq!(apart("#c8c8c8", true), "#c8c8c8");
+    assert_eq!(apart("#ffffff", false), "#ffffff");
+    assert_eq!(apart("#000000", true), "#000000");
+    assert_eq!(apart("#e44d26", true), "#e44d26");
+    assert_eq!(apart("not a color", true), "not a color");
+
+    // files devicons gives white icons
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["vercel.json", "gtkrc", "board.kicad_pcb"] {
+        fs::write(temp.path().join(name), "").unwrap();
+    }
+    let mut koil = Koil::default();
+    koil.open(temp.path()).unwrap();
+    assert_eq!(icon(temp.path(), "vercel.json").1[0], "#cccccc");
+    let rendered = render(&koil);
+    assert_eq!(rendered.pending_color, PENDING_COLOR);
+    for colors in rendered.colors.values() {
+        assert_ne!(colors[0], PENDING_COLOR[0]);
+        assert_ne!(colors[1], PENDING_COLOR[1]);
+    }
+}
+
+#[test]
+fn test_pending_lines() {
+    let (_temp, mut koil) = koil();
+    let rendered = render(&koil);
+    assert!(pending_lines(&koil, &rendered.text, &rendered.hidden).is_empty());
+
+    // file.rs renamed, notes copied as notes2, a new file, and `../`
+    let lines: Vec<&str> = rendered.text.split('\n').collect();
+    let text = [
+        lines[0].to_string(),
+        lines[1].replace("file.rs", "main.rs"),
+        lines[2].to_string(),
+        lines[2].replace("notes", "notes2"),
+        "new.txt".to_string(),
+        "../".to_string(),
+    ]
+    .join("\n");
+    // Each line's icon keeps the ID of the line it came from.
+    let ids = [Some(0), Some(1), Some(2), Some(2), None, None];
+    let mut hidden = Vec::new();
+    let mut at = 0;
+    for (line, id) in text.split('\n').zip(ids) {
+        if let Some(id) = id {
+            hidden.push(Hidden {
+                at,
+                ..rendered.hidden[id].clone()
+            });
+        }
+        at += utf16_len(line) + 1;
+    }
+    assert_eq!(pending_lines(&koil, &text, &hidden), [1, 3, 4]);
+
+    // still pending once koil has read them, until they're applied
+    let updated = update_listing(&mut koil, &text, &hidden);
+    assert!(updated.ok, "{updated:?}");
+    let rendered = render(&koil);
+    let lines = pending_lines(&koil, &rendered.text, &rendered.hidden);
+    let mut names: Vec<&str> = lines.iter().map(|&l| rendered.names[l].as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["main.rs", "new.txt", "notes2"]);
+
+    // an entry pasted into another dir is moved there
+    let path = show_path(&koil.location());
+    let updated = update(
+        &mut koil,
+        &path,
+        &rendered.text,
+        &rendered.hidden,
+        &Settings::default(),
+        Some("dir"),
+    );
+    assert!(updated.ok, "{updated:?}");
+    let notes = rendered.names.iter().position(|n| n == "notes").unwrap();
+    let line = rendered.text.split('\n').nth(notes).unwrap();
+    let h = rendered
+        .hidden
+        .iter()
+        .find(|h| h.text == hidden[2].text)
+        .unwrap();
+    let moved = [Hidden { at: 0, ..h.clone() }];
+    assert_eq!(pending_lines(&koil, line, &moved), [0]);
+}
+
+#[test]
 fn test_parse_rendered() {
     let (_temp, koil) = koil();
     let rendered = render(&koil);

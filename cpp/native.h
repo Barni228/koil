@@ -37,12 +37,18 @@ void setLineFormat(QObject* textDocument, double height, double bottomMargin);
 
 // Colors Koil's listing in a TextEdit's document (a QQuickTextDocument):
 // the icon at a line's start in its color (`iconColors` alternates icons and
-// colors), and a dir's name (a line ending in "/") in `directoryColor`. It
-// follows edits. An empty `directoryColor` takes the colors away (a file is
-// open).
+// colors), or in `pendingIconColor` on a pending entry's line (see
+// setPendingLines), and a dir's name (a line ending in "/") in
+// `directoryColor`. It follows edits. An empty `directoryColor` takes the
+// colors away (a file is open).
 void setListingColors(QObject* textDocument,
                       const QStringList& iconColors,
+                      const QString& pendingIconColor,
                       const QString& directoryColor);
+
+// Tells setListingColors which lines (numbers, from 0) have an entry that
+// applying would change. They move with edits, so this follows each one.
+void setPendingLines(QObject* textDocument, const QStringList& lines);
 
 // Colors the path field's document (a QQuickTextDocument): all of it in
 // `directoryColor`, and parts of it (a regex's) over that: `spans` holds a

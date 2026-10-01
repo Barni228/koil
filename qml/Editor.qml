@@ -20,10 +20,13 @@ Item {
     // System (main.qml), for the line format and the listing's colors.
     required property var system
     // Whether the text is Koil's listing (rather than a file), which gets
-    // colors: its icons' (`iconColors`, as { icon: [dark, light] }), and
-    // its dirs'.
+    // colors: its icons' (`iconColors`, as { icon: [dark, light] }, or
+    // `pendingIconColor` on `pendingLines`, the lines whose entries applying
+    // would change: see listing::pending_lines), and its dirs'.
     property bool listing: false
     property var iconColors: ({})
+    property var pendingIconColor: ["", ""]
+    property var pendingLines: []
     // Whether this is the path field over the listing: one line, in the
     // dirs' color, with no line numbers. `pathSyntax` holds the parts of it
     // to color (a regex's), as { start, length, kind } (see listing::Span).
@@ -89,11 +92,19 @@ Item {
         const colors = [];
         for (const icon in iconColors)
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
-        system.setListingColors(editor.textDocument, colors, listing ? String(theme.directory) : "");
+        system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1], listing ? String(theme.directory) : "");
+        applyPendingLines();
+    }
+
+    function applyPendingLines() {
+        if (listing)
+            system.setPendingLines(editor.textDocument, pendingLines.map(String));
     }
 
     onListingChanged: applyColors()
     onIconColorsChanged: applyColors()
+    onPendingIconColorChanged: applyColors()
+    onPendingLinesChanged: applyPendingLines()
     onPathSyntaxChanged: applyColors()
 
     // An emoji comes from a taller font than the editor's, which makes its

@@ -48,14 +48,25 @@ pub mod qobject {
         );
 
         /// Colors Koil's listing in a TextEdit's `textDocument`: each icon in
-        /// `icon_colors` (icons and colors, alternating), and dirs in
-        /// `directory_color`. No `directory_color` takes the colors away.
+        /// `icon_colors` (icons and colors, alternating), or a pending
+        /// entry's in `pending_icon_color`, and dirs in `directory_color`. No
+        /// `directory_color` takes the colors away.
         #[qinvokable]
         unsafe fn set_listing_colors(
             self: &System,
             text_document: *mut QObject,
             icon_colors: &QStringList,
+            pending_icon_color: &QString,
             directory_color: &QString,
+        );
+
+        /// The lines of the listing in `textDocument` (numbers, from 0) whose
+        /// entries applying would change, whose icons get the pending color.
+        #[qinvokable]
+        unsafe fn set_pending_lines(
+            self: &System,
+            text_document: *mut QObject,
+            lines: &QStringList,
         );
 
         /// Colors the path field's `textDocument`: all of it in
@@ -114,9 +125,24 @@ impl qobject::System {
         &self,
         text_document: *mut qobject::QObject,
         icon_colors: &QStringList,
+        pending_icon_color: &QString,
         directory_color: &QString,
     ) {
-        unsafe { ffi::set_listing_colors(text_document.cast(), icon_colors, directory_color) };
+        unsafe {
+            ffi::set_listing_colors(
+                text_document.cast(),
+                icon_colors,
+                pending_icon_color,
+                directory_color,
+            )
+        };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn set_pending_lines(&self, text_document: *mut qobject::QObject, lines: &QStringList) {
+        unsafe { ffi::set_pending_lines(text_document.cast(), lines) };
     }
 
     /// # Safety
