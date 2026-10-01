@@ -196,7 +196,9 @@ Item {
                 id: scrollBar
             }
 
+            // The trackpad too, which a WheelHandler leaves out by default.
             WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: event => {
                     const dy = event.pixelDelta.y || event.angleDelta.y / 120 * 3 * hover.editor.lineHeight;
                     scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY - dy));

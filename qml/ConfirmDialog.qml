@@ -152,7 +152,9 @@ Popup {
                 id: scrollBar
             }
 
+            // The trackpad too, which a WheelHandler leaves out by default.
             WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: event => dialog.scrollBy(-(event.pixelDelta.y || event.angleDelta.y / 120 * 60 * dialog.zoom))
             }
 

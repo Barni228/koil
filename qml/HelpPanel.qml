@@ -357,7 +357,9 @@ Popup {
 
             onMaxYChanged: help.showSection()
 
+            // The trackpad too, which a WheelHandler leaves out by default.
             WheelHandler {
+                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: event => help.scrollBy(-(event.pixelDelta.y || event.angleDelta.y / 120 * 3 * help.lineStep))
             }
 

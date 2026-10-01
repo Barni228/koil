@@ -455,6 +455,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   picker is a field that searches, with the list in a `Popup.Window` (so the
   Settings window doesn't cut it off); the field keeps the keys, but the popup
   takes Esc, so it closes on Esc itself.
+- **Scrolling boxes**: the help, the hover box and the confirmations are
+  `Flickable`s that aren't interactive (a drag selects their text),
+  scrolled by a `WheelHandler`. It needs `acceptedDevices` with
+  `PointerDevice.TouchPad`: by default it takes only a mouse wheel, and the
+  trackpad's scrolls go to the popup, which drops them.
 - **QML's JavaScript**: don't make a binding depend on something by reading it
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The
