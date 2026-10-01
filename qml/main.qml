@@ -641,6 +641,8 @@ ApplicationWindow {
         pendingIconColor: root.pendingIconColor
         pendingLines: root.pendingLines
         problems: root.problems
+        // An ID as the path it stands for, so the hover says whose it is.
+        describeHidden: text => koil.idPath(text) || text
         onActivated: root.activate(editorView)
         onEdited: {
             root.modified = true;

@@ -409,6 +409,33 @@ fn test_target_on_line() {
 }
 
 #[test]
+fn test_id_path() {
+    let (_temp, mut koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    let rendered = render(&koil);
+    let id = |name: &str| {
+        let line = rendered.names.iter().position(|n| n == name).unwrap();
+        let at: usize = rendered
+            .text
+            .split('\n')
+            .take(line)
+            .map(|l| utf16_len(l) + 1)
+            .sum();
+        let h = rendered.hidden.iter().find(|h| h.at == at).unwrap();
+        h.text.clone()
+    };
+    assert_eq!(id_path(&koil, &id("dir/")), Some("dir/".into()));
+    assert_eq!(id_path(&koil, &id("file.rs")), Some("file.rs".into()));
+    // not an ID, or one koil doesn't know
+    assert_eq!(id_path(&koil, "mushroom"), None);
+    assert_eq!(id_path(&koil, "999999"), None);
+    // outside the open dir: as show_path gives it
+    koil.open(root.join("dir")).unwrap();
+    let file = show_path(&root.join("file.rs"));
+    assert_eq!(id_path(&koil, &id("file.rs")), Some(file));
+}
+
+#[test]
 fn test_settings() {
     let (_temp, mut koil) = koil();
     let rendered = render(&koil);

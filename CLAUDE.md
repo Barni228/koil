@@ -36,7 +36,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   numbers, and the `HoverBox`. Both the listing (or file) and the path field
   are one (`pathField`).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
-  ID), or a warning's or error's message.
+  ID, as its path), or a warning's or error's message.
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, hidden text, `:` and `/`,
   buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
@@ -103,7 +103,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `render` gives a new entry) is dropped, and names are trimmed. An icon
   hiding something that isn't a number is an error, and so is an empty path;
   both block an update like koil's own. devicons' default file icon is `*`
-  (a glob character), so `FILE_ICON` replaces it.
+  (a glob character), so `FILE_ICON` replaces it. The hover shows an ID as
+  the path it stands for, relative to the open dir like the confirmations
+  (`listing::id_path`, given to the editor as `describeHidden`), even on a
+  line that renames it, so it says whose ID it is; hidden text that isn't
+  an ID koil knows shows as it is.
 - **Problems**: `Koil::check` runs 200 ms after the last edit
   (`checkTimer`), and gives `{ line, column, severity, message }`; Editor.qml
   draws each from `column` (where the name starts) to the line's end.

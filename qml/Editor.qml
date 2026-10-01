@@ -36,6 +36,9 @@ Item {
     // column, severity, message } (see listing::Problem): drawn from the
     // column to the line's end.
     property var problems: []
+    // What the hover box shows for the text an icon hides: the text itself,
+    // unless this gives something else (main.qml: the path an ID stands for).
+    property var describeHidden: text => text
     // Vim's state for this editor while it edits another one (see
     // Vim.leaveBuffer), kept here for main.qml to give back.
     property var saved: null

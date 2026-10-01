@@ -469,6 +469,15 @@ pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -
     })
 }
 
+/// The path the ID `id` (an icon's hidden text) stands for, as the hover
+/// shows it: like the confirmations (see [`relative`]), with a `/` after a
+/// dir's. None if it isn't an ID koil knows.
+pub fn id_path(koil: &Koil, id: &str) -> Option<String> {
+    let path = koil.path_of(Id(id.parse().ok()?))?;
+    let slash = if path.is_dir() { "/" } else { "" };
+    Some(format!("{}{slash}", relative(koil, path)))
+}
+
 /// What `Koil::apply` would do, as the user sees it, like `MOVE a -> b`.
 pub fn actions(koil: &Koil) -> Vec<String> {
     let path = |p: &Path| relative(koil, p);

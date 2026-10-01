@@ -188,7 +188,8 @@ Popup {
             rows: [
                 ["icons", "In the listing, each icon hides its entry's ID. It acts like any other character: "
                     + "move over it, select, delete, yank and paste it."],
-                ["gh", "Show the text behind the icon under the cursor (so does resting the mouse on it)."],
+                ["gh", "Show the text behind the icon under the cursor (so does resting the mouse on it). "
+                    + "An ID shows as the path it stands for, even if its line renames it."],
                 ["", "Yanks, undo and copying keep the hidden text. Other apps get the text revealed."]
             ]
         },

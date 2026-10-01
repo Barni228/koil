@@ -62,15 +62,16 @@ Item {
     }
 
     // What there is to show at pos, as { start, end, text, severity }: the
-    // icon that starts there and what it hides (with no severity), or the
-    // warning or error with the character there. Null if nothing.
+    // icon that starts there and what it hides (with no severity, as the
+    // editor describes it), or the warning or error with the character
+    // there. Null if nothing.
     function targetAt(pos) {
         const h = editor.hiddenAt(pos);
         if (h)
             return {
                 start: pos,
                 end: pos + h.icon.length,
-                text: h.text.replace(/\n$/, ""),
+                text: editor.describeHidden(h.text.replace(/\n$/, "")),
                 severity: ""
             };
         const d = editor.diagnosticAt(pos);

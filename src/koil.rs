@@ -71,6 +71,11 @@ pub mod qobject {
         #[qinvokable]
         fn target_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
+        /// The path the ID `id` (an icon's hidden text) stands for (see
+        /// `listing::id_path`), or "" if koil doesn't know it.
+        #[qinvokable]
+        fn id_path(self: &Koil, id: &QString) -> QString;
+
         /// What applying would do, as a list of lines like `MOVE a -> b`.
         #[qinvokable]
         fn actions(self: &Koil) -> QString;
@@ -209,6 +214,11 @@ impl qobject::Koil {
             listing::target_on_line(&self.koil, &text.to_string(), &read_hidden(hidden), line)
         });
         to_json(&target)
+    }
+
+    fn id_path(&self, id: &QString) -> QString {
+        let path = listing::id_path(&self.koil, &id.to_string());
+        QString::from(path.unwrap_or_default().as_str())
     }
 
     fn actions(&self) -> QString {
