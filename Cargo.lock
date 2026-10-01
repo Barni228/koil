@@ -571,7 +571,7 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#1fceaa5fa50a9d12e0fa5ffa1243808c4c99bed0"
+source = "git+https://github.com/Barni228/koil-core#efc85c1e01481d03e835264afef2ac7908f0c8be"
 dependencies = [
  "globset",
  "ignore",
