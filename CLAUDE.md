@@ -271,9 +271,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `flickable` point at that buffer (`null`, or anything missing, starts
   empty). Registers, searches, macros, `.`, the command line and the options
   are shared. The editor vim doesn't edit (`Editor.active` false) keeps the
-  state in `saved`, from which it draws a dimmed block cursor (none in the
-  path field) and its hover finds hidden text (`Editor.hidden`); vim's own
-  overlays (selection, highlights, extra cursors) are drawn only in the
+  state in `saved`, from which its hover finds hidden text
+  (`Editor.hidden`) and its relative line numbers count; vim's own overlays
+  (cursors, the current line, selection, highlights) are drawn only in the
   active one, and its diagnostics and line numbers use its own
   `visibleLines`. A press on the other editor switches before the
   `TextArea` handles it (the `MouseArea`), since the `TextArea` moves its

@@ -69,10 +69,10 @@ Item {
     property string lastText: ""
 
     // The text changed, by vim or by typing (not by setText).
-    signal edited()
+    signal edited
     // The editor was clicked (or given the keyboard) while vim edits the
     // other one, which should switch.
-    signal activated()
+    signal activated
 
     // Replaces the text (a file or a listing was opened); not an edit.
     function setText(text) {
@@ -563,15 +563,13 @@ Item {
 
             // Every cursor: the main one, then the extra ones (Alt+click, or
             // a block insert's lines), as spotAt gives them. After the search
-            // highlights, so they're drawn over them. While vim edits the
-            // other editor, where it left the cursor (the path field shows
-            // none).
+            // highlights, so they're drawn over them. None while vim edits
+            // the other editor.
             Layer {
                 id: carets
 
-                inputs: [view.active, view.cursorPos, view.vim.cursors, editor.cursorRectangle, view.layout]
-                compute: () => !view.active ? (view.pathField ? [] : [view.spotAt(view.cursorPos, true)])
-                    : [view.spotAt(view.vim.cursor, true)].concat(view.vim.cursors.map(c => view.spotAt(c.pos, false)))
+                inputs: [view.active, view.vim.cursor, view.vim.cursors, editor.cursorRectangle, view.layout]
+                compute: () => !view.active ? [] : [view.spotAt(view.vim.cursor, true)].concat(view.vim.cursors.map(c => view.spotAt(c.pos, false)))
 
                 // Shaped like the main one. In insert mode the main one is
                 // the editor's own bar (see cursorDelegate).
@@ -583,8 +581,8 @@ Item {
 
                         cell: modelData.cell
                         character: modelData.character
-                        shape: view.active ? view.vim.cursorShape : "block"
-                        shown: !modelData.main || !view.active || view.vim.mode !== "insert"
+                        shape: view.vim.cursorShape
+                        shown: !modelData.main || view.vim.mode !== "insert"
                     }
                 }
             }
