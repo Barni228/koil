@@ -38,8 +38,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
-  undo, macros, visual block, multiple cursors, hidden text, `:` and `/`,
-  buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
+  undo, macros, visual block, multiple cursors, hidden text, the listing's
+  prefixes, `:` and `/`, buffers). It drives the `TextArea` through
+  `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects),
   imported as `Txt` by Vim.qml and the views.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
@@ -108,6 +109,30 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   (`listing::id_path`, given to the editor as `describeHidden`), even on a
   line that renames it, so it says whose ID it is; hidden text that isn't
   an ID koil knows shows as it is.
+- **Prefixes** (Prefixes in Vim.qml, `linePrefixes`, on while vim edits the
+  listing): a line's icon and the two spaces after it (or three spaces, on
+  a new line) are its prefix, which the cursor never goes into, as if the
+  name started the line. `setCursor`, vim's `clampNormal` and `motion()`
+  move a position out of one (word motions step over it like blanks,
+  `wordStep`; an `f`/`t` target in one isn't found), and `syncFromEditor`
+  does for clicks and the editor's own arrow keys (not while typing:
+  `cursorPositionChanged` comes before `text` has the typed character, so
+  it checks `length`). Lines get one where they start: `o`, `O` and Enter
+  (`lineBreak`), typing on an empty line (`prefixEmptyLine`), and pasted
+  lines that have none (`prefixLines`); `J`, `gJ` and Delete at a line's
+  end drop the next line's with the line break. In insert mode vim types
+  Enter and the keys that would delete into a prefix (`prefixKey`, like
+  Alt+Backspace at a name's start), as `typedEdit` says: Backspace at a
+  name's start clears the icon (the ID goes, so the entry is new), then
+  joins the line to the one above (`X` and `dh` there only clear the icon,
+  as vim's don't join lines, and leave the registers alone); Enter there
+  puts the new line above, so the name keeps its ID. Whole lines (`dd`, `yy`, `V`) keep their
+  prefixes, `cc` keeps its line's (a rename), `>>` indents after it, and
+  text that starts with an icon and two spaces pastes as lines
+  (`pastesLines`; above the cursor's line in insert mode). Search and the
+  find bar skip matches that start in a prefix. The status line's columns
+  (and `|`) count from its end. A line without one (that doesn't start
+  with an icon or a space, then two spaces) is plain.
 - **Problems**: `Koil::check` runs 200 ms after the last edit
   (`checkTimer`), and gives `{ line, column, severity, message }`; Editor.qml
   draws each from `column` (where the name starts) to the line's end.
@@ -368,8 +393,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
     insert mode, and cursor steps go through `Txt.charStart`/`charEnd` (never
     `±1`), which treat an emoji with its modifiers as one character, as Qt
     does. Columns count characters (`Txt.column`, `Txt.atColumn`).
-  - Resting the mouse on an icon (a `HoverHandler`) or `gh` shows its text in
-    the `HoverBox`, in the window's `Overlay` (so the editor doesn't clip it).
+  - Resting the mouse on an icon (a `HoverHandler`) or `gh` (in the listing,
+    on the icon of the cursor's line, unless a problem is under the cursor)
+    shows its text in the `HoverBox`, in the window's `Overlay` (so the
+    editor doesn't clip it).
     Its text is a read-only `TextEdit` that never takes focus, so keys stay
     with the editor, which forwards Copy to it. Any other key, a scroll or an
     edit hides it; one the mouse opened also hides 300 ms after the pointer is

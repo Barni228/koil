@@ -239,8 +239,10 @@ Item {
         function onCursorChanged() {
             hover.hide();
         }
+        // In the listing, the cursor is never on an icon (see Prefixes in
+        // Vim.qml): with nothing under it, gh shows its line's icon's text.
         function onHoverRequested(at) {
-            hover.show(at, false);
+            hover.show(view.listing && !hover.targetAt(at) ? Txt.lineStart(editor.text, at) : at, false);
         }
     }
 

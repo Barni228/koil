@@ -122,7 +122,8 @@ FocusScope {
             && (e === t.length || isSeparator(t[e]) || e > s && isSeparator(t[e - 1]));
     }
 
-    // The matches in t, as the regular expression's results.
+    // The matches in t, as the regular expression's results. One that
+    // starts in a line's prefix (see Prefixes in Vim.qml) doesn't count.
     function scan(t) {
         const re = regExp();
         const found = [];
@@ -133,7 +134,7 @@ FocusScope {
             const e = m.index + m[0].length;
             if (m[0] === "") // step over a whole code point
                 re.lastIndex = m.index + (Txt.isLowSurrogate(t, m.index + 1) ? 2 : 1);
-            if (!wholeWord || isWholeWord(t, m.index, e))
+            if ((!wholeWord || isWholeWord(t, m.index, e)) && !vim.inPrefix(t, m.index))
                 found.push(m);
         }
         return found;

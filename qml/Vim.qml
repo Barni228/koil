@@ -64,6 +64,13 @@ QtObject {
     // becomes a space, and Enter while typing leaves insert mode, then does
     // what it does in normal mode.
     property bool singleLine: false
+    // Koil's listing: each line starts with a prefix, its entry's icon
+    // and two spaces, or three spaces on a line that has none, which the
+    // cursor never goes into (see Prefixes). A line without one is plain.
+    property bool linePrefixes: false
+    // What a new line starts with, and a line break that starts one.
+    readonly property string blankPrefix: linePrefixes ? "   " : ""
+    readonly property string lineBreak: "\n" + blankPrefix
 
     readonly property bool isVisual: mode === "visual" || mode === "visualLine" || mode === "visualBlock"
     // Insert or replace mode: typing edits the text, at the editor's cursor.
@@ -233,15 +240,8 @@ QtObject {
             // Ctrl+V pastes too, also on macOS (where Paste is Cmd+V).
             if (event.matches(StandardKey.Paste) || tok === "<C-v>") {
                 const r = getRegister("+");
-                if (r && cursors.length) {
-                    setCursor(editAll(p => {
-                        replaceRange(p, p, r.text, r.hidden);
-                        return p + r.text.length;
-                    }));
-                } else if (r) {
-                    replaceRange(s, e, r.text, r.hidden);
-                    setCursor(s + r.text.length);
-                }
+                if (r)
+                    insertPaste(r);
                 return true;
             }
         } else {
@@ -268,7 +268,7 @@ QtObject {
             if (event.matches(StandardKey.SelectAll) && !addKey) {
                 if (mode !== "replace") {
                     setMode("visualLine");
-                    anchor = 0;
+                    anchor = clampNormal(editor.text, 0);
                     setCursor(editor.length);
                 }
                 return true;
@@ -320,30 +320,43 @@ QtObject {
     function syncFromEditor() {
         if (syncing)
             return;
-        const p = editor.cursorPosition;
+        const p = editor.cursorPosition, t = editor.text;
         if (inserting) {
-            cursor = p;
+            // Not into a line's prefix (by an arrow key, Home or a click):
+            // to its end instead. Typing moves the cursor before `text`
+            // has the typed character (`length` does), and never into one.
+            const q = editor.length === t.length ? outOfPrefix(t, p) : p;
+            if (q !== p && editor.selectionStart === editor.selectionEnd) {
+                setCursor(q);
+                return;
+            }
+            if (q !== p) {
+                syncing = true;
+                editor.moveCursorSelection(q);
+                syncing = false;
+            }
+            cursor = q;
             return;
         }
         keys = [];
         pendingKeys = "";
         awaitingReplaceChar = false;
-        const t = editor.text;
         const s = editor.selectionStart, e = editor.selectionEnd;
         if (s !== e) {
             mode = "visual";
-            if (p === e) {
-                anchor = s;
-                cursor = Txt.charStart(t, e - 1);
-            } else {
-                anchor = Txt.charStart(t, e - 1);
-                cursor = s;
+            const a = p === e ? s : Txt.charStart(t, e - 1), c = p === e ? Txt.charStart(t, e - 1) : s;
+            anchor = outOfPrefix(t, a);
+            cursor = outOfPrefix(t, c);
+            if (anchor !== a || cursor !== c) {
+                syncing = true;
+                updateSelection();
+                syncing = false;
             }
             return;
         }
         if (isVisual)
             mode = "normal";
-        const c = Txt.clampNormal(t, p);
+        const c = clampNormal(t, p);
         wantCol = Txt.column(t, c);
         if (c !== p)
             setCursor(c);
@@ -370,7 +383,7 @@ QtObject {
             breakInsert();
         if (isVisual) {
             setMode("normal");
-            setCursor(Txt.clampNormal(editor.text, cursor));
+            setCursor(clampNormal(editor.text, cursor));
         }
         if (isRedo)
             redo(1);
@@ -396,7 +409,7 @@ QtObject {
             replaceStack = [];
         }
         const t = editor.text;
-        p = mode === "normal" ? Txt.clampNormal(t, p) : Math.max(0, Math.min(p, t.length));
+        p = mode === "normal" ? clampNormal(t, p) : outOfPrefix(t, Math.max(0, Math.min(p, t.length)));
         setCursor(p);
         wantCol = Txt.column(t, p);
     }
@@ -407,9 +420,11 @@ QtObject {
         execute({ reg: null, count: count, motion: { name: name } });
     }
 
+    // Columns count from where a line's prefix ends, as the cursor can't
+    // go before it.
     function positionLabel() {
-        const t = editor.text;
-        return Txt.lineOf(t, cursor) + ":" + (Txt.column(t, cursor) + 1);
+        const t = editor.text, ls = Txt.lineStart(t, cursor);
+        return Txt.lineOf(t, cursor) + ":" + (Txt.column(t, cursor) - Txt.column(t, prefixEnd(t, ls)) + 1);
     }
 
     function showError(text) {
@@ -441,7 +456,7 @@ QtObject {
             leaveInsert();
         if (isVisual) {
             setMode("normal");
-            setCursor(Txt.clampNormal(editor.text, cursor));
+            setCursor(clampNormal(editor.text, cursor));
         }
         commitChange();
         clearCursors();
@@ -462,7 +477,7 @@ QtObject {
         hidden = s.hidden || [];
         lastVisual = s.lastVisual || null;
         trackedText = t;
-        cursor = Txt.clampNormal(t, s.cursor || 0);
+        cursor = clampNormal(t, s.cursor || 0);
         setMode("normal");
         setCursor(cursor);
         wantCol = s.wantCol === undefined ? Txt.column(t, cursor) : s.wantCol;
@@ -518,6 +533,9 @@ QtObject {
             leaveInsert();
             return true;
         }
+        const own = linePrefixes && event ? prefixKey(event) : null;
+        if (own)
+            tok = own;
         if (tok === null)
             return false;
         const s = insertSession;
@@ -529,8 +547,9 @@ QtObject {
             s.keys.push(tok);
         // A macro has no event for the editor to handle, and the editor
         // knows only one cursor, so vim does it. Shift+Enter too, which the
-        // editor would make a line separator rather than a line break.
-        if (!event || cursors.length && (move || typed) || tok === "<CR>" && event.modifiers & Qt.ShiftModifier) {
+        // editor would make a line separator rather than a line break, and
+        // the keys that must keep the prefixes.
+        if (!event || own || cursors.length && (move || typed) || tok === "<CR>" && event.modifiers & Qt.ShiftModifier) {
             if (move)
                 insertMove(tok);
             else if (typed)
@@ -544,6 +563,26 @@ QtObject {
             return true;
         }
         return false;
+    }
+
+    // In Koil's listing, the insert-mode key `event` as vim's <CR>, <BS> or
+    // <Del> if vim must type it to keep the prefixes (see Prefixes): Enter,
+    // so the new line gets one, and the keys that delete (like
+    // Alt+Backspace) back from a name's start or forward from a line's
+    // end, into a prefix. Null for the others, which the editor types.
+    function prefixKey(event) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+            return "<CR>";
+        if (editor.selectionStart !== editor.selectionEnd)
+            return null;
+        const t = editor.text, p = editor.cursorPosition;
+        if (event.key === Qt.Key_Backspace || event.matches(StandardKey.Backspace)
+                || event.matches(StandardKey.DeleteStartOfWord))
+            return /^[ \t]*$/.test(t.slice(prefixEnd(t, Txt.lineStart(t, p)), p)) ? "<BS>" : null;
+        if (event.key === Qt.Key_Delete || event.matches(StandardKey.Delete)
+                || event.matches(StandardKey.DeleteEndOfWord))
+            return p === Txt.lineEnd(t, p) ? "<Del>" : null;
+        return null;
     }
 
     // Moves the insert-mode cursors like the editor does for these keys.
@@ -570,7 +609,7 @@ QtObject {
                 q = Txt.advance(t, ls, col, Txt.lineEnd(t, ls));
             }
         }
-        return q;
+        return outOfPrefix(t, q);
     }
 
     function openCommandLine(kind) {
@@ -912,9 +951,9 @@ QtObject {
         if (r) {
             let p = r.pos;
             if (isVisual)
-                p = r.eol ? Math.min(p, t.length) : Txt.clampNormal(t, p);
+                p = r.eol ? Math.min(p, t.length) : clampNormal(t, p);
             else
-                p = Txt.clampNormal(t, p);
+                p = clampNormal(t, p);
             if (!r.keepCol)
                 wantCol = r.eol ? Infinity : Txt.column(t, p);
             setCursor(p);
@@ -938,7 +977,7 @@ QtObject {
             const r = motion(t, c.pos, m, count, explicit, false, true);
             if (!r)
                 return Object.assign({}, c, { col: wantCol });
-            const p = Txt.clampNormal(t, r.pos);
+            const p = clampNormal(t, r.pos);
             return Object.assign({}, c, { pos: p, col: r.keepCol ? wantCol : r.eol ? Infinity : Txt.column(t, p) });
         }));
         wantCol = mainCol;
@@ -948,6 +987,18 @@ QtObject {
         const t = editor.text;
         const n = t.length;
         const count = Math.max(cmd.count, 1);
+        if (cmd.op === "d" && cmd.motion && ["h", "<Left>", "<BS>"].includes(cmd.motion.name)) {
+            // dh and X at a name's start clear its line's icon (the ID
+            // goes), as Backspace does there (see typedEdit), and leave the
+            // registers alone like it. They don't join the line to the one
+            // above, as vim's don't at a line's start: with no icon, h fails.
+            const ls = Txt.lineStart(t, cursor), pe = prefixEnd(t, ls);
+            if (cursor > ls && cursor === pe && t.slice(ls, pe) !== blankPrefix) {
+                replaceRange(ls, pe, blankPrefix);
+                setCursor(clampNormal(editor.text, ls + blankPrefix.length));
+                return;
+            }
+        }
         let range, target = cursor;
         if (cmd.linewise) {
             let le = Txt.lineEnd(t, cursor);
@@ -955,7 +1006,7 @@ QtObject {
                 le = Txt.lineEnd(t, le + 1);
             range = { start: Txt.lineStart(t, cursor), end: Math.min(le + 1, n), linewise: true };
         } else if (cmd.textObj) {
-            range = Txt.textObject(t, cursor, cmd.textObj, count);
+            range = textObject(t, cursor, cmd.textObj, count);
             if (!range) {
                 typeahead = [];
                 return;
@@ -971,7 +1022,7 @@ QtObject {
                 let q = cursor;
                 for (let i = 0; i < count; i++)
                     if (i > 0 || Txt.charClass(t[Txt.charEnd(t, q)], big) === Txt.charClass(t[q], big))
-                        q = Txt.wordEnd(t, q, big);
+                        q = wordStep(t, q, q => Txt.wordEnd(t, q, big));
                 r = { pos: q, type: "inclusive" };
             } else {
                 r = motion(t, cursor, cmd.motion, count, cmd.count > 0, true);
@@ -1001,7 +1052,7 @@ QtObject {
             yank(t, range, reg);
             if (lines > 2)
                 showMessage(lines + " lines yanked");
-            setCursor(Txt.clampNormal(t, yankCursor));
+            setCursor(clampNormal(t, yankCursor));
             break;
         case "d":
             deleteRange(t, range, reg);
@@ -1010,11 +1061,14 @@ QtObject {
             break;
         case "c": {
             yank(t, range, reg);
-            let e = range.end;
-            if (range.linewise && e > range.start && t[e - 1] === "\n")
-                e--; // keep an empty line to type on
-            replaceRange(range.start, e, "");
-            startInsert(1, range.start, null);
+            let s = range.start, e = range.end;
+            if (range.linewise) {
+                if (e > s && t[e - 1] === "\n")
+                    e--; // keep an empty line to type on
+                s = Math.min(prefixEnd(t, s), e); // and its prefix, icon and all
+            }
+            replaceRange(s, e, "");
+            startInsert(1, s, null);
             break;
         }
         case ">":
@@ -1039,24 +1093,24 @@ QtObject {
             startInsert(count, p < Txt.lineEnd(t, p) ? Txt.charEnd(t, p) : p, null);
             break;
         case "I":
-            startInsert(count, Txt.firstNonBlank(t, p), null);
+            startInsert(count, firstNonBlank(t, p), null);
             break;
         case "gI":
-            startInsert(count, Txt.lineStart(t, p), null);
+            startInsert(count, prefixEnd(t, Txt.lineStart(t, p)), null);
             break;
         case "A":
             startInsert(count, Txt.lineEnd(t, p), null);
             break;
         case "o": {
             const le = Txt.lineEnd(t, p);
-            replaceRange(le, le, "\n");
-            startInsert(count, le + 1, "o");
+            replaceRange(le, le, lineBreak);
+            startInsert(count, le + lineBreak.length, "o");
             break;
         }
         case "O": {
             const ls = Txt.lineStart(t, p);
-            replaceRange(ls, ls, "\n");
-            startInsert(count, ls, "O");
+            replaceRange(ls, ls, blankPrefix + "\n");
+            startInsert(count, ls + blankPrefix.length, "O");
             break;
         }
         case "v":
@@ -1110,7 +1164,7 @@ QtObject {
             if (e > p) {
                 const text = Txt.toggleCase(t.slice(p, e));
                 replaceRange(p, e, text, carriedHidden(p, e, text));
-                setCursor(Txt.clampNormal(editor.text, e));
+                setCursor(clampNormal(editor.text, e));
             }
             break;
         }
@@ -1122,8 +1176,8 @@ QtObject {
             if (k < count)
                 break;
             if (cmd.ch === "\n") {
-                replaceRange(p, e, "\n");
-                setCursor(p + 1);
+                replaceRange(p, e, lineBreak);
+                setCursor(p + lineBreak.length);
             } else {
                 replaceRange(p, e, cmd.ch.repeat(count));
                 setCursor(p + cmd.ch.length * (count - 1));
@@ -1132,7 +1186,7 @@ QtObject {
         }
         case "R":
             setMode("replace");
-            setCursor(p);
+            setCursor(prefixEmptyLine(p));
             replaceStack = [];
             insertSession = { count: count, keys: [], openLine: null, dot: replaying ? null : dot, broken: false };
             break;
@@ -1193,7 +1247,7 @@ QtObject {
             return;
         }
         if (cmd.textObj) {
-            const r = Txt.textObject(t, cursor, cmd.textObj, count);
+            const r = textObject(t, cursor, cmd.textObj, count);
             if (r && r.end > r.start) {
                 anchor = r.start;
                 setCursor(Txt.charStart(t, r.end - 1));
@@ -1204,7 +1258,7 @@ QtObject {
         lastVisual = { mode: mode, anchor: anchor, cursor: cursor };
         if (a === "<Esc>" || visualModes[a] === mode) {
             setMode("normal");
-            setCursor(Txt.clampNormal(t, cursor));
+            setCursor(clampNormal(t, cursor));
             return;
         }
         if (visualModes[a]) {
@@ -1246,7 +1300,7 @@ QtObject {
         const lineRange = { start: Txt.lineStart(t, lo), end: Math.min(Txt.lineEnd(t, hi) + 1, n), linewise: true };
         const range = mode === "visualLine" ? lineRange : { start: lo, end: Txt.charEnd(t, hi), linewise: false };
         setMode("normal");
-        setCursor(Txt.clampNormal(t, lo));
+        setCursor(clampNormal(t, lo));
         switch (a) {
         case "d":
         case "x":
@@ -1293,12 +1347,13 @@ QtObject {
             break;
         case "r": {
             if (cmd.ch !== "\n") {
+                // Line breaks and prefixes stay as they are.
                 let s = "";
                 for (let q = range.start; q < range.end; q = Txt.charEnd(t, q))
-                    s += t[q] === "\n" ? "\n" : cmd.ch;
-                replaceRange(range.start, range.end, s);
+                    s += t[q] === "\n" || inPrefix(t, q) ? t.slice(q, Txt.charEnd(t, q)) : cmd.ch;
+                replaceRange(range.start, range.end, s, carriedHidden(range.start, range.end, s));
             }
-            setCursor(Txt.clampNormal(editor.text, range.start));
+            setCursor(clampNormal(editor.text, range.start));
             break;
         }
         case "J":
@@ -1315,7 +1370,7 @@ QtObject {
             break;
         case "p":
         case "P": {
-            const r = getRegister(cmd.reg);
+            const r = registerToPaste(cmd.reg);
             if (!r)
                 break;
             let text = r.text, entries = r.hidden;
@@ -1327,13 +1382,14 @@ QtObject {
             }
             const removed = t.slice(range.start, range.end);
             const removedHidden = hiddenIn(hidden, range.start, range.end);
-            replaceRange(range.start, range.end, text, entries);
+            const x = prefixLines(range.start, range.end, text, entries);
+            replaceRange(range.start, range.end, x.text, x.entries);
             if (a === "p")
                 setRegister(null, removed, range.linewise, false, removedHidden);
             const nt = editor.text;
-            setCursor(Txt.clampNormal(nt, r.linewise
-                ? Txt.firstNonBlank(nt, range.start + (range.linewise ? 0 : 1))
-                : Txt.charStart(nt, range.start + text.length - 1)));
+            setCursor(clampNormal(nt, r.linewise
+                ? firstNonBlank(nt, range.start + (range.linewise ? 0 : 1))
+                : Txt.charStart(nt, range.start + x.text.length - 1)));
             break;
         }
         }
@@ -1344,8 +1400,18 @@ QtObject {
     function startInsert(count, pos, openLine) {
         beginChange();
         setMode("insert");
-        setCursor(pos);
+        setCursor(prefixEmptyLine(pos));
         insertSession = { count: count, keys: [], openLine: openLine, dot: replaying ? null : dot, broken: false };
+    }
+
+    // In Koil's listing, puts a prefix on p's line if it's empty, to type
+    // after (see Prefixes). Returns where p is then.
+    function prefixEmptyLine(p) {
+        const t = editor.text, ls = Txt.lineStart(t, p);
+        if (!linePrefixes || ls !== Txt.lineEnd(t, ls))
+            return p;
+        replaceRange(ls, ls, blankPrefix);
+        return ls + blankPrefix.length;
     }
 
     // Moving around in insert mode ends the repeatable part of the insert and
@@ -1382,21 +1448,23 @@ QtObject {
             : cursor > Txt.lineStart(t, cursor) ? Txt.charStart(t, cursor - 1) : cursor;
         setMode("normal");
         commitChange();
-        setCursor(Txt.clampNormal(t, p));
+        setCursor(clampNormal(t, p));
         wantCol = Txt.column(t, cursor);
     }
 
     // Types what the insert `s` typed count - 1 more times (3ix<Esc>), each
     // time on a new line for o and O. Text alone goes in as one edit at each
     // cursor rather than key by key, as each edit has Qt and vim go over all
-    // the text (10000osome text<Esc> took about two minutes).
+    // the text (10000osome text<Esc> took about two minutes). Not with
+    // Enter in the listing, which depends on where it's typed (typedEdit).
     function repeatInsert(s) {
         const n = s.count - 1;
         if (n <= 0)
             return;
-        if (mode === "insert" && !s.keys.some(k => k === "<BS>" || k === "<Del>")) {
+        const keyByKey = k => k === "<BS>" || k === "<Del>" || linePrefixes && k === "<CR>";
+        if (mode === "insert" && !s.keys.some(keyByKey)) {
             const typed = s.keys.map(typedText).join("");
-            const text = (s.openLine ? "\n" + typed : typed).repeat(n);
+            const text = (s.openLine ? lineBreak + typed : typed).repeat(n);
             setCursor(editAll(q => {
                 const at = s.openLine ? Txt.lineEnd(editor.text, q) : q;
                 replaceRange(at, at, text);
@@ -1408,8 +1476,8 @@ QtObject {
             if (s.openLine) {
                 setCursor(editAll(q => {
                     const le = Txt.lineEnd(editor.text, q);
-                    replaceRange(le, le, "\n");
-                    return le + 1;
+                    replaceRange(le, le, lineBreak);
+                    return le + lineBreak.length;
                 }));
             }
             for (const k of s.keys)
@@ -1419,7 +1487,7 @@ QtObject {
 
     // The text an insert-mode key types (one that isn't <BS> or <Del>).
     function typedText(tok) {
-        return tok === "<CR>" ? "\n" : tok === "<Tab>" ? "\t" : tok;
+        return tok === "<CR>" ? lineBreak : tok === "<Tab>" ? "\t" : tok;
     }
 
     // Types an insert-mode key at every cursor (for extra cursors, macros,
@@ -1429,14 +1497,7 @@ QtObject {
             replaceKey(tok);
             return;
         }
-        // What the key does at p in t: replaces [start, end) with text.
-        const edit = (t, p) => {
-            if (tok === "<BS>")
-                return p > 0 ? { start: Txt.charStart(t, p - 1), end: p, text: "" } : null;
-            if (tok === "<Del>")
-                return p < t.length ? { start: p, end: Txt.charEnd(t, p), text: "" } : null;
-            return { start: p, end: p, text: typedText(tok) };
-        };
+        const edit = (t, p) => typedEdit(t, p, tok);
         if (cursors.length && editAtOnce(edit))
             return;
         setCursor(editAll(p => {
@@ -1444,13 +1505,43 @@ QtObject {
             if (!e)
                 return p;
             replaceRange(e.start, e.end, e.text);
-            return e.start + e.text.length;
+            return e.start + editCursor(e);
         }));
     }
 
-    // Makes the edit `edit(text, pos)` gives ({ start, end, text }, or null)
-    // at every cursor, as one edit from the first to the last, and puts each
-    // cursor after its text. One edit per cursor (editAll) has Qt and vim go
+    // What the insert-mode key `tok` does at p in t: replaces [start, end)
+    // with text, and puts the cursor `cursor` characters after start (after
+    // the text, if not given). Null if nothing. In Koil's listing (see
+    // Prefixes), Backspace at a name's start clears its line's icon, and
+    // on a line without one, joins it to the line above; Delete at a line's
+    // end joins the next line without its prefix; and Enter at a name's
+    // start puts the new line above, so the name keeps its icon.
+    function typedEdit(t, p, tok) {
+        const ls = Txt.lineStart(t, p), pe = prefixEnd(t, ls);
+        if (tok === "<BS>") {
+            if (pe > ls && p === pe)
+                return t.slice(ls, pe) !== blankPrefix ? { start: ls, end: pe, text: blankPrefix }
+                    : ls > 0 ? { start: ls - 1, end: pe, text: "" } : null;
+            return p > 0 ? { start: Txt.charStart(t, p - 1), end: p, text: "" } : null;
+        }
+        if (tok === "<Del>") {
+            if (p < t.length && t[p] === "\n")
+                return { start: p, end: prefixEnd(t, p + 1), text: "" };
+            return p < t.length ? { start: p, end: Txt.charEnd(t, p), text: "" } : null;
+        }
+        if (tok === "<CR>" && pe > ls && p === pe && p < Txt.lineEnd(t, p))
+            return { start: ls, end: ls, text: blankPrefix + "\n", cursor: blankPrefix.length + 1 + pe - ls };
+        return { start: p, end: p, text: typedText(tok) };
+    }
+
+    // Where an edit (see typedEdit) puts the cursor, from its start.
+    function editCursor(e) {
+        return e.cursor === undefined ? e.text.length : e.cursor;
+    }
+
+    // Makes the edit `edit(text, pos)` gives (see typedEdit) at every
+    // cursor, as one edit from the first to the last, and puts each cursor
+    // where its edit says. One edit per cursor (editAll) has Qt and vim go
     // over all the text and hidden text each time, so with thousands of
     // cursors (a block insert in a long listing) typing a key took seconds.
     // Not for edits that overlap, or cursors over 1000 characters apart on
@@ -1467,7 +1558,7 @@ QtObject {
         if (all[all.length - 1].e.end - all[0].e.start > 1000 * all.length)
             return false;
         const ends = replaceRanges(all.map(x => x.e));
-        const placed = all.map((x, i) => Object.assign({}, x.c, { pos: ends[i] }));
+        const placed = all.map((x, i) => Object.assign({}, x.c, { pos: ends[i] - x.e.text.length + editCursor(x.e) }));
         const main = placed.find(c => c.main);
         setCursors(placed.filter(c => c !== main), main.pos);
         setCursor(main.pos);
@@ -1516,20 +1607,30 @@ QtObject {
         }));
     }
 
+    // Each entry of `stack` is what a typed character replaced ({ text,
+    // hidden }), null if it replaced nothing, or for a line break, { text:
+    // "", hidden: [], typed }, with the length of what it typed.
     function replaceAt(p, stack, tok) {
+        const t = editor.text;
         if (tok === "<BS>") {
-            const q = Txt.charStart(editor.text, p - 1);
+            const q = Txt.charStart(t, p - 1);
             if (stack.length) {
                 const orig = stack.pop();
-                replaceRange(q, p, orig ? orig.text : "", orig ? orig.hidden : []);
-                return q;
+                const from = orig && orig.typed ? p - orig.typed : q;
+                replaceRange(from, p, orig ? orig.text : "", orig ? orig.hidden : []);
+                return from;
             }
-            return p > Txt.lineStart(editor.text, p) ? q : p;
+            return p > prefixEnd(t, Txt.lineStart(t, p)) ? q : p;
         }
-        const s = tok === "<CR>" ? "\n" : tok === "<Tab>" ? "\t" : tok;
-        for (const ch of s) {
+        // A line break is inserted without replacing anything, with the new
+        // line's prefix.
+        if (tok === "<CR>") {
+            stack.push({ text: "", hidden: [], typed: lineBreak.length });
+            replaceRange(p, p, lineBreak);
+            return p + lineBreak.length;
+        }
+        for (const ch of tok === "<Tab>" ? "\t" : tok) {
             const t = editor.text;
-            // A line break is inserted without replacing anything.
             if (ch !== "\n" && p < t.length && t[p] !== "\n") {
                 const e = Txt.charEnd(t, p);
                 stack.push({ text: t.slice(p, e), hidden: hiddenIn(hidden, p, e) });
@@ -1609,7 +1710,7 @@ QtObject {
         const home = () => {
             const nt = editor.text;
             const ls = Txt.lineToPos(nt, lines[0].line);
-            setCursor(Txt.clampNormal(nt, Txt.advance(nt, ls, b.left, Txt.lineEnd(nt, ls))));
+            setCursor(clampNormal(nt, Txt.advance(nt, ls, b.left, Txt.lineEnd(nt, ls))));
             wantCol = Txt.column(nt, cursor);
         };
         switch (a) {
@@ -1676,7 +1777,7 @@ QtObject {
             return true;
         case "p":
         case "P": {
-            const r = getRegister(cmd.reg);
+            const r = registerToPaste(cmd.reg);
             if (!r)
                 return true;
             const removed = blockText(t, lines);
@@ -1735,7 +1836,7 @@ QtObject {
             const entries = hiddenIn(r.hidden, from, from + piece.length);
             from += piece.length + 1;
             if (line + i > Txt.countLines(editor.text))
-                replaceRange(editor.length, editor.length, "\n");
+                replaceRange(editor.length, editor.length, lineBreak);
             const t = editor.text;
             const ls = Txt.lineToPos(t, line + i), le = Txt.lineEnd(t, ls);
             const cols = Txt.column(t, le);
@@ -1788,12 +1889,12 @@ QtObject {
     function toggleCursor(pos) {
         if (isVisual) {
             setMode("normal");
-            setCursor(Txt.clampNormal(editor.text, cursor));
+            setCursor(clampNormal(editor.text, cursor));
         }
         if (mode !== "normal" && mode !== "insert")
             return;
         const t = editor.text;
-        const p = mode === "normal" ? Txt.clampNormal(t, pos) : Math.min(pos, t.length);
+        const p = mode === "normal" ? clampNormal(t, pos) : outOfPrefix(t, Math.min(pos, t.length));
         if (cursors.some(c => c.pos === p))
             setCursors(cursors.filter(c => c.pos !== p));
         else
@@ -1969,13 +2070,14 @@ QtObject {
         syncing = false;
     }
 
+    // Never in a line's prefix (see Prefixes).
     function setCursor(p) {
-        cursor = p;
+        cursor = outOfPrefix(editor.text, p);
         syncing = true;
         if (isVisual)
             updateSelection();
         else
-            editor.cursorPosition = p;
+            editor.cursorPosition = cursor;
         syncing = false;
     }
 
@@ -2038,7 +2140,7 @@ QtObject {
             return;
         }
         const p = Math.min(last.cursor, editor.length);
-        setCursor(mode === "normal" ? Txt.clampNormal(editor.text, p) : p);
+        setCursor(mode === "normal" ? clampNormal(editor.text, p) : p);
     }
 
     function redo(count) {
@@ -2055,7 +2157,7 @@ QtObject {
         }
         // Land on an inserted line rather than the end of the line above it.
         const p = last.start + (last.inserted[0] === "\n" ? 1 : 0);
-        setCursor(mode === "normal" ? Txt.clampNormal(editor.text, p) : p);
+        setCursor(mode === "normal" ? clampNormal(editor.text, p) : p);
     }
 
     // ---- Registers -------------------------------------------------------
@@ -2133,13 +2235,13 @@ QtObject {
         replaceRange(s, range.end, "");
         const nt = editor.text;
         if (range.linewise)
-            setCursor(Txt.clampNormal(nt, Txt.firstNonBlank(nt, Math.min(s, nt.length))));
+            setCursor(clampNormal(nt, firstNonBlank(nt, Math.min(s, nt.length))));
         else
-            setCursor(Txt.clampNormal(nt, s));
+            setCursor(clampNormal(nt, s));
     }
 
     function paste(reg, after, count) {
-        const r = getRegister(reg);
+        const r = registerToPaste(reg);
         if (!r)
             return;
         const t = editor.text;
@@ -2150,7 +2252,7 @@ QtObject {
             putBlock(r, line, col, count);
             const nt = editor.text;
             const ls = Txt.lineToPos(nt, line);
-            setCursor(Txt.clampNormal(nt, Txt.advance(nt, ls, col, Txt.lineEnd(nt, ls))));
+            setCursor(clampNormal(nt, Txt.advance(nt, ls, col, Txt.lineEnd(nt, ls))));
             return;
         }
         let entries = repeated(r.hidden, r.text.length, count);
@@ -2169,15 +2271,56 @@ QtObject {
                     entries = shifted(entries, 1);
                 }
             }
-            replaceRange(at, at, body, entries);
+            const x = prefixLines(at, at, body, entries);
+            replaceRange(at, at, x.text, x.entries);
             const nt = editor.text;
-            setCursor(Txt.clampNormal(nt, Txt.firstNonBlank(nt, body[0] === "\n" ? at + 1 : at)));
+            setCursor(clampNormal(nt, firstNonBlank(nt, body[0] === "\n" ? at + 1 : at)));
         } else {
             const at = after && p < Txt.lineEnd(t, p) ? Txt.charEnd(t, p) : p;
-            const body = r.text.repeat(count);
-            replaceRange(at, at, body, entries);
-            setCursor(Txt.clampNormal(editor.text, at + Math.max(body.length - 1, 0)));
+            const x = prefixLines(at, at, r.text.repeat(count), entries);
+            replaceRange(at, at, x.text, x.entries);
+            setCursor(clampNormal(editor.text, at + Math.max(x.text.length - 1, 0)));
         }
+    }
+
+    // Cmd+V in insert mode: pastes `r` at every cursor, or in Koil's
+    // listing, lines with an entry's icon (see pastesLines) above the
+    // cursor's line, as a copied line pastes in VS Code.
+    function insertPaste(r) {
+        if (pastesLines(r)) {
+            const text = r.text.endsWith("\n") ? r.text : r.text + "\n";
+            setCursor(editAll(p => {
+                const ls = Txt.lineStart(editor.text, p);
+                const x = prefixLines(ls, ls, text, r.hidden);
+                replaceRange(ls, ls, x.text, x.entries);
+                return p + x.text.length;
+            }));
+            return;
+        }
+        const s = editor.selectionStart, e = editor.selectionEnd;
+        const put = (from, to) => {
+            const x = prefixLines(from, to, r.text, r.hidden);
+            replaceRange(from, to, x.text, x.entries);
+            return from + x.text.length;
+        };
+        setCursor(cursors.length ? editAll(p => put(p, p)) : put(s, e));
+    }
+
+    // Register `reg` (see getRegister) as it pastes: in Koil's listing,
+    // text that starts with an entry's icon pastes as lines.
+    function registerToPaste(reg) {
+        const r = getRegister(reg);
+        if (!r || r.linewise || !pastesLines(r))
+            return r;
+        return { text: r.text.endsWith("\n") ? r.text : r.text + "\n", linewise: true, hidden: r.hidden, blockwise: false };
+    }
+
+    // Whether register `r` starts with a prefix that has an icon (an ID's,
+    // or a Nerd Font one), in Koil's listing: its icon goes first on a
+    // line, so it pastes as lines.
+    function pastesLines(r) {
+        return linePrefixes && !r.blockwise && r.text[0] !== " "
+            && prefixLength(r.text, 0, q => r.hidden.some(h => h.at === q)) > 0;
     }
 
     // ---- Hidden text -------------------------------------------------------
@@ -2313,7 +2456,15 @@ QtObject {
 
     // The entry of the icon at p, or null.
     function hiddenAt(p) {
-        return hidden.find(h => h.at === p) || null;
+        let lo = 0, hi = hidden.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (hidden[mid].at < p)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo < hidden.length && hidden[lo].at === p ? hidden[lo] : null;
     }
 
     // Replaces the whole text with `text`, whose icons hide `entries`, as
@@ -2353,6 +2504,119 @@ QtObject {
         return true;
     }
 
+    // ---- Prefixes ----------------------------------------------------------
+    // In Koil's listing (linePrefixes), a line starts with a prefix: its
+    // entry's icon (which hides its ID) and two spaces, or three spaces for
+    // a new entry. The cursor never goes into one, as if the name started
+    // the line: motions stop after it (word motions skip it like blanks),
+    // and typing, joining and splitting lines keep it first on its line.
+    // Whole lines (dd, yy, V) take it along. A line without one (that
+    // isn't an icon or a space, then two spaces) is plain.
+
+    // The length of the prefix that starts at ls in s, 0 if none.
+    // `hidesText(i)` says whether the icon at i hides text; a Nerd Font one
+    // (a rendered new entry's) is an icon too.
+    function prefixLength(s, ls, hidesText) {
+        if (ls >= s.length || s[ls] === "\n")
+            return 0;
+        const e = Txt.charEnd(s, ls);
+        if (s[e] !== " " || s[e + 1] !== " ")
+            return 0;
+        return s[ls] === " " || Txt.isPrivateUse(s, ls) || hidesText(ls) ? e + 2 - ls : 0;
+    }
+
+    // Where the prefix of the line that starts at ls ends: ls if it has none.
+    function prefixEnd(t, ls) {
+        return linePrefixes ? ls + prefixLength(t, ls, hiddenAt) : ls;
+    }
+
+    // p, or if it's in a prefix, where that ends.
+    function outOfPrefix(t, p) {
+        if (!linePrefixes)
+            return p;
+        const pe = prefixEnd(t, Txt.lineStart(t, p));
+        return p < pe ? pe : p;
+    }
+
+    function inPrefix(t, p) {
+        return outOfPrefix(t, p) !== p;
+    }
+
+    // Normal mode keeps the cursor on a character (see Txt.clampNormal),
+    // after the prefix.
+    function clampNormal(t, p) {
+        return outOfPrefix(t, Txt.clampNormal(t, p));
+    }
+
+    // The first character of p's line that isn't blank, after its prefix
+    // (or the line's end).
+    function firstNonBlank(t, p) {
+        let q = prefixEnd(t, Txt.lineStart(t, p));
+        while (q < t.length && Txt.isBlank(t[q]))
+            q++;
+        return q;
+    }
+
+    // `text` (whose icons hide `entries`) to put in place of [start, end),
+    // with three spaces added before each line it starts that has no
+    // prefix: text from another app has none, and a line break leaves the
+    // rest of its line without one. Returns { text, entries }.
+    function prefixLines(start, end, text, entries) {
+        const t = editor.text, first = start === Txt.lineStart(t, start);
+        if (!linePrefixes || !first && text.indexOf("\n") < 0)
+            return { text: text, entries: entries };
+        // The rest of the line after the text, which its last line starts.
+        const rest = t.slice(end, Txt.lineEnd(t, end));
+        const icons = new Set(entries.map(h => h.at));
+        const pieces = text.split("\n"), added = [];
+        let from = 0; // where the piece starts in text
+        pieces.forEach((piece, k) => {
+            const line = k === pieces.length - 1 ? piece + rest : piece;
+            const hides = i => i < piece.length ? icons.has(from + i) : hiddenAt(end + i - piece.length) !== null;
+            if ((k > 0 || first && piece !== "") && !prefixLength(line, 0, hides))
+                added.push(from);
+            from += piece.length + 1;
+        });
+        if (!added.length)
+            return { text: text, entries: entries };
+        let r = "", i = 0;
+        for (const at of added) {
+            r += text.slice(i, at) + blankPrefix;
+            i = at;
+        }
+        // Each entry moves by the prefixes added before it (both sorted).
+        let k = 0;
+        const moved = entries.map(h => {
+            while (k < added.length && added[k] <= h.at)
+                k++;
+            return { at: h.at + k * blankPrefix.length, icon: h.icon, text: h.text };
+        });
+        return { text: r + text.slice(i), entries: moved };
+    }
+
+    // A step of a word motion (`step`, from q), stepping again while it's
+    // in a prefix, as if that were blank. Stuck in the first line's prefix
+    // (at the text's start), it ends after it.
+    function wordStep(t, q, step) {
+        let r = step(q);
+        while (inPrefix(t, r)) {
+            const next = step(r);
+            if (next === r)
+                return outOfPrefix(t, r);
+            r = next;
+        }
+        return r;
+    }
+
+    // A text object (see Txt.textObject), which doesn't start in a prefix:
+    // `aw` takes the blanks before a name's first word, say.
+    function textObject(t, p, obj, count) {
+        const r = Txt.textObject(t, p, obj, count);
+        if (r && !r.linewise)
+            r.start = Math.min(outOfPrefix(t, r.start), r.end);
+        return r;
+    }
+
     // ---- Other edits -------------------------------------------------------
 
     function joinLines(count, spaces) {
@@ -2363,19 +2627,20 @@ QtObject {
             const le = Txt.lineEnd(t, ls);
             if (le >= t.length)
                 break;
-            let e = le + 1;
+            // The next line's prefix goes with the line break.
+            let e = prefixEnd(t, le + 1);
             let sep = "";
             if (spaces) {
                 while (e < t.length && (t[e] === " " || t[e] === "\t"))
                     e++;
                 const endsBlank = t[le - 1] === " " || t[le - 1] === "\t";
-                if (le > ls && e < t.length && t[e] !== "\n" && t[e] !== ")" && !endsBlank)
+                if (le > prefixEnd(t, ls) && e < t.length && t[e] !== "\n" && t[e] !== ")" && !endsBlank)
                     sep = " ";
             }
             replaceRange(le, e, sep);
             pos = le;
         }
-        setCursor(Txt.clampNormal(editor.text, pos));
+        setCursor(clampNormal(editor.text, pos));
     }
 
     // Adds `delta` to the number under or after the cursor on its line:
@@ -2419,19 +2684,23 @@ QtObject {
         const t = editor.text;
         const s = Txt.lineStart(t, range.start);
         const e = Txt.lineEnd(t, Math.max(range.start, range.end - 1));
-        const lines = t.slice(s, e).split("\n").map(line => {
+        let ls = s;
+        const lines = t.slice(s, e).split("\n").map(whole => {
+            // After the prefix, which stays first.
+            const head = whole.slice(0, prefixEnd(t, ls) - ls), line = whole.slice(head.length);
+            ls += whole.length + 1;
             if (dir > 0)
-                return line.length ? (line[0] === "\t" ? "\t" : "    ").repeat(times) + line : line;
+                return head + (line.length ? (line[0] === "\t" ? "\t" : "    ").repeat(times) + line : line);
             let k = 0, cols = 0;
             while (k < line.length && cols < 4 * times && (line[k] === " " || line[k] === "\t")) {
                 cols += line[k] === "\t" ? 4 : 1;
                 k++;
             }
-            return line.slice(k);
+            return head + line.slice(k);
         });
         const text = lines.join("\n");
         replaceRange(s, e, text, carriedHidden(s, e, text));
-        setCursor(Txt.clampNormal(editor.text, Txt.firstNonBlank(editor.text, s)));
+        setCursor(clampNormal(editor.text, firstNonBlank(editor.text, s)));
     }
 
     // how: "~" toggles the case, "u" lowers it, "U" raises it, and "?" (g?)
@@ -2442,7 +2711,7 @@ QtObject {
         const text = how === "u" ? s.toLowerCase() : how === "U" ? s.toUpperCase()
             : how === "?" ? Txt.rot13(s) : Txt.toggleCase(s);
         replaceRange(range.start, range.end, text, carriedHidden(range.start, range.end, text));
-        setCursor(Txt.clampNormal(editor.text, range.start));
+        setCursor(clampNormal(editor.text, range.start));
     }
 
     // ---- Command line ------------------------------------------------------
@@ -2477,7 +2746,7 @@ QtObject {
             const line = c === "$" ? Txt.countLines(t) : Math.max(1, Math.min(parseInt(c, 10), Txt.countLines(t)));
             if (isVisual)
                 setMode("normal");
-            setCursor(Txt.clampNormal(t, Txt.firstNonBlank(t, Txt.lineToPos(t, line))));
+            setCursor(clampNormal(t, firstNonBlank(t, Txt.lineToPos(t, line))));
             return;
         }
         if (["w", "write"].includes(c))
@@ -2588,15 +2857,27 @@ QtObject {
     // ---- Motions -----------------------------------------------------------
     // Each returns { pos, type: "exclusive" | "inclusive" | "linewise" } or
     // null when the motion fails. `quiet` (for extra cursors) leaves the view
-    // where it is.
+    // where it is. None ends in a prefix (see Prefixes): one that would ends
+    // after it, but a character found there isn't found.
 
     function motion(t, p, m, count, explicit, forOp, quiet) {
+        const r = rawMotion(t, p, m, count, explicit, forOp, quiet);
+        if (r && inPrefix(t, r.pos)) {
+            if (["f", "F", "t", "T", ";", ","].includes(m.name))
+                return null;
+            r.pos = outOfPrefix(t, r.pos);
+        }
+        return r;
+    }
+
+    // The motion as it would go, which motion() keeps out of prefixes.
+    function rawMotion(t, p, m, count, explicit, forOp, quiet) {
         const n = t.length;
         switch (m.name) {
         case "h":
         case "<Left>":
         case "<BS>": {
-            const ls = Txt.lineStart(t, p);
+            const ls = prefixEnd(t, Txt.lineStart(t, p));
             return p > ls ? { pos: Txt.retreat(t, p, count, ls), type: "exclusive" } : null;
         }
         case "l":
@@ -2616,17 +2897,17 @@ QtObject {
         case "<S-CR>":
         case "-": {
             const r = lineMotion(t, p, m.name === "-" ? -count : count);
-            return r && { pos: Txt.firstNonBlank(t, r.pos), type: "linewise" };
+            return r && { pos: firstNonBlank(t, r.pos), type: "linewise" };
         }
         case "_": {
             const r = count > 1 ? lineMotion(t, p, count - 1) : { pos: p };
-            return r && { pos: Txt.firstNonBlank(t, r.pos), type: "linewise" };
+            return r && { pos: firstNonBlank(t, r.pos), type: "linewise" };
         }
         case "0":
         case "<Home>":
-            return { pos: Txt.lineStart(t, p), type: "exclusive" };
+            return { pos: prefixEnd(t, Txt.lineStart(t, p)), type: "exclusive" };
         case "^":
-            return { pos: Txt.firstNonBlank(t, p), type: "exclusive" };
+            return { pos: firstNonBlank(t, p), type: "exclusive" };
         case "$":
         case "<End>": {
             let q = p;
@@ -2639,13 +2920,14 @@ QtObject {
             return { pos: Txt.lineEnd(t, q), type: "exclusive", eol: true };
         }
         case "|": {
-            return { pos: Txt.atColumn(t, Txt.lineStart(t, p), count - 1), type: "exclusive" };
+            // Columns count from the prefix's end, as in positionLabel.
+            return { pos: Txt.atColumn(t, prefixEnd(t, Txt.lineStart(t, p)), count - 1), type: "exclusive" };
         }
         case "gg":
         case "G": {
             const lines = Txt.countLines(t);
             const line = explicit ? Math.min(count, lines) : m.name === "gg" ? 1 : lines;
-            return { pos: Txt.firstNonBlank(t, Txt.lineToPos(t, line)), type: "linewise" };
+            return { pos: firstNonBlank(t, Txt.lineToPos(t, line)), type: "linewise" };
         }
         case "w":
         case "W": {
@@ -2653,7 +2935,7 @@ QtObject {
             let q = p, prev = p;
             for (let i = 0; i < count; i++) {
                 prev = q;
-                q = Txt.nextWordStart(t, q, big);
+                q = wordStep(t, q, q => Txt.nextWordStart(t, q, big));
             }
             // "dw" on the last word of a line stops at the end of that line.
             if (forOp) {
@@ -2667,21 +2949,21 @@ QtObject {
         case "B": {
             let q = p;
             for (let i = 0; i < count; i++)
-                q = Txt.prevWordStart(t, q, m.name === "B");
+                q = wordStep(t, q, q => Txt.prevWordStart(t, q, m.name === "B"));
             return q === p ? null : { pos: q, type: "exclusive" };
         }
         case "e":
         case "E": {
             let q = p;
             for (let i = 0; i < count; i++)
-                q = Txt.wordEnd(t, q, m.name === "E");
+                q = wordStep(t, q, q => Txt.wordEnd(t, q, m.name === "E"));
             return q === p ? null : { pos: q, type: "inclusive" };
         }
         case "ge":
         case "gE": {
             let q = p;
             for (let i = 0; i < count; i++)
-                q = Txt.prevWordEnd(t, q, m.name === "gE");
+                q = wordStep(t, q, q => Txt.prevWordEnd(t, q, m.name === "gE"));
             return q === p ? null : { pos: q, type: "inclusive" };
         }
         case "f":
@@ -2701,7 +2983,7 @@ QtObject {
         case "%": {
             if (explicit) {
                 const line = Math.min(Math.ceil(count * Txt.countLines(t) / 100), Txt.countLines(t));
-                return { pos: Txt.firstNonBlank(t, Txt.lineToPos(t, line)), type: "linewise" };
+                return { pos: firstNonBlank(t, Txt.lineToPos(t, line)), type: "linewise" };
             }
             return Txt.matchPair(t, p);
         }
@@ -2749,7 +3031,7 @@ QtObject {
                 Math.floor((flickable.contentY + flickable.height - editor.topPadding) / lineHeight) - 1));
             const line = m.name === "H" ? Math.min(top + count - 1, bottom)
                 : m.name === "L" ? Math.max(bottom - count + 1, top) : Math.floor((top + bottom) / 2);
-            return { pos: Txt.firstNonBlank(t, Txt.lineToPos(t, line + 1)), type: "linewise" };
+            return { pos: firstNonBlank(t, Txt.lineToPos(t, line + 1)), type: "linewise" };
         }
         default: { // page scrolling
             const half = m.name === "<C-d>" || m.name === "<C-u>";
@@ -2809,24 +3091,36 @@ QtObject {
     }
 
     function searchForward(re, t, p, quiet) {
-        re.lastIndex = p + 1;
-        let m = p + 1 <= t.length ? re.exec(t) : null;
+        let m = matchFrom(re, t, p + 1);
         if (!m) {
-            re.lastIndex = 0;
-            m = re.exec(t);
+            m = matchFrom(re, t, 0);
             if (m && !quiet)
                 showMessage("search hit BOTTOM, continuing at TOP");
         }
         return m ? m.index : -1;
     }
 
+    // The first match of `re` in t from `from` on, or null. One that starts
+    // in a prefix (see Prefixes) doesn't count.
+    function matchFrom(re, t, from) {
+        if (from > t.length)
+            return null;
+        re.lastIndex = from;
+        let m;
+        while ((m = re.exec(t)) !== null && inPrefix(t, m.index))
+            re.lastIndex = m.index + 1;
+        return m;
+    }
+
     function searchBackward(re, t, p, quiet) {
         let before = -1, last = -1, m;
         re.lastIndex = 0;
         while ((m = re.exec(t)) !== null) {
-            if (m.index < p)
-                before = m.index;
-            last = m.index;
+            if (!inPrefix(t, m.index)) {
+                if (m.index < p)
+                    before = m.index;
+                last = m.index;
+            }
             if (m[0] === "")
                 re.lastIndex++;
         }
@@ -2898,6 +3192,8 @@ QtObject {
                 re.lastIndex++;
                 continue;
             }
+            if (inPrefix(t, m.index))
+                continue;
             Txt.addHighlight(t, spans, m.index, m.index + m[0].length, m.index === highlightTarget);
         }
         return spans;

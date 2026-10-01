@@ -126,7 +126,7 @@ ApplicationWindow {
             listing = true;
             load(r.text, r.hidden, "");
             line = Math.max(0, from ? r.names.indexOf(from) : 0);
-            column = r.names.length ? 3 : 0; // after the icon and two spaces
+            column = 0; // which jumpTo puts after the icon and two spaces
         }
         const t = editorView.textArea.text;
         const ls = Txt.lineToPos(t, Math.min(line + 1, Txt.countLines(t)));
@@ -479,6 +479,7 @@ ApplicationWindow {
         editor: root.activeView.textArea
         flickable: root.activeView.flickable
         singleLine: root.activeView === pathView
+        linePrefixes: root.listing && root.activeView === editorView
         clipboard: system
         lineHeight: editorView.lineHeight
         number: settings.number

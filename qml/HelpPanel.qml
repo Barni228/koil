@@ -46,6 +46,11 @@ Popup {
                 ["Enter", "Open the dir or file on the cursor's line. A file opens as it is on disk, even "
                     + "if its line renames it."],
                 ["Shift+Enter", "Vim's Enter: the first character of the next line."],
+                ["icons", "The cursor stays out of an icon and the two spaces after it: `0` goes to the "
+                    + "name, and `o` (or Enter) starts a line after three spaces. Backspace at a name's "
+                    + "start clears its icon (making the entry new), then joins the line to the one "
+                    + "above; `X` there only clears the icon. Whole lines (`dd`, `yy`, `V`) take their icons along, and pasted ones go "
+                    + "first on their lines."],
                 ["-", "Open the dir above (`3-`: three dirs up). In a file: back to the listing, on the "
                     + "file's line (asking to save it first, if it has changes)."],
                 ["quitting", "In a file, while the listing has changes that aren't applied, `:q`, `:wq`, "
@@ -186,10 +191,11 @@ Popup {
             title: "Hidden text",
             tags: ["hide", "reveal", "icon", "icons", "id", "gh"],
             rows: [
-                ["icons", "In the listing, each icon hides its entry's ID. It acts like any other character: "
-                    + "move over it, select, delete, yank and paste it."],
-                ["gh", "Show the text behind the icon under the cursor (so does resting the mouse on it). "
-                    + "An ID shows as the path it stands for, even if its line renames it."],
+                ["icons", "In the listing, each icon hides its entry's ID. The cursor can't go on it, but "
+                    + "whole lines take it along: yank, delete and paste them (see `:h listing`)."],
+                ["gh", "Show the text behind the icon of the cursor's line, unless there's a warning or "
+                    + "error under the cursor (so does resting the mouse on the icon). An ID shows as the "
+                    + "path it stands for, even if its line renames it."],
                 ["", "Yanks, undo and copying keep the hidden text. Other apps get the text revealed."]
             ]
         },

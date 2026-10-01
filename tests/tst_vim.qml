@@ -69,7 +69,8 @@ TestCase {
             "Left": Qt.Key_Left,
             "Right": Qt.Key_Right,
             "Up": Qt.Key_Up,
-            "Down": Qt.Key_Down
+            "Down": Qt.Key_Down,
+            "Home": Qt.Key_Home
         };
         const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
         for (const m of s.match(/<[^<>]+>|[\s\S]/g)) {
@@ -230,6 +231,7 @@ TestCase {
             switchTo(editor, null);
         vim.flickable = null;
         vim.singleLine = false;
+        vim.linePrefixes = false;
         vim.commandKeys = {};
     }
 
@@ -756,6 +758,177 @@ TestCase {
         compare(render(), "ab");
         keys("u");
         compare(render(), "a<M:h1>b");
+    }
+
+    // ---- Prefixes ------------------------------------------------------------
+
+    // Starts over with `spec` (see load) as Koil's listing, whose lines
+    // start with a prefix (an icon or a space, then two spaces) that the
+    // cursor stays out of. Columns in positionLabel count from its end.
+    function loadListing(spec) {
+        vim.linePrefixes = true;
+        load(spec);
+    }
+
+    function test_prefixMotions() {
+        loadListing("M  one two\nC  three\n   four");
+        compare(vim.positionLabel(), "1:1");
+        keys("$0h");
+        compare(vim.positionLabel(), "1:1");
+        keys("ww"); // over the chair
+        compare(vim.positionLabel(), "2:1");
+        keys("b");
+        compare(vim.positionLabel(), "1:5");
+        keys("ee");
+        compare(vim.positionLabel(), "2:5");
+        keys("ge");
+        compare(vim.positionLabel(), "1:7");
+        keys("jj^");
+        compare(vim.positionLabel(), "3:1");
+        keys("gg");
+        compare(vim.positionLabel(), "1:1");
+        // Nothing before the name, and a space in the prefix isn't found.
+        keys("bdF ");
+        compare(render(), "<M:h1>  one two\n<C:h2>  three\n   four");
+        compare(vim.positionLabel(), "1:1");
+        keys("3|");
+        compare(vim.positionLabel(), "1:3");
+        // A click on an icon goes to its name, also in insert mode.
+        editor.cursorPosition = editor.text.indexOf(chair);
+        compare(vim.positionLabel(), "2:1");
+        keys("A<Up><Home>");
+        compare(vim.positionLabel(), "1:1");
+        keys("<Left>x<Esc>");
+        compare(render(), "<M:h1>  xone two\n<C:h2>  three\n   four");
+    }
+
+    // o, O and Enter start a line with three spaces, and Enter at a name's
+    // start leaves its icon on it.
+    function test_prefixNewLines() {
+        loadListing("M  one\nC  two");
+        keys("onew<Esc>");
+        compare(render(), "<M:h1>  one\n   new\n<C:h2>  two");
+        keys("Oup<Esc>");
+        compare(render(), "<M:h1>  one\n   up\n   new\n<C:h2>  two");
+        keys("Gi<CR>x<Esc>");
+        compare(render(), "<M:h1>  one\n   up\n   new\n   \n<C:h2>  xtwo");
+        keys("ggla<CR>b<Esc>");
+        compare(render(), "<M:h1>  on\n   be\n   up\n   new\n   \n<C:h2>  xtwo");
+        loadListing("M  a");
+        keys("2ob<Esc>");
+        compare(render(), "<M:h1>  a\n   b\n   b");
+        // An empty listing gets a prefix to type after.
+        loadListing("");
+        keys("inew<Esc>");
+        compare(render(), "   new");
+    }
+
+    // Backspace at a name's start clears the icon (its ID goes), then joins
+    // the line to the one above; Delete at a line's end joins the next name.
+    function test_prefixBackspace() {
+        loadListing("M  one\nC  two");
+        keys("ji<BS>");
+        compare(render(), "<M:h1>  one\n   two");
+        keys("<BS>");
+        compare(render(), "<M:h1>  onetwo");
+        keys("<BS><Esc>");
+        compare(render(), "<M:h1>  ontwo");
+        compare(vim.positionLabel(), "1:2");
+        keys("u");
+        compare(render(), "<M:h1>  one\n<C:h2>  two");
+        keys("ggA<Del><Esc>");
+        compare(render(), "<M:h1>  onetwo");
+        // X and dh clear the icon in normal mode, but keep the line break.
+        loadListing("M  one\nC  two");
+        keys("jX");
+        compare(render(), "<M:h1>  one\n   two");
+        compare(vim.positionLabel(), "2:1");
+        keys("dhX");
+        compare(render(), "<M:h1>  one\n   two");
+        compare(vim.positionLabel(), "2:1");
+        keys("gg.");
+        compare(render(), "   one\n   two");
+        keys("u");
+        compare(render(), "<M:h1>  one\n   two");
+        // At every cursor of a block, as one edit.
+        loadListing("M  a\nC  b");
+        keys("<C-v>jI<BS><BS><Esc>");
+        compare(render(), "   ab");
+        // Replace mode's line break goes back with its prefix.
+        loadListing("M  ab");
+        keys("lR<CR>x");
+        compare(render(), "<M:h1>  a\n   x");
+        keys("<BS><BS><Esc>");
+        compare(render(), "<M:h1>  ab");
+    }
+
+    // Whole lines take their prefix along; other edits leave it be.
+    function test_prefixEdits() {
+        loadListing("M  one\nC  two");
+        keys("yyjp");
+        compare(render(), "<M:h1>  one\n<C:h2>  two\n<M:h1>  one");
+        compare(vim.positionLabel(), "3:1");
+        keys("ddVkI!<Esc>");
+        compare(render(), "<M:h1>  !one\n<C:h2>  two");
+        keys("ccuno<Esc>");
+        compare(render(), "<M:h1>  uno\n<C:h2>  two");
+        keys("J");
+        compare(render(), "<M:h1>  uno two");
+        keys("ugJ");
+        compare(render(), "<M:h1>  unotwo");
+        keys("u>>");
+        compare(render(), "<M:h1>      uno\n<C:h2>  two");
+        keys("<<Vjrx");
+        compare(render(), "<M:h1>  xxx\n<C:h2>  xxx");
+        keys("ggdaw");
+        compare(render(), "<M:h1>  \n<C:h2>  xxx");
+        keys("X");
+        compare(render(), "   \n<C:h2>  xxx");
+    }
+
+    // Pasted lines get a prefix if they have none, and text with an
+    // entry's icon (its ID) pastes as lines.
+    function test_prefixPaste() {
+        loadListing("M  one\nC  two");
+        clipboard.text = "a\nb\n";
+        keys("\"+p");
+        compare(render(), "<M:h1>  one\n   a\n   b\n<C:h2>  two");
+        keys("u");
+        clipboard.text = "x\ny";
+        keys("gg\"+P");
+        compare(render(), "<M:h1>  x\n   yone\n<C:h2>  two");
+        loadListing("M  one\nC  two");
+        vim.registers = {
+            "\"": {
+                text: mushroom + "  new",
+                linewise: false,
+                hidden: [
+                    {
+                        at: 0,
+                        icon: mushroom,
+                        text: "h9"
+                    }
+                ],
+                blockwise: false
+            }
+        };
+        keys("p");
+        compare(render(), "<M:h1>  one\n<M:h9>  new\n<C:h2>  two");
+        // In insert mode, above the cursor's line.
+        keys("gg\"+yyGA<D-v>!<Esc>");
+        compare(render(), "<M:h1>  one\n<M:h9>  new\n<M:h1>  one\n<C:h2>  two!");
+    }
+
+    function test_prefixSearch() {
+        loadListing("M  a  b\nC  c");
+        keys("/  <CR>");
+        compare(vim.positionLabel(), "1:2");
+        keys("n");
+        compare(vim.positionLabel(), "1:2");
+        findBar.open(false);
+        findBar.query = "  ";
+        compare(findBar.matches.length, 1);
+        findBar.close();
     }
 
     // ---- Find bar ------------------------------------------------------------

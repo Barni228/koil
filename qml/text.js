@@ -87,6 +87,13 @@ function isLowSurrogate(t, i) {
     return c >= 0xDC00 && c <= 0xDFFF && h >= 0xD800 && h <= 0xDBFF;
 }
 
+// Whether the character at i is in a Private Use Area, where Nerd Fonts
+// put their icons.
+function isPrivateUse(t, i) {
+    const c = t.codePointAt(i);
+    return c >= 0xE000 && c <= 0xF8FF || c >= 0xF0000 && c <= 0x10FFFD;
+}
+
 // End of the character at p.
 function charEnd(t, p) {
     const n = t.length;
