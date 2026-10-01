@@ -281,10 +281,15 @@ ApplicationWindow {
 
     // Applies the listing's changes once the user confirms them (Space a,
     // :w), then quits if `quit` is set. With `orQuit` (:confirm q, ZZ), No
-    // quits without applying.
+    // quits without applying, and if the listing can't be read (its errors,
+    // or a path that can't be opened), it asks to quit without the changes,
+    // saying why (the status line's error, which updateListing just showed).
     function applyChanges(quit, orQuit) {
-        if (!updateListing())
+        if (!updateListing()) {
+            if (orQuit)
+                confirmDialog.ask("The changes can't be applied. Quit without them?", vim.message, () => Qt.quit());
             return;
+        }
         const actions = JSON.parse(koil.actions());
         if (!actions.length) {
             if (quit)

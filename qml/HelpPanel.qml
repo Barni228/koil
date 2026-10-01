@@ -53,9 +53,11 @@ Popup {
                     + "first on their lines."],
                 ["-", "Open the dir above (`3-`: three dirs up). In a file: back to the listing, on the "
                     + "file's line (asking to save it first, if it has changes)."],
-                ["quitting", "In a file, while the listing has changes that aren't applied, `:q`, `:wq`, "
-                    + "`ZZ`, `:q!` and the rest (but `:qa!`) go back to the listing instead (saving or "
-                    + "dropping the file as they say). `:conf q` and `ZZ` then ask to apply the changes."],
+                ["quitting", "`:conf q` and `ZZ` ask to apply the changes (No quits without them), or, "
+                    + "while the listing has errors, whether to quit without them. In a file, while the "
+                    + "listing has changes that aren't applied, `:q`, `:wq`, `ZZ`, `:q!` and the rest (but "
+                    + "`:qa!`) go back to the listing instead (saving or dropping the file as they say), "
+                    + "where `:conf q` and `ZZ` then ask."],
                 ["path", "The field at the top: a dir, or a pattern of files, like `~/src/**/*.rs`, or a "
                     + "regex with `:set regex` (where `,` is any character but `/`), whose parts get colors. "
                     + "It's one line, edited with vim's keys too; Enter (also in insert mode) opens it and "

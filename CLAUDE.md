@@ -207,7 +207,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - **Quitting**: `modified` is the file's unsaved changes, or in the listing,
   edits or pending changes (`koil.hasChanges()` after each update). `:q`
   updates first (`unsaved`); `:confirm q` (and `ZZ` in the listing) asks to
-  apply the changes, where No quits without them. `:wq` applies, then quits.
+  apply the changes, where No quits without them; if the listing can't be
+  read (errors, or a path that can't be opened), they ask instead whether
+  to quit without them, under the update's error. `:wq` applies, then
+  quits; it only fails then, as a write that fails does in vim.
 - **Files**: Enter on a file, File > Open (and a file on the command line)
   leave the listing (updating it first, so its edits stay in koil) for a
   plain editor: no colors or problems, only `-` of `commandKeys`, and `:w`
