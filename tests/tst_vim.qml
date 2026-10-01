@@ -171,7 +171,7 @@ TestCase {
     // while typing can go unnoticed.
     Label {
         y: 220
-        text: vim.positionLabel()
+        text: vim.progress || vim.positionLabel()
     }
 
     Vim {
@@ -225,8 +225,17 @@ TestCase {
         theme: theme
     }
 
+    property int defaultChunkTime
+
+    function initTestCase() {
+        defaultChunkTime = vim.chunkTime;
+    }
+
     // Back to the editor, after a test that switched buffers.
     function cleanup() {
+        if (vim.macroRun)
+            vim.stopMacro();
+        vim.chunkTime = defaultChunkTime;
         if (vim.editor !== editor)
             switchTo(editor, null);
         vim.flickable = null;
@@ -288,6 +297,113 @@ TestCase {
         load("1\n1\n1");
         keys("qa<C-a>jq2@a");
         compare(render(), "2\n2\n2");
+    }
+
+    // As in vim, u undoes a whole run, which is one change.
+    function test_macroUndo() {
+        load("1\n1\n1\n1");
+        keys("qa<C-a>jq2@a");
+        compare(render(), "2\n2\n2\n1");
+        keys("u");
+        compare(render(), "2\n1\n1\n1");
+        keys("u");
+        compare(render(), "1\n1\n1\n1");
+    }
+
+    // Runs macro `reg` `count` times a key per chunk: the first one now,
+    // the others only by step() (keyClick lets the timer run them).
+    function startChunks(reg, count) {
+        vim.chunkTime = 0;
+        vim.runMacro(reg, count);
+        vim.chunkTimer.stop();
+    }
+
+    function step() {
+        vim.runChunk();
+        vim.chunkTimer.stop();
+    }
+
+    // A long run goes in chunks (here a key each), after each of which the
+    // editor has its edits and the status line its progress.
+    function test_macroChunks() {
+        load("1");
+        keys("qayyp<C-a>q");
+        startChunks("a", 3); // yank
+        verify(vim.macroRun);
+        compare(vim.progress, "@a 8%");
+        step();
+        step();
+        compare(editor.text, "1\n2\n2"); // pasted
+        compare(vim.progress, "@a 25%");
+        vim.chunkTimer.start();
+        tryCompare(vim, "macroRun", null);
+        compare(vim.progress, "");
+        compare(render(), "1\n2\n3\n4\n5");
+        compare(vim.cursor, 8);
+        keys("u");
+        compare(render(), "1\n2");
+    }
+
+    // Esc stops a run between its chunks, which other keys don't run in.
+    function test_macroStops() {
+        load("1");
+        keys("qayyp<C-a>q");
+        startChunks("a", 3);
+        keys("x<Esc>");
+        compare(vim.macroRun, null);
+        compare(vim.message, "Interrupted");
+        compare(render(), "1\n2");
+        keys("x");
+        compare(render(), "1\n");
+        // So does anything else that moves vim, like a click.
+        load("1");
+        keys("qayyp<C-a>q");
+        startChunks("a", 3);
+        editor.cursorPosition = 0;
+        compare(vim.macroRun, null);
+        compare(vim.cursor, 0);
+    }
+
+    // A macro that runs itself last (until j fails) doesn't stack up, and
+    // one that runs itself more than that fails.
+    function test_recursiveMacro() {
+        load("1\n1\n1");
+        keys("qa<C-a>j@aq@a");
+        compare(render(), "2\n2\n2");
+        compare(vim.macroRun, null);
+        load("1");
+        keys("qa@a<C-a>q@a");
+        compare(vim.message, "E223: recursive mapping");
+        compare(vim.macroRun, null);
+        compare(vim.typeahead.length, 0);
+    }
+
+    // Koil's keys in a macro see its edits so far (main.qml reads the
+    // editor).
+    function test_macroCommandKey() {
+        load("abc");
+        vim.commandKeys = { "-": "parent" };
+        vim.registers.a = { text: "x-", linewise: false, hidden: [] };
+        let seen = "";
+        const f = () => seen = editor.text;
+        vim.keyCommand.connect(f);
+        keys("@a");
+        vim.keyCommand.disconnect(f);
+        compare(seen, "bc");
+    }
+
+    // Edits in chunks keep the hidden text right, also for the editor's own
+    // edits after them.
+    function test_macroKeepsHidden() {
+        load("M  1");
+        vim.linePrefixes = true;
+        keys("qayyp<C-a>q");
+        vim.chunkTime = 0; // with the timer
+        keys("2@a");
+        tryCompare(vim, "macroRun", null);
+        compare(render(), "<M:h1>  1\n<M:h1>  2\n<M:h1>  3\n<M:h1>  4");
+        keys("ggAx<Esc>");
+        compare(render(), "<M:h1>  1x\n<M:h1>  2\n<M:h1>  3\n<M:h1>  4");
     }
 
     function test_multipleCursors() {

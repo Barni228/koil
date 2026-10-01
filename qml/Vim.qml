@@ -6,7 +6,8 @@ import "text.js" as Txt
 // the mode, the cursor (a character index: in normal and visual mode the
 // cursor sits *on* the character at `cursor`), registers and undo history.
 // Every normal-mode edit goes through editor.insert/remove so the view keeps
-// its scroll position.
+// its scroll position, except while a macro runs: then vim edits a copy of
+// the text, which the editor gets after each chunk of keys (see Macros).
 QtObject {
     id: vim
 
@@ -163,10 +164,43 @@ QtObject {
     // which runs them one by one; a failing command empties it, as in vim.
     property string recording: ""
     property var recordKeys: []
+    // The keys left to run, as a stack of { keys, next, runs }: the top
+    // one's keys[next] is next, and each runs its keys `runs` times
+    // (rather than holding them that many times: 10000@q copied them
+    // 10000 times over).
     property var typeahead: []
-    property bool draining: false
+    // The macro run that hasn't finished, as { reg, frame, runs }: its
+    // frame in typeahead, and how many times it runs. Null if none.
+    property var macroRun: null
+    // While a chunk of it runs (runChunk).
+    property bool inChunk: false
+    // How long a chunk runs, in ms (at least one key): the editor gets its
+    // edits, the status line its progress, and the user a chance to stop
+    // it after each one.
+    property int chunkTime: 50
+    // Qt draws only once nothing is waiting, which a timer that's due never
+    // lets it: the chunks run back to back, but now and then the next one
+    // waits drawTime ms, for Qt to show the edits and the progress. As it
+    // takes a while to draw a long text (over 100 ms at 40000 lines), that's
+    // only as often as keeps drawing to about a fifth of the time, and at
+    // most 4 times a second (drawEvery ms). `nextDraw` is when the next
+    // chunk lets Qt draw, and `drawStart` when it did, until the next one.
+    readonly property int drawTime: 20
+    readonly property int drawEvery: 250
+    property real nextDraw: 0
+    property real drawStart: 0
+    readonly property Timer chunkTimer: Timer {
+        onTriggered: vim.runChunk()
+    }
+    // During a chunk: the text vim edits instead of the editor's, as
+    // { text } (see bufferText). Null otherwise.
+    property var batch: null
+    // While a macro runs: what the status line shows instead of the
+    // cursor's position, like "@q 34%".
+    property string progress: ""
     property string lastMacro: ""
-    readonly property int maxMacroKeys: 100000
+    // As vim's 'maxmapdepth': macros running macros, past this, fail.
+    readonly property int maxMacroDepth: 1000
     // Command-line history: ":" commands, and "/" and "?" searches together.
     property var history: ({ ":": [], "/": [] })
     property int historyIndex: -1 // -1 while not browsing
@@ -188,6 +222,7 @@ QtObject {
     // Starts over with the editor's new text, whose icons hide the texts in
     // `entries` (see Hidden text). Leaves other buffers alone (see Buffers).
     function reset(entries) {
+        interrupt();
         keys = [];
         pendingKeys = "";
         awaitingReplaceChar = false;
@@ -197,7 +232,7 @@ QtObject {
         redoStack = [];
         change = null;
         hidden = entries || [];
-        trackedText = editor.text;
+        trackedText = bufferText();
         insertSession = null;
         cursors = [];
         blockHome = null;
@@ -208,6 +243,13 @@ QtObject {
     // Returns whether the key was consumed; unconsumed keys go to the editor.
     function handleKey(event) {
         const tok = tokenFor(event);
+        // While a macro runs (keys come between its chunks), Esc or Ctrl-C
+        // stops it, and other keys do nothing.
+        if (macroRun) {
+            if (tok === "<Esc>" || tok === "<C-c>")
+                stopMacro();
+            return true;
+        }
         // Enter with a modifier vim doesn't know (Cmd+Enter), which the
         // editor would make a line break.
         if (singleLine && tok === null && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter))
@@ -229,7 +271,7 @@ QtObject {
             const s = editor.selectionStart, e = editor.selectionEnd;
             if (event.matches(StandardKey.Copy) || event.matches(StandardKey.Cut)) {
                 if (e > s) {
-                    setRegister("+", editor.text.slice(s, e), false, true, hiddenIn(hidden, s, e));
+                    setRegister("+", bufferText().slice(s, e), false, true, hiddenIn(hidden, s, e));
                     if (event.matches(StandardKey.Cut)) {
                         replaceRange(s, e, "");
                         setCursor(s);
@@ -268,8 +310,8 @@ QtObject {
             if (event.matches(StandardKey.SelectAll) && !addKey) {
                 if (mode !== "replace") {
                     setMode("visualLine");
-                    anchor = clampNormal(editor.text, 0);
-                    setCursor(editor.length);
+                    anchor = clampNormal(bufferText(), 0);
+                    setCursor(bufferText().length);
                 }
                 return true;
             }
@@ -320,6 +362,7 @@ QtObject {
     function syncFromEditor() {
         if (syncing)
             return;
+        interrupt();
         const p = editor.cursorPosition, t = editor.text;
         if (inserting) {
             // Not into a line's prefix (by an arrow key, Home or a click):
@@ -366,6 +409,7 @@ QtObject {
 
     // Runs an edit made outside vim (e.g. from a menu) as its own undo step.
     function externalEdit(fn) {
+        interrupt();
         commitChange();
         beginChange();
         fn();
@@ -376,6 +420,7 @@ QtObject {
 
     // Cmd+Z / Cmd+Shift+Z, in any mode (also from the find bar).
     function nativeUndo(isRedo) {
+        interrupt();
         if (commandLine !== "")
             commandLineKey("<Esc>");
         const wasInserting = inserting;
@@ -383,7 +428,7 @@ QtObject {
             breakInsert();
         if (isVisual) {
             setMode("normal");
-            setCursor(clampNormal(editor.text, cursor));
+            setCursor(clampNormal(bufferText(), cursor));
         }
         if (isRedo)
             redo(1);
@@ -396,6 +441,7 @@ QtObject {
     // Moves the cursor to p from outside vim (the find bar): back to one
     // cursor, out of visual mode, and a new undo step in insert mode.
     function jumpTo(p) {
+        interrupt();
         if (commandLine !== "")
             commandLineKey("<Esc>");
         keys = [];
@@ -408,7 +454,7 @@ QtObject {
             breakInsert();
             replaceStack = [];
         }
-        const t = editor.text;
+        const t = bufferText();
         p = mode === "normal" ? clampNormal(t, p) : outOfPrefix(t, Math.max(0, Math.min(p, t.length)));
         setCursor(p);
         wantCol = Txt.column(t, p);
@@ -417,13 +463,14 @@ QtObject {
     // Runs a motion from outside vim, as if typed (Koil's Enter, on a line
     // it doesn't open).
     function runMotion(name, count) {
+        interrupt();
         execute({ reg: null, count: count, motion: { name: name } });
     }
 
     // Columns count from where a line's prefix ends, as the cursor can't
     // go before it.
     function positionLabel() {
-        const t = editor.text, ls = Txt.lineStart(t, cursor);
+        const t = bufferText(), ls = Txt.lineStart(t, cursor);
         return Txt.lineOf(t, cursor) + ":" + (Txt.column(t, cursor) - Txt.column(t, prefixEnd(t, ls)) + 1);
     }
 
@@ -450,15 +497,16 @@ QtObject {
     // enterBuffer: { cursor, wantCol, undoStack, redoStack, hidden,
     // lastVisual }.
     function leaveBuffer() {
+        interrupt();
         if (commandLine !== "")
             commandLineKey("<Esc>");
         if (inserting)
             leaveInsert();
         if (isVisual) {
             setMode("normal");
-            setCursor(clampNormal(editor.text, cursor));
+            setCursor(clampNormal(bufferText(), cursor));
         }
-        commitChange();
+        commitChange(true); // even in a macro: the step is this buffer's
         clearCursors();
         keys = [];
         pendingKeys = "";
@@ -471,7 +519,7 @@ QtObject {
     // for it. Whatever `state` leaves out starts empty (all of it for null),
     // and the cursor at 0.
     function enterBuffer(state) {
-        const s = state || {}, t = editor.text;
+        const s = state || {}, t = bufferText();
         undoStack = s.undoStack || [];
         redoStack = s.redoStack || [];
         hidden = s.hidden || [];
@@ -575,7 +623,7 @@ QtObject {
             return "<CR>";
         if (editor.selectionStart !== editor.selectionEnd)
             return null;
-        const t = editor.text, p = editor.cursorPosition;
+        const t = bufferText(), p = editor.cursorPosition;
         if (event.key === Qt.Key_Backspace || event.matches(StandardKey.Backspace)
                 || event.matches(StandardKey.DeleteStartOfWord))
             return /^[ \t]*$/.test(t.slice(prefixEnd(t, Txt.lineStart(t, p)), p)) ? "<BS>" : null;
@@ -587,7 +635,7 @@ QtObject {
 
     // Moves the insert-mode cursors like the editor does for these keys.
     function insertMove(tok) {
-        setCursor(editAll(p => insertMoved(editor.text, p, tok)));
+        setCursor(editAll(p => insertMoved(bufferText(), p, tok)));
     }
 
     function insertMoved(t, p, tok) {
@@ -919,7 +967,7 @@ QtObject {
 
     function execute(cmd) {
         if (cmd.command) {
-            keyCommand(cmd.command, cmd.count);
+            outside(() => keyCommand(cmd.command, cmd.count));
             return;
         }
         const changing = isChange(cmd);
@@ -945,7 +993,7 @@ QtObject {
     }
 
     function moveBy(cmd) {
-        const t = editor.text;
+        const t = bufferText();
         const count = Math.max(cmd.count, 1);
         const r = motion(t, cursor, cmd.motion, count, cmd.count > 0, false);
         if (r) {
@@ -984,7 +1032,7 @@ QtObject {
     }
 
     function executeOperator(cmd) {
-        const t = editor.text;
+        const t = bufferText();
         const n = t.length;
         const count = Math.max(cmd.count, 1);
         if (cmd.op === "d" && cmd.motion && ["h", "<Left>", "<BS>"].includes(cmd.motion.name)) {
@@ -995,7 +1043,7 @@ QtObject {
             const ls = Txt.lineStart(t, cursor), pe = prefixEnd(t, ls);
             if (cursor > ls && cursor === pe && t.slice(ls, pe) !== blankPrefix) {
                 replaceRange(ls, pe, blankPrefix);
-                setCursor(clampNormal(editor.text, ls + blankPrefix.length));
+                setCursor(clampNormal(bufferText(), ls + blankPrefix.length));
                 return;
             }
         }
@@ -1043,7 +1091,7 @@ QtObject {
     }
 
     function applyOperator(op, range, reg, count, yankCursor) {
-        const t = editor.text;
+        const t = bufferText();
         if (!range.linewise && range.end <= range.start && op !== "c")
             return;
         const lines = range.linewise ? Txt.spannedLines(t.slice(range.start, range.end)) : 0;
@@ -1082,7 +1130,7 @@ QtObject {
     }
 
     function executeAction(cmd) {
-        const t = editor.text;
+        const t = bufferText();
         const count = Math.max(cmd.count, 1);
         const p = cursor;
         switch (cmd.action) {
@@ -1164,7 +1212,7 @@ QtObject {
             if (e > p) {
                 const text = Txt.toggleCase(t.slice(p, e));
                 replaceRange(p, e, text, carriedHidden(p, e, text));
-                setCursor(clampNormal(editor.text, e));
+                setCursor(clampNormal(bufferText(), e));
             }
             break;
         }
@@ -1196,10 +1244,10 @@ QtObject {
             openCommandLine(cmd.action);
             break;
         case "ZZ":
-            writeRequested(true, true);
+            outside(() => writeRequested(true, true));
             break;
         case "ZQ":
-            quitRequested(true, false, false);
+            outside(() => quitRequested(true, false, false));
             break;
         case "zz":
         case "zt":
@@ -1223,7 +1271,7 @@ QtObject {
             }
             break;
         case "gh":
-            hoverRequested(p);
+            outside(() => hoverRequested(p));
             break;
         case "<C-a>":
         case "<C-x>":
@@ -1239,7 +1287,7 @@ QtObject {
     }
 
     function executeVisual(cmd) {
-        const t = editor.text;
+        const t = bufferText();
         const n = t.length;
         const count = Math.max(cmd.count, 1);
         if (cmd.motion) {
@@ -1353,7 +1401,7 @@ QtObject {
                     s += t[q] === "\n" || inPrefix(t, q) ? t.slice(q, Txt.charEnd(t, q)) : cmd.ch;
                 replaceRange(range.start, range.end, s, carriedHidden(range.start, range.end, s));
             }
-            setCursor(clampNormal(editor.text, range.start));
+            setCursor(clampNormal(bufferText(), range.start));
             break;
         }
         case "J":
@@ -1386,7 +1434,7 @@ QtObject {
             replaceRange(range.start, range.end, x.text, x.entries);
             if (a === "p")
                 setRegister(null, removed, range.linewise, false, removedHidden);
-            const nt = editor.text;
+            const nt = bufferText();
             setCursor(clampNormal(nt, r.linewise
                 ? firstNonBlank(nt, range.start + (range.linewise ? 0 : 1))
                 : Txt.charStart(nt, range.start + x.text.length - 1)));
@@ -1407,7 +1455,7 @@ QtObject {
     // In Koil's listing, puts a prefix on p's line if it's empty, to type
     // after (see Prefixes). Returns where p is then.
     function prefixEmptyLine(p) {
-        const t = editor.text, ls = Txt.lineStart(t, p);
+        const t = bufferText(), ls = Txt.lineStart(t, p);
         if (!linePrefixes || ls !== Txt.lineEnd(t, ls))
             return p;
         replaceRange(ls, ls, blankPrefix);
@@ -1443,7 +1491,7 @@ QtObject {
         // onto what was typed, as in vim.
         const block = blockHome;
         clearCursors();
-        const t = editor.text;
+        const t = bufferText();
         const p = block && !block.moved ? Txt.lineToPos(t, block.line) + block.offset
             : cursor > Txt.lineStart(t, cursor) ? Txt.charStart(t, cursor - 1) : cursor;
         setMode("normal");
@@ -1466,7 +1514,7 @@ QtObject {
             const typed = s.keys.map(typedText).join("");
             const text = (s.openLine ? lineBreak + typed : typed).repeat(n);
             setCursor(editAll(q => {
-                const at = s.openLine ? Txt.lineEnd(editor.text, q) : q;
+                const at = s.openLine ? Txt.lineEnd(bufferText(), q) : q;
                 replaceRange(at, at, text);
                 return at + text.length;
             }));
@@ -1475,7 +1523,7 @@ QtObject {
         for (let i = 0; i < n; i++) {
             if (s.openLine) {
                 setCursor(editAll(q => {
-                    const le = Txt.lineEnd(editor.text, q);
+                    const le = Txt.lineEnd(bufferText(), q);
                     replaceRange(le, le, lineBreak);
                     return le + lineBreak.length;
                 }));
@@ -1501,7 +1549,7 @@ QtObject {
         if (cursors.length && editAtOnce(edit))
             return;
         setCursor(editAll(p => {
-            const e = edit(editor.text, p);
+            const e = edit(bufferText(), p);
             if (!e)
                 return p;
             replaceRange(e.start, e.end, e.text);
@@ -1547,7 +1595,7 @@ QtObject {
     // Not for edits that overlap, or cursors over 1000 characters apart on
     // average, where the one edit would be long: returns whether it made it.
     function editAtOnce(edit) {
-        const t = editor.text;
+        const t = bufferText();
         const all = [{ pos: cursor, main: true }].concat(cursors.filter(c => c.pos !== cursor))
             .map(c => ({ c: c, e: edit(t, c.pos) || { start: c.pos, end: c.pos, text: "" } }))
             .sort((a, b) => a.e.start - b.e.start);
@@ -1570,7 +1618,7 @@ QtObject {
     // one replaceRange, keeping the hidden text between them, and returns
     // where each one's text ends.
     function replaceRanges(edits) {
-        const t = editor.text, first = edits[0].start, last = edits[edits.length - 1].end;
+        const t = bufferText(), first = edits[0].start, last = edits[edits.length - 1].end;
         // The new text, with the entries of the icons it keeps (hidden is
         // sorted, so one pass finds them).
         const parts = [], entries = [], ends = [];
@@ -1611,7 +1659,7 @@ QtObject {
     // hidden }), null if it replaced nothing, or for a line break, { text:
     // "", hidden: [], typed }, with the length of what it typed.
     function replaceAt(p, stack, tok) {
-        const t = editor.text;
+        const t = bufferText();
         if (tok === "<BS>") {
             const q = Txt.charStart(t, p - 1);
             if (stack.length) {
@@ -1630,7 +1678,7 @@ QtObject {
             return p + lineBreak.length;
         }
         for (const ch of tok === "<Tab>" ? "\t" : tok) {
-            const t = editor.text;
+            const t = bufferText();
             if (ch !== "\n" && p < t.length && t[p] !== "\n") {
                 const e = Txt.charEnd(t, p);
                 stack.push({ text: t.slice(p, e), hidden: hiddenIn(hidden, p, e) });
@@ -1690,13 +1738,13 @@ QtObject {
 
     // The block as { start, end } spans, for drawing it.
     function blockSpans() {
-        return blockShape(editor.text).lines.filter(l => l.end > l.start).map(l => ({ start: l.start, end: l.end }));
+        return blockShape(bufferText()).lines.filter(l => l.end > l.start).map(l => ({ start: l.start, end: l.end }));
     }
 
     // Runs a visual block command. Returns false for the ones that work on
     // whole lines, as in the other visual modes.
     function executeBlock(cmd) {
-        const t = editor.text;
+        const t = bufferText();
         const a = cmd.action;
         const b = blockShape(t);
         const lines = b.lines;
@@ -1708,7 +1756,7 @@ QtObject {
         const points = (reached.length ? reached : lines.slice(0, 1))
             .map(l => ({ line: l.line, offset: l.start - l.ls, pad: "" }));
         const home = () => {
-            const nt = editor.text;
+            const nt = bufferText();
             const ls = Txt.lineToPos(nt, lines[0].line);
             setCursor(clampNormal(nt, Txt.advance(nt, ls, b.left, Txt.lineEnd(nt, ls))));
             wantCol = Txt.column(nt, cursor);
@@ -1788,11 +1836,11 @@ QtObject {
             } else if (!r.linewise && !r.text.includes("\n")) {
                 // One line of text goes on every line of the block.
                 for (let i = points.length - 1; i >= 0; i--) {
-                    const p = Txt.lineToPos(editor.text, points[i].line) + points[i].offset;
+                    const p = Txt.lineToPos(bufferText(), points[i].line) + points[i].offset;
                     replaceRange(p, p, r.text, r.hidden);
                 }
             } else {
-                const nt = editor.text;
+                const nt = bufferText();
                 setCursor(r.linewise ? Txt.lineToPos(nt, lines[lines.length - 1].line)
                     : Txt.lineToPos(nt, points[0].line) + points[0].offset);
                 paste(cmd.reg, r.linewise, 1);
@@ -1835,9 +1883,9 @@ QtObject {
         pieces.forEach((piece, i) => {
             const entries = hiddenIn(r.hidden, from, from + piece.length);
             from += piece.length + 1;
-            if (line + i > Txt.countLines(editor.text))
-                replaceRange(editor.length, editor.length, lineBreak);
-            const t = editor.text;
+            if (line + i > Txt.countLines(bufferText()))
+                replaceRange(bufferText().length, bufferText().length, lineBreak);
+            const t = bufferText();
             const ls = Txt.lineToPos(t, line + i), le = Txt.lineEnd(t, ls);
             const cols = Txt.column(t, le);
             const at = Txt.advance(t, ls, col, le);
@@ -1857,7 +1905,7 @@ QtObject {
         // The lines' starts, in one pass (the points are in order of their
         // lines; lineToPos goes over every line before), then the padding,
         // as one edit.
-        const t = editor.text, starts = [];
+        const t = bufferText(), starts = [];
         let line = points[0].line, ls = Txt.lineToPos(t, line);
         for (const q of points) {
             for (; line < q.line; line++)
@@ -1881,19 +1929,20 @@ QtObject {
             main = cursor;
         const sorted = list.slice().sort((a, b) => a.pos - b.pos);
         cursors = sorted.filter((c, i) => c.pos !== main && (i === 0 || c.pos !== sorted[i - 1].pos));
-        if (cursors.length)
+        if (cursors.length && !batch)
             trackedText = editor.text;
     }
 
     // Alt+click: adds a cursor at pos, or removes the one there.
     function toggleCursor(pos) {
+        interrupt();
         if (isVisual) {
             setMode("normal");
-            setCursor(clampNormal(editor.text, cursor));
+            setCursor(clampNormal(bufferText(), cursor));
         }
         if (mode !== "normal" && mode !== "insert")
             return;
-        const t = editor.text;
+        const t = bufferText();
         const p = mode === "normal" ? clampNormal(t, pos) : outOfPrefix(t, Math.min(pos, t.length));
         if (cursors.some(c => c.pos === p))
             setCursors(cursors.filter(c => c.pos !== p));
@@ -1957,6 +2006,9 @@ QtObject {
     // ---- Macros ------------------------------------------------------------
     // A register holds a macro as text, with keys like Esc written "<Esc>".
     // A recorded one also keeps its keys, so typed text like "<CR>" stays text.
+    // A run (@q, with the macros it runs) is one undo step, as in vim. It
+    // runs in chunks (see runChunk), between which Qt draws its progress on
+    // the status line, and Esc or Ctrl-C stops it (see handleKey).
 
     function startRecording(reg) {
         recording = reg;
@@ -1966,7 +2018,7 @@ QtObject {
     function stopRecording() {
         const reg = recording.toLowerCase();
         let ks = recordKeys;
-        if (!draining)
+        if (!macroRun)
             ks = ks.slice(0, -1); // the "q" that stopped it
         // "qA" appends to register a.
         const old = recording !== reg ? registers[reg] : null;
@@ -2007,49 +2059,210 @@ QtObject {
         if (!r)
             return;
         const ks = r.keys || macroKeys(r.text);
-        let all = [];
-        for (let i = 0; i < count; i++)
-            all = all.concat(ks);
-        // A macro run from a macro goes before the rest of that one.
-        typeahead = all.concat(typeahead);
-        if (draining)
+        if (!ks.length)
             return;
-        draining = true;
-        for (let n = 0; typeahead.length; n++) {
-            if (n === maxMacroKeys) {
-                showError("Macro stopped after " + n + " keys");
-                break;
-            }
-            runKey(typeahead.shift(), null);
+        if (typeahead.length >= maxMacroDepth) {
+            showError("E223: recursive mapping");
+            return;
         }
-        draining = false;
+        // A macro run from a macro goes before the rest of that one.
+        const frame = { keys: ks, next: 0, runs: count };
+        typeahead.push(frame);
+        if (macroRun)
+            return;
+        macroRun = { reg: reg, frame: frame, runs: count };
+        // Already, so the status line doesn't follow the cursor (see
+        // main.qml), which in a long text takes a while each time.
+        progress = "@" + reg;
+        nextDraw = 0; // shown after the first chunk
+        runChunk();
+    }
+
+    // The next key of the macros running (see typeahead).
+    function nextMacroKey() {
+        const f = typeahead[typeahead.length - 1];
+        const k = f.keys[f.next++];
+        if (f.next === f.keys.length) {
+            f.next = 0;
+            // Gone before its last key runs, so a macro that runs itself
+            // last (qa…@aq) doesn't stack up.
+            if (--f.runs === 0)
+                typeahead.pop();
+        }
+        return k;
+    }
+
+    // Runs macroRun's keys for chunkTime ms, editing a copy of the text
+    // (`batch`) rather than the editor, where each edit has Qt go over all
+    // the text (10000@q with yyp<C-a> in q took minutes, without returning
+    // to Qt to free the memory it took, which ran out). Then the editor gets
+    // the chunk's edits as one, and the next chunk runs once Qt has drawn
+    // it and handled the keys typed meanwhile.
+    function runChunk() {
+        if (!macroRun)
+            return;
+        const start = Date.now();
+        if (drawStart) {
+            nextDraw = start + Math.max(drawEvery, 4 * (start - drawStart));
+            drawStart = 0;
+        }
+        inChunk = true;
+        batch = { text: editor.text };
+        try {
+            while (typeahead.length) {
+                runKey(nextMacroKey(), null);
+                if (Date.now() - start >= chunkTime)
+                    break;
+            }
+        } catch (e) {
+            typeahead = []; // a bug: not the rest of it
+            throw e;
+        } finally {
+            flush();
+            batch = null;
+            inChunk = false;
+            if (typeahead.length) {
+                progress = progressLabel();
+                const now = Date.now(), draw = now >= nextDraw;
+                if (draw)
+                    drawStart = now;
+                chunkTimer.interval = draw ? drawTime : 0;
+                chunkTimer.start();
+            } else {
+                endMacro();
+            }
+        }
+    }
+
+    // How far macroRun is, for the status line: "@q 34%", or only "@q"
+    // once it's running a macro it ran last.
+    function progressLabel() {
+        const r = macroRun, f = r.frame;
+        if (typeahead[0] !== f)
+            return "@" + r.reg;
+        const done = (r.runs - f.runs) * f.keys.length + f.next;
+        return "@" + r.reg + " " + Math.floor(100 * done / (r.runs * f.keys.length)) + "%";
+    }
+
+    // The run ended: its keys ran out, one failed, or it was stopped.
+    function endMacro() {
+        chunkTimer.stop();
+        drawStart = 0;
+        typeahead = [];
+        macroRun = null;
+        progress = "";
+        if (!inserting)
+            commitChange();
+    }
+
+    // Also drops what the macro left half typed (a command, a command line).
+    function stopMacro() {
+        endMacro();
+        if (commandLine !== "")
+            commandLineKey("<Esc>");
+        keys = [];
+        pendingKeys = "";
+        awaitingReplaceChar = false;
+        showMessage("Interrupted");
+    }
+
+    // Called first by what changes the text or moves vim from outside (a
+    // click, the find bar, main.qml): a macro running then, between its
+    // chunks, would go on from somewhere else, so it stops.
+    function interrupt() {
+        if (macroRun && !inChunk)
+            stopMacro();
+    }
+
+    // Runs fn, which emits a signal main.qml handles by reading or changing
+    // the editor, with the editor up to date during a chunk.
+    function outside(fn) {
+        if (!batch) {
+            fn();
+            return;
+        }
+        flush();
+        batch = null;
+        try {
+            fn();
+        } finally {
+            batch = { text: editor.text };
+        }
+    }
+
+    // Gives the editor the text vim edited in its place during a chunk, as
+    // one edit, and vim's mode and cursor (or selection), as setMode and
+    // setCursor would have.
+    function flush() {
+        const b = batch;
+        batch = null;
+        syncing = true;
+        const old = editor.text;
+        if (b.text !== old) {
+            const d = diff(old, b.text, [], []);
+            editing = true;
+            if (d.end1 > d.start)
+                editor.remove(d.start, d.end1);
+            if (d.end2 > d.start)
+                editor.insert(d.start, b.text.slice(d.start, d.end2));
+            editing = false;
+        }
+        const view = flickable && { x: flickable.contentX, y: flickable.contentY };
+        editor.readOnly = mode !== "insert";
+        if (isVisual)
+            updateSelection();
+        else
+            editor.cursorPosition = Math.min(cursor, editor.length);
+        if (view) {
+            flickable.contentX = view.x;
+            flickable.contentY = view.y;
+        }
+        syncing = false;
+        b.text = editor.text;
+        if (hidden.length || cursors.length)
+            trackedText = b.text;
+        showCursor();
+        batch = b;
     }
 
     // ---- Editing primitives ----------------------------------------------
+
+    // The text of the buffer vim edits: the editor's, or during a chunk of
+    // a macro, the copy vim edits in its place (see runChunk).
+    function bufferText() {
+        return batch ? batch.text : editor.text;
+    }
 
     // `entries` are the hidden-text entries for `text`, if it has any.
     function replaceRange(start, end, text, entries) {
         // A space is as long as a line break, so positions stay right.
         if (singleLine)
             text = text.replace(new RegExp("[\\r\\n\\u2028\\u2029]", "g"), " ");
-        syncing = true;
-        editing = true;
-        if (end > start)
-            editor.remove(start, end);
-        if (text.length)
-            editor.insert(start, text);
-        editing = false;
-        syncing = false;
+        if (batch) {
+            const t = batch.text;
+            batch.text = t.slice(0, start) + text + t.slice(end);
+        } else {
+            syncing = true;
+            editing = true;
+            if (end > start)
+                editor.remove(start, end);
+            if (text.length)
+                editor.insert(start, text);
+            editing = false;
+            syncing = false;
+        }
         if (hidden.length || entries && entries.length)
             shiftHidden(start, end, text.length, entries || []);
         shiftCursors(start, end, text.length);
-        if (hidden.length || cursors.length)
+        if (!batch && (hidden.length || cursors.length))
             trackedText = editor.text;
     }
 
     function setMode(m) {
         const wasVisual = isVisual;
         mode = m;
+        if (batch)
+            return; // the editor gets it after the chunk (see flush)
         syncing = true;
         // Changing readOnly makes the editor scroll to where the cursor used
         // to be, then setting the cursor puts its line at the top. Keep the
@@ -2061,7 +2274,7 @@ QtObject {
         if (wasVisual && !isVisual)
             editor.deselect();
         if (!isVisual)
-            editor.cursorPosition = Math.min(cursor, editor.length);
+            editor.cursorPosition = Math.min(cursor, bufferText().length);
         if (view) {
             flickable.contentX = view.x;
             flickable.contentY = view.y;
@@ -2072,7 +2285,9 @@ QtObject {
 
     // Never in a line's prefix (see Prefixes).
     function setCursor(p) {
-        cursor = outOfPrefix(editor.text, p);
+        cursor = outOfPrefix(bufferText(), p);
+        if (batch)
+            return; // as setMode
         syncing = true;
         if (isVisual)
             updateSelection();
@@ -2082,7 +2297,7 @@ QtObject {
     }
 
     function updateSelection() {
-        const t = editor.text;
+        const t = bufferText();
         const n = t.length;
         if (mode === "visualBlock") {
             // The editor's selection can't be a block: the view draws it.
@@ -2103,31 +2318,42 @@ QtObject {
     }
 
     // ---- Undo ------------------------------------------------------------
-    // Each change (a normal-mode command, or everything typed in one insert)
-    // is stored as the span it replaced, found by diffing the text around it.
+    // Each change (a normal-mode command, everything typed in one insert, or
+    // a macro run) is stored as the span it replaced, found by diffing the
+    // text around it.
 
     function beginChange() {
         if (!change)
-            change = { before: editor.text, hidden: hidden, cursor: cursor };
+            change = { before: bufferText(), hidden: hidden, cursor: cursor };
     }
 
-    function commitChange() {
-        if (!change)
+    // While a macro runs, its changes add up to one, which only ends with
+    // it, unless `force` (to undo, or leave the buffer).
+    function commitChange(force) {
+        if (!change || macroRun && !force)
             return;
-        const before = change.before, after = editor.text;
+        const before = change.before, after = bufferText();
         const c = change.cursor, bh = change.hidden;
         change = null;
         const d = diff(before, after, bh, hidden);
         if (!d)
             return;
         const s = d.start, e1 = d.end1, e2 = d.end2;
-        undoStack.push({ start: s, removed: before.slice(s, e1), inserted: after.slice(s, e2),
+        undoStack.push({ start: s, removed: own(before.slice(s, e1)), inserted: own(after.slice(s, e2)),
             removedHidden: hiddenIn(bh, s, e1), insertedHidden: hiddenIn(hidden, s, e2), cursor: c });
         redoStack = [];
     }
 
+    // s as a string of its own. V4 keeps the whole string a slice was cut
+    // from until the slice is read (here by charCodeAt), so each undo step
+    // and register kept a copy of all the text.
+    function own(s) {
+        s.charCodeAt(0);
+        return s;
+    }
+
     function undo(count) {
-        commitChange();
+        commitChange(true);
         let last = null;
         for (let i = 0; i < count && undoStack.length; i++) {
             last = undoStack.pop();
@@ -2136,15 +2362,15 @@ QtObject {
         }
         if (!last) {
             showMessage("Already at oldest change");
-            nothingToUndo();
+            outside(() => nothingToUndo());
             return;
         }
-        const p = Math.min(last.cursor, editor.length);
-        setCursor(mode === "normal" ? clampNormal(editor.text, p) : p);
+        const p = Math.min(last.cursor, bufferText().length);
+        setCursor(mode === "normal" ? clampNormal(bufferText(), p) : p);
     }
 
     function redo(count) {
-        commitChange();
+        commitChange(true);
         let last = null;
         for (let i = 0; i < count && redoStack.length; i++) {
             last = redoStack.pop();
@@ -2157,7 +2383,7 @@ QtObject {
         }
         // Land on an inserted line rather than the end of the line above it.
         const p = last.start + (last.inserted[0] === "\n" ? 1 : 0);
-        setCursor(mode === "normal" ? clampNormal(editor.text, p) : p);
+        setCursor(mode === "normal" ? clampNormal(bufferText(), p) : p);
     }
 
     // ---- Registers -------------------------------------------------------
@@ -2178,13 +2404,13 @@ QtObject {
                     ? JSON.stringify({ text: text, hidden: entries, block: blockwise, session: clipboardSession }) : "");
             return;
         }
-        const entry = { text: text, linewise: linewise, hidden: entries, blockwise: blockwise };
+        const entry = { text: own(text), linewise: linewise, hidden: entries, blockwise: blockwise };
         if (name && /^[A-Z]$/.test(name)) {
             const key = name.toLowerCase();
             const old = registers[key];
             if (old) {
                 const sep = linewise && !old.linewise ? "\n" : "";
-                entry.text = old.text + sep + text;
+                entry.text = own(old.text + sep + text);
                 entry.hidden = old.hidden.concat(shifted(entries, old.text.length + sep.length));
             }
             entry.linewise = linewise || (old && old.linewise);
@@ -2233,7 +2459,7 @@ QtObject {
         }
         setRegister(reg, text, range.linewise, false, hiddenIn(hidden, range.start, range.end));
         replaceRange(s, range.end, "");
-        const nt = editor.text;
+        const nt = bufferText();
         if (range.linewise)
             setCursor(clampNormal(nt, firstNonBlank(nt, Math.min(s, nt.length))));
         else
@@ -2244,13 +2470,13 @@ QtObject {
         const r = registerToPaste(reg);
         if (!r)
             return;
-        const t = editor.text;
+        const t = bufferText();
         const p = cursor;
         if (r.blockwise) {
             const line = Txt.lineOf(t, p);
             const col = Txt.column(t, p) + (after && p < Txt.lineEnd(t, p) ? 1 : 0);
             putBlock(r, line, col, count);
-            const nt = editor.text;
+            const nt = bufferText();
             const ls = Txt.lineToPos(nt, line);
             setCursor(clampNormal(nt, Txt.advance(nt, ls, col, Txt.lineEnd(nt, ls))));
             return;
@@ -2273,13 +2499,13 @@ QtObject {
             }
             const x = prefixLines(at, at, body, entries);
             replaceRange(at, at, x.text, x.entries);
-            const nt = editor.text;
+            const nt = bufferText();
             setCursor(clampNormal(nt, firstNonBlank(nt, body[0] === "\n" ? at + 1 : at)));
         } else {
             const at = after && p < Txt.lineEnd(t, p) ? Txt.charEnd(t, p) : p;
             const x = prefixLines(at, at, r.text.repeat(count), entries);
             replaceRange(at, at, x.text, x.entries);
-            setCursor(clampNormal(editor.text, at + Math.max(x.text.length - 1, 0)));
+            setCursor(clampNormal(bufferText(), at + Math.max(x.text.length - 1, 0)));
         }
     }
 
@@ -2290,7 +2516,7 @@ QtObject {
         if (pastesLines(r)) {
             const text = r.text.endsWith("\n") ? r.text : r.text + "\n";
             setCursor(editAll(p => {
-                const ls = Txt.lineStart(editor.text, p);
+                const ls = Txt.lineStart(bufferText(), p);
                 const x = prefixLines(ls, ls, text, r.hidden);
                 replaceRange(ls, ls, x.text, x.entries);
                 return p + x.text.length;
@@ -2351,7 +2577,28 @@ QtObject {
 
     // The entries of `list` whose icon is in [start, end), from start.
     function hiddenIn(list, start, end) {
-        return shifted(list.filter(h => h.at >= start && h.at + h.icon.length <= end), -start);
+        const r = [];
+        for (let i = firstAt(list, start); i < list.length && list[i].at < end; i++) {
+            const h = list[i];
+            if (h.at + h.icon.length <= end)
+                r.push({ at: h.at - start, icon: h.icon, text: h.text });
+        }
+        return r;
+    }
+
+    // The index of the first entry of `list` at p or after it (or its
+    // length). Entries are sorted, so with thousands of them (a long
+    // listing) edits look them up rather than going over them all.
+    function firstAt(list, p) {
+        let lo = 0, hi = list.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (list[mid].at < p)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo;
     }
 
     function shifted(list, by) {
@@ -2374,9 +2621,12 @@ QtObject {
     // Updates `hidden` for text [start, end) replaced by `length` characters
     // with the entries `entries`. An icon the edit touches loses its text.
     function shiftHidden(start, end, length, entries) {
-        const d = length - (end - start);
-        hidden = hidden.filter(h => h.at + h.icon.length <= start)
-            .concat(shifted(entries, start), shifted(hidden.filter(h => h.at >= end), d));
+        const list = hidden, d = length - (end - start);
+        let i = firstAt(list, start);
+        if (i > 0 && list[i - 1].at + list[i - 1].icon.length > start)
+            i--;
+        const after = list.slice(firstAt(list, end));
+        hidden = list.slice(0, i).concat(shifted(entries, start), d ? shifted(after, d) : after);
     }
 
     // Edits made by the editor itself, rather than through replaceRange.
@@ -2395,19 +2645,32 @@ QtObject {
         }
     }
 
+    // How many characters a and b have in common at their starts (or ends,
+    // if `fromEnd`), up to max. It compares slices, which V4 does natively,
+    // rather than characters, each of which it makes a string of (in a long
+    // text, a diff took milliseconds).
+    function sameLength(a, b, fromEnd, max) {
+        let n = 0;
+        for (let step = 1024; step > 0;) {
+            const same = n + step <= max && (fromEnd
+                ? a.slice(a.length - n - step, a.length - n) === b.slice(b.length - n - step, b.length - n)
+                : a.slice(n, n + step) === b.slice(n, n + step));
+            if (same)
+                n += step;
+            else
+                step >>= 1;
+        }
+        return n;
+    }
+
     // The span that differs between two texts with their entries: `before`
     // [start, end1) became `after` [start, end2). Null if nothing differs.
     function diff(before, after, beforeHidden, afterHidden) {
         const bh = beforeHidden, ah = afterHidden;
-        let s = 0;
         const max = Math.min(before.length, after.length);
-        while (s < max && before[s] === after[s])
-            s++;
-        let e1 = before.length, e2 = after.length;
-        while (e1 > s && e2 > s && before[e1 - 1] === after[e2 - 1]) {
-            e1--;
-            e2--;
-        }
+        let s = sameLength(before, after, false, max);
+        const same = sameLength(before, after, true, max - s);
+        let e1 = before.length - same, e2 = after.length - same;
         // An icon on both sides is only unchanged if its hidden text is too.
         for (let i = 0; ; i++) {
             const b = bh[i], a = ah[i];
@@ -2440,7 +2703,7 @@ QtObject {
     // same order (a case change or indenting), which keep their texts: the
     // k-th 🍄 of the old text is the k-th 🍄 of the new one.
     function carriedHidden(start, end, text) {
-        const old = editor.text.slice(start, end);
+        const old = bufferText().slice(start, end);
         const r = [];
         for (const h of hiddenIn(hidden, start, end)) {
             let i = old.indexOf(h.icon), j = text.indexOf(h.icon);
@@ -2456,15 +2719,8 @@ QtObject {
 
     // The entry of the icon at p, or null.
     function hiddenAt(p) {
-        let lo = 0, hi = hidden.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (hidden[mid].at < p)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        return lo < hidden.length && hidden[lo].at === p ? hidden[lo] : null;
+        const list = hidden, i = firstAt(list, p);
+        return i < list.length && list[i].at === p ? list[i] : null;
     }
 
     // Replaces the whole text with `text`, whose icons hide `entries`, as
@@ -2472,7 +2728,7 @@ QtObject {
     // changes, so the view stays where it is.
     function replaceText(text, entries) {
         externalEdit(() => {
-            const d = diff(editor.text, text, hidden, entries);
+            const d = diff(bufferText(), text, hidden, entries);
             if (d)
                 replaceRange(d.start, d.end1, text.slice(d.start, d.end2), hiddenIn(entries, d.start, d.end2));
         });
@@ -2562,7 +2818,7 @@ QtObject {
     // prefix: text from another app has none, and a line break leaves the
     // rest of its line without one. Returns { text, entries }.
     function prefixLines(start, end, text, entries) {
-        const t = editor.text, first = start === Txt.lineStart(t, start);
+        const t = bufferText(), first = start === Txt.lineStart(t, start);
         if (!linePrefixes || !first && text.indexOf("\n") < 0)
             return { text: text, entries: entries };
         // The rest of the line after the text, which its last line starts.
@@ -2620,10 +2876,10 @@ QtObject {
     // ---- Other edits -------------------------------------------------------
 
     function joinLines(count, spaces) {
-        const ls = Txt.lineStart(editor.text, cursor);
+        const ls = Txt.lineStart(bufferText(), cursor);
         let pos = cursor;
         for (let i = 1; i < Math.max(count, 2); i++) {
-            const t = editor.text;
+            const t = bufferText();
             const le = Txt.lineEnd(t, ls);
             if (le >= t.length)
                 break;
@@ -2640,14 +2896,14 @@ QtObject {
             replaceRange(le, e, sep);
             pos = le;
         }
-        setCursor(clampNormal(editor.text, pos));
+        setCursor(clampNormal(bufferText(), pos));
     }
 
     // Adds `delta` to the number under or after the cursor on its line:
     // decimal (with an optional "-"), 0x hex or 0b binary. Hex and binary
     // numbers, and decimals with leading zeros, keep their width.
     function addToNumber(delta) {
-        const t = editor.text;
+        const t = bufferText();
         const ls = Txt.lineStart(t, cursor), le = Txt.lineEnd(t, cursor);
         const re = /0[xX][0-9a-fA-F]+|0[bB][01]+|-?(?!0[xX][0-9a-fA-F]|0[bB][01])[0-9]+/g;
         const line = t.slice(ls, le);
@@ -2681,7 +2937,7 @@ QtObject {
     }
 
     function shiftLines(range, dir, times) {
-        const t = editor.text;
+        const t = bufferText();
         const s = Txt.lineStart(t, range.start);
         const e = Txt.lineEnd(t, Math.max(range.start, range.end - 1));
         let ls = s;
@@ -2700,18 +2956,18 @@ QtObject {
         });
         const text = lines.join("\n");
         replaceRange(s, e, text, carriedHidden(s, e, text));
-        setCursor(clampNormal(editor.text, firstNonBlank(editor.text, s)));
+        setCursor(clampNormal(bufferText(), firstNonBlank(bufferText(), s)));
     }
 
     // how: "~" toggles the case, "u" lowers it, "U" raises it, and "?" (g?)
     // is ROT13.
     function changeCase(range, how) {
-        const t = editor.text;
+        const t = bufferText();
         const s = t.slice(range.start, range.end);
         const text = how === "u" ? s.toLowerCase() : how === "U" ? s.toUpperCase()
             : how === "?" ? Txt.rot13(s) : Txt.toggleCase(s);
         replaceRange(range.start, range.end, text, carriedHidden(range.start, range.end, text));
-        setCursor(clampNormal(editor.text, range.start));
+        setCursor(clampNormal(bufferText(), range.start));
     }
 
     // ---- Command line ------------------------------------------------------
@@ -2742,7 +2998,7 @@ QtObject {
             return;
         }
         if (/^\d+$/.test(c) || c === "$") {
-            const t = editor.text;
+            const t = bufferText();
             const line = c === "$" ? Txt.countLines(t) : Math.max(1, Math.min(parseInt(c, 10), Txt.countLines(t)));
             if (isVisual)
                 setMode("normal");
@@ -2750,13 +3006,13 @@ QtObject {
             return;
         }
         if (["w", "write"].includes(c))
-            writeRequested(false, false);
+            outside(() => writeRequested(false, false));
         else if (["wq", "x", "wq!", "x!", "xit", "exit"].includes(c))
-            writeRequested(true, false);
+            outside(() => writeRequested(true, false));
         else if (["q", "quit", "qa", "qall"].includes(c))
-            quitRequested(false, !!confirm, c.startsWith("qa"));
+            outside(() => quitRequested(false, !!confirm, c.startsWith("qa")));
         else if (["q!", "quit!", "qa!", "qall!"].includes(c))
-            quitRequested(true, false, c.startsWith("qa"));
+            outside(() => quitRequested(true, false, c.startsWith("qa")));
         else if (["noh", "nohl", "nohlsearch"].includes(c)) {
             highlightPattern = "";
             highlightsCleared();
@@ -2764,7 +3020,7 @@ QtObject {
         else if (/^se(t)?(\s|$)/.test(c))
             setOptions(c.replace(/^\S+\s*/, ""));
         else if (/^h(elp)?(\s|$)/.test(c))
-            helpRequested(c.replace(/^\S+\s*/, ""));
+            outside(() => helpRequested(c.replace(/^\S+\s*/, "")));
         else
             showError("E492: Not an editor command: " + c);
     }
@@ -3025,6 +3281,8 @@ QtObject {
         case "L": {
             if (!flickable)
                 return null;
+            if (batch)
+                flush(); // for where the view is
             const lines = Txt.countLines(t);
             const top = Math.min(lines - 1, Math.max(0, Math.ceil((flickable.contentY - editor.topPadding) / lineHeight)));
             const bottom = Math.max(top, Math.min(lines - 1,
@@ -3139,6 +3397,8 @@ QtObject {
     // Like vim's 'incsearch': while a search is typed, scroll to the match
     // Enter would jump to, and restore the view when the search is cancelled.
     function previewSearch() {
+        if (batch)
+            return; // not for a search a macro types
         const pattern = typedSearch();
         if (pattern === null) {
             if (searchView && flickable) {
@@ -3151,7 +3411,7 @@ QtObject {
         }
         if (!searchView && flickable)
             searchView = { x: flickable.contentX, y: flickable.contentY };
-        const t = editor.text;
+        const t = bufferText();
         const re = searchRegExp(pattern);
         searchTarget = pattern === "" ? -1
             : commandLine[0] === "/" ? searchForward(re, t, cursor, true) : searchBackward(re, t, cursor, true);
@@ -3181,7 +3441,7 @@ QtObject {
         const pattern = typed !== null ? typed : highlightPattern;
         if (!pattern)
             return [];
-        const t = editor.text;
+        const t = bufferText();
         const v = visibleRange(t);
         const re = searchRegExp(pattern);
         const spans = [];
@@ -3205,7 +3465,7 @@ QtObject {
     // (bottom can be past the last line).
     function visibleLines() {
         if (!flickable)
-            return { top: 0, bottom: Txt.countLines(editor.text) - 1 };
+            return { top: 0, bottom: Txt.countLines(bufferText()) - 1 };
         const y = flickable.contentY - editor.topPadding;
         return { top: Math.max(0, Math.floor(y / lineHeight)), bottom: Math.max(0, Math.ceil((y + flickable.height) / lineHeight)) };
     }
@@ -3219,6 +3479,8 @@ QtObject {
     function scrollLines(lines) {
         if (!flickable)
             return;
+        if (batch)
+            flush(); // the view follows the cursor only after a chunk
         const max = Math.max(0, flickable.contentHeight - flickable.height);
         flickable.contentY = Math.max(0, Math.min(flickable.contentY + lines * lineHeight, max));
     }
@@ -3227,9 +3489,9 @@ QtObject {
     // and the padding after it, as the editor does for its own cursor (its
     // rectangle is a bar, only as wide as a line).
     function showCursor() {
-        if (!flickable)
-            return;
-        const t = editor.text, p = Math.min(cursor, editor.length);
+        if (!flickable || batch)
+            return; // after the chunk (see flush)
+        const t = bufferText(), p = Math.min(cursor, bufferText().length);
         const f = flickable, r = editor.positionToRectangle(p);
         const right = (p < Txt.lineEnd(t, p) ? editor.positionToRectangle(Txt.charEnd(t, p)).x : r.x + r.width)
             + editor.rightPadding;
@@ -3252,11 +3514,13 @@ QtObject {
     function scrollText(lines) {
         if (!flickable)
             return;
+        if (batch)
+            flush(); // as scrollLines
         const f = flickable, h = lineHeight, pad = editor.topPadding;
         const at = Math.max(0, (f.contentY - pad) / h); // the top line, maybe partly hidden
         const top = Math.max(0, lines > 0 ? Math.floor(at + 1e-6) + lines : Math.ceil(at - 1e-6) + lines);
         f.contentY = top === 0 ? 0 : Math.min(Math.max(0, f.contentHeight - f.height), pad + top * h);
-        const t = editor.text, n = Txt.countLines(t);
+        const t = bufferText(), n = Txt.countLines(t);
         const first = Math.min(n - 1, Math.max(0, Math.ceil((f.contentY - pad) / h - 1e-6)));
         // A line counts as shown with the space below its text cut off.
         const last = Math.max(first, Math.min(n - 1, Math.floor((f.contentY + f.height - pad) / h + 0.25) - 1));
@@ -3269,6 +3533,8 @@ QtObject {
     function scrollToCursor(where) {
         if (!flickable)
             return;
+        if (batch)
+            flush(); // as scrollLines
         const r = editor.positionToRectangle(cursor);
         const y = where === "t" ? r.y - editor.topPadding
             : where === "b" ? r.y + r.height + editor.bottomPadding - flickable.height

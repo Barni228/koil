@@ -337,10 +337,29 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   clipboard.
 - **Macros**: typed keys are recorded as tokens (`"<Esc>"`, `"x"`); the register
   keeps them as `keys` next to the text, so literal "<CR>" typed in insert mode
-  stays text. `@` puts the keys in `typeahead`, which `runMacro` runs through
-  `runKey` with no key event, so vim types insert-mode keys itself (`typeKey`,
-  `insertMove`). A failing command (bad keys, failed motion, `showError`)
-  empties `typeahead`, and a run stops after `maxMacroKeys` keys.
+  stays text. `@` pushes a frame (`{ keys, next, runs }`, not the keys `runs`
+  times) on `typeahead`, whose keys `runChunk` runs through `runKey` with no
+  key event, so vim types insert-mode keys itself (`typeKey`, `insertMove`).
+  A failing command (bad keys, failed motion, `showError`) empties
+  `typeahead`. A run (`macroRun`) is one undo step, as in vim
+  (`commitChange` waits for it, unless forced: `u`, leaving the buffer).
+  It runs in chunks of `chunkTime` ms: each edit of the `TextArea` has Qt
+  go over all the text (`10000@q` with `yyp<C-a>` took minutes, and as the
+  JS never returned to Qt, its memory ran out), so during a chunk vim edits
+  a copy (`batch`; everything reads the text through `bufferText()`), and
+  `flush` gives the editor the chunk's edits as one, with vim's mode and
+  cursor (`setMode`, `setCursor` and `showCursor` wait for it; what needs
+  the view, like `zz` or `H`, flushes first). Signals main.qml handles by
+  reading the editor are emitted through `outside`, which flushes first.
+  Between chunks the editor is up to date, the status line shows
+  `vim.progress` ("@q 34%") instead of the position (which would be found
+  again at every key), Esc or Ctrl-C stops the run (`handleKey`; other keys
+  do nothing), and anything else that edits or moves vim (a click, the find
+  bar, `reset`) stops it first (`interrupt`). Qt draws only once nothing
+  is waiting, which a due timer never lets it, so the next chunk usually
+  starts at once, but now and then waits `drawTime` for a frame: as often as
+  keeps drawing to about a fifth of the time (a frame of 40,000 lines takes
+  over 100 ms), at most 4 times a second.
 - **Visual block** (`visualBlock`): the editor's selection can't be a block, so
   it's cleared and Editor.qml draws `vim.blockSpans()`. Columns count
   characters, and `wantCol === Infinity` (after `$`) makes the block reach
@@ -386,7 +405,12 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
     entries (icon and text), since deleting either of two identical icons
     gives the same text. Registers, undo steps and the clipboard carry the
     entries for their text (`at` from its start; `hiddenIn` takes the entries
-    whose whole icon is in a range, `shifted` moves them).
+    whose whole icon is in a range, `shifted` moves them). Being sorted, they
+    are found by binary search (`firstAt`), not by going over all of them
+    (a listing has one per line). `diff` compares slices rather than
+    characters (V4 makes a string of each character it indexes), and undo
+    steps and registers keep their text through `own`: V4's `slice` keeps
+    the whole string it was cut from until the slice is read.
   - The `"+` register (and Cmd+C/X/V in every mode) writes the text with every
     icon replaced by what it hides (`revealed`), for other apps, and JSON
     `{ text, hidden, block, session }` as `application/x-koil-data`, which

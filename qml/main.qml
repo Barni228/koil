@@ -762,7 +762,9 @@ ApplicationWindow {
             anchors.right: parent.right
             font.family: vim.fontFamily
             font.pointSize: vim.fontSize
-            text: vim.pendingKeys + "    " + vim.positionLabel()
+            // A macro's progress while it runs: not the position, which
+            // would be found again at every key it runs.
+            text: vim.progress ? vim.progress + " (Esc to stop)" : vim.pendingKeys + "    " + vim.positionLabel()
         }
     }
 
