@@ -305,9 +305,11 @@ FocusScope {
         if (!found.length)
             return;
         const first = found[0].index;
-        let text = "", entries = [], i = first;
+        let text = "", i = first;
+        const entries = [];
         for (const m of found) {
-            entries = entries.concat(vim.shifted(vim.hiddenIn(vim.hidden, i, m.index), text.length));
+            for (const h of vim.shifted(vim.hiddenIn(vim.hidden, i, m.index), text.length))
+                entries.push(h);
             text += t.slice(i, m.index) + replacementFor(m);
             i = m.index + m[0].length;
         }

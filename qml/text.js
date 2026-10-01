@@ -2,9 +2,42 @@
 
 // Text helpers, shared by Vim.qml and the views. `t` is the whole text and
 // positions are UTF-16 indexes into it, as in the editor. None of these
-// keep any state.
+// keep any state, but for the line starts they found (see lineIndex).
 
 // ---- Lines -----------------------------------------------------------------
+
+// Where the lines of long texts start, as far as they were looked for, for
+// the last two texts asked about (the listing's and the path field's,
+// say): { text, starts, done }, where starts[k] is where line k + 1
+// starts, and `done` says they're all there. Finding a line from the
+// text's start took over a millisecond at 40,000 lines, and the status
+// line, line numbers and highlights do it at every key. Shorter texts
+// (yanked lines, say) are looked through each time instead, and keep the
+// long ones in.
+const indexedLength = 10000;
+let lineIndexes = [];
+
+function lineIndex(t) {
+    const fresh = { text: t, starts: [0], done: false };
+    if (t.length < indexedLength)
+        return fresh;
+    const x = lineIndexes.find(x => x.text === t) || fresh;
+    lineIndexes = [x].concat(lineIndexes.filter(y => y !== x)).slice(0, 2);
+    return x;
+}
+
+// Finds line starts in x until it has `count` of them and one past p (or
+// all of them).
+function findLines(x, count, p) {
+    const t = x.text, s = x.starts;
+    while (!x.done && (s.length < count || s[s.length - 1] <= p)) {
+        const i = t.indexOf("\n", s[s.length - 1]);
+        if (i < 0)
+            x.done = true;
+        else
+            s.push(i + 1);
+    }
+}
 
 function lineStart(t, p) {
     return p <= 0 ? 0 : t.lastIndexOf("\n", p - 1) + 1;
@@ -38,10 +71,9 @@ function clampNormal(t, p) {
 }
 
 function countLines(t) {
-    let lines = 1;
-    for (let i = t.indexOf("\n"); i >= 0; i = t.indexOf("\n", i + 1))
-        lines++;
-    return lines;
+    const x = lineIndex(t);
+    findLines(x, Infinity, -1);
+    return x.starts.length;
 }
 
 // Lines covered by a linewise span, which ends after its last newline.
@@ -49,23 +81,27 @@ function spannedLines(s) {
     return countLines(s) - (s.endsWith("\n") ? 1 : 0);
 }
 
+// Where line `line` (from 1) starts, or the last line, past the end.
 function lineToPos(t, line) {
-    let pos = 0;
-    for (let i = 1; i < line; i++) {
-        const nl = t.indexOf("\n", pos);
-        if (nl < 0)
-            break;
-        pos = nl + 1;
-    }
-    return pos;
+    const x = lineIndex(t);
+    findLines(x, line, -1);
+    return x.starts[Math.max(0, Math.min(line, x.starts.length) - 1)];
 }
 
 // The line number (from 1) of position p.
 function lineOf(t, p) {
-    let line = 1;
-    for (let i = t.indexOf("\n"); i >= 0 && i < p; i = t.indexOf("\n", i + 1))
-        line++;
-    return line;
+    const x = lineIndex(t), s = x.starts;
+    findLines(x, 0, p);
+    // How many lines start at p or before it.
+    let lo = 0, hi = s.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (s[mid] <= p)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return Math.max(1, lo);
 }
 
 // ---- Characters ------------------------------------------------------------

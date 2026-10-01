@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtTest
 
 import "../qml"
+import "../qml/text.js" as Txt
 
 // Vim.qml (and the find bar's replace) without the Rust app:
 //   qmltestrunner -input tests
@@ -297,6 +298,27 @@ TestCase {
         load("1\n1\n1");
         keys("qa<C-a>jq2@a");
         compare(render(), "2\n2\n2");
+    }
+
+    // Line lookups in a long text (which Txt keeps the line starts of)
+    // give what going through the text does, also after it changed.
+    function test_lineIndex() {
+        const plainLineOf = (t, p) => t.slice(0, Math.max(0, p)).split("\n").length;
+        const plainLineToPos = (t, line) => {
+            const lines = t.split("\n");
+            return lines.slice(0, Math.max(0, Math.min(line, lines.length) - 1)).join("\n").length + (line > 1 ? 1 : 0);
+        };
+        let t = "";
+        for (let i = 0; i < 3000; i++)
+            t += "line " + i + "\n";
+        for (const text of [t, t + "end", t.slice(0, 500) + "\n\n" + t.slice(500)]) {
+            compare(Txt.countLines(text), text.split("\n").length);
+            for (const p of [-1, 0, 7, 8, 9, 500, 501, 502, text.length - 1, text.length, text.length + 5])
+                compare(Txt.lineOf(text, p), plainLineOf(text, p), "lineOf " + p);
+            for (const line of [0, 1, 2, 60, 2999, 3000, 3001, 3002, 5000])
+                compare(Txt.lineToPos(text, line), plainLineToPos(text, line), "lineToPos " + line);
+        }
+        compare(Txt.lineOf(t, 8), 2); // the first text again
     }
 
     // As in vim, u undoes a whole run, which is one change.

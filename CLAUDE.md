@@ -42,7 +42,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   prefixes, `:` and `/`, buffers). It drives the `TextArea` through
   `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects),
-  imported as `Txt` by Vim.qml and the views.
+  imported as `Txt` by Vim.qml and the views. The only state it keeps is
+  where the lines of the last two long texts start (`lineIndex`), so
+  `lineOf`, `lineToPos` and `countLines` (the status line, line numbers,
+  highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious.
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under

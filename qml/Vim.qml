@@ -1857,11 +1857,13 @@ QtObject {
 
     // The text of a block's lines, one per line, with its hidden entries.
     function blockText(t, lines) {
-        let text = "", entries = [];
+        let text = "";
+        const entries = [];
         lines.forEach((l, i) => {
             if (i > 0)
                 text += "\n";
-            entries = entries.concat(shifted(hiddenIn(hidden, l.start, l.end), text.length));
+            for (const h of shifted(hiddenIn(hidden, l.start, l.end), text.length))
+                entries.push(h);
             text += t.slice(l.start, l.end);
         });
         return { text: text, entries: entries };
@@ -2605,11 +2607,15 @@ QtObject {
         return list.map(h => ({ at: h.at + by, icon: h.icon, text: h.text }));
     }
 
-    // `list` for text repeated `count` times.
+    // `list` for text repeated `count` times. Pushed, not concatenated,
+    // which copies all of it each time (8000p of a listing line took a
+    // second).
     function repeated(list, length, count) {
-        let r = [];
-        for (let i = 0; i < count; i++)
-            r = r.concat(shifted(list, i * length));
+        const r = [];
+        for (let i = 0; i < count; i++) {
+            for (const h of shifted(list, i * length))
+                r.push(h);
+        }
         return r;
     }
 
