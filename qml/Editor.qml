@@ -73,6 +73,7 @@ Item {
 
     // Replaces the text (a file or a listing was opened); not an edit.
     function setText(text) {
+        system.redrawText(editor); // or it may show none of a shorter text
         quiet = true;
         editor.text = text;
         quiet = false;
@@ -115,7 +116,10 @@ Item {
     function fixLineFormat() {
         // Not textBaseline, which may not have caught up with the font yet.
         const baseline = (lineHeight + metrics.ascent - metrics.descent) / 2;
-        const height = Math.min(lineHeight, baseline * 5 / 4);
+        // In whole 64ths of a pixel, as Qt keeps both and drops the rest:
+        // else each line comes out a 64th short, and in a long file the
+        // text drifts off the line grid the overlays are drawn on.
+        const height = Math.floor(Math.min(lineHeight, baseline * 5 / 4) * 64) / 64;
         quiet = true;
         system.setLineFormat(editor.textDocument, height, lineHeight - height);
         quiet = false;

@@ -75,5 +75,10 @@ mod bridge {
         /// margin below it.
         #[cxx_name = "setLineFormat"]
         unsafe fn set_line_format(text_document: *mut QObject, height: f64, bottom_margin: f64);
+
+        /// Has a TextEdit build the lines in view from scratch, around a Qt
+        /// bug; call it before setting its text (see native.h).
+        #[cxx_name = "redrawText"]
+        unsafe fn redraw_text(text_edit: *mut QObject);
     }
 }

@@ -35,6 +35,13 @@ void setClipboardText(const QString& text, const QString& data);
 // at 4/5 of it, and the margin lets the text sit higher in the whole line.
 void setLineFormat(QObject* textDocument, double height, double bottomMargin);
 
+// Call before setting a TextEdit's text. With over 10,000 characters, a
+// TextEdit builds only the lines in view, and after a change it builds again
+// from where those started, so it skips all of a new text that ends before
+// that (a Qt bug: a short listing after the end of a long file showed
+// nothing). Then this has it build every line in view from scratch.
+void redrawText(QObject* textEdit);
+
 // Colors Koil's listing in a TextEdit's document (a QQuickTextDocument):
 // the icon at a line's start in its color (`iconColors` alternates icons and
 // colors), or in `pendingIconColor` on a pending entry's line (see

@@ -25,7 +25,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, line format, the listing's and path field's
-  `QSyntaxHighlighter`).
+  `QSyntaxHighlighter`, `redrawText`).
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
   path field and its option buttons, and Koil's listing (`showListing`,
   `updateListing`, `applyChanges`, `undoApply`) or a file (`loadFile`), and
@@ -396,10 +396,23 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   marking the file modified). Qt puts a fixed-height line's baseline at 4/5 of
   it, so to center the text the block gets a shorter line plus a bottom margin
   that makes up `lineHeight` (`textBaseline` is where the baseline ends up).
+  Qt keeps both in 64ths of a pixel and drops the rest, so the line's height
+  is rounded down to one: else each line comes out a 64th short, and in a
+  10,000-line file the text drifts lines away from the overlays.
   Qt's selection and `positionToRectangle` still use the natural (taller)
   height on emoji lines, so the selection is drawn by the app (under the text,
   `z: -0.5`), and all overlays use `cellAt` (the whole line, snapped to the
   line grid). The current-line highlight is at `z: -0.6`.
+- **Long texts**: a `TextEdit` with over 10,000 characters builds only the
+  lines in view (`ItemObservesViewport`), and after a change builds again
+  from where those started, so a new text that ends before that shows none
+  of it (`-` from the end of a long file showed an empty listing until the
+  cursor moved). Turning that off would cost ~130 ms per 10,000 lines on
+  every open and zoom, so `setText` calls `System.redrawText` first, which
+  runs Qt's `q_invalidate` slot (what it runs when fonts change: build
+  everything again) on the window's `afterAnimating`, right before the
+  frame is synced, since a change after it (text, colors, selection) would
+  ask for the changed lines only again.
 - **Line numbers** (`:set nu`/`rnu`): the `gutter` is a child of the
   `TextArea` (so it scrolls with the text), kept at `contentX` and drawn over
   text scrolled under it. The styles hard-code `leftPadding` (7 on macOS,

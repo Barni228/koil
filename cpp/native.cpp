@@ -14,7 +14,9 @@
 #include <QtGui/QTextBlockFormat>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
+#include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickTextDocument>
+#include <QtQuick/QQuickWindow>
 #include <QtQuickControls2/QQuickStyle>
 
 namespace {
@@ -215,6 +217,24 @@ setLineFormat(QObject* textDocument, double height, double bottomMargin)
   format.setLineHeight(height, QTextBlockFormat::FixedHeight);
   format.setBottomMargin(bottomMargin);
   cursor.mergeBlockFormat(format);
+}
+
+void
+redrawText(QObject* textEdit)
+{
+  auto* item = qobject_cast<QQuickItem*>(textEdit);
+  if (!item || !item->window() || !(item->flags() & QQuickItem::ItemObservesViewport))
+    return;
+  // q_invalidate (a slot of Qt's, not public) is what Qt runs when fonts
+  // change. It must run right before the frame is synced: a change after it
+  // (to the text, its colors or the selection) asks for the changed lines
+  // only, as before.
+  QObject::connect(
+    item->window(),
+    &QQuickWindow::afterAnimating,
+    item,
+    [item] { QMetaObject::invokeMethod(item, "q_invalidate"); },
+    Qt::SingleShotConnection);
 }
 
 void
