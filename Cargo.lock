@@ -571,13 +571,14 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#88370f80eac7755145bdd2d3cbae91b163019204"
+source = "git+https://github.com/Barni228/koil-core#3635c98a1a2c79135959b86de8a7b490e9fe9360"
 dependencies = [
  "globset",
  "ignore",
  "objc2-foundation",
  "pathfinding",
  "regex",
+ "regex-automata",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
