@@ -89,19 +89,17 @@ ApplicationWindow {
     }
 
     // Lists the dir (or pattern) `path`: File > Open Folder, and at startup.
+    // False if it can't be opened (the status line says why).
     function openFolder(path) {
-        if (listing) {
-            updateListing(path);
-            return;
-        }
+        if (listing)
+            return updateListing(path);
         const r = JSON.parse(koil.open(path));
         if (!r.ok) {
             vim.showError(r.message);
-            return;
+            return false;
         }
         showListing(true, "");
-        if (r.message)
-            vim.showMessage(r.message);
+        return true;
     }
 
     // Shows Koil's listing of what's open (see listing.rs), and its path in
@@ -1020,10 +1018,15 @@ ApplicationWindow {
         // A file opens as a file; anything else (a dir, a pattern) Koil
         // lists, and with nothing given, the home dir.
         const start = doc.startupPath();
-        if (start && doc.isFile(start))
+        if (start && doc.isFile(start)) {
             doc.openFile(start);
-        else
-            openFolder(start || doc.homeDir());
+        } else if (!openFolder(start || doc.homeDir()) && start && openFolder(doc.homeDir())) {
+            // One that isn't there: the home dir, with it in the path field
+            // and why it can't be opened, to fix like one written there.
+            showPath(doc.shownPath(start));
+            updatePathSyntax();
+            updateListing();
+        }
         // The editor sits in a ScrollView, which is its own focus scope, so
         // `focus: true` alone doesn't give it the keyboard.
         editorView.textArea.forceActiveFocus();

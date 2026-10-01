@@ -13,7 +13,8 @@ use std::path::{MAIN_SEPARATOR, Path, PathBuf, is_separator};
 use devicons::Theme;
 use koil_core::apply::Undo;
 use koil_core::{
-    Action, Entry, EntryErrorKind, EntryWarning, Id, Koil, Pattern, Settings, UpdateError,
+    Action, Entry, EntryErrorKind, EntryWarning, Id, Koil, OpenError, Pattern, Settings,
+    UpdateError,
 };
 use serde::{Deserialize, Serialize};
 
@@ -311,7 +312,7 @@ pub fn pending_lines(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
 #[serde(rename_all = "camelCase")]
 pub struct Updated {
     /// False if the listing wasn't read, or the location to open couldn't be
-    /// opened: the problems and `message` say why.
+    /// opened: the problems and `message` say why. Koil is then as it was.
     pub ok: bool,
     /// The listing's.
     pub problems: Vec<Problem>,
@@ -331,7 +332,7 @@ pub struct Updated {
 /// `settings`, and then opens `open` (a dir, relative to the open one) if
 /// given, else `path` (the path field, as written) if it changed. Like
 /// koil-cli, which reads the entries with the settings they were listed
-/// with.
+/// with. If anything fails, `koil` is left as it was.
 pub fn update(
     koil: &mut Koil,
     path: &str,
@@ -358,6 +359,13 @@ pub fn update(
     let before = view(koil);
     let before_dir = koil.current_dir().to_path_buf();
     let shown = show_path(&koil.location());
+    let target = open.or((location != shown).then_some(location));
+    // Opening it can fail after the listing is read and the settings are
+    // used: then koil is put back as it was. Left with the new settings, it
+    // would take what the editor shows as listed with them, so the next
+    // update would delete every hidden entry the editor doesn't show (after
+    // `:set hidden` with a path that isn't there).
+    let kept = target.map(|target| (target, koil.clone()));
     let problems = match koil.update(&parsed.entries) {
         Ok(warnings) => warning_problems(&parsed, &warnings),
         Err(error) => {
@@ -378,19 +386,16 @@ pub fn update(
             Err(error) => messages.push(describe(&error)),
         }
     }
-    let target = open.or((location != shown).then_some(location));
-    if let Some(target) = target {
-        match koil.open(expand_home(target)) {
-            Ok(warning) => messages.extend(warning.map(|w| w.to_string())),
-            Err(error) => {
-                let message = describe(&error);
-                let path_problems = match open {
-                    Some(_) => Vec::new(),
-                    None => vec![path_problem(path, &message)],
-                };
-                return failed(problems, path_problems, message);
-            }
-        }
+    if let Some((target, kept)) = kept
+        && let Err(error) = koil.open(expand_home(target))
+    {
+        *koil = kept;
+        let message = describe_open(&error);
+        let path_problems = match open {
+            Some(_) => Vec::new(),
+            None => vec![path_problem(path, &message)],
+        };
+        return failed(problems, path_problems, message);
     }
     let from = before_dir.strip_prefix(koil.current_dir()).ok();
     let from = from.and_then(|rest| rest.components().next());
@@ -728,6 +733,18 @@ pub fn expand_home(path: &str) -> PathBuf {
     match (rest, std::env::home_dir()) {
         (Some(rest), Some(home)) => home.join(rest),
         _ => path.into(),
+    }
+}
+
+/// Why `Koil::open` failed, with `~` for the home dir in a path it names
+/// (see [`show_path`]).
+pub fn describe_open(error: &OpenError) -> String {
+    match error {
+        OpenError::NotFound(path) => format!("`{}` does not exist", show_path(path)),
+        OpenError::NotADirectory(path) => {
+            format!("`{}` is a file, not a directory", show_path(path))
+        }
+        error => describe(error),
     }
 }
 

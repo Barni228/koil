@@ -147,13 +147,13 @@ impl qobject::Koil {
         // This reopens what was open, if anything, which is left right away.
         let _ = koil.set_settings(settings);
         let outcome = match koil.open(listing::expand_home(&location.to_string())) {
-            Ok(warning) => Outcome {
+            Ok(()) => Outcome {
                 ok: true,
-                message: warning.map(|w| w.to_string()).unwrap_or_default(),
+                message: String::new(),
             },
             Err(error) => Outcome {
                 ok: false,
-                message: listing::describe(&error),
+                message: listing::describe_open(&error),
             },
         };
         to_json(&outcome)

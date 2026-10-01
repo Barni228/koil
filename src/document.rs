@@ -33,9 +33,14 @@ pub mod qobject {
         fn save_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
 
         /// The path passed on the command line, if any: a file to open, or a
-        /// dir (or pattern) for Koil to list.
+        /// dir (or pattern) for Koil to list. Absolute, from the dir Koil was
+        /// started in.
         #[qinvokable]
         fn startup_path(self: &Document) -> QString;
+
+        /// `path` as the path field shows it, with `~` for the home dir.
+        #[qinvokable]
+        fn shown_path(self: &Document, path: &QString) -> QString;
 
         /// Whether `path` is a file (or a link to one), rather than a dir or
         /// nothing.
@@ -84,8 +89,15 @@ impl qobject::Document {
         std::env::args()
             .skip(1)
             .find(|arg| !arg.starts_with('-'))
-            .map(|arg| QString::from(arg.as_str()))
+            // Keeps a trailing `/` (a pattern's) and `..`, which koil reads.
+            .and_then(|arg| std::path::absolute(arg).ok())
+            .map(|path| QString::from(path.to_string_lossy().as_ref()))
             .unwrap_or_default()
+    }
+
+    fn shown_path(&self, path: &QString) -> QString {
+        let path = std::path::PathBuf::from(path.to_string());
+        QString::from(crate::listing::show_path(&path).as_str())
     }
 
     fn is_file(&self, path: &QString) -> bool {

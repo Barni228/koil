@@ -363,6 +363,23 @@ fn test_navigate() {
     assert_eq!(updated.path_problems[0].message, updated.message);
     assert_eq!(koil.current_dir(), root.join("dir"));
 
+    // one that isn't a dir, which the message names from its first part
+    // that isn't one
+    let cases = [
+        ("missing/deeper", "missing", "does not exist"),
+        ("missing/*.rs", "missing", "does not exist"),
+        ("file.rs/inside", "file.rs", "is a file, not a directory"),
+    ];
+    for (path, part, problem) in cases {
+        let updated = navigate(&mut koil, &show_path(&root.join(path)), None);
+        assert!(!updated.ok, "{path}: {updated:?}");
+        let part = show_path(&root.join(part));
+        assert_eq!(updated.message, format!("`{part}` {problem}"));
+        assert_eq!(updated.path_problems.len(), 1);
+        assert_eq!(updated.path_problems[0].message, updated.message);
+        assert_eq!(koil.current_dir(), root.join("dir"));
+    }
+
     // no path at all
     let updated = navigate(&mut koil, "  ", None);
     assert!(!updated.ok);
@@ -433,6 +450,36 @@ fn test_id_path() {
     koil.open(root.join("dir")).unwrap();
     let file = show_path(&root.join("file.rs"));
     assert_eq!(id_path(&koil, &id("file.rs")), Some(file));
+}
+
+// `g.` while the path field has a path that isn't there: the update fails,
+// and koil keeps the settings the listing was shown with, so once the path
+// is fixed the hidden entries the editor didn't show aren't deleted.
+#[test]
+fn test_failed_open_keeps_settings() {
+    let (_temp, mut koil) = koil();
+    let rendered = render(&koil);
+    let settings = Settings {
+        show_hidden: true,
+        ..Settings::default()
+    };
+    let missing = show_path(&koil.current_dir().join("missing"));
+    for path in [missing.as_str(), " [", rendered.path.as_str()] {
+        let updated = update(
+            &mut koil,
+            path,
+            &rendered.text,
+            &rendered.hidden,
+            &settings,
+            None,
+        );
+        assert_eq!(updated.ok, path == rendered.path, "{path}: {updated:?}");
+    }
+    assert_eq!(koil.compute_actions(), []);
+    assert_eq!(
+        render(&koil).names,
+        ["../", "dir/", ".hidden", "file.rs", "notes"]
+    );
 }
 
 #[test]

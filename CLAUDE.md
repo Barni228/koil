@@ -114,7 +114,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   Everything else (squiggles, the message after the line, the hover, `gh`)
   works as before. A failed update gives the path's problems apart
   (`pathProblems`: none, or it can't be opened), which the path field shows
-  until the path is edited or an update works.
+  until the path is edited or an update works. koil's `open` fails on a
+  path that isn't there or is a file (`OpenError::NotFound`,
+  `NotADirectory`, naming its first part that isn't a dir, which
+  `listing::describe_open` shows with `~`), rather than opening its closest
+  parent, so it can be fixed. A path on the command line that can't be
+  opened lists the home dir, with it in the path field and its problem
+  (`Document.startupPath` makes it absolute from the dir Koil started in,
+  since the field is read relative to the open dir).
 - **The path field** (`pathView` in main.qml, over the listing): an Editor
   with `pathField` set, one line in a field, with the option buttons (the
   find bar's `IconButton`s) on its right. It's hidden while a file is open.
@@ -149,7 +156,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   the Enter/`-` target, else the path field's path if it changed (like
   koil-cli, where it's the first line). The field is read with the listing
   wherever the update comes from, so a path typed there and left without
-  Enter is opened by the next update.
+  Enter is opened by the next update. If opening fails, `listing::update`
+  puts koil back as it was before it (a clone), since the listing isn't
+  shown again: koil keeping the new settings would read the shown listing
+  as missing what they show (`g.` with a bad path, then fixing it, deleted
+  every hidden entry).
   The listing is then shown again. If what's shown stayed the same (same
   dir and pattern, compared as `Pattern`s, since paths are equal without a
   trailing `/`; same hidden/gitignore; `moved` is false), the new text replaces
