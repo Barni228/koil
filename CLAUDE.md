@@ -135,13 +135,15 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   its ID points to on disk, even if the line renames it; a new entry isn't
   there to open); on a line without an entry it's vim's Enter. Enter in the
   path field (`openPath`, also from insert mode: see `singleLine`) updates
-  and goes to the listing, unless the update fails. In a file with a path,
+  and goes to the listing, unless the update fails; Shift+Enter there only
+  updates, so vim stays in the field. In a file with a path,
   `-` is Koil's too (`leaveFile`): back to the listing, on the file's line.
   They're only matched at the start of a normal-mode command (so `d-` and
   visual `-` are vim's), with a count; keys that start one and go on
   differently are a bad command (Space l), unless they go on as a name of
   vim's (`gg`, `gU`). Shift+Enter is its own token, `<S-CR>`, a motion like
-  `<CR>`, and plain `<CR>` everywhere else (insert mode, the command line).
+  `<CR>`, and plain `<CR>` everywhere else (insert mode, the command line),
+  but in the path field's insert mode, which hands it to normal mode.
 - **Update** (`updateListing`): koil reads the entries with the settings they
   were shown with, then takes vim's `:set hidden/gitignore/regex`, then opens
   the Enter/`-` target, else the path field's path if it changed (like

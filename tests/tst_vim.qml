@@ -503,7 +503,8 @@ TestCase {
         keys("ox<Esc>");
         compare(other.text, "a b one two x");
         vim.commandKeys = {
-            "<CR>": "open"
+            "<CR>": "open",
+            "<S-CR>": "update"
         };
         keyCommands.clear();
         keys("Ay<CR>");
@@ -513,7 +514,7 @@ TestCase {
         keys("Rz<S-CR>");
         compare(other.text, "a b one two xz");
         compare(vim.mode, "normal");
-        compare(keyCommands.count, 2);
+        compare(keyCommands.signalArguments.map(a => a[0]), ["open", "update"]);
         // Without a command for Enter, it's only Esc.
         vim.commandKeys = {};
         keys("a!<CR>");

@@ -494,7 +494,9 @@ ApplicationWindow {
         fontFamily: settings.fontFamily
         defaultFontFamily: settings.fontFamily
         fontFamilies: root.fontFamilies
-        commandKeys: root.listing ? ({
+        // In the path field, Shift+Enter updates like Enter but stays
+        // there; in the listing it's vim's Enter.
+        commandKeys: root.listing ? Object.assign({
                 "  ": "update",
                 " a": "apply",
                 "-": "parent",
@@ -503,7 +505,9 @@ ApplicationWindow {
                 "g.": "hidden",
                 "gi": "gitignore",
                 "gr": "regex"
-            }) : root.filePath ? ({
+            }, root.activeView === pathView ? {
+                "<S-CR>": "update"
+            } : {}) : root.filePath ? ({
                 "-": "back"
             }) : ({})
 
@@ -547,9 +551,9 @@ ApplicationWindow {
     }
 
     // Over the listing, a field with the path of what's listed, which vim
-    // edits like the listing (Tab goes from one to the other, and Enter
-    // opens the path), and Koil's options beside it, which g., gi and gr
-    // toggle too.
+    // edits like the listing (Tab goes from one to the other, Enter opens
+    // the path, and Shift+Enter opens it but stays in the field), and
+    // Koil's options beside it, which g., gi and gr toggle too.
     Rectangle {
         id: pathBar
 

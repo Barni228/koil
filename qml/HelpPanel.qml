@@ -54,7 +54,7 @@ Popup {
                 ["path", "The field at the top: a dir, or a pattern of files, like `~/src/**/*.rs`, or a "
                     + "regex with `:set regex` (where `,` is any character but `/`), whose parts get colors. "
                     + "It's one line, edited with vim's keys too; Enter (also in insert mode) opens it and "
-                    + "goes back to the listing."],
+                    + "goes back to the listing, and Shift+Enter opens it but stays in the field."],
                 ["Tab", "In normal mode: go from the listing to the path field, or back. So does a click."],
                 ["g.  gi  gr", "Turn `:set hidden`, `gitignore` and `regex` on or off, like the buttons beside "
                     + "the path."],

@@ -287,12 +287,13 @@ QtObject {
     // Runs a typed key, or one from a macro (with no event).
     function runKey(tok, event) {
         // Shift+Enter is Enter, except as a motion: then it's vim's Enter
-        // where Koil's does something else (see commandKeys).
-        if (tok === "<S-CR>" && (commandLine !== "" || inserting))
+        // where Koil's does something else (see commandKeys). In one line,
+        // Enter and Shift+Enter while typing are normal mode's (Koil's).
+        if (tok === "<S-CR>" && (commandLine !== "" || inserting && !singleLine))
             tok = "<CR>";
         if (commandLine !== "")
             return commandLineKey(tok);
-        if (singleLine && inserting && tok === "<CR>") {
+        if (singleLine && inserting && (tok === "<CR>" || tok === "<S-CR>")) {
             leaveInsert();
             feed(tok);
             return true;
