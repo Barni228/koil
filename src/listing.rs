@@ -419,10 +419,13 @@ fn path_problem(path: &str, message: &str) -> Problem {
 
 /// What decides which entries the listing shows: what's open, and the
 /// settings that hide some (`regex` only changes how a path is read).
-fn view(koil: &Koil) -> (PathBuf, bool, bool) {
+fn view(koil: &Koil) -> (PathBuf, Option<Pattern>, bool, bool) {
     let settings = koil.settings();
     (
-        koil.location(),
+        koil.current_dir().to_path_buf(),
+        // Not in `location()`: paths are equal without their trailing `/`,
+        // and a glob and a regex can be written the same.
+        koil.pattern().cloned(),
         settings.show_hidden,
         settings.respect_gitignore,
     )
@@ -691,10 +694,16 @@ pub fn show_path(path: &Path) -> String {
     if let Some(home) = std::env::home_dir()
         && let Ok(rest) = path.strip_prefix(&home)
     {
-        return match rest.as_os_str().is_empty() {
+        let mut shown = match rest.as_os_str().is_empty() {
             true => "~".to_string(),
             false => format!("~{MAIN_SEPARATOR}{}", rest.display()),
         };
+        // `strip_prefix` drops a trailing `/`, which makes a pattern match
+        // only dirs.
+        if path.to_string_lossy().ends_with(is_separator) {
+            shown.push('/');
+        }
+        return shown;
     }
     path.display().to_string()
 }

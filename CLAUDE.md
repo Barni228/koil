@@ -145,7 +145,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   wherever the update comes from, so a path typed there and left without
   Enter is opened by the next update.
   The listing is then shown again. If what's shown stayed the same (same
-  location, same hidden/gitignore; `moved` is false), the new text replaces
+  dir and pattern, compared as `Pattern`s, since paths are equal without a
+  trailing `/`; same hidden/gitignore; `moved` is false), the new text replaces
   the old as one vim change (`vim.replaceText`, which changes only the span
   that differs), so `u` can take it back: Koil reads the buffer as a whole
   each time, so undoing to an earlier listing of the same view is safe.

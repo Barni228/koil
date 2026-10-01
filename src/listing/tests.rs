@@ -449,12 +449,56 @@ fn test_settings() {
 }
 
 #[test]
+fn test_dirs_pattern() {
+    let (_temp, mut koil) = koil();
+    let settings = Settings {
+        regex: true,
+        ..Settings::default()
+    };
+    // Updates with `path` in the path field.
+    let navigate = |koil: &mut Koil, path: &str| {
+        let rendered = render(koil);
+        update(
+            koil,
+            path,
+            &rendered.text,
+            &rendered.hidden,
+            &settings,
+            None,
+        )
+    };
+    let dir = render(&koil).path;
+
+    // a pattern ending with `/` keeps it, and shows the dirs
+    let path = format!("{dir}/,*/");
+    let updated = navigate(&mut koil, &path);
+    assert!(updated.ok && updated.moved, "{updated:?}");
+    let rendered = render(&koil);
+    assert_eq!(rendered.path, path);
+    assert_eq!(rendered.names, ["dir/"]);
+    // so the same path is what's open
+    assert!(!navigate(&mut koil, &path).moved);
+    assert_eq!(render(&koil).path, path);
+
+    // without the `/`, it's another listing (the files)
+    let path = format!("{dir}/,*");
+    assert!(navigate(&mut koil, &path).moved);
+    assert_eq!(render(&koil).path, path);
+    assert_eq!(render(&koil).names, ["file.rs", "notes"]);
+}
+
+#[test]
 fn test_home() {
     let Some(home) = std::env::home_dir() else {
         return;
     };
     assert_eq!(show_path(&home), "~");
     assert_eq!(show_path(&home.join("a")), format!("~{MAIN_SEPARATOR}a"));
+    // a pattern's trailing `/` is kept
+    assert_eq!(
+        show_path(&home.join(",*/")),
+        format!("~{MAIN_SEPARATOR},*/")
+    );
     assert_eq!(expand_home("~"), home);
     assert_eq!(expand_home("~/a"), home.join("a"));
     assert_eq!(expand_home("/~/a"), PathBuf::from("/~/a"));
