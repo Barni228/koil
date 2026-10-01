@@ -165,6 +165,13 @@ TestCase {
             textFormat: TextEdit.PlainText
             wrapMode: TextEdit.NoWrap
             readOnly: true
+            onCursorPositionChanged: {
+                if (vim.editor === narrowText)
+                    vim.syncFromEditor();
+            }
+            Keys.onPressed: event => {
+                event.accepted = vim.handleKey(event);
+            }
         }
     }
 
@@ -187,6 +194,13 @@ TestCase {
 
         palette: editor.palette
         font: editor.font
+    }
+
+    SignalSpy {
+        id: edits
+
+        target: editor
+        signalName: "textChanged"
     }
 
     SignalSpy {
@@ -234,8 +248,8 @@ TestCase {
 
     // Back to the editor, after a test that switched buffers.
     function cleanup() {
-        if (vim.macroRun)
-            vim.stopMacro();
+        if (vim.running)
+            vim.stopRun();
         vim.chunkTime = defaultChunkTime;
         if (vim.editor !== editor)
             switchTo(editor, null);
@@ -351,14 +365,14 @@ TestCase {
         load("1");
         keys("qayyp<C-a>q");
         startChunks("a", 3); // yank
-        verify(vim.macroRun);
+        verify(vim.running);
         compare(vim.progress, "@a 8%");
         step();
         step();
         compare(editor.text, "1\n2\n2"); // pasted
         compare(vim.progress, "@a 25%");
         vim.chunkTimer.start();
-        tryCompare(vim, "macroRun", null);
+        tryCompare(vim, "running", null);
         compare(vim.progress, "");
         compare(render(), "1\n2\n3\n4\n5");
         compare(vim.cursor, 8);
@@ -372,7 +386,7 @@ TestCase {
         keys("qayyp<C-a>q");
         startChunks("a", 3);
         keys("x<Esc>");
-        compare(vim.macroRun, null);
+        compare(vim.running, null);
         compare(vim.message, "Interrupted");
         compare(render(), "1\n2");
         keys("x");
@@ -382,7 +396,7 @@ TestCase {
         keys("qayyp<C-a>q");
         startChunks("a", 3);
         editor.cursorPosition = 0;
-        compare(vim.macroRun, null);
+        compare(vim.running, null);
         compare(vim.cursor, 0);
     }
 
@@ -392,12 +406,84 @@ TestCase {
         load("1\n1\n1");
         keys("qa<C-a>j@aq@a");
         compare(render(), "2\n2\n2");
-        compare(vim.macroRun, null);
+        compare(vim.running, null);
         load("1");
         keys("qa@a<C-a>q@a");
         compare(vim.message, "E223: recursive mapping");
-        compare(vim.macroRun, null);
+        compare(vim.running, null);
         compare(vim.typeahead.length, 0);
+    }
+
+    // A long command (u with a count) runs in chunks too, with its
+    // progress, and Esc stops it as far as it got.
+    function test_longCommand() {
+        load("abcd");
+        keys("xxx");
+        vim.chunkTime = 0;
+        vim.undo(3);
+        vim.chunkTimer.stop();
+        compare(vim.progress, "3u 33%");
+        compare(editor.text, "cd");
+        step();
+        compare(editor.text, "bcd");
+        step();
+        compare(vim.running, null);
+        compare(vim.progress, "");
+        compare(render(), "abcd");
+        compare(vim.cursor, 0);
+        keys("xxx");
+        vim.undo(3);
+        vim.chunkTimer.stop();
+        keys("<Esc>");
+        compare(vim.running, null);
+        compare(vim.message, "Interrupted");
+        compare(render(), "cd");
+        keys("<C-r>");
+        compare(render(), "d");
+        // So does @: with a count (here at once, in one chunk).
+        vim.chunkTime = defaultChunkTime;
+        load("x");
+        const size = vim.fontSize;
+        keys(":set fs+=1<CR>3@:");
+        compare(vim.fontSize, size + 4);
+        vim.fontSize = size;
+    }
+
+    // However many edits a key makes (J, a block's lines), the editor gets
+    // one: each has Qt go over all the text.
+    function test_oneEditPerKey() {
+        load("a\nb\nc\nd\ne");
+        edits.clear();
+        keys("4J");
+        compare(render(), "a b c d\ne");
+        verify(edits.count <= 2, edits.count + " edits");
+        edits.clear();
+        keys("u");
+        compare(render(), "a\nb\nc\nd\ne");
+        verify(edits.count <= 2, edits.count + " edits");
+        edits.clear();
+        keys("<C-v>Gd");
+        compare(render(), "\n\n\n\n");
+        verify(edits.count <= 2, edits.count + " edits");
+    }
+
+    // A key that changes nothing leaves the view where it is, even with the
+    // cursor out of it (scrolled by the mouse).
+    function test_viewStays() {
+        narrowText.text = "x".repeat(60);
+        waitForRendering(narrow);
+        const f = narrow.contentItem as Flickable;
+        switchTo(narrowText, {
+            cursor: 0
+        }, f);
+        narrowText.forceActiveFocus();
+        f.contentX = 200;
+        keys("<Esc>");
+        compare(f.contentX, 200);
+        keys("l");
+        compare(vim.cursor, 1);
+        const x = narrowText.positionToRectangle(1).x;
+        verify(f.contentX <= x && x < f.contentX + f.width, "the cursor is in view");
     }
 
     // Koil's keys in a macro see its edits so far (main.qml reads the
@@ -422,7 +508,7 @@ TestCase {
         keys("qayyp<C-a>q");
         vim.chunkTime = 0; // with the timer
         keys("2@a");
-        tryCompare(vim, "macroRun", null);
+        tryCompare(vim, "running", null);
         compare(render(), "<M:h1>  1\n<M:h1>  2\n<M:h1>  3\n<M:h1>  4");
         keys("ggAx<Esc>");
         compare(render(), "<M:h1>  1x\n<M:h1>  2\n<M:h1>  3\n<M:h1>  4");

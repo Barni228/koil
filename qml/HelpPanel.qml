@@ -174,7 +174,8 @@ Popup {
                     + "changing any register."],
                 ["qa … q", "Record the keys you type into register `a`. `qA` appends to it."],
                 ["@a  3@a  @@", "Run the macro in `a`, three times, or the last one run again. "
-                    + "`u` undoes all of a run. A long one shows how far it is; Esc or Ctrl-C stops it."]
+                    + "`u` undoes all of a run. A long one shows how far it is; Esc or Ctrl-C stops it "
+                    + "(so do `5000u`, `5000 Ctrl-R` and `100@:`)."]
             ]
         },
         {

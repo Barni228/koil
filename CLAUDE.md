@@ -341,28 +341,36 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - **Macros**: typed keys are recorded as tokens (`"<Esc>"`, `"x"`); the register
   keeps them as `keys` next to the text, so literal "<CR>" typed in insert mode
   stays text. `@` pushes a frame (`{ keys, next, runs }`, not the keys `runs`
-  times) on `typeahead`, whose keys `runChunk` runs through `runKey` with no
-  key event, so vim types insert-mode keys itself (`typeKey`, `insertMove`).
-  A failing command (bad keys, failed motion, `showError`) empties
-  `typeahead`. A run (`macroRun`) is one undo step, as in vim
-  (`commitChange` waits for it, unless forced: `u`, leaving the buffer).
-  It runs in chunks of `chunkTime` ms: each edit of the `TextArea` has Qt
-  go over all the text (`10000@q` with `yyp<C-a>` took minutes, and as the
-  JS never returned to Qt, its memory ran out), so during a chunk vim edits
+  times) on `typeahead`, whose keys a run (see Batches and runs) gives
+  `runKey` with no key event, so vim types insert-mode keys itself
+  (`typeKey`, `insertMove`). A failing command (bad keys, failed motion,
+  `showError`) empties `typeahead`.
+- **Batches and runs** (Vim.qml): each edit of the `TextArea` has Qt go over
+  all the text, so while a key runs (`handleKey` through `batched`) vim edits
   a copy (`batch`; everything reads the text through `bufferText()`), and
-  `flush` gives the editor the chunk's edits as one, with vim's mode and
-  cursor (`setMode`, `setCursor` and `showCursor` wait for it; what needs
-  the view, like `zz` or `H`, flushes first). Signals main.qml handles by
-  reading the editor are emitted through `outside`, which flushes first.
-  Between chunks the editor is up to date, the status line shows
-  `vim.progress` ("@q 34%") instead of the position (which would be found
-  again at every key), Esc or Ctrl-C stops the run (`handleKey`; other keys
-  do nothing), and anything else that edits or moves vim (a click, the find
-  bar, `reset`) stops it first (`interrupt`). Qt draws only once nothing
-  is waiting, which a due timer never lets it, so the next chunk usually
-  starts at once, but now and then waits `drawTime` for a frame: as often as
-  keeps drawing to about a fifth of the time (a frame of 40,000 lines takes
-  over 100 ms), at most 4 times a second.
+  `flush` gives the editor the edits as one, with vim's mode and cursor
+  (`setMode`, `setCursor` and `showCursor` wait for it; what needs the view,
+  like `zz`, `H` or a search's preview, flushes first). The edit doesn't
+  scroll; the cursor scrolls as Qt does it, and a new mode as `setMode` does;
+  a key that changes nothing leaves the view alone, even off the cursor.
+  Signals main.qml handles by reading the editor are emitted through
+  `outside`, which flushes first. Commands that edit in many places make
+  one edit through `replaceRanges` (`J`, a block's lines, `putBlock`), which
+  took `4000J` from two minutes to a tenth of a second. What stays a loop is
+  a run (`running`): a macro (`10000@q` took minutes, and as the JS never
+  returned to Qt, its memory ran out), or a long command, `startTask`'s
+  steps (`5000u`, `5000<C-r>`, `100@:`). A run goes in chunks of
+  `chunkTime` ms (`runChunk`), each a batch; between them the editor is up
+  to date, the status line shows `vim.progress` ("@q 34%", "5000u 34%")
+  instead of the position (which would be found again at every key), Esc or
+  Ctrl-C stops the run (`handleKey`; other keys do nothing), and anything
+  else that edits or moves vim (a click, the find bar, `reset`) stops it
+  first (`interrupt`). A run is one undo step, as a macro's is in vim
+  (`commitChange` waits for it, unless forced: `u`, leaving the buffer). Qt
+  draws only once nothing is waiting, which a due timer never lets it, so
+  the next chunk usually starts at once, but now and then waits `drawTime`
+  for a frame: as often as keeps drawing to about a fifth of the time (a
+  frame of 40,000 lines takes over 100 ms), at most 4 times a second.
 - **Visual block** (`visualBlock`): the editor's selection can't be a block, so
   it's cleared and Editor.qml draws `vim.blockSpans()`. Columns count
   characters, and `wantCol === Infinity` (after `$`) makes the block reach
