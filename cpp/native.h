@@ -35,6 +35,13 @@ void setClipboardText(const QString& text, const QString& data);
 // at 4/5 of it, and the margin lets the text sit higher in the whole line.
 void setLineFormat(QObject* textDocument, double height, double bottomMargin);
 
+// Sets a TextEdit's text, with the line format setLineFormat gives, as one
+// edit, and resets what setting its text does (the cursor at the start).
+// Qt lays out all of a text for each change to it or its format, and
+// setting the text and then the format laid out 100,000 lines twice (a
+// second each).
+void setText(QObject* textEdit, const QString& text, double height, double bottomMargin);
+
 // Call before setting a TextEdit's text. With over 10,000 characters, a
 // TextEdit builds only the lines in view, and after a change it builds again
 // from where those started, so it skips all of a new text that ends before

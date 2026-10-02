@@ -74,13 +74,19 @@ Item {
     // other one, which should switch.
     signal activated
 
-    // Replaces the text (a file or a listing was opened); not an edit.
+    // Replaces the text (a file or a listing was opened); not an edit. Qt
+    // lays out all of a text again when its format or the editor's padding
+    // changes (100,000 lines took most of a second each), so the text comes
+    // with its line format (see fixLineFormat), and the line numbers get
+    // their width for it first.
     function setText(text) {
         system.redrawText(editor); // or it may show none of a shorter text
+        if (gutter.shown)
+            gutter.fit(Txt.countLines(text));
+        const f = lineFormat();
         quiet = true;
-        editor.text = text;
+        system.setText(editor, text, f.height, f.bottomMargin);
         quiet = false;
-        fixLineFormat(); // setting the text reset it
     }
 
     // Colors the listing (see `listing`) or the path field, in the light or
@@ -117,15 +123,21 @@ Item {
     // line is made shorter and a bottom margin makes up the rest. Qt counts
     // the new block format as an edit, but it isn't one.
     function fixLineFormat() {
+        const f = lineFormat();
+        quiet = true;
+        system.setLineFormat(editor.textDocument, f.height, f.bottomMargin);
+        quiet = false;
+    }
+
+    // The format fixLineFormat gives every line: { height, bottomMargin }.
+    function lineFormat() {
         // Not textBaseline, which may not have caught up with the font yet.
         const baseline = (lineHeight + metrics.ascent - metrics.descent) / 2;
         // In whole 64ths of a pixel, as Qt keeps both and drops the rest:
         // else each line comes out a 64th short, and in a long file the
         // text drifts off the line grid the overlays are drawn on.
         const height = Math.floor(Math.min(lineHeight, baseline * 5 / 4) * 64) / 64;
-        quiet = true;
-        system.setLineFormat(editor.textDocument, height, lineHeight - height);
-        quiet = false;
+        return { height: height, bottomMargin: lineHeight - height };
     }
 
     // The rectangle of the character at pos, as tall as the line. The
@@ -761,7 +773,7 @@ Item {
                     }
                     const t = editor.text, v = view.visibleLines();
                     const count = Txt.countLines(t);
-                    digits = Math.max(3, String(count).length);
+                    gutter.fit(count);
                     const current = Txt.lineOf(t, view.cursorPos) - 1;
                     const list = [];
                     for (let i = v.top; i <= Math.min(count - 1, v.bottom); i++) {
@@ -774,6 +786,11 @@ Item {
                         });
                     }
                     rows = list;
+                }
+
+                // Room for `count` lines' numbers.
+                function fit(count) {
+                    digits = Math.max(3, String(count).length);
                 }
 
                 onInputsChanged: Qt.callLater(refresh)

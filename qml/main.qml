@@ -1027,7 +1027,10 @@ ApplicationWindow {
         // lists, and with nothing given, the home dir.
         const start = doc.startupPath();
         if (start && doc.isFile(start)) {
-            doc.openFile(start);
+            // Once the editor is done: before its own onCompleted, it doesn't
+            // have the line numbers' padding, and adding it then had Qt lay
+            // out all of a long file again (100,000 lines took a second).
+            Qt.callLater(() => doc.openFile(start));
         } else if (!openFolder(start || doc.homeDir()) && start && openFolder(doc.homeDir())) {
             // One that isn't there: the home dir, with it in the path field
             // and why it can't be opened, to fix like one written there.

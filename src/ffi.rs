@@ -76,6 +76,16 @@ mod bridge {
         #[cxx_name = "setLineFormat"]
         unsafe fn set_line_format(text_document: *mut QObject, height: f64, bottom_margin: f64);
 
+        /// Sets a TextEdit's text with that line format, as one edit (see
+        /// native.h).
+        #[cxx_name = "setText"]
+        unsafe fn set_text(
+            text_edit: *mut QObject,
+            text: &QString,
+            height: f64,
+            bottom_margin: f64,
+        );
+
         /// Has a TextEdit build the lines in view from scratch, around a Qt
         /// bug; call it before setting its text (see native.h).
         #[cxx_name = "redrawText"]

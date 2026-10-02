@@ -21,10 +21,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   path on the command line.
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, and the editor's
-  line format and colors.
+  text, line format and colors.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
-  Nerd Font, line format, the listing's and path field's
+  Nerd Font, line format, `setText`, the listing's and path field's
   `QSyntaxHighlighter`, `redrawText`).
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
   path field and its option buttons, and Koil's listing (`showListing`,
@@ -488,9 +488,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   recomputes in the middle of an edit. The carets are declared after the
   search highlights, so they're drawn over them.
 - **Line height**: emoji come from a taller font and would make their line
-  taller, so `fixLineFormat` gives every block a fixed height (a block format,
-  reapplied after `setText`; Qt counts it as an edit, so `quiet` keeps it from
-  marking the file modified). Qt puts a fixed-height line's baseline at 4/5 of
+  taller, so `fixLineFormat` gives every block a fixed height (a block format;
+  Qt counts it as an edit, so `quiet` keeps it from marking the file
+  modified). Setting the `TextArea`'s text resets it, so `setText` goes
+  through `System.setText`, which puts the text in with the format (see Long
+  texts). Qt puts a fixed-height line's baseline at 4/5 of
   it, so to center the text the block gets a shorter line plus a bottom margin
   that makes up `lineHeight` (`textBaseline` is where the baseline ends up).
   Qt keeps both in 64ths of a pixel and drops the rest, so the line's height
@@ -510,6 +512,19 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   everything again) on the window's `afterAnimating`, right before the
   frame is synced, since a change after it (text, colors, selection) would
   ask for the changed lines only again.
+  Qt lays out all of a text again (about a second for 100,000 lines) when
+  it or its format changes, and when the editor's width or padding does,
+  as the text's width changes with it (even without wrapping). So opening
+  one makes it once: `System.setText` replaces the text and gives every
+  line its format in one edit block (setting the text the `TextArea`'s way
+  and then the format laid it out twice; emptying it first hid the scroll
+  bar, which changed the width), the gutter gets its width before the text
+  (`gutter.fit`), and a file on the command line opens after the editor's
+  `onCompleted`, which adds the gutter's padding. A window resize still
+  lays it out again, and so does the scroll bar showing up on macOS, whose
+  style makes room for it (Fusion draws it over the text): keeping that
+  room even without one saved most of a second, but left a strip the text
+  didn't reach.
 - **Line numbers** (`:set nu`/`rnu`): the `gutter` is a child of the
   `TextArea` (so it scrolls with the text), kept at `contentX` and drawn over
   text scrolled under it. The styles hard-code `leftPadding` (7 on macOS,

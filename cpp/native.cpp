@@ -172,6 +172,20 @@ recolor(QSyntaxHighlighter* highlighter, const std::optional<QSet<int>>& lines =
     document->setLayoutEnabled(true);
 }
 
+// The format setLineFormat gives every line.
+QTextBlockFormat
+lineFormat(double height, double bottomMargin)
+{
+  QTextBlockFormat format;
+  format.setLineHeight(height, QTextBlockFormat::FixedHeight);
+  format.setBottomMargin(bottomMargin);
+  return format;
+}
+
+// A TextEdit with more characters than this builds only the lines in view
+// (QQuickTextEditPrivate::largeTextSizeThreshold).
+constexpr qsizetype largeTextSize = 10000;
+
 } // namespace
 
 void
@@ -240,10 +254,40 @@ setLineFormat(QObject* textDocument, double height, double bottomMargin)
     return;
   QTextCursor cursor(quickDocument->textDocument());
   cursor.select(QTextCursor::Document);
-  QTextBlockFormat format;
-  format.setLineHeight(height, QTextBlockFormat::FixedHeight);
-  format.setBottomMargin(bottomMargin);
-  cursor.mergeBlockFormat(format);
+  cursor.mergeBlockFormat(lineFormat(height, bottomMargin));
+}
+
+void
+setText(QObject* textEdit, const QString& text, double height, double bottomMargin)
+{
+  auto* item = qobject_cast<QQuickItem*>(textEdit);
+  if (!item)
+    return;
+  auto* textDocument = item->property("textDocument").value<QObject*>();
+  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
+  if (!quickDocument)
+    return;
+  // The old text out and the new one in, after a line in the format (which
+  // every line it makes takes on), in an edit block: the document tells its
+  // layout and the TextEdit when it ends. Emptying the TextEdit first (the
+  // way setting its text does) changed its width, as the scroll bar went,
+  // and that laid out the new text again.
+  auto* document = quickDocument->textDocument();
+  const bool undo = document->isUndoRedoEnabled();
+  document->setUndoRedoEnabled(false);
+  QTextCursor cursor(document);
+  cursor.beginEditBlock();
+  cursor.select(QTextCursor::Document);
+  cursor.removeSelectedText();
+  cursor.setBlockFormat(lineFormat(height, bottomMargin));
+  cursor.insertText(text);
+  cursor.endEditBlock();
+  document->setUndoRedoEnabled(false); // which lets the old text go
+  document->setUndoRedoEnabled(undo);
+  // As setting the text does: the cursor at the start, and for a long text,
+  // only the lines in view built.
+  item->setProperty("cursorPosition", 0);
+  item->setFlag(QQuickItem::ItemObservesViewport, text.size() > largeTextSize);
 }
 
 void

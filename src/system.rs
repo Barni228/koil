@@ -47,6 +47,17 @@ pub mod qobject {
             bottom_margin: f64,
         );
 
+        /// Sets a TextEdit's text, every line with the format
+        /// `set_line_format` gives, laying it out once (see native.h).
+        #[qinvokable]
+        unsafe fn set_text(
+            self: &System,
+            text_edit: *mut QObject,
+            text: &QString,
+            height: f64,
+            bottom_margin: f64,
+        );
+
         /// Call before setting a TextEdit's text: works around a Qt bug that
         /// can leave it blank (see native.h).
         #[qinvokable]
@@ -121,6 +132,19 @@ impl qobject::System {
         bottom_margin: f64,
     ) {
         unsafe { ffi::set_line_format(text_document.cast(), height, bottom_margin) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_edit` must be null or point to a live QObject.
+    unsafe fn set_text(
+        &self,
+        text_edit: *mut qobject::QObject,
+        text: &QString,
+        height: f64,
+        bottom_margin: f64,
+    ) {
+        unsafe { ffi::set_text(text_edit.cast(), text, height, bottom_margin) };
     }
 
     /// # Safety
