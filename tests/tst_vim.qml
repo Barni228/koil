@@ -521,6 +521,25 @@ TestCase {
         keys("iX<Esc>");
         compare(render(), "Xab\nXcd");
         compare(vim.cursors.length, 0);
+        // The main cursor after an extra one.
+        load("ab\ncd\nef");
+        keys("j");
+        vim.toggleCursor(6);
+        vim.toggleCursor(0);
+        keys("iX");
+        compare(vim.cursor, 5);
+        compare(vim.cursors.map(c => c.pos), [1, 9]);
+        keys("<Esc>");
+        compare(render(), "Xab\nXcd\nXef");
+    }
+
+    // Drawing a block gives only the lines asked for.
+    function test_blockSpans() {
+        load("ab\ncd\nef\ngh");
+        keys("l<C-v>jj");
+        compare(vim.blockSpans(), [{ start: 1, end: 2 }, { start: 4, end: 5 }, { start: 7, end: 8 }]);
+        compare(vim.blockSpans(3, 8), [{ start: 4, end: 5 }, { start: 7, end: 8 }]);
+        compare(vim.blockSpans(9, 11), []);
     }
 
     function test_countedInsert() {

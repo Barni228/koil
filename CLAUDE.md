@@ -372,7 +372,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   for a frame: as often as keeps drawing to about a fifth of the time (a
   frame of 40,000 lines takes over 100 ms), at most 4 times a second.
 - **Visual block** (`visualBlock`): the editor's selection can't be a block, so
-  it's cleared and Editor.qml draws `vim.blockSpans()`. Columns count
+  it's cleared and Editor.qml draws `vim.blockSpans()` (the lines in
+  view: all of a 100,000-line block took a second a key). Columns count
   characters, and `wantCol === Infinity` (after `$`) makes the block reach
   every line end. `I`/`A`/`c` put an extra cursor on each other line;
   `blockHome` makes Esc remove them and go back to the start. Ctrl+V is Paste
@@ -388,12 +389,16 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   typed at cursors close together is one edit over all of them instead
   (`editAtOnce`, `replaceRanges`: a block insert over 3000 lines took 12 s
   a key), and so is a count's repeat of an insert (`repeatInsert`: `10000o`).
+  With 100,000 cursors a key still takes over a second, most of it Qt
+  laying out every changed line again (a native edit per line, in one
+  edit block, was no faster).
   Leaving insert mode removes them. In normal mode `moveBy`
   moves them too (`moveCursors`; each keeps its own `col` for j/k, and
   `motion(..., quiet)` doesn't scroll), and `execute` runs operators and
   `everyCursorActions` once per cursor (`atEveryCursor`), swapping in each
   extra cursor's own `registers`. They're drawn like the main one, blinking
-  with the real bar via `editor.blinkOn`.
+  with the real bar via `editor.blinkOn`, but only those in view
+  (`visibleCursors`): drawing a block insert's 100,000 took minutes a key.
 - **Hidden text**: an icon (any one character; in the listing, a file's
   icon, hiding its ID) can hide some text. The document holds the plain
   icon, and `vim.hidden` keeps the text as `{ at, icon, text }` entries

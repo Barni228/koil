@@ -152,6 +152,25 @@ Item {
         };
     }
 
+    // Vim's extra cursors in the visible lines. They're sorted, so they're
+    // found by binary search: a block insert can make 100,000 of them, and
+    // drawing them all took minutes a key.
+    function visibleCursors() {
+        const list = vim.cursors, v = visibleRange();
+        let lo = 0, hi = list.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (list[mid].pos < v.from)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        const r = [];
+        for (let i = lo; i < list.length && list[i].pos <= v.to; i++)
+            r.push(list[i]);
+        return r;
+    }
+
     // The selection in the visible lines, as one { start, end, eol } span
     // per line, where eol means it includes the line break. A visual block
     // isn't the editor's selection, so vim gives it.
@@ -162,7 +181,7 @@ Item {
             return [];
         const t = editor.text, v = visibleRange();
         if (block)
-            return vim.blockSpans().filter(r => r.start >= v.from && r.start <= v.to);
+            return vim.blockSpans(v.from, v.to);
         const spans = [];
         for (let p = Math.max(s, v.from); p <= Math.min(e, v.to); ) {
             const le = Txt.lineEnd(t, p);
@@ -563,15 +582,15 @@ Item {
                 }
             }
 
-            // Every cursor: the main one, then the extra ones (Alt+click, or
-            // a block insert's lines), as spotAt gives them. After the search
-            // highlights, so they're drawn over them. None while vim edits
-            // the other editor.
+            // Every cursor: the main one, then the extra ones in view
+            // (Alt+click, or a block insert's lines), as spotAt gives them.
+            // After the search highlights, so they're drawn over them. None
+            // while vim edits the other editor.
             Layer {
                 id: carets
 
-                inputs: [view.active, view.vim.cursor, view.vim.cursors, editor.cursorRectangle, view.layout]
-                compute: () => !view.active ? [] : [view.spotAt(view.vim.cursor, true)].concat(view.vim.cursors.map(c => view.spotAt(c.pos, false)))
+                inputs: [view.active, view.vim.cursor, view.vim.cursors, editor.cursorRectangle, view.layout, view.viewport]
+                compute: () => !view.active ? [] : [view.spotAt(view.vim.cursor, true)].concat(view.visibleCursors().map(c => view.spotAt(c.pos, false)))
 
                 // Shaped like the main one. In insert mode the main one is
                 // the editor's own bar (see cursorDelegate).

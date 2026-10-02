@@ -151,7 +151,8 @@ QtObject {
     // replaceRange). Replaced, never changed in place, so the view sees
     // every change.
     property var cursors: []
-    // While editAll runs: every cursor, the main one too, for edits to move.
+    // While editAll runs: every cursor, the main one too, for edits to move
+    // (none while editAtOnce runs, which places them itself).
     property var shifting: null
     // During a block insert: where it started ({ line, offset, moved }), to go
     // back to after it unless the cursors moved.
@@ -1607,16 +1608,18 @@ QtObject {
     // average, where the one edit would be long: returns whether it made it.
     function editAtOnce(edit) {
         const t = bufferText();
-        const all = [{ pos: cursor, main: true }].concat(cursors.filter(c => c.pos !== cursor))
-            .map(c => ({ c: c, e: edit(t, c.pos) || { start: c.pos, end: c.pos, text: "" } }))
-            .sort((a, b) => a.e.start - b.e.start);
+        const all = sortedBy([{ pos: cursor, main: true }].concat(cursors.filter(c => c.pos !== cursor))
+            .map(c => ({ c: c, e: edit(t, c.pos) || { start: c.pos, end: c.pos, text: "" } })), x => x.e.start);
         for (let i = 1; i < all.length; i++) {
             if (all[i].e.start < all[i - 1].e.end)
                 return false;
         }
         if (all[all.length - 1].e.end - all[0].e.start > 1000 * all.length)
             return false;
+        // The cursors are placed below, so the edit needn't move them.
+        shifting = [];
         const ends = replaceRanges(all.map(x => x.e));
+        shifting = null;
         const placed = all.map((x, i) => Object.assign({}, x.c, { pos: ends[i] - x.e.text.length + editCursor(x.e) }));
         const main = placed.find(c => c.main);
         setCursors(placed.filter(c => c !== main), main.pos);
@@ -1732,28 +1735,31 @@ QtObject {
     // The block's columns (right is Infinity after "$") and one entry per
     // line, top to bottom: { line, ls, le, start, end, cols }, where
     // [start, end) is the part in the block (empty if the line is too short)
-    // and cols the line's length.
-    function blockShape(t) {
+    // and cols the line's length. Only the lines in [from, to], if given.
+    function blockShape(t, from, to) {
         const ca = Txt.column(t, anchor), cc = Txt.column(t, cursor);
         const left = Math.min(ca, cc), right = wantCol === Infinity ? Infinity : Math.max(ca, cc);
-        const last = Txt.lineStart(t, Math.max(anchor, cursor));
-        const lines = [];
         let ls = Txt.lineStart(t, Math.min(anchor, cursor));
-        for (let line = Txt.lineOf(t, ls); ; line++) {
+        let last = Txt.lineStart(t, Math.max(anchor, cursor));
+        if (from !== undefined) {
+            ls = Math.max(ls, Txt.lineStart(t, from));
+            last = Math.min(last, Txt.lineStart(t, to));
+        }
+        const lines = [];
+        for (let line = Txt.lineOf(t, ls); ls <= last; line++) {
             const le = Txt.lineEnd(t, ls);
             const start = Txt.advance(t, ls, left, le);
             lines.push({ line: line, ls: ls, le: le, start: start,
                 end: right === Infinity ? le : Txt.advance(t, start, right - left + 1, le), cols: Txt.column(t, le) });
-            if (ls >= last)
-                break;
             ls = le + 1;
         }
         return { left: left, right: right, lines: lines };
     }
 
-    // The block as { start, end } spans, for drawing it.
-    function blockSpans() {
-        return blockShape(bufferText()).lines.filter(l => l.end > l.start).map(l => ({ start: l.start, end: l.end }));
+    // The block as { start, end } spans, for drawing it: only its lines in
+    // [from, to], as all of a 100,000-line block took a second a key.
+    function blockSpans(from, to) {
+        return blockShape(bufferText(), from, to).lines.filter(l => l.end > l.start).map(l => ({ start: l.start, end: l.end }));
     }
 
     // Runs a visual block command. Returns false for the ones that work on
@@ -1958,10 +1964,21 @@ QtObject {
     function setCursors(list, main) {
         if (main === undefined)
             main = cursor;
-        const sorted = list.slice().sort((a, b) => a.pos - b.pos);
+        const sorted = sortedBy(list, c => c.pos);
         cursors = sorted.filter((c, i) => c.pos !== main && (i === 0 || c.pos !== sorted[i - 1].pos));
         if (cursors.length)
             trackedText = bufferText();
+    }
+
+    // `list` sorted by key(item), without changing it: itself if it already
+    // is, as cursors almost always are (with a block insert's 100,000,
+    // sorting them took a tenth of a second a key).
+    function sortedBy(list, key) {
+        for (let i = 1; i < list.length; i++) {
+            if (key(list[i]) < key(list[i - 1]))
+                return list.slice().sort((a, b) => key(a) - key(b));
+        }
+        return list;
     }
 
     // Alt+click: adds a cursor at pos, or removes the one there.
