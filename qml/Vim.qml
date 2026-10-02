@@ -360,7 +360,8 @@ QtObject {
         }
         if (mode === "insert")
             return insertKey(tok, event);
-        if (tok === null)
+        // Cmd+Backspace deletes only while typing (and in the command line).
+        if (tok === null || tok === "<D-BS>")
             return true;
         if (mode === "replace") {
             if (tok === "<Esc>") {
@@ -567,7 +568,7 @@ QtObject {
             return null;
         }
         if (isMac && (event.modifiers & Qt.ControlModifier)) // Cmd
-            return null;
+            return event.key === Qt.Key_Backspace ? "<D-BS>" : null;
         const named = {
             [Qt.Key_Escape]: "<Esc>",
             [Qt.Key_Return]: "<CR>",
@@ -603,23 +604,32 @@ QtObject {
             leaveInsert();
             return true;
         }
-        const own = linePrefixes && event ? prefixKey(event) : null;
+        const own = linePrefixes && event && tok !== "<D-BS>" ? prefixKey(event) : null;
         if (own)
             tok = own;
         if (tok === null)
             return false;
         const s = insertSession;
         const move = ["<Left>", "<Right>", "<Up>", "<Down>", "<Home>", "<End>", "<PageUp>", "<PageDown>"].includes(tok);
-        const typed = !isSpecial(tok) || ["<CR>", "<Tab>", "<BS>", "<Del>"].includes(tok);
+        const typed = !isSpecial(tok) || ["<CR>", "<Tab>", "<BS>", "<Del>", "<D-BS>"].includes(tok);
         if (move)
             breakInsert();
         else if (s && !s.broken && typed)
             s.keys.push(tok);
+        // The editor doesn't know Cmd+Backspace: with a selection, it
+        // deletes that, as Backspace does.
+        const from = editor.selectionStart, to = editor.selectionEnd;
+        if (tok === "<D-BS>" && event && to > from) {
+            replaceRange(from, to, "");
+            setCursor(from);
+            return true;
+        }
         // A macro has no event for the editor to handle, and the editor
         // knows only one cursor, so vim does it. Shift+Enter too, which the
-        // editor would make a line separator rather than a line break, and
-        // the keys that must keep the prefixes.
-        if (!event || own || cursors.length && (move || typed) || tok === "<CR>" && event.modifiers & Qt.ShiftModifier) {
+        // editor would make a line separator rather than a line break,
+        // Cmd+Backspace, and the keys that must keep the prefixes.
+        if (!event || own || tok === "<D-BS>" || cursors.length && (move || typed)
+                || tok === "<CR>" && event.modifiers & Qt.ShiftModifier) {
             if (move)
                 insertMove(tok);
             else if (typed)
@@ -723,7 +733,7 @@ QtObject {
         } else if (tok === "<Del>") {
             if (c < n)
                 editCommandLine(c, c + 1, "");
-        } else if (tok === "<C-u>") {
+        } else if (tok === "<C-u>" || tok === "<D-BS>") {
             editCommandLine(1, c, "");
         } else if (tok === "<C-w>") {
             let s = c;
@@ -1531,7 +1541,7 @@ QtObject {
         const n = s.count - 1;
         if (n <= 0)
             return;
-        const keyByKey = k => k === "<BS>" || k === "<Del>" || linePrefixes && k === "<CR>";
+        const keyByKey = k => k === "<BS>" || k === "<Del>" || k === "<D-BS>" || linePrefixes && k === "<CR>";
         if (mode === "insert" && !s.keys.some(keyByKey)) {
             const typed = s.keys.map(typedText).join("");
             const text = (s.openLine ? lineBreak + typed : typed).repeat(n);
@@ -1581,13 +1591,17 @@ QtObject {
 
     // What the insert-mode key `tok` does at p in t: replaces [start, end)
     // with text, and puts the cursor `cursor` characters after start (after
-    // the text, if not given). Null if nothing. In Koil's listing (see
-    // Prefixes), Backspace at a name's start clears its line's icon, and
-    // on a line without one, joins it to the line above; Delete at a line's
-    // end joins the next line without its prefix; and Enter at a name's
-    // start puts the new line above, so the name keeps its icon.
+    // the text, if not given). Null if nothing. Cmd+Backspace deletes back
+    // to the line's start, and there is Backspace. In Koil's listing (see
+    // Prefixes), a line starts after its prefix; Backspace at a name's
+    // start clears its line's icon, and on a line without one, joins it to
+    // the line above; Delete at a line's end joins the next line without
+    // its prefix; and Enter at a name's start puts the new line above, so
+    // the name keeps its icon.
     function typedEdit(t, p, tok) {
         const ls = Txt.lineStart(t, p), pe = prefixEnd(t, ls);
+        if (tok === "<D-BS>")
+            return p > pe ? { start: pe, end: p, text: "" } : typedEdit(t, p, "<BS>");
         if (tok === "<BS>") {
             if (pe > ls && p === pe)
                 return t.slice(ls, pe) !== blankPrefix ? { start: ls, end: pe, text: blankPrefix }

@@ -87,6 +87,8 @@ TestCase {
                     keyClick(Qt.Key_A + name.charCodeAt(2) - 97, ctrl);
                 else if (/^D-[a-z]$/.test(name))
                     keyClick(Qt.Key_A + name.charCodeAt(2) - 97, Qt.ControlModifier);
+                else if (name === "D-BS")
+                    keyClick(Qt.Key_Backspace, Qt.ControlModifier);
                 else
                     fail("unknown key " + m);
             }
@@ -1162,6 +1164,46 @@ TestCase {
         compare(render(), "<M:h1>  a\n   x");
         keys("<BS><BS><Esc>");
         compare(render(), "<M:h1>  ab");
+    }
+
+    // Cmd+Backspace deletes to the line's start (in the listing, the
+    // name's), and there is Backspace. In the command line, it's Ctrl-U.
+    function test_cmdBackspace() {
+        if (!isMac)
+            skip("Cmd+Backspace is macOS's");
+        load("one\ntwo three");
+        keys("jfhi<D-BS>");
+        compare(editor.text, "one\nhree");
+        keys("<D-BS><Esc>");
+        compare(editor.text, "onehree");
+        compare(vim.positionLabel(), "1:3");
+        // Typed again by . and a count.
+        load("ab\ncd");
+        keys("Ax<D-BS>y<Esc>j.");
+        compare(editor.text, "y\ny");
+        load("ab");
+        keys("2Ax<D-BS>y<Esc>");
+        compare(editor.text, "y");
+        // What's selected goes, as with Backspace.
+        load("one two");
+        keys("A");
+        for (let i = 0; i < 3; i++)
+            keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        keys("<D-BS><Esc>");
+        compare(editor.text, "one ");
+        // Normal mode doesn't know it.
+        keys("0<D-BS>x");
+        compare(editor.text, "ne ");
+        keys(":abc<Left><D-BS>");
+        compare(vim.commandLine, ":c");
+        keys("<Esc>");
+        loadListing("M  one\nC  two");
+        keys("jA<D-BS>");
+        compare(render(), "<M:h1>  one\n<C:h2>  ");
+        keys("<D-BS>");
+        compare(render(), "<M:h1>  one\n   ");
+        keys("<D-BS><Esc>");
+        compare(render(), "<M:h1>  one");
     }
 
     // Whole lines take their prefix along; other edits leave it be.

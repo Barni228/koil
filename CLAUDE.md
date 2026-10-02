@@ -341,7 +341,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `setCursor`, and typing, a `Qt.callLater`), and at a name's start in the
   listing the whole prefix, so `0` scrolls all the way left. Vim keeps its own undo stack (diffs per change), so native
   undo (Cmd+Z) is routed to it. Only the `"+`/`"*` registers use the system
-  clipboard.
+  clipboard. The `TextArea` does nothing on Cmd+Backspace, so on macOS
+  it's vim's `<D-BS>`: typed by vim in insert mode (`typedEdit`: back to
+  the line's start, the name's in the listing, and there Backspace),
+  `Ctrl-U` in the command line, nothing in the other modes.
 - **Macros**: typed keys are recorded as tokens (`"<Esc>"`, `"x"`); the register
   keeps them as `keys` next to the text, so literal "<CR>" typed in insert mode
   stays text. `@` pushes a frame (`{ keys, next, runs }`, not the keys `runs`
