@@ -278,8 +278,8 @@ QtObject {
             return true;
         }
         if (mode === "insert") {
-            // Also through the "+ register, so hidden text is revealed for
-            // other apps and stays hidden when pasted here.
+            // Also through the "+ register, so hidden text stays hidden
+            // when pasted here.
             const s = editor.selectionStart, e = editor.selectionEnd;
             if (event.matches(StandardKey.Copy) || event.matches(StandardKey.Cut)) {
                 if (e > s) {
@@ -2546,10 +2546,11 @@ QtObject {
         blockwise = !!blockwise;
         // The clipboard registers are separate: writing them leaves the
         // unnamed register (what plain "p" pastes) alone. Other apps get the
-        // hidden texts revealed; Koil gets the icons back.
+        // text as shown, icons and all; Koil gets the hidden texts back from
+        // its own data.
         if (name === "+" || name === "*") {
             if (clipboard)
-                clipboard.setClipboardText(revealed(text, entries), entries.length || blockwise
+                clipboard.setClipboardText(text, entries.length || blockwise
                     ? JSON.stringify({ text: text, hidden: entries, block: blockwise, session: clipboardSession }) : "");
             return;
         }
@@ -2885,16 +2886,6 @@ QtObject {
             if (d)
                 replaceRange(d.start, d.end1, text.slice(d.start, d.end2), hiddenIn(entries, d.start, d.end2));
         });
-    }
-
-    // `text` with the icons of its entries `list` replaced by what they hide.
-    function revealed(text, list) {
-        let r = "", i = 0;
-        for (const h of list) {
-            r += text.slice(i, h.at) + h.text;
-            i = h.at + h.icon.length;
-        }
-        return r + text.slice(i);
     }
 
     // Entries read from the clipboard: checked, since any app could have

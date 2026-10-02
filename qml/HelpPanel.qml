@@ -200,7 +200,7 @@ Popup {
                 ["gh", "Show the text behind the icon of the cursor's line, unless there's a warning or "
                     + "error under the cursor (so does resting the mouse on the icon). An ID shows as the "
                     + "path it stands for, even if its line renames it."],
-                ["", "Yanks, undo and copying keep the hidden text. Other apps get the text revealed."]
+                ["", "Yanks, undo and copying keep the hidden text. Other apps get the icons."]
             ]
         },
         {

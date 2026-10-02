@@ -785,7 +785,6 @@ TestCase {
         compare(vim.hiddenAt(0).text, "h1");
         compare(vim.hiddenAt(6).icon, chair);
         compare(vim.hiddenAt(1), null);
-        compare(vim.revealed(editor.text, vim.hidden), "h1  a\nh2  b");
     }
 
     function test_motionsOverIcon() {
@@ -877,11 +876,11 @@ TestCase {
         compare(vim.getRegister("a").hidden.length, 2);
     }
 
-    // Other apps get the hidden text; Koil gets the icons back.
+    // Other apps get the icons; Koil gets the hidden text back.
     function test_clipboard() {
         load("M  a");
         keys("\"+yy");
-        compare(clipboard.text, "h1  a\n");
+        compare(clipboard.text, mushroom + "  a\n");
         compare(JSON.parse(clipboard.data).hidden, [
             {
                 at: 0,

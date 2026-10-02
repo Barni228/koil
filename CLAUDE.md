@@ -427,8 +427,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
     characters (V4 makes a string of each character it indexes), and undo
     steps and registers keep their text through `own`: V4's `slice` keeps
     the whole string it was cut from until the slice is read.
-  - The `"+` register (and Cmd+C/X/V in every mode) writes the text with every
-    icon replaced by what it hides (`revealed`), for other apps, and JSON
+  - The `"+` register (and Cmd+C/X/V in every mode) writes the text as
+    shown, icons and all, for other apps (an ID means nothing outside
+    Koil), and JSON
     `{ text, hidden, block, session }` as `application/x-koil-data`, which
     Koil reads back (`validHidden` checks it first: any app can write the
     clipboard; see Clipboard under Koil for `session`).
