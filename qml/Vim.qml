@@ -18,6 +18,8 @@ QtObject {
     // system clipboard. data is Koil's own (the hidden texts).
     property var clipboard: null
     property real lineHeight: 16
+    // How wide a column is (a character of the editor's font).
+    property real charWidth: 8
     readonly property int pageLines: flickable ? Math.max(2, Math.floor(flickable.height / lineHeight)) : 20
 
     // "normal", "insert", "replace", "visual", "visualLine" or "visualBlock"
@@ -50,6 +52,10 @@ QtObject {
     property string fontFamily: ""
     property string defaultFontFamily: ""
     property var fontFamilies: []
+    // :set sidescrolloff: the columns kept in view on either side of the
+    // cursor when the view scrolls sideways (see showColumn). Vim's
+    // default is 0.
+    property int sideScrollOff: 4
     // Koil's :set hidden, gitignore and regex: show hidden entries (and
     // ../), hide what git ignores, and read the path to open as a regex
     // (see Settings in koil-core). The view applies them to the listing.
@@ -391,6 +397,10 @@ QtObject {
                 syncing = false;
             }
             cursor = q;
+            // The editor scrolls only as far as shows its cursor: the room
+            // beside it, once `text` has what was typed.
+            if (editor.selectionStart === editor.selectionEnd)
+                Qt.callLater(showColumn);
             return;
         }
         keys = [];
@@ -2316,9 +2326,9 @@ QtObject {
     // Gives the editor the text vim edited in its place, as one edit, and
     // vim's mode and cursor (or selection), as setMode and setCursor would
     // have: the edit doesn't scroll (it moves the editor's cursor), but the
-    // cursor does, as Qt does it, and a new mode as setMode does. If none
-    // of them changed, the view stays where it is, even if the mouse
-    // scrolled the cursor out of it.
+    // cursor does, as Qt does it, with room beside it (showColumn), and a
+    // new mode as setMode does. If none of them changed, the view stays
+    // where it is, even if the mouse scrolled the cursor out of it.
     function flush() {
         const b = batch, old = editor.text, edited = b.text !== old;
         if (!edited && b.cursor === cursor && b.anchor === anchor && b.mode === mode)
@@ -2352,6 +2362,8 @@ QtObject {
         if (newMode) {
             restore();
             showCursor();
+        } else if (b.cursor !== cursor) {
+            showColumn();
         }
         syncing = false;
         b.text = editor.text;
@@ -2432,6 +2444,7 @@ QtObject {
         else
             editor.cursorPosition = cursor;
         syncing = false;
+        showColumn();
     }
 
     function updateSelection() {
@@ -3195,6 +3208,7 @@ QtObject {
         { name: "guifont", short: "gfn", property: "fontFamily", default: defaultFontFamily },
         { name: "number", short: "nu", property: "number", default: defaultNumber },
         { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber },
+        { name: "sidescrolloff", short: "siso", property: "sideScrollOff", default: 4, min: 0, max: 999 },
         { name: "hidden", short: "hid", property: "showHidden", default: false },
         { name: "gitignore", short: "ignore", property: "gitignore", default: false },
         { name: "regex", short: "re", property: "regex", default: false }
@@ -3646,28 +3660,47 @@ QtObject {
         flickable.contentY = Math.max(0, Math.min(flickable.contentY + lines * lineHeight, max));
     }
 
-    // Scrolls as little as shows the cursor: all of the character it's on,
-    // and the padding after it, as the editor does for its own cursor (its
-    // rectangle is a bar, only as wide as a line).
+    // Scrolls as little as shows the cursor (sideways, as showColumn does).
     function showCursor() {
         if (!flickable || batch)
             return; // after the chunk (see flush)
-        const t = bufferText(), p = Math.min(cursor, bufferText().length);
-        const f = flickable, r = editor.positionToRectangle(p);
-        const right = (p < Txt.lineEnd(t, p) ? editor.positionToRectangle(Txt.charEnd(t, p)).x : r.x + r.width)
-            + editor.rightPadding;
-        const top = editor.topPadding + (Txt.lineOf(t, cursor) - 1) * lineHeight;
+        const f = flickable, top = editor.topPadding + (Txt.lineOf(bufferText(), cursor) - 1) * lineHeight;
         const maxY = Math.max(0, f.contentHeight - f.height);
         if (top < f.contentY)
             f.contentY = top <= editor.topPadding ? 0 : top;
         else if (top + lineHeight > f.contentY + f.height)
             f.contentY = Math.min(maxY, top + lineHeight - f.height);
-        // The left edge is the padding, where the line numbers are.
-        const maxX = Math.max(0, f.contentWidth - f.width);
-        if (r.x < f.contentX + editor.leftPadding)
-            f.contentX = Math.max(0, r.x - editor.leftPadding);
-        else if (right > f.contentX + f.width)
-            f.contentX = Math.min(maxX, right - f.width);
+        showColumn();
+    }
+
+    // Scrolls sideways as little as shows all of the character the cursor
+    // is on (the editor's cursor rectangle is a bar, only as wide as a
+    // line), sideScrollOff columns on either side of it (fewer if the view
+    // is too narrow for them) and the padding after them. Room that
+    // reaches the start of a name shows its prefix too, the icon that
+    // hides its ID, so 0 scrolls all the way left.
+    function showColumn() {
+        if (!flickable || batch)
+            return; // as showCursor
+        const t = bufferText(), p = Math.min(cursor, t.length), ls = Txt.lineStart(t, p);
+        const f = flickable, r = editor.positionToRectangle(p);
+        const columns = Math.floor((f.width - editor.leftPadding - editor.rightPadding) / charWidth);
+        const room = Math.max(0, Math.min(sideScrollOff, Math.floor((columns - 1) / 2))) * charWidth;
+        let left = r.x - room;
+        if (left <= editor.positionToRectangle(prefixEnd(t, ls)).x)
+            left = editor.positionToRectangle(ls).x;
+        const right = (p < Txt.lineEnd(t, p) ? editor.positionToRectangle(Txt.charEnd(t, p)).x : r.x + charWidth)
+            + room + editor.rightPadding;
+        // The left edge is the padding, where the line numbers are. If both
+        // sides can't be in view, the left one is.
+        let x = f.contentX;
+        if (right > x + f.width)
+            x = right - f.width;
+        if (left < x + editor.leftPadding)
+            x = left - editor.leftPadding;
+        x = Math.max(0, Math.min(x, f.contentWidth - f.width));
+        if (x !== f.contentX)
+            f.contentX = x;
     }
 
     // Ctrl-E and Ctrl-Y: scrolls the view `lines` whole lines (down if

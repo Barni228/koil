@@ -55,6 +55,8 @@ Item {
     // Every line is this tall, even one with an emoji (see fixLineFormat).
     // The extra space keeps an emoji clear of the lines around it.
     readonly property int lineHeight: Math.ceil(metrics.lineSpacing * 1.25)
+    // How wide a column is: every character advances one (see Icon font).
+    readonly property real charWidth: spaceMetrics.advanceWidth
     // Where the baseline is in a line: the font's characters sit in the
     // middle of it (see fixLineFormat).
     readonly property real textBaseline: (lineHeight + metrics.ascent - metrics.descent) / 2

@@ -241,9 +241,13 @@ TestCase {
     }
 
     property int defaultChunkTime
+    property real defaultCharWidth
+    property int defaultSideScrollOff
 
     function initTestCase() {
         defaultChunkTime = vim.chunkTime;
+        defaultCharWidth = vim.charWidth;
+        defaultSideScrollOff = vim.sideScrollOff;
     }
 
     // Back to the editor, after a test that switched buffers.
@@ -251,6 +255,8 @@ TestCase {
         if (vim.running)
             vim.stopRun();
         vim.chunkTime = defaultChunkTime;
+        vim.charWidth = defaultCharWidth;
+        vim.sideScrollOff = defaultSideScrollOff;
         if (vim.editor !== editor)
             switchTo(editor, null);
         vim.flickable = null;
@@ -442,6 +448,8 @@ TestCase {
         compare(render(), "d");
         // So does @: with a count (here at once, in one chunk).
         vim.chunkTime = defaultChunkTime;
+        vim.charWidth = defaultCharWidth;
+        vim.sideScrollOff = defaultSideScrollOff;
         load("x");
         const size = vim.fontSize;
         keys(":set fs+=1<CR>3@:");
@@ -733,6 +741,58 @@ TestCase {
         compare(vim.cursor, 59);
         verify(f.contentX > 0);
         verify(f.contentX + f.width >= narrowText.positionToRectangle(60).x, "the last x is cut off");
+    }
+
+    // The cursor scrolls the view sideways as little as keeps
+    // sidescrolloff columns in view on either side of it.
+    function test_sideScrollOff() {
+        load("one");
+        narrowText.text = "x".repeat(60);
+        waitForRendering(narrow);
+        const f = narrow.contentItem as Flickable;
+        switchTo(narrowText, {
+            cursor: 0
+        }, f);
+        const x = p => narrowText.positionToRectangle(p).x;
+        vim.charWidth = x(1) - x(0);
+        keys(":set siso=2<CR>");
+        // The view scrolls by whole pixels (a ScrollView's Flickable is
+        // pixelAligned).
+        keys("30l");
+        fuzzyCompare(f.contentX + f.width, x(33) + narrowText.rightPadding, 0.5);
+        keys("20h");
+        fuzzyCompare(f.contentX + narrowText.leftPadding, x(8), 0.5);
+        keys("$");
+        fuzzyCompare(f.contentX, f.contentWidth - f.width, 0.5);
+        keys("0");
+        compare(f.contentX, 0);
+        // Typing too, which the editor does.
+        keys("i" + "y".repeat(20));
+        wait(0);
+        compare(vim.cursor, 20);
+        fuzzyCompare(f.contentX + f.width, x(23) + narrowText.rightPadding, 0.5);
+        keys("<Esc>");
+    }
+
+    // At a name's start in the listing, the view shows its prefix, the
+    // icon that hides its ID, even with no sidescrolloff.
+    function test_sideScrollOffPrefix() {
+        load("one");
+        narrowText.text = mushroom + "  " + "x".repeat(60);
+        waitForRendering(narrow);
+        const f = narrow.contentItem as Flickable;
+        vim.linePrefixes = true;
+        switchTo(narrowText, {
+            hidden: [{ at: 0, icon: mushroom, text: "1" }]
+        }, f);
+        vim.sideScrollOff = 0;
+        keys("$");
+        verify(f.contentX > 0);
+        keys("0");
+        compare(vim.cursor, mushroom.length + 2);
+        compare(f.contentX, 0);
+        keys("$b^");
+        compare(f.contentX, 0);
     }
 
     // A one-line buffer (Koil's path field) gets spaces for line breaks,

@@ -72,8 +72,8 @@ Popup {
         {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
-                "number", "nu", "relativenumber", "rnu", "hidden", "hid", "gitignore", "ignore", "regex",
-                "re"],
+                "number", "nu", "relativenumber", "rnu", "sidescrolloff", "siso", "hidden", "hid", "gitignore",
+                "ignore", "regex", "re"],
             intro: "`:set` with no arguments lists the options that aren't at their default. "
                 + "Several can be set at once: `:set nu rnu fs=18`.",
             rows: [
@@ -83,6 +83,8 @@ Popup {
                 ["number, nu", "Line numbers."],
                 ["relativenumber, rnu", "Line numbers counted from the cursor's line. With `nu` too, "
                     + "the cursor's line shows its own number."],
+                ["sidescrolloff, siso", "Columns kept in view on either side of the cursor when the text "
+                    + "scrolls sideways. Default 4. At a name's start, its icon is always in view."],
                 ["hidden, hid", "Show hidden entries (starting with `.`), and `../` to open the dir above."],
                 ["gitignore, ignore", "Hide what git ignores, and `.git`."],
                 ["regex, re", "Read the path as a regex, not a glob."]

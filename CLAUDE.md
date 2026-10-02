@@ -335,7 +335,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   Changing `readOnly` makes the editor scroll to a stale cursor position, so
   `setMode` restores the view and then scrolls only if the cursor is out of it
   (`showCursor`: to all of the character under the block, and the padding
-  after it, since Qt's cursor rectangle is a thin bar). Vim keeps its own undo stack (diffs per change), so native
+  after it, since Qt's cursor rectangle is a thin bar). Sideways, the
+  cursor keeps `:set sidescrolloff` (default 4) columns in view on either
+  side wherever it moves (`showColumn`, after Qt's own scroll: `flush`,
+  `setCursor`, and typing, a `Qt.callLater`), and at a name's start in the
+  listing the whole prefix, so `0` scrolls all the way left. Vim keeps its own undo stack (diffs per change), so native
   undo (Cmd+Z) is routed to it. Only the `"+`/`"*` registers use the system
   clipboard.
 - **Macros**: typed keys are recorded as tokens (`"<Esc>"`, `"x"`); the register

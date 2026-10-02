@@ -487,6 +487,7 @@ ApplicationWindow {
         linePrefixes: root.listing && root.activeView === editorView
         clipboard: system
         lineHeight: editorView.lineHeight
+        charWidth: editorView.charWidth
         number: settings.number
         defaultNumber: settings.number
         relativeNumber: settings.relativeNumber
