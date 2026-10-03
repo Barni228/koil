@@ -8,13 +8,13 @@
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::{MAIN_SEPARATOR, Path, PathBuf, is_separator};
+use std::path::{Path, PathBuf};
 
 use devicons::Theme;
 use koil_core::apply::Undo;
 use koil_core::{
     Action, Entry, EntryErrorKind, EntryWarning, Id, Koil, OpenError, Pattern, Settings,
-    UpdateError,
+    UpdateError, Warning,
 };
 use serde::{Deserialize, Serialize};
 
@@ -77,7 +77,7 @@ pub struct Rendered {
 /// The listing of what `koil` has open.
 pub fn render(koil: &Koil) -> Rendered {
     let mut rendered = Rendered {
-        path: show_path(&koil.location()),
+        path: show_location(koil),
         pending_color: PENDING_COLOR,
         ..Rendered::default()
     };
@@ -358,7 +358,7 @@ pub fn update(
     }
     let before = view(koil);
     let before_dir = koil.current_dir().to_path_buf();
-    let shown = show_path(&koil.location());
+    let shown = show_location(koil);
     let target = open.or((location != shown).then_some(location));
     // Opening it can fail after the listing is read and the settings are
     // used: then koil is put back as it was. Left with the new settings, it
@@ -382,7 +382,7 @@ pub fn update(
     let mut messages = Vec::new();
     if koil.settings() != settings {
         match koil.set_settings(settings.clone()) {
-            Ok(warning) => messages.extend(warning.map(|w| w.to_string())),
+            Ok(warning) => messages.extend(warning.as_ref().map(describe_warning)),
             Err(error) => messages.push(describe(&error)),
         }
     }
@@ -508,7 +508,7 @@ pub fn undo_steps(koil: &Koil) -> Result<Vec<String>, String> {
         Undo::Restore(t) => format!("RESTORE {}", path(&t.original)),
         Undo::Rename(s, d) => format!("MOVE    {} -> {}", dir(s), path(d)),
     };
-    let steps = koil.undo_steps().map_err(|e| describe(&e))?;
+    let steps = koil.undo_steps().map_err(|e| describe_paths(&e))?;
     Ok(steps.unwrap_or_default().iter().map(step).collect())
 }
 
@@ -535,7 +535,7 @@ pub struct Span {
 /// dir, at the first part with a special character.
 pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
     let path = line.trim();
-    let is_regex = match path == show_path(&koil.location()) {
+    let is_regex = match path == show_location(koil) {
         true => matches!(koil.pattern(), Some(Pattern::Regex(_))),
         false => regex,
     };
@@ -562,27 +562,25 @@ pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
 }
 
 /// Where the regex starts in `path` (as written in the path field, relative
-/// to `dir`), as [`path_syntax`] says. None if it isn't a pattern.
+/// to `dir`), as [`path_syntax`] says. None if it isn't a pattern. As
+/// `Koil::open` reads it, only a `/` (or the root, like `/` or `C:\`) ends a
+/// part, so on Windows a `\` after the dir is the regex's (an escape).
 fn pattern_start(dir: &Path, path: &str) -> Option<usize> {
-    // After the longest part that's a dir: each part ends at a separator, or
-    // at the end. A relative path starts in `dir`.
-    let ends = path.match_indices(is_separator).map(|(i, _)| i);
-    let ends = ends.chain([path.len()]);
-    let ends: Vec<usize> = ends.collect();
-    let mut base = 0;
-    for &end in ends.iter().rev() {
-        let prefix = if end == 0 { "/" } else { &path[..end] };
-        if dir.join(expand_home(prefix)).is_dir() {
-            if end == path.len() {
-                return None;
-            }
-            base = end + 1;
-            break;
-        }
+    let is_dir = |p: &str| dir.join(expand_home(p)).is_dir();
+    if is_dir(path) {
+        return None;
     }
+    // After the longest part before a `/` that's a dir, else after the root
+    // (none in a relative path, which starts in `dir`).
+    let root = Path::new(path).ancestors().last();
+    let root = root.map_or(0, |r| r.as_os_str().len());
+    let ends = path.match_indices('/').map(|(i, _)| i);
+    let mut ends = ends.filter(|&i| i >= root);
+    let base = ends.rfind(|&i| is_dir(&path[..i]));
+    let base = base.map_or(root, |i| i + 1);
     // Then at the first part with a special character.
     let mut start = base;
-    for part in path[base..].split(is_separator) {
+    for part in path[base..].split('/') {
         if part.contains(REGEX_SPECIAL) {
             return Some(start);
         }
@@ -698,41 +696,93 @@ fn repetition_end(chars: &[(usize, char)], i: usize) -> Option<usize> {
 /// it, else as [`show_path`] does.
 fn relative(koil: &Koil, path: &Path) -> String {
     match path.strip_prefix(koil.current_dir()) {
-        Ok(rest) if !rest.as_os_str().is_empty() => rest.display().to_string(),
+        Ok(rest) if !rest.as_os_str().is_empty() => slashes(rest.display().to_string()),
         _ => show_path(path),
     }
 }
 
-/// `path` with `~` for the home dir.
-pub fn show_path(path: &Path) -> String {
-    if let Some(home) = std::env::home_dir()
-        && let Ok(rest) = path.strip_prefix(&home)
-    {
-        let mut shown = match rest.as_os_str().is_empty() {
-            true => "~".to_string(),
-            false => format!("~{MAIN_SEPARATOR}{}", rest.display()),
-        };
-        // `strip_prefix` drops a trailing `/`, which makes a pattern match
-        // only dirs.
-        if path.to_string_lossy().ends_with(is_separator) {
-            shown.push('/');
-        }
-        return shown;
+/// What `koil` has open, as the path field shows it: the dir (see
+/// [`show_path`]), then a `/` and the pattern as written, if there is one.
+pub fn show_location(koil: &Koil) -> String {
+    let dir = show_path(koil.current_dir());
+    match koil.pattern() {
+        Some(pattern) => join_shown(dir, pattern.as_str()),
+        None => dir,
     }
-    path.display().to_string()
 }
 
-/// `path` with a `~` at its start (see [`show_path`]) made the home dir.
+/// `path` (a dir or a file, not a pattern) as Koil shows it: with `/`
+/// between its parts, also on Windows (see [`slashes`]), and `~` for the
+/// home dir.
+pub fn show_path(path: &Path) -> String {
+    with_tilde(&slashes(path.display().to_string()))
+}
+
+/// `path` (as Koil shows it, with `/`) with `~` for the home dir at its
+/// start. Only that part is read, so a pattern after it stays as written.
+pub fn with_tilde(path: &str) -> String {
+    let Some(home) = home() else {
+        return path.to_string();
+    };
+    match path.strip_prefix(&home) {
+        Some("") => "~".to_string(),
+        Some(rest) if rest.starts_with('/') && !home.ends_with('/') => format!("~{rest}"),
+        _ => path.to_string(),
+    }
+}
+
+/// `rest` (a pattern or a relative path) after the dir `dir`, with a `/`
+/// between them, unless `dir` (a root, like `/` or `C:/`) ends with one.
+pub fn join_shown(dir: String, rest: &str) -> String {
+    match dir.ends_with('/') {
+        true => dir + rest,
+        false => format!("{dir}/{rest}"),
+    }
+}
+
+/// `path` with `/` for every `\` on Windows, where both are separators (and
+/// no name has either), but in a `\\?\` path, where only `\` is one. Users
+/// write only `/`: koil reads a `\` in a pattern as an escape, and ends a
+/// pattern's base dir only at a `/`, so a path Koil shows must have none.
+pub fn slashes(path: String) -> String {
+    match cfg!(windows) && !path.starts_with(r"\\?\") {
+        true => path.replace('\\', "/"),
+        false => path,
+    }
+}
+
+/// The home dir, as Koil shows it (see [`slashes`]).
+fn home() -> Option<String> {
+    let home = std::env::home_dir()?;
+    Some(slashes(home.to_string_lossy().into_owned()))
+}
+
+/// `path` with a `~/` at its start (see [`show_path`]) made the home dir,
+/// joined with a `/`: on Windows a `\` before a pattern would make koil
+/// read the home dir as part of it.
 pub fn expand_home(path: &str) -> PathBuf {
     let rest = match path {
         "~" => Some(""),
-        _ => path
-            .strip_prefix("~/")
-            .or_else(|| path.strip_prefix(&format!("~{MAIN_SEPARATOR}"))),
+        _ => path.strip_prefix("~/"),
     };
-    match (rest, std::env::home_dir()) {
-        (Some(rest), Some(home)) => home.join(rest),
+    match (rest, home()) {
+        (Some(""), Some(home)) => home.into(),
+        (Some(rest), Some(home)) => join_shown(home, rest).into(),
         _ => path.into(),
+    }
+}
+
+/// A warning from opening the dir again, with its paths as Koil shows them.
+pub fn describe_warning(warning: &Warning) -> String {
+    match warning {
+        Warning::DirNotFound { requested, opened } => format!(
+            "`{}` is not a directory, opened `{}` instead",
+            show_path(requested),
+            show_path(opened)
+        ),
+        Warning::OverLimit { error, opened } => {
+            format!("{error}, opened `{}` instead", show_path(opened))
+        }
     }
 }
 
@@ -746,6 +796,12 @@ pub fn describe_open(error: &OpenError) -> String {
         }
         error => describe(error),
     }
+}
+
+/// An error that names only paths (not a pattern, where `\` is an escape),
+/// like applying's, with `/` in them (see [`slashes`]).
+pub fn describe_paths(error: &dyn Error) -> String {
+    slashes(describe(error))
 }
 
 /// An error, followed by what caused it.

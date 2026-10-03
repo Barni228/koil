@@ -100,8 +100,19 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - **The listing** (listing.rs): per entry its devicons icon, two spaces and
   its name (`/` after a dir's), one per line. The location (`~` for the home
   dir) is apart, in the path field over it (`Rendered.path`), which `update`
-  takes as `path`. The icon hides the entry's ID (`Id.0`, as text) as vim's
-  hidden text, so it yanks, pastes and undoes with its line. `parse` reads a
+  takes as `path`. Users write only `/`, also on Windows: koil opens a
+  plain path with `\` (a pasted one), but in a pattern `\` is an escape, and
+  a pattern's base dir ends only at a `/`. So every path Koil shows has `/`
+  (`listing::slashes`: `show_path`, the confirmations, the hover, messages;
+  koil gives names with `/` itself), and once a pasted `C:\src` opens, the
+  field shows `C:/src`, after which a pattern can be typed. `show_location`
+  writes the dir, a `/` and the pattern as it is (`join_shown`), and `~` is
+  only read at the start, as text (`with_tilde`, `expand_home`, which joins
+  the home dir with a `/`), so a pattern's `\` is never touched. Apply and
+  undo errors name only paths, so they get `/` too (`describe_paths`); open
+  errors can quote a pattern, so they don't. The icon hides the entry's ID
+  (`Id.0`, as text) as vim's hidden text, so it yanks, pastes and undoes
+  with its line. `parse` reads a
   line as an existing entry if its first character is an icon with a hidden
   entry, else as a new one; a Private Use Area character first (the icon
   `render` gives a new entry) is dropped, and names are trimmed. An icon
@@ -149,7 +160,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   parent, so it can be fixed. A path on the command line that can't be
   opened lists the home dir, with it in the path field and its problem
   (`Document.startupPath` makes it absolute from the dir Koil started in,
-  since the field is read relative to the open dir).
+  since the field is read relative to the open dir, by writing it after that
+  dir and a `/`: `std::path::absolute` would make a pattern's `/` a `\`, and
+  `join` would put a `\` before it).
 - **The path field** (`pathView` in main.qml, over the listing): an Editor
   with `pathField` set, one line in a field, with the option buttons (the
   find bar's `IconButton`s) on its right. It's hidden while a file is open.

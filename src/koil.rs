@@ -237,7 +237,7 @@ impl qobject::Koil {
             },
             Err(error) => Outcome {
                 ok: false,
-                message: listing::describe(&error),
+                message: listing::describe_paths(&error),
             },
         };
         to_json(&outcome)
@@ -259,7 +259,7 @@ impl qobject::Koil {
             },
             Err(error) => Outcome {
                 ok: false,
-                message: listing::describe(&error),
+                message: listing::describe_paths(&error),
             },
         };
         to_json(&outcome)
@@ -273,7 +273,7 @@ fn report_message(report: koil_core::Report, done: &str) -> String {
         n => format!("{n} changes"),
     };
     match report.warning {
-        Some(warning) => format!("{changes} {done}; {warning}"),
+        Some(warning) => format!("{changes} {done}; {}", listing::describe_warning(&warning)),
         None => format!("{changes} {done}"),
     }
 }

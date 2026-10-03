@@ -371,6 +371,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dunce"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -571,8 +577,9 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#efc85c1e01481d03e835264afef2ac7908f0c8be"
+source = "git+https://github.com/Barni228/koil-core#9ab3e523f97f5d52dd2f06a525c5bfaa3b5f4a58"
 dependencies = [
+ "dunce",
  "globset",
  "ignore",
  "objc2-foundation",
@@ -584,6 +591,7 @@ dependencies = [
  "thiserror 2.0.21",
  "trash",
  "typed-builder",
+ "winapi-util",
 ]
 
 [[package]]

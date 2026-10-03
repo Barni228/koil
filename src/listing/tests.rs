@@ -52,7 +52,7 @@ fn edited(
 /// Updates with the path that's open.
 fn update_listing(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Updated {
     let settings = koil.settings().clone();
-    let path = show_path(&koil.location());
+    let path = show_location(koil);
     update(koil, &path, text, hidden, &settings, None)
 }
 
@@ -154,7 +154,7 @@ fn test_pending_lines() {
     assert_eq!(names, ["main.rs", "new.txt", "notes2"]);
 
     // an entry pasted into another dir is moved there
-    let path = show_path(&koil.location());
+    let path = show_location(&koil);
     let updated = update(
         &mut koil,
         &path,
@@ -337,7 +337,7 @@ fn test_navigate() {
     assert_eq!(updated.from, "");
 
     // `-`, which comes from `dir/`
-    let path = show_path(&koil.location());
+    let path = show_location(&koil);
     let updated = navigate(&mut koil, &path, Some(".."));
     assert!(updated.ok && updated.moved);
     assert_eq!(koil.current_dir(), root);
@@ -350,7 +350,7 @@ fn test_navigate() {
     assert_eq!(koil.current_dir(), root.join("dir"));
 
     // the same path reads the listing again, without moving
-    let path = show_path(&koil.location());
+    let path = show_location(&koil);
     let updated = navigate(&mut koil, &path, None);
     assert!(updated.ok && !updated.moved);
 
@@ -567,14 +567,19 @@ fn test_home() {
         return;
     };
     assert_eq!(show_path(&home), "~");
-    assert_eq!(show_path(&home.join("a")), format!("~{MAIN_SEPARATOR}a"));
-    // a pattern's trailing `/` is kept
-    assert_eq!(
-        show_path(&home.join(",*/")),
-        format!("~{MAIN_SEPARATOR},*/")
-    );
+    // with `/`, also on Windows
+    assert_eq!(show_path(&home.join("a").join("b")), "~/a/b");
+    // only the home dir is read, so a pattern's `\` and trailing `/` stay
+    let shown = slashes(home.to_string_lossy().into_owned());
+    assert_eq!(with_tilde(&format!(r"{shown}/\w+/")), r"~/\w+/");
+    assert_eq!(with_tilde(&format!("{shown}x")), format!("{shown}x"));
     assert_eq!(expand_home("~"), home);
     assert_eq!(expand_home("~/a"), home.join("a"));
+    // after a `/`, which on Windows ends the base dir of a pattern after it
+    assert_eq!(
+        expand_home("~/*.rs"),
+        PathBuf::from(format!("{shown}/*.rs"))
+    );
     assert_eq!(expand_home("/~/a"), PathBuf::from("/~/a"));
 }
 
@@ -635,4 +640,59 @@ fn test_path_syntax() {
     // a dir, even with a special character, and the path that's open
     assert_eq!(spans(&dir, true), []);
     assert_eq!(spans("dir", true), []);
+    // after a `/`, `\` is the regex's, also on Windows
+    assert_eq!(
+        spans("dir/\\w+", true),
+        [
+            ("\\w+".to_string(), "pattern"),
+            ("\\w".to_string(), "escape"),
+            ("+".to_string(), "quantifier")
+        ]
+    );
+}
+
+#[test]
+fn test_show_location() {
+    let (_temp, mut koil) = koil();
+    let dir = show_path(koil.current_dir());
+    let settings = Settings {
+        regex: true,
+        ..koil.settings().clone()
+    };
+    koil.set_settings(settings.clone()).unwrap();
+    koil.open(r"dir/\w+").unwrap();
+    // the dir, then the pattern as written
+    let rendered = render(&koil);
+    assert_eq!(rendered.path, format!(r"{dir}/dir/\w+"));
+    // which reads as what's open, so it isn't opened again
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    let updated = update(&mut koil, &rendered.path, text, hidden, &settings, None);
+    assert!(updated.ok && !updated.moved, "{updated:?}");
+}
+
+#[test]
+fn test_pasted_path() {
+    let (temp, mut koil) = koil();
+    let dir = koil.current_dir().to_path_buf();
+    // a path as the OS writes it (with `\` on Windows), like a pasted one,
+    // opens, and is then shown with `/`
+    let pasted = dir.join("dir").display().to_string();
+    let rendered = render(&koil);
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    let settings = koil.settings().clone();
+    let updated = update(&mut koil, &pasted, text, hidden, &settings, None);
+    assert!(updated.ok && updated.moved, "{updated:?}");
+    let path = render(&koil).path;
+    assert_eq!(path, show_path(&dir.join("dir")));
+    assert!(!path.contains('\\'), "{path}");
+    // so a pattern written after it is one in that dir
+    fs::write(temp.path().join("dir/a.rs"), "").unwrap();
+    let location = join_shown(path, "*.rs");
+    let rendered = render(&koil);
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    let updated = update(&mut koil, &location, text, hidden, &settings, None);
+    assert!(updated.ok && updated.moved, "{updated:?}");
+    assert_eq!(koil.current_dir(), dir.join("dir"));
+    assert_eq!(koil.pattern(), Some(&Pattern::Glob("*.rs".into())));
+    assert_eq!(render(&koil).path, location);
 }

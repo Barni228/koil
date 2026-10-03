@@ -60,7 +60,9 @@ Popup {
                     + "where `:conf q` and `ZZ` then ask."],
                 ["path", "The field at the top: a dir, or a pattern of files, like `~/src/**/*.rs`, or a "
                     + "regex with `:set regex` (where `,` is any character but `/`), whose parts get colors. "
-                    + "It's one line, edited with vim's keys too; Enter (also in insert mode) opens it and "
+                    + "Write paths with `/`, also on Windows: a path pasted with `\\` opens, and then shows "
+                    + "with `/`, but in a pattern `\\` escapes, like `\\.`. It's one line, edited with vim's "
+                    + "keys too; Enter (also in insert mode) opens it and "
                     + "goes back to the listing, and Shift+Enter opens it but stays in the field."],
                 ["Tab", "In normal mode: go from the listing to the path field, or back. So does a click."],
                 ["g.  gi  gr", "Turn `:set hidden`, `gitignore` and `regex` on or off, like the buttons beside "
@@ -211,7 +213,8 @@ Popup {
             rows: [
                 ["", "Koil's problems with the listing get a wavy underline, orange or red, and a message "
                     + "after the end of their line, as in VS Code. An error (like a name written twice) "
-                    + "stops Space Space and applying; a warning (like a name Windows can't use) doesn't."],
+                    + "stops Space Space and applying; a warning (like a name a shell needs quoted) doesn't. "
+                    + "A name Windows can't use is a warning, but an error on Windows."],
                 ["gh", "Show the message of the warning or error under the cursor (so does resting the "
                     + "mouse on it, or on the message)."]
             ]

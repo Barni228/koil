@@ -1,6 +1,9 @@
+use std::path::{Component, Path};
 use std::pin::Pin;
 
 use cxx_qt_lib::{QString, QUrl};
+
+use crate::listing;
 
 /// Files the editor opens and saves, and the path on the command line.
 #[cxx_qt::bridge]
@@ -89,15 +92,13 @@ impl qobject::Document {
         std::env::args()
             .skip(1)
             .find(|arg| !arg.starts_with('-'))
-            // Keeps a trailing `/` (a pattern's) and `..`, which koil reads.
-            .and_then(|arg| std::path::absolute(arg).ok())
-            .map(|path| QString::from(path.to_string_lossy().as_ref()))
+            .and_then(absolute)
+            .map(|path| QString::from(path.as_str()))
             .unwrap_or_default()
     }
 
     fn shown_path(&self, path: &QString) -> QString {
-        let path = std::path::PathBuf::from(path.to_string());
-        QString::from(crate::listing::show_path(&path).as_str())
+        QString::from(listing::with_tilde(&path.to_string()).as_str())
     }
 
     fn is_file(&self, path: &QString) -> bool {
@@ -118,4 +119,20 @@ impl qobject::Document {
     fn url_to_path(&self, url: &QUrl) -> QString {
         url.to_local_file().unwrap_or_default()
     }
+}
+
+/// `arg` (from the command line) made absolute from the dir Koil started
+/// in, by writing it after that dir and a `/` (see `listing::slashes`), so
+/// it keeps a trailing `/` (a pattern's), `..` and `\` as written, which
+/// koil reads: on Windows `std::path::absolute` would make every `/` a `\`,
+/// and `join` would put a `\` before it, where koil doesn't end a pattern's
+/// base dir.
+fn absolute(arg: String) -> Option<String> {
+    let first = Path::new(&arg).components().next();
+    if matches!(first, Some(Component::Prefix(_) | Component::RootDir)) {
+        return Some(arg);
+    }
+    let dir = std::env::current_dir().ok()?;
+    let dir = listing::slashes(dir.to_string_lossy().into_owned());
+    Some(listing::join_shown(dir, &arg))
 }
