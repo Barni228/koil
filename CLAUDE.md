@@ -272,7 +272,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   (`:q` still fails on its unsaved changes); `:confirm q` and `ZZ` then ask
   about applying them. `:qa!` and Cmd+Q still quit. File > Open Folder
   (Cmd+Shift+O) and a dir or pattern on the command line list it; with no
-  argument Koil lists the home dir.
+  argument Koil lists the home dir. A file that can't be read (one that
+  isn't UTF-8, like a picture) isn't opened, and the status line says why,
+  as for a save that fails (no `MessageDialog`, whose macOS style can't
+  be themed); one on the command line lists its dir instead, on its entry.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
   the editor's document colors each line's icon (colors from devicons,
   gathered from every listing shown, `iconColors`, dark or light by theme)

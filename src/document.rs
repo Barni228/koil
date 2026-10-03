@@ -1,3 +1,4 @@
+use std::io;
 use std::path::{Component, Path};
 use std::pin::Pin;
 
@@ -25,12 +26,14 @@ pub mod qobject {
         #[qsignal]
         fn loaded(self: Pin<&mut Document>, path: QString, text: QString);
 
-        /// Emitted when reading or writing fails.
+        /// Emitted when writing fails, with why.
         #[qsignal]
         fn failed(self: Pin<&mut Document>, message: QString);
 
+        /// Reads the file `path`, and emits `loaded`; or else returns why it
+        /// can't (empty if it could).
         #[qinvokable]
-        fn open_file(self: Pin<&mut Document>, path: &QString);
+        fn open_file(self: Pin<&mut Document>, path: &QString) -> QString;
 
         #[qinvokable]
         fn save_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
@@ -67,22 +70,22 @@ pub mod qobject {
 pub struct DocumentRust;
 
 impl qobject::Document {
-    fn open_file(self: Pin<&mut Self>, path: &QString) {
-        match std::fs::read_to_string(path.to_string()) {
-            Ok(text) => self.loaded(path.clone(), QString::from(text.as_str())),
-            Err(err) => self.failed(QString::from(
-                format!("Could not open {path}: {err}").as_str(),
-            )),
+    fn open_file(self: Pin<&mut Self>, path: &QString) -> QString {
+        match read(&path.to_string()) {
+            Ok(text) => {
+                self.loaded(path.clone(), QString::from(text.as_str()));
+                QString::default()
+            }
+            Err(message) => QString::from(message.as_str()),
         }
     }
 
     fn save_file(self: Pin<&mut Self>, path: &QString, text: &QString) -> bool {
-        match std::fs::write(path.to_string(), text.to_string()) {
+        let path = path.to_string();
+        match std::fs::write(&path, text.to_string()) {
             Ok(()) => true,
             Err(err) => {
-                self.failed(QString::from(
-                    format!("Could not save {path}: {err}").as_str(),
-                ));
+                self.failed(QString::from(cannot("save", &path, &err).as_str()));
                 false
             }
         }
@@ -121,6 +124,25 @@ impl qobject::Document {
     }
 }
 
+/// The text of the file `path`, or why it can't be read.
+fn read(path: &str) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|err| cannot("open", path, &err))
+}
+
+/// Why `path` can't be opened or saved (`doing`), as the status line says
+/// it.
+fn cannot(doing: &str, path: &str, err: &io::Error) -> String {
+    let why = match err.kind() {
+        // What read_to_string says about a picture, say.
+        io::ErrorKind::InvalidData => "it isn't UTF-8 text".to_string(),
+        _ => err.to_string(),
+    };
+    format!(
+        "Can't {doing} `{}`: {why}",
+        listing::show_path(Path::new(path))
+    )
+}
+
 /// `arg` (from the command line) made absolute from the dir Koil started
 /// in, by writing it after that dir and a `/` (`koil_core::with_slashes`), so
 /// it keeps a trailing `/` (a pattern's), `..` and `\` as written, which
@@ -135,4 +157,24 @@ fn absolute(arg: String) -> Option<String> {
     let dir = std::env::current_dir().ok()?;
     let dir = koil_core::with_slashes(&dir).to_string_lossy().into_owned();
     Some(listing::join_shown(dir, &arg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_read() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("photo.jpg");
+        std::fs::write(&path, [0xff, 0xd8, 0xff, 0xe0]).unwrap();
+        let path = path.to_str().unwrap();
+        let shown = listing::show_path(Path::new(path));
+        assert_eq!(
+            read(path),
+            Err(format!("Can't open `{shown}`: it isn't UTF-8 text"))
+        );
+        std::fs::write(path, "text").unwrap();
+        assert_eq!(read(path), Ok("text".to_string()));
+    }
 }

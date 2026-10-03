@@ -88,6 +88,14 @@ ApplicationWindow {
         updatePathSyntax();
     }
 
+    // Opens the file `path` (see loadFile), or says in the status line why
+    // it can't, as vim does (a picture isn't text).
+    function readFile(path) {
+        const error = doc.openFile(path);
+        if (error)
+            vim.showError(error);
+    }
+
     // Lists the dir (or pattern) `path`: File > Open Folder, and at startup.
     // False if it can't be opened (the status line says why).
     function openFolder(path) {
@@ -254,7 +262,7 @@ ApplicationWindow {
             // The file on disk, even if the line renames it; loadFile updates
             // the listing first.
             openedFrom = target.file.name;
-            doc.openFile(target.file.path);
+            readFile(target.file.path);
         }
     }
 
@@ -456,10 +464,7 @@ ApplicationWindow {
         id: doc
 
         onLoaded: (path, text) => root.loadFile(text, path)
-        onFailed: message => {
-            errorDialog.text = message;
-            errorDialog.open();
-        }
+        onFailed: message => vim.showError(message)
     }
 
     Koil {
@@ -778,7 +783,7 @@ ApplicationWindow {
         fileMode: FileDialog.OpenFile
         onAccepted: {
             root.openedFrom = "";
-            doc.openFile(doc.urlToPath(selectedFile));
+            root.readFile(doc.urlToPath(selectedFile));
         }
     }
 
@@ -803,12 +808,6 @@ ApplicationWindow {
             root.quitAfterSave = false;
         }
         onRejected: root.quitAfterSave = false
-    }
-
-    MessageDialog {
-        id: errorDialog
-
-        buttons: MessageDialog.Ok
     }
 
     // macOS: native menu bar. The Quit/Preferences roles make Qt move those
@@ -1034,7 +1033,17 @@ ApplicationWindow {
             // Once the editor is done: before its own onCompleted, it doesn't
             // have the line numbers' padding, and adding it then had Qt lay
             // out all of a long file again (100,000 lines took a second).
-            Qt.callLater(() => doc.openFile(start));
+            Qt.callLater(() => {
+                const error = doc.openFile(start);
+                if (!error)
+                    return;
+                // One it can't read: its dir, on its entry, as `-` from it
+                // would show, and why.
+                const r = JSON.parse(koil.open(doc.dirOf(start)));
+                if (r.ok)
+                    showListing(true, start.split(/[\\/]/).pop());
+                vim.showError(error);
+            });
         } else if (!openFolder(start || doc.homeDir()) && start && openFolder(doc.homeDir())) {
             // One that isn't there: the home dir, with it in the path field
             // and why it can't be opened, to fix like one written there.
