@@ -399,9 +399,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `installer.iss`; what the Open With menu shows), and those extensions as
   `Applications\koil.exe`'s `SupportedTypes` (so "Choose another app" offers
   it only for them). Both give it the path on the command line, without
-  taking any extension. Earlier versions put it in every file's Open With
-  list (`*\OpenWithList`, which only "Choose another app" shows), which the
-  installer now deletes.
+  taking any extension.
 - **App icon**: macOS draws icons as they are, so `Koil.icns` shrinks
   `icon.png`'s rounded square to Apple's grid (824 of 1024 pixels);
   Windows' fills its square. Qt gives windows the exe's `IDI_ICON1` on

@@ -68,8 +68,6 @@ Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; Val
 #endsub
 
 [Registry]
-; Earlier versions put Koil in every file's Open With list.
-Root: HKA; Subkey: "Software\Classes\*\OpenWithList\{#AppExe}"; ValueType: none; Flags: deletekey
 Root: HKA; Subkey: "Software\Classes\Koil.Text"; ValueType: string; ValueData: "Text Document"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Koil.Text\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"
 Root: HKA; Subkey: "Software\Classes\Koil.Text\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
