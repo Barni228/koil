@@ -1208,6 +1208,82 @@ TestCase {
         compare(render(), "<C:h2> b\n<M:h3> c");
     }
 
+    // An edit that isn't the user's (Koil's listing, as it changed on disk):
+    // undo doesn't take it back, but goes on around it, and the cursor stays
+    // on what it was on.
+    function test_mergeEdits() {
+        load("one\ntwo\nthree");
+        keys("jAX<Esc>");
+        compare(vim.cursor, 7);
+        vim.mergeEdits([
+            { start: 0, end: 0, text: "zero\n", hidden: [] },
+            { start: 9, end: 14, text: "THREE", hidden: [] }
+        ], false);
+        compare(editor.text, "zero\none\ntwoX\nTHREE");
+        compare(vim.cursor, 12);
+        keys("u");
+        compare(editor.text, "zero\none\ntwo\nTHREE");
+        keys("u");
+        compare(editor.text, "zero\none\ntwo\nTHREE");
+        keys("<C-r>");
+        compare(editor.text, "zero\none\ntwoX\nTHREE");
+    }
+
+    // A change the edit touches can't be undone after it, nor can the older
+    // ones; the newer ones can.
+    function test_mergeEditsTouchesChange() {
+        load("abc\ndef");
+        keys("x");
+        keys("lrX");
+        keys("jx");
+        compare(editor.text, "bX\ndf");
+        vim.mergeEdits([{ start: 0, end: 2, text: "QQ", hidden: [] }], false);
+        compare(editor.text, "QQ\ndf");
+        keys("u");
+        compare(editor.text, "QQ\ndef");
+        keys("u");
+        compare(editor.text, "QQ\ndef");
+    }
+
+    // Redo goes on around it too.
+    function test_mergeEditsRedo() {
+        load("a\nb");
+        keys("x");
+        keys("u");
+        compare(editor.text, "a\nb");
+        vim.mergeEdits([{ start: 3, end: 3, text: "\nc", hidden: [] }], false);
+        keys("<C-r>");
+        compare(editor.text, "\nb\nc");
+    }
+
+    // While typing: what was typed before it is a change, and what after
+    // another.
+    function test_mergeEditsWhileTyping() {
+        load("one");
+        keys("Atwo");
+        vim.mergeEdits([{ start: 0, end: 0, text: "zero\n", hidden: [] }], false);
+        keys("three<Esc>");
+        compare(editor.text, "zero\nonetwothree");
+        keys("u");
+        compare(editor.text, "zero\nonetwo");
+        keys("u");
+        compare(editor.text, "zero\none");
+    }
+
+    // With the hidden texts of what it puts in, and as a change of its own
+    // if it's undoable (an answer to Koil's question).
+    function test_mergeEditsHidden() {
+        load("M a\nC b");
+        const hidden = [{ at: 0, icon: chair, text: "h9" }];
+        vim.mergeEdits([{ start: 0, end: 0, text: chair + " z\n", hidden: hidden }], false);
+        compare(render(), "<C:h9> z\n<M:h1> a\n<C:h2> b");
+        const line = (chair + " z\n").length;
+        vim.mergeEdits([{ start: line, end: line + mushroom.length + 3, text: "", hidden: [] }], true);
+        compare(render(), "<C:h9> z\n<C:h2> b");
+        keys("u");
+        compare(render(), "<C:h9> z\n<M:h1> a\n<C:h2> b");
+    }
+
     // Any one character can be an icon, like the Nerd Font ones Koil uses
     // (one outside the BMP here), and it's one character to vim.
     function test_anyIcon() {

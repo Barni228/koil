@@ -19,9 +19,10 @@ Popup {
     readonly property real zoom: theme.zoom
     property string text
     property string details
-    // What the answers do (see ask).
+    // What the answers do, and what's done after any of them (see ask).
     property var yesAction: null
     property var noAction: null
+    property var afterAction: null
     // Without anything for No to do, No is the same as Cancel, so it's
     // offered alone.
     readonly property var choices: [
@@ -32,22 +33,28 @@ Popup {
     property int current: 0
 
     // Asks `question`, with `details` (a list, maybe "") under it. `yes` is
-    // what Yes does, and `no` what No does, if anything.
-    function ask(question, details, yes, no) {
+    // what Yes does, and `no` what No does, if anything. `after` runs after
+    // either, or if it's closed some other way (the next question, say).
+    function ask(question, details, yes, no, after) {
         text = question;
         dialog.details = details || "";
         yesAction = yes;
         noAction = no || null;
+        afterAction = after || null;
         current = 0;
         scroller.contentY = 0;
         open();
     }
 
     function answer(choice) {
-        close();
         const action = choice === "yes" ? yesAction : choice === "no" ? noAction : null;
+        const after = afterAction;
+        afterAction = null;
+        close();
         if (action)
             action();
+        if (after)
+            after();
     }
 
     function scrollBy(dy) {
@@ -62,7 +69,14 @@ Popup {
     modal: true
     focus: true
     closePolicy: Popup.CloseOnPressOutside
-    onClosed: label.deselect()
+    onClosed: {
+        label.deselect();
+        // Closed by a click outside it.
+        const after = afterAction;
+        afterAction = null;
+        if (after)
+            after();
+    }
 
     Overlay.modal: Rectangle {
         color: dialog.theme.dark ? "#60000000" : "#30000000"

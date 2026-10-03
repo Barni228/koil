@@ -1,8 +1,13 @@
+use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
-use koil_core::Settings;
+use koil_core::{Conflict, Settings, Watched};
+use notify::event::ModifyKind;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::json;
 
@@ -27,6 +32,34 @@ pub mod qobject {
         #[qproperty(bool, gitignore)]
         #[qproperty(bool, regex)]
         type Koil = super::KoilRust;
+
+        /// Emitted when something changed on disk that can change what
+        /// `sync` finds (see `watch`), on the GUI thread, soon after.
+        #[qsignal]
+        fn changed_on_disk(self: Pin<&mut Koil>);
+
+        /// Watches what's open, and the dirs of changes made in other
+        /// listings, for `changedOnDisk` (see `koil_core::Koil::watched`).
+        /// Call it after anything that may change them.
+        #[qinvokable]
+        fn watch(self: Pin<&mut Koil>);
+
+        /// Reads what's open from disk again, to follow what changed there,
+        /// and returns how the listing `text` (with `hidden`), as the user
+        /// has it now, changes to show it, as `listing::Synced`.
+        #[qinvokable]
+        fn sync(self: Pin<&mut Koil>, text: &QString, hidden: &QString) -> QString;
+
+        /// Takes the other way in `conflicts` (a `listing::Question`'s, as
+        /// JSON), and returns how the listing `text` (with `hidden`) changes
+        /// for it, as `listing::Merge`.
+        #[qinvokable]
+        fn resolve(
+            self: Pin<&mut Koil>,
+            text: &QString,
+            hidden: &QString,
+            conflicts: &QString,
+        ) -> QString;
 
         /// Opens `location`, a dir or a pattern (see `Koil::open`), dropping
         /// the listing shown so far (see `update` for keeping it). Returns
@@ -105,6 +138,8 @@ pub mod qobject {
         #[qinvokable]
         fn undo(self: Pin<&mut Koil>) -> QString;
     }
+
+    impl cxx_qt::Threading for Koil {}
 }
 
 #[derive(Default)]
@@ -113,6 +148,81 @@ pub struct KoilRust {
     gitignore: bool,
     regex: bool,
     koil: koil_core::Koil,
+    /// Made on the first `watch`, None if it can't be.
+    watcher: Option<DiskWatcher>,
+}
+
+/// Watches dirs for changes on disk, and emits `changedOnDisk` for those
+/// that matter.
+struct DiskWatcher {
+    watcher: RecommendedWatcher,
+    /// What it watches, as `Watched::dirs`.
+    dirs: Vec<(PathBuf, bool)>,
+    /// Which changes matter, which the watcher's thread reads.
+    watched: Arc<Mutex<Watched>>,
+}
+
+impl DiskWatcher {
+    fn new(thread: CxxQtThread<qobject::Koil>) -> Option<DiskWatcher> {
+        let watched = Arc::new(Mutex::new(Watched::default()));
+        // Whether `changedOnDisk` is on its way, so a burst of changes (a
+        // build writing thousands of files) sends it once, not once each.
+        let queued = Arc::new(AtomicBool::new(false));
+        let filter = watched.clone();
+        let handler = move |event: notify::Result<notify::Event>| {
+            let matters = match event {
+                Ok(event) => {
+                    let watched = filter.lock().unwrap();
+                    changes_listing(&event.kind)
+                        && (event.need_rescan() || event.paths.iter().any(|p| watched.affects(p)))
+                }
+                // Changes may have been missed.
+                Err(_) => true,
+            };
+            if matters && !queued.swap(true, Ordering::AcqRel) {
+                let queued = queued.clone();
+                let _ = thread.queue(move |koil| {
+                    queued.store(false, Ordering::Release);
+                    koil.changed_on_disk();
+                });
+            }
+        };
+        let watcher = notify::recommended_watcher(handler).ok()?;
+        Some(DiskWatcher {
+            watcher,
+            dirs: Vec::new(),
+            watched,
+        })
+    }
+
+    /// Watches what `watched` says, instead of what it did. A watch is
+    /// changed only if the dirs did (on macOS it starts over each time).
+    fn set(&mut self, watched: Watched) {
+        if watched.dirs != self.dirs {
+            for (dir, _) in &self.dirs {
+                let _ = self.watcher.unwatch(dir);
+            }
+            for (dir, recursive) in &watched.dirs {
+                let mode = match recursive {
+                    true => RecursiveMode::Recursive,
+                    false => RecursiveMode::NonRecursive,
+                };
+                // A dir that isn't there yet (a new one) can't be watched.
+                let _ = self.watcher.watch(dir, mode);
+            }
+            self.dirs = watched.dirs.clone();
+        }
+        *self.watched.lock().unwrap() = watched;
+    }
+}
+
+/// Whether an event of `kind` can change a listing: not reading or writing
+/// a file.
+fn changes_listing(kind: &EventKind) -> bool {
+    !matches!(
+        kind,
+        EventKind::Access(_) | EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_))
+    )
 }
 
 impl KoilRust {
@@ -145,6 +255,42 @@ fn read_hidden(hidden: &QString) -> Vec<Hidden> {
 }
 
 impl qobject::Koil {
+    fn watch(self: Pin<&mut Self>) {
+        let thread = self.qt_thread();
+        let mut rust = self.rust_mut();
+        if rust.watcher.is_none() {
+            rust.watcher = DiskWatcher::new(thread);
+        }
+        let watched = rust.koil.watched();
+        if let Some(watcher) = &mut rust.watcher {
+            watcher.set(watched);
+        }
+    }
+
+    fn sync(self: Pin<&mut Self>, text: &QString, hidden: &QString) -> QString {
+        let mut rust = self.rust_mut();
+        let hidden = read_hidden(hidden);
+        to_json(&listing::sync(&mut rust.koil, &text.to_string(), &hidden))
+    }
+
+    fn resolve(
+        self: Pin<&mut Self>,
+        text: &QString,
+        hidden: &QString,
+        conflicts: &QString,
+    ) -> QString {
+        let mut rust = self.rust_mut();
+        let hidden = read_hidden(hidden);
+        let conflicts: Vec<Conflict> =
+            serde_json::from_str(&conflicts.to_string()).unwrap_or_default();
+        to_json(&listing::resolve(
+            &mut rust.koil,
+            &text.to_string(),
+            &hidden,
+            &conflicts,
+        ))
+    }
+
     fn open(self: Pin<&mut Self>, location: &QString) -> QString {
         let mut rust = self.rust_mut();
         let settings = rust.settings();

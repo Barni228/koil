@@ -13,11 +13,13 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `undo_steps`), the path field's regex parts
-  (`path_syntax`) and what Tab completes in it (`complete`). Its tests
-  (`src/listing/tests.rs`) use a temp dir.
+  (`path_syntax`), what Tab completes in it (`complete`), and what changed
+  on disk as edits to the text and questions (`sync`, `resolve`, `merge`).
+  Its tests (`src/listing/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore` and `regex`
-  are properties, bound to vim's `:set` options.
+  are properties, bound to vim's `:set` options. It also watches the disk
+  (`watch`, `changedOnDisk`; see Changes on disk).
 - `src/document.rs`: `Document` (QML element): reading and writing files, the
   path on the command line.
 - `src/system.rs`: `System` (QML element): the system clipboard, the
@@ -52,7 +54,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious.
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
-  the question: `:confirm q`, applying, undoing an apply.
+  the question: `:confirm q`, applying, undoing an apply, and what changed
+  on disk against the user's edits.
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
   look the app's own controls share (see Theme).
@@ -254,6 +257,33 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   buffer back past an update) and asks to run koil's undo, listing its
   steps; koil refuses while changes are pending. Not from the path field,
   whose undo history is its own.
+- **Changes on disk** (koil-core's `Koil::sync`; read its CLAUDE.md): the
+  listing shows what changes on disk as it happens, keeping the user's
+  edits. `Koil.watch()` (after every `showListing`, sync and answer) has a
+  `notify` watcher watch what `Koil::watched` says, changed only if the
+  dirs did (on macOS each change restarts the FSEvents stream). Its thread
+  skips reads, writes and events `Watched::affects` says can't matter, and
+  queues `changedOnDisk` once per burst (`queued`). `syncTimer` then syncs
+  (`syncListing`) 100 ms later, and not again for four times as long as
+  the last sync took (a pattern's walk can be slow); not while a file is
+  open (`showListing` syncs when the listing is back), nor while a dialog
+  is open or questions are being asked, a macro runs, or the user types
+  in the path field (it polls until then). `listing::sync` parses the
+  buffer as the user has it (errors and all), gives it to `Koil::sync`,
+  and turns its entry edits into text edits (`merge`): a line changes or
+  goes for its entry, and a new one goes where `render` would put it among
+  the lines with IDs (a new entry's after the last entry), as few spans as
+  possible, without the line breaks around them (`trim_breaks`). Vim makes
+  them with `mergeEdits` (see Edits from outside), from the listing
+  (`mergeListing` switches from the path field and back), and they don't
+  make the listing modified. A renamed open dir puts its new path in the
+  field; a gone one shows its parent as a new listing (`moved`). What goes
+  against the user's edits comes as one question per kind (`Question`:
+  "`a` was renamed to `b` on disk, but you deleted it. Delete it anyway?"),
+  asked in turn (`askConflicts`, chained by `ConfirmDialog.ask`'s `after`,
+  which also runs when it's closed by a click outside). Until answered it
+  stays the safe way; Yes resolves it (`Koil.resolve`), as an edit undo
+  can take back.
 - **Quitting**: `modified` is the file's unsaved changes, or in the listing,
   edits or pending changes (`koil.hasChanges()` after each update). `:q`
   updates first (`unsaved`); `:confirm q` (and `ZZ` in the listing) asks to
@@ -442,6 +472,18 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   the next chunk usually starts at once, but now and then waits `drawTime`
   for a frame: as often as keeps drawing to about a fifth of the time (a
   frame of 40,000 lines takes over 100 ms), at most 4 times a second.
+- **Edits from outside** (`mergeEdits` in Vim.qml): Koil's listing as it
+  changed on disk isn't the user's change, so `u` mustn't take it back (it
+  would delete a file that appeared, or rename one back). It's made in one
+  batch, and the undo and redo steps are moved past it (`movedSteps`): from
+  the newest, each step's start moves past the edits before it, and the
+  edits are taken back through the step, to where they are in the text
+  before it, for the next one. A step an edit touches (overlaps; touching
+  is fine) can't be undone any more, and the stack keeps only the newer
+  ones. An insert going on is committed first and goes on as a new change.
+  The cursors move past the edits (`movedPast`: in a replaced line, as far
+  in as they were). With `undoable` (an answer to a question), it's a
+  change like any other.
 - **Visual block** (`visualBlock`): the editor's selection can't be a block, so
   it's cleared and Editor.qml draws `vim.blockSpans()` (the lines in
   view: all of a 100,000-line block took a second a key). Columns count

@@ -6,15 +6,15 @@
 //!
 //! Positions in the text are in UTF-16 code units, as QML counts them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use devicons::Theme;
 use koil_core::apply::Undo;
 use koil_core::{
-    Action, Entry, EntryErrorKind, EntryWarning, Id, Koil, OpenError, Pattern, Settings,
-    UpdateError, UpdateOpenError, Warning, with_slashes,
+    Action, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil, OpenError,
+    Pattern, Settings, UpdateError, UpdateOpenError, Warning, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -88,22 +88,37 @@ pub fn render(koil: &Koil) -> Rendered {
             rendered.text.push('\n');
             length += 1;
         }
-        let name = entry_name(&entry);
-        let (icon, colors) = icon(koil.current_dir(), &name);
-        let line = format!("{icon}  {name}");
-        if let Some(id) = entry.id {
-            rendered.hidden.push(Hidden {
-                at: length,
-                icon: icon.to_string(),
-                text: id.0.to_string(),
-            });
-        }
-        rendered.colors.entry(icon.to_string()).or_insert(colors);
-        rendered.text.push_str(&line);
-        length += utf16_len(&line);
-        rendered.names.push(name);
+        let line = entry_line(koil, &entry, &mut rendered.colors);
+        rendered
+            .hidden
+            .extend(line.hidden.map(|h| Hidden { at: length, ..h }));
+        rendered.text.push_str(&line.text);
+        length += utf16_len(&line.text);
+        rendered.names.push(entry_name(&entry));
     }
     rendered
+}
+
+/// A line of the listing, and the ID its icon hides (at its start).
+struct Line {
+    text: String,
+    hidden: Option<Hidden>,
+}
+
+/// The line of `entry` in the listing of what `koil` has open, with its
+/// icon's colors added to `colors`.
+fn entry_line(koil: &Koil, entry: &Entry, colors: &mut HashMap<String, [String; 2]>) -> Line {
+    let name = entry_name(entry);
+    let (icon, icon_colors) = icon(koil.current_dir(), &name);
+    colors.entry(icon.to_string()).or_insert(icon_colors);
+    Line {
+        text: format!("{icon}  {name}"),
+        hidden: entry.id.map(|id| Hidden {
+            at: 0,
+            icon: icon.to_string(),
+            text: id.0.to_string(),
+        }),
+    }
 }
 
 /// An entry's name as the listing shows it, with a `/` after a dir's.
@@ -399,6 +414,452 @@ fn path_problem(path: &str, message: &str) -> Problem {
         column: utf16_len(indent(path)),
         severity: Severity::Error,
         message: message.to_string(),
+    }
+}
+
+/// A change to the listing's text: `text` replaces [`start`, `end`), and
+/// its icons hide `hidden` (whose `at` count from `start`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TextEdit {
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+    pub hidden: Vec<Hidden>,
+}
+
+/// Edits to the listing's text, in order and apart, and the colors of the
+/// icons they add.
+#[derive(Debug, Default, Serialize)]
+pub struct Merge {
+    pub edits: Vec<TextEdit>,
+    pub colors: HashMap<String, [String; 2]>,
+}
+
+/// What [`sync`] found changed on disk.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Synced {
+    /// How the listing changes to show it, with the user's edits kept.
+    #[serde(flatten)]
+    pub merge: Merge,
+    /// What changed against the user's edits, to ask about one at a time.
+    pub questions: Vec<Question>,
+    /// Whether the listing must be shown as a new one, as something else is
+    /// open now (the open dir is gone): `edits` are of no use then.
+    pub moved: bool,
+    /// What's open, for the path field: the open dir may have been renamed.
+    pub path: String,
+    /// Why something else is open, or why it couldn't be read.
+    pub message: String,
+    /// Whether `message` is an error: nothing changed.
+    pub failed: bool,
+}
+
+/// A question about the conflicts of one kind, which Yes resolves (see
+/// `Koil::resolve`) and No leaves as they are.
+#[derive(Debug, Serialize)]
+pub struct Question {
+    pub text: String,
+    pub details: String,
+    pub conflicts: Vec<Conflict>,
+}
+
+/// Reads what `koil` has open from disk again (see `Koil::sync`), and
+/// returns how the listing `text` (with `hidden`), as the user has it now,
+/// changes to show what changed there, and what to ask about.
+pub fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
+    let parsed = parse(text, hidden);
+    let synced = match koil.sync(&parsed.entries) {
+        Ok(synced) => synced,
+        Err(error) => {
+            let dir = show_path(koil.current_dir());
+            return Synced {
+                path: show_location(koil),
+                message: format!("Can't read `{dir}`: {}", describe(&error)),
+                failed: true,
+                ..Synced::default()
+            };
+        }
+    };
+    Synced {
+        merge: match synced.moved {
+            true => Merge::default(),
+            false => merge(koil, text, &parsed, &synced.edits),
+        },
+        questions: questions(koil, &synced.conflicts),
+        moved: synced.moved,
+        path: show_location(koil),
+        message: (synced.warning.as_ref())
+            .map(describe_warning)
+            .unwrap_or_default(),
+        failed: false,
+    }
+}
+
+/// Takes the other way in `conflicts` (a [`Question`]'s, which the user
+/// said yes to), and returns how the listing `text` (with `hidden`) changes
+/// for it.
+pub fn resolve(koil: &mut Koil, text: &str, hidden: &[Hidden], conflicts: &[Conflict]) -> Merge {
+    let edits: Vec<Edit> = conflicts.iter().flat_map(|c| koil.resolve(c)).collect();
+    merge(koil, text, &parse(text, hidden), &edits)
+}
+
+/// `edits` to the entries of the listing `text` (read as `parsed`) as
+/// edits to the text: a line changes or goes for the entry on it, and a new
+/// one goes among the others where `render` would put it.
+fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut colors = HashMap::new();
+    // The lines of each ID's entries (new entries under none), as a listing
+    // can have thousands.
+    let mut by_id: HashMap<Option<Id>, Vec<(usize, &Entry)>> = HashMap::new();
+    for (&(line, _), entry) in parsed.spots.iter().zip(&parsed.entries) {
+        by_id.entry(entry.id).or_default().push((line, entry));
+    }
+    let lines_of = |entry: &Entry| -> Vec<usize> {
+        let like =
+            |e: &&Entry| e.name == entry.name && (e.id.is_some() || e.is_dir == entry.is_dir);
+        let of = by_id.get(&entry.id).into_iter().flatten();
+        of.filter(|(_, e)| like(e)).map(|&(line, _)| line).collect()
+    };
+    let existing: Vec<(&Entry, usize)> = (parsed.entries.iter().zip(&parsed.spots))
+        .filter(|(e, _)| e.id.is_some())
+        .map(|(e, &(line, _))| (e, line))
+        .collect();
+    let sorted = existing
+        .windows(2)
+        .all(|w| listing_order(w[0].0, w[1].0).is_le());
+    // What each changed line becomes (nothing, if it goes), and the lines
+    // that go before each line (or at the end, after the last).
+    let mut replaced: BTreeMap<usize, Option<Line>> = BTreeMap::new();
+    let mut inserted: BTreeMap<usize, Vec<(Entry, Line)>> = BTreeMap::new();
+    for edit in edits {
+        match edit {
+            Edit::Remove(entry) => {
+                for line in lines_of(entry) {
+                    replaced.insert(line, None);
+                }
+            }
+            Edit::Change { from, to } => {
+                for line in lines_of(from) {
+                    replaced.insert(line, Some(entry_line(koil, to, &mut colors)));
+                }
+            }
+            Edit::Add(entry) => {
+                let line = entry_line(koil, entry, &mut colors);
+                let at = insert_at(parsed, &existing, sorted, entry, lines.len());
+                inserted.entry(at).or_default().push((entry.clone(), line));
+            }
+        }
+    }
+
+    let mut starts = Vec::with_capacity(lines.len() + 1);
+    let (mut at, mut byte) = (0, 0);
+    for line in &lines {
+        starts.push((at, byte));
+        at += utf16_len(line) + 1;
+        byte += line.len() + 1;
+    }
+    // The end of the text, where a line break after the last line would
+    // end.
+    starts.push((at, byte));
+    let n = lines.len();
+    let mut merged = Merge {
+        colors,
+        ..Merge::default()
+    };
+    let mut i = 0;
+    while i <= n {
+        if !inserted.contains_key(&i) && !replaced.contains_key(&i) {
+            i += 1;
+            continue;
+        }
+        // The lines from `first` up to `i` are replaced by `new`.
+        let first = i;
+        let mut new = Vec::new();
+        loop {
+            if let Some(mut lines) = inserted.remove(&i) {
+                lines.sort_by(|(a, _), (b, _)| listing_order(a, b));
+                new.extend(lines.into_iter().map(|(_, line)| line));
+            }
+            match replaced.remove(&i) {
+                Some(line) => {
+                    new.extend(line);
+                    i += 1;
+                }
+                None => break,
+            }
+        }
+        merged.edits.push(region(text, &starts, first, i, new));
+    }
+    merged
+}
+
+/// Where `render` lists `a` against `b`: entries with IDs first (dirs, then
+/// files, each by name), then new ones by name.
+fn listing_order(a: &Entry, b: &Entry) -> std::cmp::Ordering {
+    (a.id.is_none().cmp(&b.id.is_none()))
+        .then(b.is_dir.cmp(&a.is_dir))
+        .then_with(|| a.name.cmp(&b.name))
+}
+
+/// The line a new line for `entry` goes before (`lines`, the number of
+/// lines, for after the last one): one with an ID before the first of the
+/// `existing` entries (those with IDs, and their lines; `sorted` if they're
+/// in `render`'s order, as they usually are) that `render` lists after it,
+/// or after the last of them; a new one (or one with an ID, if no other
+/// has one) after the last entry.
+fn insert_at(
+    parsed: &Parsed,
+    existing: &[(&Entry, usize)],
+    sorted: bool,
+    entry: &Entry,
+    lines: usize,
+) -> usize {
+    if entry.id.is_some()
+        && let Some(&(_, last)) = existing.last()
+    {
+        let after = |&(e, _): &(&Entry, usize)| listing_order(e, entry).is_gt();
+        let first = match sorted {
+            true => Some(existing.partition_point(|e| !after(e))).filter(|&i| i < existing.len()),
+            false => existing.iter().position(after),
+        };
+        return first.map_or(last + 1, |i| existing[i].1);
+    }
+    parsed.spots.last().map_or(lines, |&(line, _)| line + 1)
+}
+
+/// The edit that replaces the lines of `text` from `first` up to `last`
+/// (the number of lines, for all the rest) with `new`, where `starts` has
+/// where each line starts (and the text ends), in UTF-16 and in bytes.
+fn region(
+    text: &str,
+    starts: &[(usize, usize)],
+    first: usize,
+    last: usize,
+    new: Vec<Line>,
+) -> TextEdit {
+    let n = starts.len() - 1;
+    let mut joined = String::new();
+    let mut hidden = Vec::new();
+    for (k, line) in new.iter().enumerate() {
+        if k > 0 {
+            joined.push('\n');
+        }
+        let at = utf16_len(&joined);
+        hidden.extend(line.hidden.clone().map(|h| Hidden { at, ..h }));
+        joined.push_str(&line.text);
+    }
+    // The text's end, without the line break `starts` counts after it.
+    let end = (starts[n].0 - 1, starts[n].1 - 1);
+    let (start, stop, new_text) = if last < n {
+        // Each line with its line break.
+        let with_breaks = match new.is_empty() {
+            true => String::new(),
+            false => joined + "\n",
+        };
+        (starts[first], starts[last], with_breaks)
+    } else if first == n && text.is_empty() {
+        ((0, 0), (0, 0), joined)
+    } else if first == n {
+        (end, end, format!("\n{joined}"))
+    } else if !new.is_empty() || first == 0 {
+        (starts[first], end, joined)
+    } else {
+        // The last lines go, with the line break before them.
+        let before = (starts[first].0 - 1, starts[first].1 - 1);
+        (before, end, String::new())
+    };
+    let shift = utf16_len(&new_text) - utf16_len(new_text.trim_start_matches('\n'));
+    let hidden = hidden.into_iter().map(|h| Hidden {
+        at: h.at + shift,
+        ..h
+    });
+    trim_breaks(
+        TextEdit {
+            start: start.0,
+            end: stop.0,
+            text: new_text,
+            hidden: hidden.collect(),
+        },
+        &text[start.1..stop.1],
+    )
+}
+
+/// `edit` (of `old`) without the line breaks it keeps at its start and end,
+/// so it touches only the lines it changes.
+fn trim_breaks(mut edit: TextEdit, mut old: &str) -> TextEdit {
+    while let (Some(rest), Some(text)) = (old.strip_prefix('\n'), edit.text.strip_prefix('\n')) {
+        old = rest;
+        edit.text = text.to_string();
+        edit.start += 1;
+        for h in &mut edit.hidden {
+            h.at -= 1;
+        }
+    }
+    while let (Some(rest), Some(text)) = (old.strip_suffix('\n'), edit.text.strip_suffix('\n')) {
+        old = rest;
+        edit.text = text.to_string();
+        edit.end -= 1;
+    }
+    edit
+}
+
+/// What to ask about `conflicts`: a question for each kind there is.
+fn questions(koil: &Koil, conflicts: &[Conflict]) -> Vec<Question> {
+    let kinds = [
+        ConflictKind::Deleted,
+        ConflictKind::Renamed,
+        ConflictKind::Gone,
+        ConflictKind::Taken,
+    ];
+    let questions = kinds.into_iter().filter_map(|kind| {
+        let of: Vec<&Conflict> = conflicts.iter().filter(|c| c.kind == kind).collect();
+        (!of.is_empty()).then(|| question(koil, kind, &of))
+    });
+    questions.collect()
+}
+
+/// The question about `conflicts`, all of `kind`: what happened, with
+/// paths as the confirmations show them, and what Yes does.
+fn question(koil: &Koil, kind: ConflictKind, conflicts: &[&Conflict]) -> Question {
+    let path = |p: &Path, is_dir: bool| {
+        let slash = if is_dir { "/" } else { "" };
+        format!("{}{slash}", relative(koil, p))
+    };
+    let from = |c: &Conflict| path(&c.from, c.is_dir);
+    let to = |c: &Conflict| {
+        c.to.as_deref()
+            .map(|p| path(p, c.is_dir))
+            .unwrap_or_default()
+    };
+    // The paths the user put it at.
+    let yours = |c: &Conflict| {
+        let listed = c
+            .listed
+            .iter()
+            .map(|e| path(&koil.current_dir().join(&e.name), c.is_dir));
+        let elsewhere = c.elsewhere.iter().map(|p| path(p, c.is_dir));
+        listed.chain(elsewhere).collect::<Vec<_>>()
+    };
+    let quoted = |paths: &[String]| {
+        let quoted: Vec<String> = paths.iter().map(|p| format!("`{p}`")).collect();
+        quoted.join(", ")
+    };
+    // Renamed in the dir it was in, or moved to another.
+    let moved = |c: &Conflict| match c.to.as_deref().and_then(Path::parent) == c.from.parent() {
+        true => "renamed",
+        false => "moved",
+    };
+    let one = conflicts.len() == 1;
+    let c = conflicts[0];
+    let (text, details) = match kind {
+        ConflictKind::Deleted if one => (
+            format!(
+                "`{}` was {} to `{}` on disk, but you deleted it. Delete it anyway?",
+                from(c),
+                moved(c),
+                to(c)
+            ),
+            Vec::new(),
+        ),
+        ConflictKind::Deleted => (
+            "These were renamed or moved on disk, but you deleted them. Delete them anyway?"
+                .to_string(),
+            conflicts
+                .iter()
+                .map(|c| format!("{} -> {}", from(c), to(c)))
+                .collect(),
+        ),
+        ConflictKind::Renamed if one => (
+            format!(
+                "`{}` was {} to `{}` on disk, but you {} it to {}. Keep `{}` instead?",
+                from(c),
+                moved(c),
+                to(c),
+                if yours(c).len() > 1 {
+                    "renamed or copied"
+                } else {
+                    "renamed"
+                },
+                quoted(&yours(c)),
+                to(c)
+            ),
+            Vec::new(),
+        ),
+        ConflictKind::Renamed => (
+            "These were renamed or moved on disk, but you renamed them too. Keep the names \
+             they have on disk instead?"
+                .to_string(),
+            (conflicts.iter())
+                .map(|c| format!("{} -> {} (yours: {})", from(c), to(c), yours(c).join(", ")))
+                .collect(),
+        ),
+        ConflictKind::Gone if one => {
+            let yours = yours(c);
+            let what = if c.is_dir { "dir" } else { "file" };
+            let (them, what) = match yours.len() {
+                1 => ("it", format!("a new, empty {what}")),
+                _ => ("them", format!("new, empty {what}s")),
+            };
+            (
+                format!(
+                    "`{}` is no longer on disk, but you {} it to {}. Create {them} as {what} \
+                     instead?",
+                    from(c),
+                    if yours.len() > 1 {
+                        "renamed or copied"
+                    } else {
+                        "renamed"
+                    },
+                    quoted(&yours),
+                ),
+                Vec::new(),
+            )
+        }
+        ConflictKind::Gone => (
+            "These are no longer on disk, but you renamed or copied them. Create what you \
+             wrote as new, empty files and dirs instead?"
+                .to_string(),
+            (conflicts.iter())
+                .map(|c| format!("{} -> {}", from(c), yours(c).join(", ")))
+                .collect(),
+        ),
+        ConflictKind::Taken => {
+            // What the user put there: an entry renamed (or moved) there, or
+            // a new one.
+            let theirs = |c: &Conflict| {
+                let entry = c.listed.first();
+                match entry.and_then(|e| koil.path_of(e.id?)) {
+                    Some(p) => format!("{} -> {}", path(p, p.is_dir()), to(c)),
+                    None => format!("new {}", to(c)),
+                }
+            };
+            match one {
+                true => (
+                    format!(
+                        "`{}` appeared on disk, where you put `{}`. Replace it with yours? \
+                         It goes to the trash when the changes are applied.",
+                        to(c),
+                        theirs(c)
+                    ),
+                    Vec::new(),
+                ),
+                false => (
+                    "These appeared on disk where you put other entries. Replace them with \
+                     yours? They go to the trash when the changes are applied."
+                        .to_string(),
+                    (conflicts.iter())
+                        .map(|c| format!("{} (yours: {})", to(c), theirs(c)))
+                        .collect(),
+                ),
+            }
+        }
+    };
+    Question {
+        text,
+        details: details.join("\n"),
+        conflicts: conflicts.iter().map(|&c| c.clone()).collect(),
     }
 }
 

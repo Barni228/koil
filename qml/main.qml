@@ -44,6 +44,11 @@ ApplicationWindow {
     // A file's unsaved changes, or the listing's edits and changes that
     // aren't applied.
     property bool modified: false
+    // Whether something changed on disk that the listing may not show yet
+    // (see syncListing), and whether what goes against the user's edits is
+    // being asked about.
+    property bool diskChanged: false
+    property bool askingConflicts: false
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
     property bool quitAfterSave: false
@@ -146,6 +151,10 @@ ApplicationWindow {
         updatePathSyntax(true);
         if (inPath)
             activate(pathView);
+        koil.watch();
+        // What changed while a file was open.
+        if (diskChanged)
+            Qt.callLater(syncListing);
     }
 
     // Puts `path` in the path field (while vim edits the listing), unless
@@ -179,6 +188,74 @@ ApplicationWindow {
         if (r.message)
             vim.showMessage(r.message);
         return true;
+    }
+
+    // Shows what changed on disk in the listing (see Koil.sync), keeping the
+    // user's edits, as edits undo doesn't take back. Not while a file is
+    // open (showListing comes back to it), nor while the listing can't
+    // change under the user: a dialog, a macro, typing in the path field.
+    function syncListing() {
+        if (!diskChanged || !listing)
+            return;
+        if (confirmDialog.opened || askingConflicts || vim.running || activeView === pathView && vim.inserting) {
+            syncTimer.start();
+            return;
+        }
+        diskChanged = false;
+        const started = Date.now();
+        const r = JSON.parse(koil.sync(editorView.textArea.text, JSON.stringify(editorView.hidden)));
+        if (r.moved) {
+            showListing(true, "");
+        } else {
+            mergeListing(r, false);
+            // The open dir was renamed.
+            if (r.path !== location) {
+                location = r.path;
+                showPath(r.path);
+                updatePathSyntax(true);
+            }
+            koil.watch();
+        }
+        if (r.failed)
+            vim.showError(r.message);
+        else if (r.message)
+            vim.showMessage(r.message);
+        // A pattern's can take a while: not more than a fifth of the time.
+        syncTimer.interval = Math.max(100, 4 * (Date.now() - started));
+        askConflicts(r.questions);
+    }
+
+    // Puts `merge`'s edits (see Koil.sync) in the listing, while vim edits
+    // it (back in the path field after, if it was there). Undo takes them
+    // back only if `undoable`; else they aren't the user's, and don't make
+    // the listing modified.
+    function mergeListing(merge, undoable) {
+        if (!merge.edits.length)
+            return;
+        iconColors = Object.assign({}, iconColors, merge.colors);
+        const inPath = activeView === pathView, wasModified = modified;
+        activate(editorView);
+        vim.mergeEdits(merge.edits, undoable);
+        if (inPath)
+            activate(pathView);
+        modified = undoable || wasModified;
+        checkListing();
+        updatePendingLines();
+    }
+
+    // Asks about each of `questions` (see listing::Question) in turn: Yes
+    // takes the other way (Koil.resolve), as an edit undo can take back.
+    function askConflicts(questions) {
+        askingConflicts = questions.length > 0;
+        if (!askingConflicts)
+            return;
+        const q = questions[0];
+        confirmDialog.ask(q.text, q.details, () => {
+            const r = JSON.parse(koil.resolve(editorView.textArea.text, JSON.stringify(editorView.hidden), JSON.stringify(q.conflicts)));
+            mergeListing(r, true);
+            modified = modified || koil.hasChanges();
+            koil.watch();
+        }, null, () => Qt.callLater(askConflicts, questions.slice(1)));
     }
 
     // Finds the parts of the regex in the path field again, if the path
@@ -473,6 +550,21 @@ ApplicationWindow {
         showHidden: vim.showHidden
         gitignore: vim.gitignore
         regex: vim.regex
+
+        onChangedOnDisk: {
+            root.diskChanged = true;
+            if (!syncTimer.running)
+                syncTimer.start();
+        }
+    }
+
+    // Syncs the listing a moment after something changed on disk (once for
+    // a burst of changes), and then not again for a while if it took long.
+    Timer {
+        id: syncTimer
+
+        interval: 100
+        onTriggered: root.syncListing()
     }
 
     // Checks the listing for problems once typing stops for a moment.

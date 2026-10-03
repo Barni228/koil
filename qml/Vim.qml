@@ -3046,6 +3046,104 @@ QtObject {
         });
     }
 
+    // Makes `edits` ({ start, end, text, hidden }: in the text as it is, in
+    // order and apart, `hidden` the entries for `text`, from its start) as
+    // one edit, which isn't the user's (Koil's listing, as it changed on
+    // disk): undo and redo don't take it back, but go on around it, as their
+    // steps move past it (see movedSteps). With `undoable`, it's a change
+    // like any other. The cursors stay on the text they were on.
+    function mergeEdits(edits, undoable) {
+        if (!edits.length)
+            return;
+        interrupt();
+        const wasInserting = inserting;
+        // What was typed so far is a change of its own.
+        commitChange(true);
+        if (undoable)
+            beginChange();
+        batched(() => {
+            const c = movedPast(cursor, edits), a = movedPast(anchor, edits);
+            for (let i = edits.length - 1; i >= 0; i--) {
+                const e = edits[i];
+                replaceRange(e.start, e.end, e.text, e.hidden);
+            }
+            if (!undoable) {
+                undoStack = movedSteps(undoStack, edits, true);
+                redoStack = movedSteps(redoStack, edits, false);
+            }
+            if (lastVisual) {
+                lastVisual = { mode: lastVisual.mode, anchor: movedPast(lastVisual.anchor, edits),
+                    cursor: movedPast(lastVisual.cursor, edits) };
+            }
+            const t = bufferText();
+            anchor = Math.min(a, t.length);
+            setCursor(mode === "normal" ? clampNormal(t, c) : Math.min(c, t.length));
+        });
+        if (undoable)
+            commitChange(true);
+        if (wasInserting)
+            beginChange();
+    }
+
+    // Where p is after `edits` (as mergeEdits takes them, or with `length`
+    // for the length of the text): past the ones before it, and in one that
+    // replaces it, as far into its text as it was, at most its last
+    // character.
+    function movedPast(p, edits) {
+        let d = 0;
+        for (const e of edits) {
+            if (e.start > p)
+                break;
+            const length = e.text !== undefined ? e.text.length : e.length;
+            if (e.end <= p) {
+                d += length - (e.end - e.start);
+                continue;
+            }
+            return e.start + d + Math.min(p - e.start, Math.max(0, length - 1));
+        }
+        return p + d;
+    }
+
+    // An undo (or redo, if not `undoing`) stack, newest last, with its steps
+    // moved past `edits` (as mergeEdits takes them), which were made to the
+    // text the newest one left: each step is where its text is after them,
+    // and the edits are taken back through it, to where they are in the
+    // text before it, for the next one. A step that an edit touches can't be
+    // undone (or redone) any more, nor can the ones after it: the stack
+    // keeps only the newer ones.
+    function movedSteps(stack, edits, undoing) {
+        let spans = edits.map(e => ({ start: e.start, end: e.end, length: e.text.length }));
+        const kept = [];
+        for (let k = stack.length - 1; k >= 0; k--) {
+            const step = stack[k];
+            // Its text in the text as it is, and what it puts back.
+            const now = (undoing ? step.inserted : step.removed).length;
+            const then = (undoing ? step.removed : step.inserted).length;
+            const s = step.start, e = s + now;
+            let shift = 0, clash = false;
+            const before = [];
+            for (const x of spans) {
+                if (x.end <= s) {
+                    shift += x.length - (x.end - x.start);
+                    before.push(x);
+                } else if (x.start >= e) {
+                    before.push({ start: x.start + then - now, end: x.end + then - now, length: x.length });
+                } else {
+                    clash = true;
+                    break;
+                }
+            }
+            if (clash)
+                break;
+            const moved = Object.assign({}, step, { start: s + shift });
+            if (undoing)
+                moved.cursor = movedPast(step.cursor, before);
+            kept.push(moved);
+            spans = before;
+        }
+        return kept.reverse();
+    }
+
     // Entries read from the clipboard: checked, since any app could have
     // put them there.
     function validHidden(text, list) {

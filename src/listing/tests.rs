@@ -851,3 +851,218 @@ fn test_shared_start() {
     assert_eq!(shared_start(&names(&["ab/", "a/"])), "a");
     assert_eq!(shared_start(&names(&["🍄a/", "🍄b/"])), "🍄");
 }
+
+/// `text` (with `hidden`) after `edits`, as vim makes them: an icon an edit
+/// touches loses its hidden text.
+fn merged(text: &str, hidden: &[Hidden], edits: &[TextEdit]) -> (String, Vec<Hidden>) {
+    let mut units: Vec<u16> = text.encode_utf16().collect();
+    let mut hidden = hidden.to_vec();
+    for edit in edits.iter().rev() {
+        let new: Vec<u16> = edit.text.encode_utf16().collect();
+        let (removed, added) = (edit.end - edit.start, new.len());
+        units.splice(edit.start..edit.end, new);
+        hidden.retain(|h| h.at + utf16_len(&h.icon) <= edit.start || h.at >= edit.end);
+        for h in hidden.iter_mut().filter(|h| h.at >= edit.end) {
+            h.at = h.at + added - removed;
+        }
+        let at = |h: &Hidden| Hidden {
+            at: h.at + edit.start,
+            ..h.clone()
+        };
+        hidden.extend(edit.hidden.iter().map(at));
+        hidden.sort_by_key(|h| h.at);
+    }
+    (String::from_utf16(&units).unwrap(), hidden)
+}
+
+/// Syncs the listing `text` (with `hidden`), and returns it with what
+/// changed on disk.
+fn synced_text(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> (Synced, String, Vec<Hidden>) {
+    let synced = sync(koil, text, hidden);
+    let (text, hidden) = merged(text, hidden, &synced.merge.edits);
+    (synced, text, hidden)
+}
+
+#[test]
+fn test_sync_unchanged_listing() {
+    let (temp, mut koil) = koil();
+    let rendered = render(&koil);
+    let root = temp.path();
+    fs::write(root.join("alpha"), "").unwrap();
+    fs::create_dir(root.join("zdir")).unwrap();
+    fs::remove_file(root.join("notes")).unwrap();
+    fs::rename(root.join("file.rs"), root.join("main.rs")).unwrap();
+    let (synced, text, hidden) = synced_text(&mut koil, &rendered.text, &rendered.hidden);
+    assert!(synced.questions.is_empty());
+    assert!(!synced.moved);
+    // as if it was read again, as nothing was edited
+    let again = render(&koil);
+    assert_eq!(names(&text), again.names);
+    assert_eq!((text, hidden), (again.text, again.hidden));
+    // only the changed lines are edited (the ones after `dir/`, as one)
+    assert_eq!(synced.merge.edits.len(), 1);
+    let first = rendered.text.split('\n').next().unwrap();
+    assert_eq!(synced.merge.edits[0].start, utf16_len(first) + 1);
+    assert!(koil.compute_actions().is_empty());
+}
+
+/// The names in the listing `text`.
+fn names(text: &str) -> Vec<String> {
+    let parsed = parse(text, &[]);
+    parsed.entries.iter().map(entry_name).collect()
+}
+
+#[test]
+fn test_sync_keeps_edits() {
+    let (temp, mut koil) = koil();
+    let rendered = render(&koil);
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "notes" => Some(line.replace("notes", "todo")),
+        "file.rs" => None,
+        _ => Some(line.to_string()),
+    });
+    fs::write(temp.path().join("alpha"), "").unwrap();
+    let (synced, text, hidden) = synced_text(&mut koil, &text, &hidden);
+    assert!(synced.questions.is_empty());
+    assert_eq!(names(&text), ["dir/", "alpha", "todo"]);
+    let updated = update_listing(&mut koil, &text, &hidden);
+    assert!(updated.ok, "{updated:?}");
+    let mut actions = actions(&koil);
+    actions.sort();
+    assert_eq!(actions, ["DELETE file.rs", "MOVE   notes -> todo"]);
+}
+
+#[test]
+fn test_sync_asks() {
+    let (temp, mut koil) = koil();
+    let rendered = render(&koil);
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "notes" => None,
+        "file.rs" => Some(line.replace("file.rs", "lib.rs")),
+        _ => Some(line.to_string()),
+    });
+    let root = temp.path();
+    fs::rename(root.join("notes"), root.join("notes.md")).unwrap();
+    fs::rename(root.join("file.rs"), root.join("main.rs")).unwrap();
+    let (synced, text, hidden) = synced_text(&mut koil, &text, &hidden);
+    // what the user deleted is kept, until they say otherwise
+    assert_eq!(names(&text), ["dir/", "lib.rs", "notes.md"]);
+    let questions: Vec<&str> = synced.questions.iter().map(|q| q.text.as_str()).collect();
+    assert_eq!(
+        questions,
+        [
+            "`notes` was renamed to `notes.md` on disk, but you deleted it. Delete it anyway?",
+            "`file.rs` was renamed to `main.rs` on disk, but you renamed it to `lib.rs`. \
+             Keep `main.rs` instead?",
+        ]
+    );
+    // yes to both
+    let mut text = text;
+    let mut hidden = hidden;
+    for question in &synced.questions {
+        let merge = resolve(&mut koil, &text, &hidden, &question.conflicts);
+        (text, hidden) = merged(&text, &hidden, &merge.edits);
+    }
+    assert_eq!(names(&text), ["dir/", "main.rs"]);
+    let updated = update_listing(&mut koil, &text, &hidden);
+    assert!(updated.ok, "{updated:?}");
+    assert_eq!(actions(&koil), ["DELETE notes.md"]);
+}
+
+#[test]
+fn test_sync_edits_at_the_ends() {
+    let (temp, mut koil) = koil();
+    let root = temp.path();
+    let rendered = render(&koil);
+    // the last line goes with the line break before it
+    fs::remove_file(root.join("notes")).unwrap();
+    let (synced, text, hidden) = synced_text(&mut koil, &rendered.text, &rendered.hidden);
+    assert_eq!(names(&text), ["dir/", "file.rs"]);
+    assert!(!text.ends_with('\n'));
+    assert_eq!(synced.merge.edits[0].text, "");
+    // all of them
+    fs::remove_file(root.join("file.rs")).unwrap();
+    fs::remove_dir(root.join("dir")).unwrap();
+    let (_, text, hidden) = synced_text(&mut koil, &text, &hidden);
+    assert_eq!((text.as_str(), hidden.len()), ("", 0));
+    // into an empty listing, and after the last line
+    fs::write(root.join("b"), "").unwrap();
+    let (_, text, hidden) = synced_text(&mut koil, &text, &hidden);
+    assert_eq!(names(&text), ["b"]);
+    fs::write(root.join("c"), "").unwrap();
+    let (_, text, hidden) = synced_text(&mut koil, &text, &hidden);
+    assert_eq!(names(&text), ["b", "c"]);
+    // a new entry the user wrote stays last, and one on disk goes before it
+    let text = format!("{text}\nnew");
+    fs::write(root.join("d"), "").unwrap();
+    let (_, text, _) = synced_text(&mut koil, &text, &hidden);
+    assert_eq!(names(&text), ["b", "c", "d", "new"]);
+}
+
+#[test]
+fn test_sync_open_dir_gone() {
+    let (temp, mut koil) = koil();
+    koil.open("dir").unwrap();
+    fs::remove_dir(temp.path().join("dir")).unwrap();
+    let synced = sync(&mut koil, "", &[]);
+    assert!(synced.moved);
+    assert!(
+        synced.message.contains("is not a directory, opened"),
+        "{}",
+        synced.message
+    );
+    assert_eq!(names(&render(&koil).text), ["file.rs", "notes"]);
+}
+
+#[test]
+fn test_sync_lines_out_of_order() {
+    let (temp, mut koil) = koil();
+    let rendered = render(&koil);
+    // the user moved `notes` up
+    let lines: Vec<&str> = rendered.text.split('\n').collect();
+    let text = [lines[0], lines[2], lines[1]].join("\n");
+    let hidden = parse(&rendered.text, &rendered.hidden);
+    let at = |line: usize| {
+        utf16_len(
+            &lines[..line]
+                .iter()
+                .map(|l| format!("{l}\n"))
+                .collect::<String>(),
+        )
+    };
+    let ids: Vec<String> = hidden
+        .entries
+        .iter()
+        .map(|e| e.id.unwrap().0.to_string())
+        .collect();
+    let icon = |line: usize| {
+        rendered
+            .hidden
+            .iter()
+            .find(|h| h.at == at(line))
+            .unwrap()
+            .icon
+            .clone()
+    };
+    let hidden = vec![
+        Hidden {
+            at: 0,
+            icon: icon(0),
+            text: ids[0].clone(),
+        },
+        Hidden {
+            at: utf16_len(lines[0]) + 1,
+            icon: icon(2),
+            text: ids[2].clone(),
+        },
+        Hidden {
+            at: utf16_len(lines[0]) + utf16_len(lines[2]) + 2,
+            icon: icon(1),
+            text: ids[1].clone(),
+        },
+    ];
+    assert_eq!(names(&text), ["dir/", "notes", "file.rs"]);
+    fs::write(temp.path().join("m"), "").unwrap();
+    let (_, text, _) = synced_text(&mut koil, &text, &hidden);
+    assert_eq!(names(&text), ["dir/", "m", "notes", "file.rs"]);
+}
