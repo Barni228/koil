@@ -129,18 +129,21 @@ fn read(path: &str) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|err| cannot("open", path, &err))
 }
 
-/// Why `path` can't be opened or saved (`doing`), as the status line says
-/// it.
+/// Why the file `path` can't be opened or saved (`doing`), as the status
+/// line says it: by its name, since the listing (or the title) shows where
+/// it is, and a long path would push why out of view.
 fn cannot(doing: &str, path: &str, err: &io::Error) -> String {
+    let path = Path::new(path);
+    let name = path.file_name().map_or_else(
+        || listing::show_path(path),
+        |name| name.to_string_lossy().into_owned(),
+    );
     let why = match err.kind() {
         // What read_to_string says about a picture, say.
         io::ErrorKind::InvalidData => "it isn't UTF-8 text".to_string(),
         _ => err.to_string(),
     };
-    format!(
-        "Can't {doing} `{}`: {why}",
-        listing::show_path(Path::new(path))
-    )
+    format!("Can't {doing} `{name}`: {why}")
 }
 
 /// `arg` (from the command line) made absolute from the dir Koil started
@@ -169,10 +172,9 @@ mod tests {
         let path = temp.path().join("photo.jpg");
         std::fs::write(&path, [0xff, 0xd8, 0xff, 0xe0]).unwrap();
         let path = path.to_str().unwrap();
-        let shown = listing::show_path(Path::new(path));
         assert_eq!(
             read(path),
-            Err(format!("Can't open `{shown}`: it isn't UTF-8 text"))
+            Err("Can't open `photo.jpg`: it isn't UTF-8 text".to_string())
         );
         std::fs::write(path, "text").unwrap();
         assert_eq!(read(path), Ok("text".to_string()));

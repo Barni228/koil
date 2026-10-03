@@ -722,7 +722,10 @@ ApplicationWindow {
 
             anchors.left: parent.left
             anchors.right: position.left
-            elide: Text.ElideRight
+            // A message too long to fit loses its middle, as its end often
+            // says why (a path can be long); the command line its end, as
+            // its cursor is measured from its start.
+            elide: vim.commandLine === "" ? Text.ElideMiddle : Text.ElideRight
             font.family: vim.fontFamily
             font.pointSize: vim.fontSize
             textFormat: Text.PlainText

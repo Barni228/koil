@@ -275,7 +275,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   argument Koil lists the home dir. A file that can't be read (one that
   isn't UTF-8, like a picture) isn't opened, and the status line says why,
   as for a save that fails (no `MessageDialog`, whose macOS style can't
-  be themed); one on the command line lists its dir instead, on its entry.
+  be themed), naming only the file, so a long path doesn't push why out
+  of view; one on the command line lists its dir instead, on its entry.
+  A message too long for the status line loses its middle, not its end.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
   the editor's document colors each line's icon (colors from devicons,
   gathered from every listing shown, `iconColors`, dark or light by theme)
