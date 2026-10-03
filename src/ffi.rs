@@ -86,6 +86,11 @@ mod bridge {
             bottom_margin: f64,
         );
 
+        /// Has a TextEdit build only the lines in view while its text is
+        /// long, after an edit too (see native.h).
+        #[cxx_name = "followTextLength"]
+        unsafe fn follow_text_length(text_edit: *mut QObject);
+
         /// Has a TextEdit build the lines in view from scratch, around a Qt
         /// bug; call it before setting its text (see native.h).
         #[cxx_name = "redrawText"]

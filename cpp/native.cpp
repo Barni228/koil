@@ -287,7 +287,26 @@ setText(QObject* textEdit, const QString& text, double height, double bottomMarg
   // As setting the text does: the cursor at the start, and for a long text,
   // only the lines in view built.
   item->setProperty("cursorPosition", 0);
-  item->setFlag(QQuickItem::ItemObservesViewport, text.size() > largeTextSize);
+  followTextLength(item);
+}
+
+void
+followTextLength(QObject* textEdit)
+{
+  auto* item = qobject_cast<QQuickItem*>(textEdit);
+  if (!item)
+    return;
+  const bool large = item->property("length").toInt() > largeTextSize;
+  if (large == item->flags().testFlag(QQuickItem::ItemObservesViewport))
+    return;
+  item->setFlag(QQuickItem::ItemObservesViewport, large);
+  // The lines built again. A short text had all its lines built, from its
+  // start, so marking them all changed builds just those in view, without
+  // laying out the long text again. A long text's built lines start at the
+  // view, and Qt builds again only from there, which may be past the end of
+  // the text now, so a short one starts over (q_invalidate, which lays it
+  // out again, quickly, as it's short).
+  QMetaObject::invokeMethod(item, large ? "updateWholeDocument" : "q_invalidate");
 }
 
 void

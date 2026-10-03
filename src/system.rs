@@ -58,6 +58,11 @@ pub mod qobject {
             bottom_margin: f64,
         );
 
+        /// Call after each change to a TextEdit's text: has it build only
+        /// the lines in view while the text is long (see native.h).
+        #[qinvokable]
+        unsafe fn follow_text_length(self: &System, text_edit: *mut QObject);
+
         /// Call before setting a TextEdit's text: works around a Qt bug that
         /// can leave it blank (see native.h).
         #[qinvokable]
@@ -145,6 +150,13 @@ impl qobject::System {
         bottom_margin: f64,
     ) {
         unsafe { ffi::set_text(text_edit.cast(), text, height, bottom_margin) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_edit` must be null or point to a live QObject.
+    unsafe fn follow_text_length(&self, text_edit: *mut qobject::QObject) {
+        unsafe { ffi::follow_text_length(text_edit.cast()) };
     }
 
     /// # Safety

@@ -402,6 +402,8 @@ Item {
             readOnly: true // vim starts in normal mode
             focus: true
             onTextChanged: {
+                // Only the lines in view built, if the text grew long.
+                view.system.followTextLength(editor);
                 if (!view.quiet && text !== view.lastText)
                     view.edited();
                 view.lastText = text;

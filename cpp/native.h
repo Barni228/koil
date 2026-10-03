@@ -42,6 +42,13 @@ void setLineFormat(QObject* textDocument, double height, double bottomMargin);
 // second each).
 void setText(QObject* textEdit, const QString& text, double height, double bottomMargin);
 
+// Call after each change to a TextEdit's text. Over 10,000 characters, a
+// TextEdit builds only the lines in view, but Qt decides that only when its
+// text is set: a text that grew by edits (a paste of 100,000 lines) had all
+// its lines built, which made every key take seconds. This decides it by
+// the text's length after an edit too.
+void followTextLength(QObject* textEdit);
+
 // Call before setting a TextEdit's text. With over 10,000 characters, a
 // TextEdit builds only the lines in view, and after a change it builds again
 // from where those started, so it skips all of a new text that ends before

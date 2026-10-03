@@ -539,6 +539,15 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   everything again) on the window's `afterAnimating`, right before the
   frame is synced, since a change after it (text, colors, selection) would
   ask for the changed lines only again.
+  Qt decides whether a text is long only when it's set, so one that grew
+  long by edits (a paste of 100,000 lines) had all its lines built, and
+  each key took seconds (`j` 1.7 s, against 80 ms in the same text
+  opened). So Editor.qml calls `System.followTextLength` after every
+  change, which decides it by the length, and has Qt build the lines
+  again: those in view (`updateWholeDocument`, which a short text's lines,
+  built from its start, allow), or for a text that's short now, all of
+  them from scratch (`q_invalidate`, as its built lines may start far past
+  its end).
   Qt lays out all of a text again (about a second for 100,000 lines) when
   it or its format changes, and when the editor's width or padding does,
   as the text's width changes with it (even without wrapping). So opening
