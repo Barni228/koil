@@ -8,8 +8,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 
 ## Layout
 
-- `src/main.rs`: creates the app, installs the "Settings…" translator and the
-  Nerd Font, sets the Windows style, loads `qml/main.qml`.
+- `src/main.rs`: creates the app, installs the "Settings…" translator, the
+  Nerd Font and the window icon, sets the Windows style, loads
+  `qml/main.qml`.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `undo_steps`), the path field's regex parts
@@ -27,8 +28,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   text, line format and colors.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
-  Nerd Font, line format, `setText`, the listing's and path field's
-  `QSyntaxHighlighter`, `redrawText`).
+  Nerd Font, the window icon, files macOS asks to open, line format,
+  `setText`, the listing's and path field's `QSyntaxHighlighter`,
+  `redrawText`).
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
   path field and its option buttons, and Koil's listing (`showListing`,
   `updateListing`, `applyChanges`, `undoApply`) or a file (`loadFile`), and
@@ -61,9 +63,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   look the app's own controls share (see Theme).
 - `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml and the find bar.
 - `scripts/`: `bundle-macos.sh` (makes the `.app`), `package-macos.sh` (the
-  `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup installer).
-- `packaging/`: `Info.plist` (with a `@VERSION@` placeholder) and
-  `installer.iss`.
+  `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup
+  installer), `make-icons.sh` (the icons, from `packaging/icon.png`).
+- `packaging/`: `icon.png` (the app's icon) and the icons made from it
+  (committed, so building needs no ImageMagick): `macos/Koil.icns`,
+  `windows/koil.ico` (in the exe through `koil.rc`, which `build.rs`
+  compiles with `embed-resource`) and `window-icon.png` (see App icon);
+  `macos/Info.plist` (with a `@VERSION@` placeholder) and
+  `windows/installer.iss`.
 - `fonts/`: the Nerd Font Koil ships (see Icon font) and its license.
 
 ## Build and test
@@ -376,10 +383,26 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   writes "Ctrl+," and "Ctrl+Q" as plain strings, because `Preferences` and
   `Quit` have no Ctrl binding on Windows. "Ctrl+0" has no `StandardKey`. In
   strings, Qt maps Ctrl to Cmd on macOS.
-- **No file types**: Koil doesn't claim any file type (no
-  `CFBundleDocumentTypes`, no "Open with" registry entries), so nothing opens
-  files with it and there's no `QFileOpenEvent` filter. A path on the command
-  line is opened (`Document.startupFile`); otherwise the sample listing shows.
+- **Open With**: Koil offers to open text files but is never their default
+  app. On macOS, `Info.plist` claims `public.text` (which source code
+  conforms to) at the `Alternate` rank. Files of undeclared types
+  (`dyn.*`) can't be offered: Launch Services ignores an `Alternate` claim
+  on `public.data`, and a `Default` one makes the app their default. Finder
+  gives the file as a `QFileOpenEvent`, not on the command line (also to
+  Koil already running): `Document.watchFileOpens` has native.cpp's filter
+  call `document::file_opened` (C++ can't emit a cxx-qt signal, and the
+  bridge allows no `#[allow(dead_code)]` for a signal only C++ uses), and
+  main.qml opens it as a dropped file (`openDropped`). A cold start shows
+  the home dir first, as the event comes once the event loop runs. On
+  Windows, the installer adds Koil to every file's Open With list
+  (`*\OpenWithList`) and registers it under `Applications\koil.exe`, which
+  gives it the path on the command line, without taking any extension.
+- **App icon**: macOS draws icons as they are, so `Koil.icns` shrinks
+  `icon.png`'s rounded square to Apple's grid (824 of 1024 pixels);
+  Windows' fills its square. Qt gives windows the exe's `IDI_ICON1` on
+  Windows; elsewhere `main.rs` sets `window-icon.png` (the macOS-sized one)
+  as the window icon, for Linux and `cargo run` on macOS (its Dock icon;
+  the bundle's is the same).
 - **cxx-qt**: bridges containing a `#[qobject]` declare `QObject` implicitly
   (declaring it again fails); plain bridges like `ffi.rs` must declare it
   themselves. `#[auto_cxx_name]` turns snake_case into camelCase for QML.

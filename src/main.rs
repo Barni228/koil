@@ -16,6 +16,11 @@ use cxx_qt_lib::{QByteArray, QGuiApplication, QQmlApplicationEngine, QString, QU
 /// the `=` line, as one. It's the editor's default font.
 const NERD_FONT: &[u8] = include_bytes!("../fonts/JetBrainsMonoNLNerdFont-Regular.ttf");
 
+/// The app's icon (see `scripts/make-icons.sh`). The exe has it on Windows
+/// and the bundle on macOS, but not a bare binary (Linux, `cargo run`).
+#[cfg(not(windows))]
+const WINDOW_ICON: &[u8] = include_bytes!("../packaging/window-icon.png");
+
 fn main() {
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {
@@ -24,6 +29,8 @@ fn main() {
     }
     ffi::use_settings_menu_title();
     ffi::use_nerd_font(&QByteArray::from(NERD_FONT));
+    #[cfg(not(windows))]
+    ffi::use_window_icon(&QByteArray::from(WINDOW_ICON));
 
     // Qt Quick's default Windows style has no dark theme. Fusion follows the
     // system's light or dark mode, title bar and menus included (FluentWinUI3

@@ -1,16 +1,22 @@
 #include "native.h"
+#include "koil/src/ffi.cxx.h"
 
 #include <algorithm>
 #include <optional>
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
+#include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QTranslator>
 #include <QtGui/QClipboard>
+#include <QtGui/QFileOpenEvent>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QFontMetricsF>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QIcon>
+#include <QtGui/QImage>
+#include <QtGui/QPixmap>
 #include <QtGui/QSyntaxHighlighter>
 #include <QtGui/QTextBlockFormat>
 #include <QtGui/QTextCursor>
@@ -47,6 +53,32 @@ public:
   }
 
   bool isEmpty() const override { return false; }
+};
+
+// Hands the files the system asks the app to open (macOS's Open With) to
+// `document`'s fileOpened signal.
+class FileOpenFilter : public QObject
+{
+public:
+  explicit FileOpenFilter(QObject* document)
+    : QObject(document)
+    , document(document)
+  {
+  }
+
+  bool eventFilter(QObject* watched, QEvent* event) override
+  {
+    if (event->type() != QEvent::FileOpen)
+      return QObject::eventFilter(watched, event);
+    const auto* open = static_cast<QFileOpenEvent*>(event);
+    const QString path = open->file().isEmpty() ? open->url().toLocalFile() : open->file();
+    if (document && !path.isEmpty())
+      fileOpened(document, path);
+    return true;
+  }
+
+private:
+  QPointer<QObject> document;
 };
 
 // Whether a family has Latin letters, digits and punctuation, all the same
@@ -205,6 +237,19 @@ useNerdFont(const QByteArray& data)
   if (!family.isEmpty())
     QFontDatabase::addApplicationFallbackFontFamily(QChar::Script_Common, family);
 #endif
+}
+
+void
+useWindowIcon(const QByteArray& png)
+{
+  QGuiApplication::setWindowIcon(QIcon(QPixmap::fromImage(QImage::fromData(png, "PNG"))));
+}
+
+void
+watchFileOpens(QObject* document)
+{
+  // A child of `document`, so it goes (and stops filtering) with it.
+  qApp->installEventFilter(new FileOpenFilter(document));
 }
 
 QString

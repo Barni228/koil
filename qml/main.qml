@@ -570,6 +570,14 @@ ApplicationWindow {
 
         onLoaded: (path, text) => root.loadFile(text, path)
         onFailed: message => vim.showError(message)
+        // Finder's Open With on macOS (see watchFileOpens): opened as if
+        // dropped on the window, and likewise not while a dialog is open.
+        // Later, so Finder isn't kept waiting.
+        onFileOpened: path => {
+            if (dropArea.enabled)
+                Qt.callLater(root.openDropped, path);
+        }
+        Component.onCompleted: watchFileOpens()
     }
 
     Koil {

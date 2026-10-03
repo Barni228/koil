@@ -2,8 +2,17 @@
 
 pub use bridge::*;
 
+use crate::document::file_opened;
+
 #[cxx_qt::bridge]
 mod bridge {
+    extern "Rust" {
+        /// Emits `fileOpened(path)` on `document`, a Document (see
+        /// `watch_file_opens`).
+        #[cxx_name = "fileOpened"]
+        unsafe fn file_opened(document: *mut QObject, path: &QString);
+    }
+
     unsafe extern "C++" {
         include!(<QtCore/QObject>);
         type QObject = cxx_qt::QObject;
@@ -24,6 +33,16 @@ mod bridge {
         /// the fallback for the listing's icons.
         #[cxx_name = "useNerdFont"]
         fn use_nerd_font(data: &QByteArray);
+
+        /// Sets the windows' icon from a PNG file (`png`).
+        #[cxx_name = "useWindowIcon"]
+        #[allow(dead_code)] // not used on Windows
+        fn use_window_icon(png: &QByteArray);
+
+        /// Has `document`, a Document, emit `fileOpened(path)` for each file
+        /// the system asks the app to open (macOS's Open With; see native.h).
+        #[cxx_name = "watchFileOpens"]
+        unsafe fn watch_file_opens(document: *mut QObject);
 
         /// The family of the font `use_nerd_font` added.
         #[cxx_name = "nerdFontFamily"]

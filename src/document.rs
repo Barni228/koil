@@ -2,9 +2,10 @@ use std::io;
 use std::path::{Component, Path};
 use std::pin::Pin;
 
+use cxx_qt::casting::{Downcast, Upcast};
 use cxx_qt_lib::{QString, QUrl};
 
-use crate::listing;
+use crate::{ffi, listing};
 
 /// Files the editor opens and saves, and the path on the command line.
 #[cxx_qt::bridge]
@@ -26,6 +27,12 @@ pub mod qobject {
         #[qsignal]
         fn loaded(self: Pin<&mut Document>, path: QString, text: QString);
 
+        /// Emitted for each file the system asks Koil to open, once
+        /// `watch_file_opens` was called: macOS's Open With, which gives no
+        /// path on the command line.
+        #[qsignal]
+        fn file_opened(self: Pin<&mut Document>, path: QString);
+
         /// Emitted when writing fails, with why.
         #[qsignal]
         fn failed(self: Pin<&mut Document>, message: QString);
@@ -34,6 +41,10 @@ pub mod qobject {
         /// can't (empty if it could).
         #[qinvokable]
         fn open_file(self: Pin<&mut Document>, path: &QString) -> QString;
+
+        /// Has `file_opened` emitted from now on.
+        #[qinvokable]
+        fn watch_file_opens(self: Pin<&mut Document>);
 
         #[qinvokable]
         fn save_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
@@ -80,6 +91,15 @@ impl qobject::Document {
         }
     }
 
+    fn watch_file_opens(self: Pin<&mut Self>) {
+        // SAFETY: the pointer is to this Document, a live QObject, which
+        // fileOpened is emitted on (it's in its meta-object).
+        unsafe {
+            let object: &mut cxx_qt::QObject = Pin::into_inner_unchecked(self.upcast_pin());
+            ffi::watch_file_opens(object);
+        }
+    }
+
     fn save_file(self: Pin<&mut Self>, path: &QString, text: &QString) -> bool {
         let path = path.to_string();
         match std::fs::write(&path, text.to_string()) {
@@ -121,6 +141,20 @@ impl qobject::Document {
 
     fn url_to_path(&self, url: &QUrl) -> QString {
         url.to_local_file().unwrap_or_default()
+    }
+}
+
+/// Emits `file_opened(path)` on `document`, if it's a Document: what
+/// native.cpp's watchFileOpens calls.
+///
+/// # Safety
+///
+/// `document` must point to a live QObject.
+pub unsafe fn file_opened(document: *mut cxx_qt::QObject, path: &QString) {
+    // SAFETY: the caller's.
+    let document = unsafe { Pin::new_unchecked(&mut *document) };
+    if let Some(document) = document.downcast_pin::<qobject::Document>() {
+        document.file_opened(path.clone());
     }
 }
 

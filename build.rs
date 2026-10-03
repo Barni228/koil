@@ -28,4 +28,10 @@ fn main() {
         .cpp_file("cpp/native.cpp")
         .include_dir("cpp")
         .build();
+
+    // The exe's icon on Windows (nothing elsewhere).
+    println!("cargo::rerun-if-changed=packaging/windows/koil.ico");
+    embed_resource::compile("packaging/windows/koil.rc", embed_resource::NONE)
+        .manifest_optional()
+        .expect("koil.rc should compile");
 }

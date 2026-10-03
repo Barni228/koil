@@ -18,6 +18,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$root/target/release/koil" "$app/Contents/MacOS/Koil"
 sed "s/@VERSION@/$version/g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
+cp "$root/packaging/macos/Koil.icns" "$app/Contents/Resources/"
 
 if [[ "${1:-}" == "--deploy" ]]; then
     macdeployqt "$app" -qmldir="$root/qml"

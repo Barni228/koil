@@ -10,6 +10,8 @@
     <string>io.github.barni228.koil</string>
     <key>CFBundleExecutable</key>
     <string>Koil</string>
+    <key>CFBundleIconFile</key>
+    <string>Koil</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -22,5 +24,26 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <!-- Koil opens any file that is UTF-8 text: public.text, which source
+         code and other text types conform to. As an Alternate, it shows in
+         Open With but is never made the default. Files of types nothing
+         declares (dyn.*) aren't offered: Launch Services ignores an
+         Alternate claim on public.data, and a Default one would make Koil
+         their default app. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Text</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.text</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

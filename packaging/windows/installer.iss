@@ -23,6 +23,9 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExe}
+SetupIconFile=koil.ico
+; Tells Explorer about the Open With entries below.
+ChangesAssociations=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=Koil-{#AppVersion}-windows-x64-setup
 Compression=lzma2
@@ -34,6 +37,16 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Koil shows in Open With for every file (it opens any that is UTF-8 text,
+; which no extension says), but no file type is given to it, so it's never
+; the default app. HKA is the current user's keys, or the machine's in an
+; all-users install.
+[Registry]
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "Koil"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\*\OpenWithList\{#AppExe}"; Flags: uninsdeletekey
 
 [Icons]
 Name: "{autoprograms}\Koil"; Filename: "{app}\{#AppExe}"

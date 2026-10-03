@@ -25,6 +25,8 @@ tempfile = "3"
 
 [build-dependencies]
 cxx-qt-build = "0.10"
+# the exe's icon on Windows
+embed-resource = "3"
 
 # `cargo release` tags a version only from main; CI builds the installers.
 [package.metadata.release]
