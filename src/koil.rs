@@ -44,6 +44,11 @@ pub mod qobject {
         #[qinvokable]
         fn path_syntax(self: &Koil, line: &QString) -> QString;
 
+        /// What Tab completes in the path field `line` at `cursor`, as
+        /// `listing::Completion`.
+        #[qinvokable]
+        fn complete(self: &Koil, line: &QString, cursor: i32) -> QString;
+
         /// The warnings and errors in the listing `text`, whose icons hide
         /// `hidden` (JSON, as vim keeps it), as a list of `listing::Problem`.
         #[qinvokable]
@@ -168,6 +173,15 @@ impl qobject::Koil {
             &self.koil,
             &line.to_string(),
             self.regex,
+        ))
+    }
+
+    fn complete(&self, line: &QString, cursor: i32) -> QString {
+        to_json(&listing::complete(
+            &self.koil,
+            &line.to_string(),
+            usize::try_from(cursor).unwrap_or(0),
+            &self.settings(),
         ))
     }
 

@@ -484,6 +484,9 @@ ApplicationWindow {
         editor: root.activeView.textArea
         flickable: root.activeView.flickable
         singleLine: root.activeView === pathView
+        // Tab while typing in the path field completes the dir being
+        // written (see Koil.complete).
+        completer: root.listing && root.activeView === pathView ? (line, cursor) => JSON.parse(koil.complete(line, cursor)) : null
         linePrefixes: root.listing && root.activeView === editorView
         clipboard: system
         lineHeight: editorView.lineHeight

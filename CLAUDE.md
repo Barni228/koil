@@ -12,8 +12,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   Nerd Font, sets the Windows style, loads `qml/main.qml`.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
-  lines (`actions`, `undo_steps`) and the path field's regex parts
-  (`path_syntax`). Its tests (`src/listing/tests.rs`) use a temp dir.
+  lines (`actions`, `undo_steps`), the path field's regex parts
+  (`path_syntax`) and what Tab completes in it (`complete`). Its tests
+  (`src/listing/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore` and `regex`
   are properties, bound to vim's `:set` options.
@@ -33,10 +34,12 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
   with it: cursors, selection, search highlights, warnings and errors, line
-  numbers, and the `HoverBox`. Both the listing (or file) and the path field
-  are one (`pathField`).
+  numbers, the `HoverBox` and the `CompletionList`. Both the listing (or
+  file) and the path field are one (`pathField`).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
+- `qml/CompletionList.qml`: the dirs Tab can complete the path field to, in
+  a box under it, like VS Code's suggestions (see Completion).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, hidden text, the listing's
   prefixes, `:` and `/`, buffers). It drives the `TextArea` through
@@ -181,6 +184,30 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   shown. After the update the field shows the location as Koil does, with
   no quotes (`showPath`). koil-core also reads a `~` at the start as the
   home dir, also right after a quote (`"~/x"`, unlike a shell).
+- **Completion** (Completion in Vim.qml, `listing::complete`, koil-core's
+  `Koil::complete`): Tab while typing in the path field (`vim.completer`,
+  set only there) completes the dir being written, like a shell. koil-core
+  reads the path up to the cursor and gives the dirs its last part (after
+  its last `/`) can be, in the dir before it, read as `open` reads it: not
+  hidden ones unless the part starts with `.` or `:set hidden` is on, not
+  ignored ones with `gitignore`, new dirs in the diff too, `..` for `.`, and
+  ignoring case only if nothing matches with it. Tab fills in the only one
+  (with its `/`, which steps over a `/` right after the cursor), or else the
+  longest start they share, if that's longer than the part (`fill`).
+  Otherwise vim shows them (`vim.completion`, drawn by `CompletionList` in
+  the window's overlay, a row per dir as its listing line, the names under
+  the part): Tab and Shift+Tab (`<S-Tab>`, which does nothing elsewhere;
+  also Down and Up, Ctrl-N and Ctrl-P) pick the next or previous one, Enter
+  takes it (so Enter opens the path only once they're closed), Esc closes
+  them but stays in insert mode, typing and
+  Backspace narrow them (vim types those itself, so the options follow at
+  once; a `/` shows that dir's), and other keys close them and then do what
+  they do (but a key with no token, like the Ctrl before N, leaves them).
+  Moving the cursor or the mode closes them (`onCursorChanged`, which the
+  completion's own edits get past by setting them after). Names are written
+  as they are, since koil opens a location that's a dir as written before
+  reading its quotes. A completion goes into the insert as Backspaces and
+  its text, so `.` and counts repeat it.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` updates, `Space a` applies, `-`
   opens `..` (`3-`: `../../..`), Tab goes to the other editor (`activate`),
@@ -531,7 +558,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   Qt counts it as an edit, so `quiet` keeps it from marking the file
   modified). Setting the `TextArea`'s text resets it, so `setText` goes
   through `System.setText`, which puts the text in with the format (see Long
-  texts). Qt puts a fixed-height line's baseline at 4/5 of
+  texts); `quiet` also keeps its cursor moves from vim (`syncFromEditor`
+  would read the old `text`, which Qt updates after, and ask for a position
+  past the new one's end), which starts over after it. Qt puts a fixed-height line's baseline at 4/5 of
   it, so to center the text the block gets a shorter line plus a bottom margin
   that makes up `lineHeight` (`textBaseline` is where the baseline ends up).
   Qt keeps both in 64ths of a pixel and drops the rest, so the line's height

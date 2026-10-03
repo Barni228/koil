@@ -478,6 +478,86 @@ pub fn undo_steps(koil: &Koil) -> Result<Vec<String>, String> {
     Ok(steps.unwrap_or_default().iter().map(step).collect())
 }
 
+/// What Tab completes in the path field (see [`complete`]).
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Completion {
+    /// Where the part of the path being written starts (after its last
+    /// `/`): each option replaces it, up to the cursor.
+    pub start: usize,
+    /// What Tab fills in at once: the only option, or the longest start
+    /// all of them share, if that's more than what's written. Empty if
+    /// it's neither, and Tab shows the options.
+    pub fill: String,
+    pub options: Vec<Choice>,
+}
+
+/// A dir the path can go on to, shown like its line in the listing.
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct Choice {
+    /// With a `/` after it.
+    pub name: String,
+    pub icon: String,
+    /// The icon's color in a dark and in a light theme.
+    pub colors: [String; 2],
+}
+
+/// The dirs the path field `line` can go on to from the cursor (`cursor`),
+/// as `Koil::complete` reads the path from its start up to there, with the
+/// settings the next update uses.
+pub fn complete(koil: &Koil, line: &str, cursor: usize, settings: &Settings) -> Completion {
+    let before = &line[..byte_index(line, cursor)];
+    let path = before.trim_start();
+    let completion = koil.complete(path, settings);
+    let options = completion.names.iter().map(|name| {
+        let (icon, colors) = icon(&completion.dir, name);
+        Choice {
+            name: name.clone(),
+            icon: icon.to_string(),
+            colors,
+        }
+    });
+    let shared = shared_start(&completion.names);
+    let fill = match completion.names.as_slice() {
+        [name] => name.clone(),
+        _ if shared.chars().count() > completion.part.chars().count() => shared.to_string(),
+        _ => String::new(),
+    };
+    Completion {
+        start: utf16_len(indent(before)) + utf16_len(&path[..completion.start]),
+        fill,
+        options: options.collect(),
+    }
+}
+
+/// The longest text all of `names` start with.
+fn shared_start(names: &[String]) -> &str {
+    let Some((first, rest)) = names.split_first() else {
+        return "";
+    };
+    let mut shared = first.as_str();
+    for name in rest {
+        let differs = shared
+            .char_indices()
+            .zip(name.chars())
+            .find(|((_, a), b)| a != b);
+        let end = differs.map_or(shared.len().min(name.len()), |((i, _), _)| i);
+        shared = &shared[..end];
+    }
+    shared
+}
+
+/// Where the UTF-16 position `at` is in `s`, in bytes (its end, if past it).
+fn byte_index(s: &str, at: usize) -> usize {
+    let mut units = 0;
+    for (i, c) in s.char_indices() {
+        if units >= at {
+            return i;
+        }
+        units += c.len_utf16();
+    }
+    s.len()
+}
+
 /// A part of the path field to color: the `pattern` (all of it, after the
 /// dirs it's in), then its regex's parts: an `escape`, a `class`, a
 /// `quantifier`, a `group` (or `|`), or an `anchor` (`.`, `,`, `^` and `$`,

@@ -783,3 +783,71 @@ fn test_home_path() {
         "{updated:?}"
     );
 }
+
+/// What Tab completes in the path field `line`, at its end, in a temp dir
+/// with `src/`, `src-old/`, `Abc/`, `aBd/`, `🍄/sub/` and the file `script`:
+/// where the options start, what it fills in, and the options.
+fn completed(line: &str) -> (usize, String, Vec<String>) {
+    let temp = tempfile::tempdir().unwrap();
+    for dir in ["src", "src-old", "Abc", "aBd", "🍄/sub"] {
+        fs::create_dir_all(temp.path().join(dir)).unwrap();
+    }
+    fs::write(temp.path().join("script"), "").unwrap();
+    let mut koil = Koil::default();
+    koil.open(temp.path()).unwrap();
+    let cursor = utf16_len(line);
+    let c = complete(&koil, line, cursor, &Settings::default());
+    for option in &c.options {
+        assert!(option.icon.chars().all(is_private_use), "{}", option.icon);
+    }
+    let names = c.options.into_iter().map(|o| o.name).collect();
+    (c.start, c.fill, names)
+}
+
+#[test]
+fn test_complete() {
+    let fill = |line| completed(line).1;
+    // the only option, or what all of them start with
+    assert_eq!(fill("src-"), "src-old/");
+    assert_eq!(fill("s"), "src");
+    // else nothing, and Tab shows them
+    assert_eq!(
+        completed("src"),
+        (0, String::new(), vec!["src/".into(), "src-old/".into()])
+    );
+    // nor when the options only match ignoring case, and share less than
+    // what's written
+    assert_eq!(
+        completed("ab"),
+        (0, String::new(), vec!["Abc/".into(), "aBd/".into()])
+    );
+    assert_eq!(fill("abc"), "Abc/");
+    // after the spaces before the path, and in UTF-16
+    assert_eq!(
+        completed("  src-"),
+        (2, "src-old/".into(), vec!["src-old/".into()])
+    );
+    assert_eq!(completed("🍄/"), (3, "sub/".into(), vec!["sub/".into()]));
+    assert_eq!(completed("script/"), (0, String::new(), vec![]));
+}
+
+#[test]
+fn test_complete_at_cursor() {
+    let (_temp, koil) = koil();
+    // only what's before the cursor
+    let c = complete(&koil, "di/x", 2, &Settings::default());
+    assert_eq!((c.start, c.fill.as_str()), (0, "dir/"));
+    // and past the line's end, all of it
+    let c = complete(&koil, "d", 5, &Settings::default());
+    assert_eq!(c.fill, "dir/");
+}
+
+#[test]
+fn test_shared_start() {
+    let names = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+    assert_eq!(shared_start(&names(&[])), "");
+    assert_eq!(shared_start(&names(&["src/"])), "src/");
+    assert_eq!(shared_start(&names(&["src/", "src-old/", "srv/"])), "sr");
+    assert_eq!(shared_start(&names(&["ab/", "a/"])), "a");
+    assert_eq!(shared_start(&names(&["🍄a/", "🍄b/"])), "🍄");
+}

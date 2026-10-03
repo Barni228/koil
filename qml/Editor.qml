@@ -305,6 +305,12 @@ Item {
         theme: view.theme
     }
 
+    // What Tab can complete, once it shows the options (the path field).
+    CompletionList {
+        editor: view
+        theme: view.theme
+    }
+
     // An overlay drawn from a model (spans, cursors), which it recomputes
     // with `compute` once anything in `inputs` changed and the current edit
     // is done: while editor.remove() runs, the document is already shorter
@@ -409,13 +415,16 @@ Item {
                 view.lastText = text;
                 revision++;
             }
+            // Not while the text is replaced (setText), whose cursor Qt
+            // moves before `text` has the new text, which vim would read:
+            // vim starts over after.
             onCursorPositionChanged: {
                 blinkOn = true;
-                if (view.active)
+                if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
             }
             onSelectedTextChanged: {
-                if (view.active)
+                if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
             }
             onRevisionChanged: hover.hide()

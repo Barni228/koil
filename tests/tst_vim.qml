@@ -59,7 +59,7 @@ TestCase {
     }
 
     // Types keys: characters, and names like <Esc>, <CR>, <S-CR>
-    // (Shift+Enter), <C-v> (Ctrl) or <D-c> (Cmd on macOS, Ctrl elsewhere).
+    // (Shift+Enter), <S-Tab>, <C-v> (Ctrl) or <D-c> (Cmd on macOS, Ctrl elsewhere).
     function keys(s) {
         const named = {
             "Esc": Qt.Key_Escape,
@@ -83,6 +83,8 @@ TestCase {
                     keyClick(named[name]);
                 else if (name === "S-CR")
                     keyClick(Qt.Key_Return, Qt.ShiftModifier);
+                else if (name === "S-Tab")
+                    keyClick(Qt.Key_Backtab, Qt.ShiftModifier);
                 else if (/^C-[a-z]$/.test(name))
                     keyClick(Qt.Key_A + name.charCodeAt(2) - 97, ctrl);
                 else if (/^D-[a-z]$/.test(name))
@@ -268,6 +270,7 @@ TestCase {
         vim.singleLine = false;
         vim.linePrefixes = false;
         vim.commandKeys = {};
+        vim.completer = null;
     }
 
     // Makes vim edit `to` (the editor, `other` or `narrowText`, scrolled by
@@ -957,6 +960,102 @@ TestCase {
         keys("a!<CR>");
         compare(other.text, "a b one two xz!");
         compare(vim.mode, "normal");
+    }
+
+    // A completer like Koil's (see listing::complete) of the dirs `dirs`,
+    // like "src/main/", without quotes, case or icons.
+    function completerOf(dirs) {
+        return (line, cursor) => {
+            const before = line.slice(0, cursor), start = before.lastIndexOf("/") + 1;
+            const dir = before.slice(0, start), part = before.slice(start);
+            const names = [];
+            for (const d of dirs) {
+                const name = d.startsWith(dir) ? d.slice(dir.length).split("/")[0] : "";
+                if (name && name.startsWith(part) && !names.includes(name))
+                    names.push(name);
+            }
+            names.sort();
+            let shared = names[0] || "";
+            for (const n of names) {
+                while (!n.startsWith(shared))
+                    shared = shared.slice(0, -1);
+            }
+            return {
+                start: start,
+                fill: names.length === 1 ? names[0] + "/" : shared.length > part.length ? shared : "",
+                options: names.map(n => ({ name: n + "/", icon: "x", colors: ["", ""] }))
+            };
+        };
+    }
+
+    // Tab while typing completes (Koil's path field), like a shell: as far
+    // as all the options go alike, then it shows them to pick one.
+    function test_completion() {
+        other.text = "";
+        switchTo(other, null);
+        vim.singleLine = true;
+        vim.commandKeys = { "<CR>": "openPath" };
+        vim.completer = completerOf(["src/main/", "src/test/", "src-old/", "docs/"]);
+        keys("is<Tab>");
+        compare(other.text, "src");
+        compare(vim.completion, null);
+        // Nothing more to fill in: the options, with the first picked.
+        keys("<Tab>");
+        compare(vim.completion.options.map(o => o.name), ["src/", "src-old/"]);
+        compare(vim.completion.index, 0);
+        keys("<Tab>");
+        compare(vim.completion.index, 1);
+        keys("<Tab><S-Tab>");
+        compare(vim.completion.index, 1);
+        keys("<S-Tab><S-Tab><Down><Down><C-n><C-p><Up>");
+        compare(vim.completion.index, 0);
+        // Enter takes one, rather than opening the path.
+        keyCommands.clear();
+        keys("<CR>");
+        compare(other.text, "src/");
+        compare([vim.completion, vim.mode, keyCommands.count], [null, "insert", 0]);
+        // Typing narrows them; a `/` shows that dir's.
+        keys("<BS><Tab>");
+        compare(vim.completion.options.length, 2);
+        keys("/");
+        compare(other.text, "src/");
+        compare(vim.completion.options.map(o => o.name), ["main/", "test/"]);
+        keys("t");
+        compare(vim.completion.options.map(o => o.name), ["test/"]);
+        // and Backspace widens them, keeping the picked one.
+        keys("<BS>");
+        compare(vim.completion.options.length, 2);
+        compare(vim.completion.index, 1);
+        keys("<CR>");
+        compare(other.text, "src/test/");
+        // Esc only closes them, and another key closes them and does its
+        // own thing.
+        keys("<BS><BS><BS><BS><BS><Tab>");
+        verify(vim.completion !== null);
+        keys("<Esc>");
+        compare([vim.completion, vim.mode], [null, "insert"]);
+        keys("<Tab><Left>");
+        compare([vim.completion, vim.cursor], [null, 3]);
+        // A click takes one.
+        keys("<Right><Tab>");
+        vim.takeCompletion(1);
+        compare(other.text, "src/test/");
+        compare(vim.cursor, 9);
+        // The only option, whose `/` steps over the one after the cursor.
+        keys("<Esc>");
+        other.text = "do/x";
+        switchTo(other, null);
+        keys("la<Tab>");
+        compare(other.text, "docs/x");
+        compare(vim.cursor, 5);
+        // "." types what the completion did.
+        other.text = "";
+        switchTo(other, null);
+        keys("Ad<Tab><Esc>.");
+        compare(other.text, "docs/docs/");
+        // Shift+Tab does nothing elsewhere, not even end a command.
+        keys("0d<S-Tab>w");
+        compare(other.text, "/docs/");
     }
 
     function test_nothingToUndo() {

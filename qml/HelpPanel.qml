@@ -64,7 +64,10 @@ Popup {
                     + "with `/`, but in a pattern `\\` escapes, like `\\.`. It's one line, edited with vim's "
                     + "keys too; Enter (also in insert mode) opens it and "
                     + "goes back to the listing, and Shift+Enter opens it but stays in the field."],
-                ["Tab", "In normal mode: go from the listing to the path field, or back. So does a click."],
+                ["Tab", "In normal mode: go from the listing to the path field, or back. So does a click. "
+                    + "While typing a path: complete the dir being written, like a shell, as far as it can; "
+                    + "with nothing more to fill in, list the dirs it can be: Tab and Shift+Tab (or Down and "
+                    + "Up) pick one, Enter takes it, Esc closes the list, and typing narrows it."],
                 ["g.  gi  gr", "Turn `:set hidden`, `gitignore` and `regex` on or off, like the buttons beside "
                     + "the path."],
                 [(isMac ? "⇧⌘O" : "Ctrl+Shift+O"), "Open a folder. " + cmdKey + "O opens a file to edit "

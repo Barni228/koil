@@ -71,6 +71,15 @@ QtObject {
     // becomes a space, and Enter while typing leaves insert mode, then does
     // what it does in normal mode.
     property bool singleLine: false
+    // Where Tab while typing completes (Koil's path field, see Completion):
+    // a function of the text and the cursor that gives { start, fill,
+    // options } (see listing::Completion), each option { name, icon,
+    // colors } to write from `start` to the cursor. Null elsewhere.
+    property var completer: null
+    // The options Tab shows once it can't fill in more, as { start,
+    // options, index } (the picked one), or null. Moving the cursor (or
+    // leaving insert mode) closes them.
+    property var completion: null
     // Koil's listing: each line starts with a prefix, its entry's icon
     // and two spaces, or three spaces on a line that has none, which the
     // cursor never goes into (see Prefixes). A line without one is plain.
@@ -229,6 +238,10 @@ QtObject {
     readonly property int highlightTarget: commandLine[0] === "/" || commandLine[0] === "?" ? searchTarget : cursor
 
     onCommandLineChanged: previewSearch()
+    // The options are for where they were found (completing sets them again
+    // after it moves the cursor).
+    onCursorChanged: completion = null
+    onModeChanged: completion = null
 
     // ---- Entry points ------------------------------------------------------
 
@@ -353,6 +366,8 @@ QtObject {
             tok = "<CR>";
         if (commandLine !== "")
             return commandLineKey(tok);
+        if (mode === "insert" && completer && (completion || tok === "<Tab>") && completionKey(tok))
+            return true;
         if (singleLine && inserting && (tok === "<CR>" || tok === "<S-CR>")) {
             leaveInsert();
             // After the insert's repeat, if it goes on (see Runs).
@@ -364,8 +379,9 @@ QtObject {
         }
         if (mode === "insert")
             return insertKey(tok, event);
-        // Cmd+Backspace deletes only while typing (and in the command line).
-        if (tok === null || tok === "<D-BS>")
+        // Cmd+Backspace deletes only while typing (and in the command line),
+        // and Shift+Tab only picks from the completion's options.
+        if (tok === null || tok === "<D-BS>" || tok === "<S-Tab>")
             return true;
         if (mode === "replace") {
             if (tok === "<Esc>") {
@@ -582,6 +598,7 @@ QtObject {
             [Qt.Key_Backspace]: "<BS>",
             [Qt.Key_Delete]: "<Del>",
             [Qt.Key_Tab]: "<Tab>",
+            [Qt.Key_Backtab]: "<S-Tab>",
             [Qt.Key_Left]: "<Left>",
             [Qt.Key_Right]: "<Right>",
             [Qt.Key_Up]: "<Up>",
@@ -1776,6 +1793,91 @@ QtObject {
         replaying = false;
     }
 
+    // ---- Completion --------------------------------------------------------
+    // Where `completer` is set (Koil's path field), Tab while typing
+    // completes what's before the cursor, like a shell: to the only option,
+    // or else as far as all of them go alike. Once that adds nothing, it
+    // shows them (`completion`, which Editor's CompletionList draws, like VS
+    // Code's suggestions): Tab and Shift+Tab (Down and Up, Ctrl-N and
+    // Ctrl-P) pick the next or previous one, Enter takes it, and Esc closes
+    // them. Typing (and Backspace) narrows them, so a `/` shows that dir's.
+    // Any other key closes them, then does what it does. A completion is
+    // typed into the insert as Backspaces and its text, which "." and
+    // counts repeat.
+
+    // A key while typing, where Tab completes: Tab, or any key while the
+    // options show. Returns whether it took the key.
+    function completionKey(tok) {
+        const c = completion;
+        if (!c) {
+            complete();
+            return true;
+        }
+        const step = { "<Tab>": 1, "<Down>": 1, "<C-n>": 1, "<S-Tab>": -1, "<Up>": -1, "<C-p>": -1 }[tok];
+        if (step) {
+            const n = c.options.length;
+            completion = Object.assign({}, c, { index: (c.index + step + n) % n });
+            return true;
+        }
+        if (tok === "<CR>") {
+            completeWith(c.start, c.options[c.index].name);
+            return true;
+        }
+        // Like a lone modifier, which may start Ctrl-N.
+        if (tok === null)
+            return false;
+        completion = null;
+        if (tok === "<Esc>")
+            return true;
+        if (!isSpecial(tok) || tok === "<BS>") {
+            insertKey(tok, null); // vim types it, so the options follow at once
+            showCompletions(c.options[c.index].name);
+            return true;
+        }
+        return false;
+    }
+
+    // Tab: fills in what it can, or else shows the options.
+    function complete() {
+        const r = completer(bufferText(), cursor);
+        if (r.fill)
+            completeWith(r.start, r.fill);
+        else if (r.options.length)
+            completion = { start: r.start, options: r.options, index: 0 };
+    }
+
+    // Shows the options for what's before the cursor (none if there are
+    // none), with `picked` picked if it's one of them.
+    function showCompletions(picked) {
+        const r = completer(bufferText(), cursor);
+        if (r.options.length)
+            completion = { start: r.start, options: r.options, index: Math.max(0, r.options.findIndex(o => o.name === picked)) };
+    }
+
+    // Takes option i of the ones shown (a click).
+    function takeCompletion(i) {
+        interrupt();
+        if (completion)
+            batched(() => completeWith(completion.start, completion.options[i].name));
+    }
+
+    // Writes `text` in place of what's from `start` to the cursor, as if
+    // typed. A dir's `/` steps over one right after the cursor, rather than
+    // doubling it.
+    function completeWith(start, text) {
+        const t = bufferText(), s = insertSession, over = text.endsWith("/") && t[cursor] === "/";
+        if (over)
+            text = text.slice(0, -1);
+        if (s && !s.broken) {
+            for (let p = cursor; p > start; p = Txt.charStart(t, p - 1))
+                s.keys.push("<BS>");
+            for (const ch of text)
+                s.keys.push(ch);
+        }
+        replaceRange(start, cursor, text);
+        setCursor(start + text.length + (over ? 1 : 0));
+    }
+
     // ---- Visual block ------------------------------------------------------
     // Columns count characters, as elsewhere. After "$" the block reaches the
     // end of every line.
@@ -2127,7 +2229,7 @@ QtObject {
     // Splits register text into keys.
     function macroKeys(text) {
         const named = { "\n": "<CR>", "\r": "<CR>", "\t": "<Tab>", "\x1b": "<Esc>" };
-        const re = /<(?:Esc|CR|S-CR|BS|Del|Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z])>|[\s\S]/gu;
+        const re = /<(?:Esc|CR|S-CR|BS|Del|Tab|S-Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z])>|[\s\S]/gu;
         return (text.match(re) || []).map(k => named[k] || k);
     }
 
