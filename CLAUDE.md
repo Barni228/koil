@@ -371,8 +371,12 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `flush` gives the editor the edits as one, with vim's mode and cursor
   (`setMode`, `setCursor` and `showCursor` wait for it; what needs the view,
   like `zz`, `H` or a search's preview, flushes first). The edit doesn't
-  scroll; the cursor scrolls as Qt does it, and a new mode as `setMode` does;
-  a key that changes nothing leaves the view alone, even off the cursor.
+  scroll (the view stays, as far as a shorter text reaches); the cursor
+  scrolls as Qt does it, and after an edit or a new mode as `setMode` does
+  (`showCursor`), since an edit can move the editor's cursor to where vim's
+  goes, and setting it there doesn't scroll (`100000dk` from the end of a
+  long text left the view blank); a key that changes nothing leaves the
+  view alone, even off the cursor.
   Signals main.qml handles by reading the editor are emitted through
   `outside`, which flushes first. Commands that edit in many places make
   one edit through `replaceRanges` (`J`, a block's lines, `putBlock`), which

@@ -244,11 +244,13 @@ TestCase {
 
     property int defaultChunkTime
     property real defaultCharWidth
+    property real defaultLineHeight
     property int defaultSideScrollOff
 
     function initTestCase() {
         defaultChunkTime = vim.chunkTime;
         defaultCharWidth = vim.charWidth;
+        defaultLineHeight = vim.lineHeight;
         defaultSideScrollOff = vim.sideScrollOff;
     }
 
@@ -258,6 +260,7 @@ TestCase {
             vim.stopRun();
         vim.chunkTime = defaultChunkTime;
         vim.charWidth = defaultCharWidth;
+        vim.lineHeight = defaultLineHeight;
         vim.sideScrollOff = defaultSideScrollOff;
         if (vim.editor !== editor)
             switchTo(editor, null);
@@ -585,6 +588,42 @@ TestCase {
         compare(vim.cursor, 1);
         const x = narrowText.positionToRectangle(1).x;
         verify(f.contentX <= x && x < f.contentX + f.width, "the cursor is in view");
+    }
+
+    // After an edit the view shows the cursor, even if the edit put the
+    // editor's cursor where vim's is (so setting it didn't scroll), and
+    // isn't left past the text's end (deleting all of a long text from its
+    // end left the view blank).
+    function test_editShowsCursor() {
+        const f = narrow.contentItem as Flickable;
+        const line = n => narrowText.positionToRectangle(Txt.lineToPos(narrowText.text, n));
+        const cursorLine = () => Txt.lineOf(narrowText.text, vim.cursor);
+        const cases = [
+            { lines: 100, at: 100, keys: "100dk", line: 1 },
+            { lines: 1000, at: 300, keys: "dgg", line: 1 },
+            { lines: 1000, at: 300, keys: "200dk", line: 100 },
+            { lines: 100, at: 50, keys: "ztdG", line: 49 }
+        ];
+        for (const c of cases) {
+            // Lines that differ from their first character, or the edit
+            // the editor gets (vim's diff) would start after what's alike.
+            const lines = [];
+            for (let i = 1; i <= c.lines; i++)
+                lines.push(String.fromCharCode(97 + i % 26) + i);
+            narrowText.text = lines.join("\n");
+            waitForRendering(narrow);
+            vim.lineHeight = line(2).y - line(1).y;
+            switchTo(narrowText, {
+                cursor: Txt.lineToPos(narrowText.text, c.at)
+            }, f);
+            keys("zz");
+            verify(f.contentY > line(c.at).y - f.height, "the cursor's line is in view");
+            keys(c.keys);
+            compare(cursorLine(), c.line);
+            const r = line(c.line);
+            verify(f.contentY <= r.y && r.y + r.height <= f.contentY + f.height, c.keys + ": the cursor is in view");
+            verify(f.contentY <= Math.max(0, f.contentHeight - f.height), c.keys + ": the view is past the end");
+        }
     }
 
     // Koil's keys in a macro see its edits so far (main.qml reads the

@@ -2365,18 +2365,23 @@ QtObject {
     // vim's mode and cursor (or selection), as setMode and setCursor would
     // have: the edit doesn't scroll (it moves the editor's cursor), but the
     // cursor does, as Qt does it, with room beside it (showColumn), and a
-    // new mode as setMode does. If none of them changed, the view stays
-    // where it is, even if the mouse scrolled the cursor out of it.
+    // new mode as setMode does. So does an edit, which may have moved the
+    // editor's cursor to where vim's goes, so that setting it there doesn't
+    // scroll (deleting up to the text's start from below left the view on
+    // what had been below). If none of them changed, the view stays where
+    // it is, even if the mouse scrolled the cursor out of it.
     function flush() {
         const b = batch, old = editor.text, edited = b.text !== old;
         if (!edited && b.cursor === cursor && b.anchor === anchor && b.mode === mode)
             return;
         batch = null;
         const view = flickable && { x: flickable.contentX, y: flickable.contentY };
+        // Where the view was, as far as the text still reaches: put back
+        // past the end of a shorter text, it showed nothing.
         const restore = () => {
             if (view) {
-                flickable.contentX = view.x;
-                flickable.contentY = view.y;
+                flickable.contentX = Math.min(view.x, Math.max(0, flickable.contentWidth - flickable.width));
+                flickable.contentY = Math.min(view.y, Math.max(0, flickable.contentHeight - flickable.height));
             }
         };
         syncing = true;
@@ -2397,12 +2402,12 @@ QtObject {
             updateSelection();
         else
             editor.cursorPosition = Math.min(cursor, editor.length);
-        if (newMode) {
+        if (newMode)
             restore();
+        if (newMode || edited)
             showCursor();
-        } else if (b.cursor !== cursor) {
+        else if (b.cursor !== cursor)
             showColumn();
-        }
         syncing = false;
         b.text = editor.text;
         b.cursor = cursor;
