@@ -54,7 +54,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `lineOf`, `lineToPos` and `countLines` (the status line, line numbers,
   highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
-- `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious.
+- `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious;
+  `:reg` shows the registers in it (`showList`).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
   the question: `:confirm q`, applying, undoing an apply, and what changed
   on disk against the user's edits.
@@ -461,7 +462,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
   `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
-  are read from vim's state and can't be written. The `TextArea` does nothing on Cmd+Backspace, so on macOS
+  are read from vim's state and can't be written. `:reg` (`:di`) lists
+  them (`registerList`) in the help box, one line each, cut off. The `TextArea` does nothing on Cmd+Backspace, so on macOS
   it's vim's `<D-BS>`: typed by vim in insert mode (`typedEdit`: back to
   the line's start, the name's in the listing, and there Backspace),
   `Ctrl-U` in the command line, nothing in the other modes.

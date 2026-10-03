@@ -116,6 +116,8 @@ QtObject {
     signal highlightsCleared()
     // :help, or :help topic.
     signal helpRequested(string topic)
+    // :reg, with what registerList gives.
+    signal registersRequested(var rows)
     // One of commandKeys was typed, with its count (0 if none).
     signal keyCommand(string name, int count)
     // u (or Cmd+Z) with no change left to undo: Koil offers to undo its last
@@ -2798,6 +2800,37 @@ QtObject {
         return registers[(name || "\"").toLowerCase()] || null;
     }
 
+    // :reg lists the registers that hold something (those in `names`, if
+    // it isn't blank), in vim's order, as rows of [type and name, text]:
+    // ["l  \"0", "one^J"]. The type is c (characters), l (lines) or b (a
+    // block), and control characters are written like ^J, so each is one
+    // line (cut off, as a register can hold all of a long file).
+    function registerList(names) {
+        const all = "\"0123456789abcdefghijklmnopqrstuvwxyz-*+.:%/";
+        const wanted = names.replace(/\s/g, "").toLowerCase();
+        const rows = [];
+        for (const name of all) {
+            if (wanted && !wanted.includes(name))
+                continue;
+            const r = getRegister(name);
+            if (!r || !r.text)
+                continue;
+            const max = 300, cut = r.text.length > max;
+            const text = (cut ? r.text.slice(0, Txt.charStart(r.text, max)) : r.text).replace(/[\x00-\x1f\x7f]/g,
+                ch => "^" + (ch === "\x7f" ? "?" : String.fromCharCode(ch.charCodeAt(0) + 64)));
+            rows.push([(r.blockwise ? "b" : r.linewise ? "l" : "c") + "  \"" + name, cut ? text + "…" : text]);
+        }
+        return rows;
+    }
+
+    function showRegisters(names) {
+        const rows = registerList(names);
+        if (rows.length)
+            registersRequested(rows);
+        else
+            showMessage(names.trim() ? "Nothing in those registers" : "Nothing in the registers");
+    }
+
     // `deleting` for the text a change deletes.
     function yank(t, range, reg, deleting) {
         let text = t.slice(range.start, range.end);
@@ -3500,6 +3533,8 @@ QtObject {
             setOptions(c.replace(/^\S+\s*/, ""));
         else if (/^h(elp)?(\s|$)/.test(c))
             outside(() => helpRequested(c.replace(/^\S+\s*/, "")));
+        else if (/^(reg(i|is|ist|iste|ister|isters)?|di(s|sp|spl|spla|splay)?)(\s|$)/.test(c))
+            showRegisters(c.replace(/^\S+\s*/, ""));
         else
             showError("E492: Not an editor command: " + c);
     }

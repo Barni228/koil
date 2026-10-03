@@ -1195,6 +1195,29 @@ TestCase {
         compare(editor.text, "a foxbfox");
     }
 
+    // :reg lists them in vim's order, each on one line.
+    function test_registerList() {
+        load("one\ntwo\tx");
+        let shown = null;
+        const show = rows => shown = rows;
+        vim.registersRequested.connect(show);
+        vim.lastInsert = "";
+        vim.lastSearch = null;
+        vim.history = { ":": [], "/": [] };
+        keys("yyjdw\"ayy");
+        compare(vim.registerList(""), [["l  \"\"", "x^J"], ["l  \"0", "one^J"], ["l  \"a", "x^J"],
+            ["c  \"-", "two^I"]]);
+        keys(":reg 0 -<CR>");
+        compare(shown, [["l  \"0", "one^J"], ["c  \"-", "two^I"]]);
+        shown = null;
+        keys(":di z<CR>");
+        compare(shown, null);
+        compare(vim.message, "Nothing in those registers");
+        vim.registersRequested.disconnect(show);
+        vim.registers = { "a": { text: "x".repeat(400), linewise: false, hidden: [] } };
+        compare(vim.registerList("a")[0][1], "x".repeat(300) + "…");
+    }
+
     // Other apps get the icons; Koil gets the hidden text back.
     function test_clipboard() {
         load("M  a");

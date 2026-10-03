@@ -6,6 +6,7 @@ import QtQuick.Controls
 // :help, a box over the editor with what isn't obvious: Koil's listing,
 // :set and its forms, the commands, search, registers and macros, visual
 // block and multiple cursors, hidden text and other keys. :help topic scrolls to a section.
+// :reg shows the registers in it too (showList).
 // Keys scroll it as in a vim help buffer; Esc or q closes it. Its text can be
 // selected with the mouse and copied.
 Popup {
@@ -22,6 +23,9 @@ Popup {
     readonly property string cmdKey: isMac ? "⌘" : "Ctrl+"
     readonly property string altKey: isMac ? "⌥" : "Alt+"
     readonly property real lineStep: Math.round(20 * zoom)
+    // What it shows: the help, or a list (see showList).
+    property string heading: "Koil Help"
+    property var shownSections: sections
 
     // Each section: a title, the :help topics that go to it, an optional
     // intro and note, and rows of [keys, what they do]. `code` in text is
@@ -144,6 +148,8 @@ Popup {
                     + "Esc) to cancel. Left and Right pick a choice for Enter."],
                 [":42  :$", "Go to line 42, or the last line."],
                 [":noh", "Clear the search highlights (so does Esc in normal mode)."],
+                [":reg  :reg [names]", "Show what the registers hold, e.g. `:reg a0`. `c`, `l` and `b` "
+                    + "say whether one holds characters, lines or a block."],
                 [":h  :help [topic]", "This help, e.g. `:h set`, `:h search`, `:h macros`."],
                 ["↑ ↓", "In the command line: earlier and later commands (or searches)."],
                 ["Ctrl-U  Ctrl-W", "In the command line: delete to the start, or the word before the cursor."],
@@ -251,10 +257,23 @@ Popup {
         const i = t === "" ? 0 : sections.findIndex(s => s.tags.includes(t));
         if (i < 0)
             return false;
+        heading = "Koil Help";
+        shownSections = sections;
         open();
         shownSection = i;
         showSection();
         return true;
+    }
+
+    // Opens the box with `title` over `rows` of [keys, text], both shown
+    // as they are in the editor's font, the keys taking `keyColumns`
+    // characters (:reg).
+    function showList(title, rows, keyColumns) {
+        heading = title;
+        shownSections = [{ title: "", rows: rows, plain: true, keyColumns: keyColumns }];
+        open();
+        shownSection = 0;
+        showSection();
     }
 
     // The section :help went to. Its text is laid out over the first frames,
@@ -304,6 +323,13 @@ Popup {
         color: help.theme.dark ? "#60000000" : "#30000000"
     }
 
+    FontMetrics {
+        id: monoMetrics
+
+        font.family: help.monoFamily
+        font.pixelSize: Math.round(13 * help.zoom)
+    }
+
     background: Panel {
         theme: help.theme
         raised: true
@@ -343,7 +369,7 @@ Popup {
             HelpText {
                 id: title
 
-                text: "Koil Help"
+                text: help.heading
                 font.pixelSize: Math.round(18 * help.zoom)
                 font.bold: true
                 color: help.theme.text
@@ -425,7 +451,7 @@ Popup {
                 Repeater {
                     id: sectionRepeater
 
-                    model: help.sections
+                    model: help.shownSections
 
                     Column {
                         id: section
@@ -436,6 +462,7 @@ Popup {
                         spacing: 6 * help.zoom
 
                         HelpText {
+                            visible: !!section.modelData.title
                             text: section.modelData.title
                             font.pixelSize: Math.round(15 * help.zoom)
                             font.bold: true
@@ -463,7 +490,9 @@ Popup {
                                 HelpText {
                                     id: keysText
 
-                                    width: Math.round(body.width * 0.34)
+                                    width: section.modelData.keyColumns
+                                        ? Math.ceil(section.modelData.keyColumns * monoMetrics.averageCharacterWidth)
+                                        : Math.round(body.width * 0.34)
                                     text: row.modelData[0]
                                     textFormat: TextEdit.PlainText
                                     wrapMode: TextEdit.Wrap
@@ -473,9 +502,10 @@ Popup {
                                 }
                                 HelpText {
                                     width: body.width - keysText.width - row.spacing
-                                    text: help.styled(row.modelData[1])
-                                    textFormat: TextEdit.RichText
-                                    wrapMode: TextEdit.Wrap
+                                    text: section.modelData.plain ? row.modelData[1] : help.styled(row.modelData[1])
+                                    textFormat: section.modelData.plain ? TextEdit.PlainText : TextEdit.RichText
+                                    wrapMode: section.modelData.plain ? TextEdit.WrapAnywhere : TextEdit.Wrap
+                                    font.family: section.modelData.plain ? help.monoFamily : help.font.family
                                     font.pixelSize: Math.round(13 * help.zoom)
                                     color: help.theme.text
                                 }

@@ -709,6 +709,7 @@ ApplicationWindow {
             if (!help.show(topic))
                 vim.showError("E149: Sorry, no help for " + topic);
         }
+        onRegistersRequested: rows => help.showList("Registers", rows, 6)
     }
 
     // Behind the path field and the space under it, as behind the text.
