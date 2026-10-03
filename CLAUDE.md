@@ -107,8 +107,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   koil gives names with `/` itself), and once a pasted `C:\src` opens, the
   field shows `C:/src`, after which a pattern can be typed. `show_location`
   writes the dir, a `/` and the pattern as it is (`join_shown`), and `~` is
-  only read at the start, as text (`with_tilde`, `expand_home`, which joins
-  the home dir with a `/`), so a pattern's `\` is never touched. Apply and
+  only written at the start, as text (`with_tilde`), so a pattern's `\` is
+  never touched. koil-core reads a `~` back (`Koil::read_location`). Apply and
   undo errors name only paths, so they get `/` too (`describe_paths`); open
   errors can quote a pattern, so they don't. The icon hides the entry's ID
   (`Id.0`, as text) as vim's hidden text, so it yanks, pastes and undoes
@@ -173,7 +173,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   and back to the path field after if it was there, so a setting toggled in
   the field (`g.`, a button) leaves vim in it (insert mode ends, though).
   When the location changes, the field gets a new buffer, with the cursor
-  at the end; otherwise it keeps its text and undo history.
+  at the end; otherwise it keeps its text and undo history. koil reads it
+  as a terminal would (see Patterns in koil-core's CLAUDE.md): a path can
+  be quoted (`"my dir"`, `'my dir'`) or escaped (`my\ dir`, not on Windows),
+  like one pasted from a terminal, and a quoted character is never special
+  in a pattern. A name with quotes in it (`it's`) still opens as it's
+  shown. After the update the field shows the location as Koil does, with
+  no quotes (`showPath`). koil-core also reads a `~` at the start as the
+  home dir, also right after a quote (`"~/x"`, unlike a shell).
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` updates, `Space a` applies, `-`
   opens `..` (`3-`: `../../..`), Tab goes to the other editor (`activate`),
@@ -264,9 +271,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   out of it two). The path field's document has one too
   (`setPathColors`, `isPath`): all of it in `theme.directory`, and while the
   path is read as a regex (`:set regex` and the path changed, or a regex is
-  open), `pathSyntax` gives its parts (`listing::path_syntax`: after the
-  longest existing dir, from the first part with a special character, as koil
-  splits it), drawn over that in `theme.regexColors`.
+  open), `pathSyntax` gives its parts (`listing::path_syntax`: from where
+  `Koil::read_location` says the regex starts, after the longest existing
+  dir, at the first part with a special character that isn't quoted),
+  drawn over that in `theme.regexColors`.
 - **Icon font**: devicons' icons are Nerd Font glyphs in the Private Use
   Area. Koil ships one, JetBrains Mono NL Nerd Font (Nerd Fonts v3.5.1,
   `fonts/`), compiled into the binary (`include_bytes!` in main.rs), so no

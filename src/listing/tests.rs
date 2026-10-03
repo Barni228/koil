@@ -573,14 +573,6 @@ fn test_home() {
     let shown = slashes(home.to_string_lossy().into_owned());
     assert_eq!(with_tilde(&format!(r"{shown}/\w+/")), r"~/\w+/");
     assert_eq!(with_tilde(&format!("{shown}x")), format!("{shown}x"));
-    assert_eq!(expand_home("~"), home);
-    assert_eq!(expand_home("~/a"), home.join("a"));
-    // after a `/`, which on Windows ends the base dir of a pattern after it
-    assert_eq!(
-        expand_home("~/*.rs"),
-        PathBuf::from(format!("{shown}/*.rs"))
-    );
-    assert_eq!(expand_home("/~/a"), PathBuf::from("/~/a"));
 }
 
 /// The parts of `regex` as (text, kind).
@@ -695,4 +687,99 @@ fn test_pasted_path() {
     assert_eq!(koil.current_dir(), dir.join("dir"));
     assert_eq!(koil.pattern(), Some(&Pattern::Glob("*.rs".into())));
     assert_eq!(render(&koil).path, location);
+}
+
+#[test]
+fn test_quoted_path() {
+    let (temp, mut koil) = koil();
+    fs::create_dir(temp.path().join("my dir")).unwrap();
+    fs::write(temp.path().join("my dir/a.rs"), "").unwrap();
+    let settings = koil.settings().clone();
+    let dir = show_path(koil.current_dir());
+    let mut paths = vec![
+        format!(r#""{dir}/my dir""#),
+        format!("'{dir}/my dir'"),
+        format!(r#"{dir}/"my dir""#),
+    ];
+    if cfg!(not(windows)) {
+        paths.push(format!(r"{dir}/my\ dir"));
+    }
+    for path in paths {
+        let mut koil = koil.clone();
+        // a path as a terminal writes it opens, and is then shown as it is
+        let rendered = render(&koil);
+        let (text, hidden) = (&rendered.text, &rendered.hidden);
+        let updated = update(&mut koil, &path, text, hidden, &settings, None);
+        assert!(updated.ok && updated.moved, "{path}: {updated:?}");
+        assert_eq!(render(&koil).path, format!("{dir}/my dir"), "{path}");
+    }
+    // also with a pattern after it
+    let path = format!(r#""{dir}/my dir"/*.rs"#);
+    let rendered = render(&koil);
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    let updated = update(&mut koil, &path, text, hidden, &settings, None);
+    assert!(updated.ok && updated.moved, "{updated:?}");
+    assert_eq!(render(&koil).path, format!("{dir}/my dir/*.rs"));
+    assert_eq!(render(&koil).names, ["a.rs"]);
+}
+
+#[test]
+fn test_quoted_path_syntax() {
+    let (temp, koil) = koil();
+    fs::create_dir(temp.path().join("my dir")).unwrap();
+    let dir = show_path(koil.current_dir());
+    let pattern = |line: &str| -> Vec<String> {
+        let utf16: Vec<u16> = line.encode_utf16().collect();
+        let spans = path_syntax(&koil, line, true).into_iter();
+        let text = |s: &Span| String::from_utf16(&utf16[s.start..s.start + s.length]).unwrap();
+        spans
+            .filter(|s| s.kind == "pattern")
+            .map(|s| text(&s))
+            .collect()
+    };
+    // a quoted name isn't a regex, even with a `.` in it, and if it isn't
+    // there
+    assert_eq!(pattern(&format!(r#"{dir}/"my.dir"/.+"#)), [".+"]);
+    assert_eq!(pattern(&format!("{dir}/my.dir/.+")), ["my.dir/.+"]);
+    assert_eq!(pattern(&format!(r#"{dir}/"my dir"/.+"#)), [".+"]);
+    assert_eq!(pattern(r#""my dir"/.+"#), [".+"]);
+    assert_eq!(pattern(r#""my dir/x"/.+"#), [".+"]);
+    assert_eq!(pattern(r#""my dir"/"x"."#), [r#""x"."#]);
+    assert_eq!(pattern(r#""my dir""#), Vec::<String>::new());
+    // after the home dir, which isn't a regex either
+    if std::env::home_dir().is_some() {
+        assert_eq!(pattern("~/.+"), [".+"]);
+        assert_eq!(pattern(r#""~"/.+"#), [".+"]);
+    }
+    if cfg!(not(windows)) {
+        assert_eq!(pattern(&format!(r"{dir}/my\ dir/.+")), [".+"]);
+        assert_eq!(pattern(r"my\.dir/.+"), [".+"]);
+    }
+}
+
+#[test]
+fn test_home_path() {
+    let (_temp, mut koil) = koil();
+    if std::env::home_dir().is_none() {
+        return;
+    }
+    let settings = koil.settings().clone();
+    // `~` opens the home dir, also in quotes, like a pasted path
+    for path in ["~", r#""~""#, "'~/'"] {
+        let mut koil = koil.clone();
+        let rendered = render(&koil);
+        let (text, hidden) = (&rendered.text, &rendered.hidden);
+        let updated = update(&mut koil, path, text, hidden, &settings, None);
+        assert!(updated.ok && updated.moved, "{path}: {updated:?}");
+        assert_eq!(render(&koil).path, "~", "{path}");
+    }
+    // but not after the start, where it's a name
+    let rendered = render(&koil);
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    let updated = update(&mut koil, "dir/~", text, hidden, &settings, None);
+    assert!(!updated.ok);
+    assert!(
+        updated.message.ends_with("/dir/~` does not exist"),
+        "{updated:?}"
+    );
 }

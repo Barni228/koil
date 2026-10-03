@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#9ab3e523f97f5d52dd2f06a525c5bfaa3b5f4a58"
+source = "git+https://github.com/Barni228/koil-core#eafa456b2f5f065790f433eae9da99739db1e9dc"
 dependencies = [
  "dunce",
  "globset",
@@ -586,12 +586,12 @@ dependencies = [
  "pathfinding",
  "regex",
  "regex-automata",
+ "same-file",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "trash",
  "typed-builder",
- "winapi-util",
 ]
 
 [[package]]

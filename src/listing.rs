@@ -387,7 +387,7 @@ pub fn update(
         }
     }
     if let Some((target, kept)) = kept
-        && let Err(error) = koil.open(expand_home(target))
+        && let Err(error) = koil.open(target)
     {
         *koil = kept;
         let message = describe_open(&error);
@@ -512,11 +512,6 @@ pub fn undo_steps(koil: &Koil) -> Result<Vec<String>, String> {
     Ok(steps.unwrap_or_default().iter().map(step).collect())
 }
 
-/// The characters that make a part of a path a regex (see `Koil::open`).
-const REGEX_SPECIAL: &[char] = &[
-    '.', ',', '*', '+', '?', '(', ')', '[', ']', '{', '}', '|', '^', '$', '\\',
-];
-
 /// A part of the path field to color: the `pattern` (all of it, after the
 /// dirs it's in), then its regex's parts: an `escape`, a `class`, a
 /// `quantifier`, a `group` (or `|`), or an `anchor` (`.`, `,`, `^` and `$`,
@@ -530,19 +525,15 @@ pub struct Span {
 
 /// The parts of the regex in the path field `line`, to color. None unless
 /// the path is read as a regex: it's the regex that's open, or it changed
-/// and `regex` (the setting the next update uses) is on. As `Koil::open`
-/// reads it, the regex starts after the longest part of the path that's a
-/// dir, at the first part with a special character.
+/// and `regex` (the setting the next update uses) is on. The regex starts
+/// where `Koil::open` would read it from (see [`pattern_start`]).
 pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
     let path = line.trim();
     let is_regex = match path == show_location(koil) {
         true => matches!(koil.pattern(), Some(Pattern::Regex(_))),
         false => regex,
     };
-    let Some(start) = is_regex
-        .then(|| pattern_start(koil.current_dir(), path))
-        .flatten()
-    else {
+    let Some(start) = is_regex.then(|| pattern_start(koil, path)).flatten() else {
         return Vec::new();
     };
     let pattern = &path[start..];
@@ -561,32 +552,13 @@ pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
         .collect()
 }
 
-/// Where the regex starts in `path` (as written in the path field, relative
-/// to `dir`), as [`path_syntax`] says. None if it isn't a pattern. As
-/// `Koil::open` reads it, only a `/` (or the root, like `/` or `C:\`) ends a
-/// part, so on Windows a `\` after the dir is the regex's (an escape).
-fn pattern_start(dir: &Path, path: &str) -> Option<usize> {
-    let is_dir = |p: &str| dir.join(expand_home(p)).is_dir();
-    if is_dir(path) {
-        return None;
-    }
-    // After the longest part before a `/` that's a dir, else after the root
-    // (none in a relative path, which starts in `dir`).
-    let root = Path::new(path).ancestors().last();
-    let root = root.map_or(0, |r| r.as_os_str().len());
-    let ends = path.match_indices('/').map(|(i, _)| i);
-    let mut ends = ends.filter(|&i| i >= root);
-    let base = ends.rfind(|&i| is_dir(&path[..i]));
-    let base = base.map_or(root, |i| i + 1);
-    // Then at the first part with a special character.
-    let mut start = base;
-    for part in path[base..].split('/') {
-        if part.contains(REGEX_SPECIAL) {
-            return Some(start);
-        }
-        start += part.len() + 1;
-    }
-    None
+/// Where the regex starts in `path` (the path field, as written), as
+/// `Koil::read_location` says: after the longest part of the path that's a
+/// dir, at the first part with a special character that isn't quoted. None
+/// if it isn't a pattern.
+fn pattern_start(koil: &Koil, path: &str) -> Option<usize> {
+    let start = koil.read_location(path, true).pattern_start?;
+    path.is_char_boundary(start).then_some(start)
 }
 
 /// The parts of `regex` to color, as byte ranges and their kinds (see
@@ -755,21 +727,6 @@ pub fn slashes(path: String) -> String {
 fn home() -> Option<String> {
     let home = std::env::home_dir()?;
     Some(slashes(home.to_string_lossy().into_owned()))
-}
-
-/// `path` with a `~/` at its start (see [`show_path`]) made the home dir,
-/// joined with a `/`: on Windows a `\` before a pattern would make koil
-/// read the home dir as part of it.
-pub fn expand_home(path: &str) -> PathBuf {
-    let rest = match path {
-        "~" => Some(""),
-        _ => path.strip_prefix("~/"),
-    };
-    match (rest, home()) {
-        (Some(""), Some(home)) => home.into(),
-        (Some(rest), Some(home)) => join_shown(home, rest).into(),
-        _ => path.into(),
-    }
 }
 
 /// A warning from opening the dir again, with its paths as Koil shows them.

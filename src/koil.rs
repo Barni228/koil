@@ -146,7 +146,7 @@ impl qobject::Koil {
         let koil = &mut rust.koil;
         // This reopens what was open, if anything, which is left right away.
         let _ = koil.set_settings(settings);
-        let outcome = match koil.open(listing::expand_home(&location.to_string())) {
+        let outcome = match koil.open(location.to_string()) {
             Ok(()) => Outcome {
                 ok: true,
                 message: String::new(),
