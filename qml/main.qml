@@ -121,8 +121,10 @@ ApplicationWindow {
     // the cursor stays on its line. Otherwise it starts over: undo mustn't
     // bring back another dir's entries, which Koil would read as this one's.
     // The cursor goes to the entry `from` (the dir `-` came from), or else
-    // to the first one. Vim stays in the path field if it was there.
-    function showListing(moved, from) {
+    // to the first one. With `keep` (see listingSpot), it goes back to
+    // where it was, on its entry's line if that's still there, and the
+    // view stays. Vim stays in the path field if it was there.
+    function showListing(moved, from, keep) {
         const r = JSON.parse(koil.render());
         iconColors = Object.assign({}, iconColors, r.colors);
         pendingIconColor = r.pendingColor;
@@ -138,8 +140,14 @@ ApplicationWindow {
         } else {
             listing = true;
             load(r.text, r.hidden, "");
-            line = Math.max(0, from ? r.names.indexOf(from) : 0);
-            column = 0; // which jumpTo puts after the icon and two spaces
+            const i = from ? r.names.indexOf(from) : -1;
+            line = i >= 0 ? i : keep ? keep.line : 0;
+            column = keep ? keep.column : 0; // 0: jumpTo puts it after the icon and two spaces
+            if (keep) {
+                // Before jumpTo, which then scrolls only if the line is out of view.
+                const f = editorView.flickable;
+                f.contentY = Math.min(keep.contentY, Math.max(0, f.contentHeight - f.height));
+            }
         }
         const t = editorView.textArea.text;
         const ls = Txt.lineToPos(t, Math.min(line + 1, Txt.countLines(t)));
@@ -382,8 +390,9 @@ ApplicationWindow {
         }
         const what = actions.length === 1 ? "this change" : "these " + actions.length + " changes";
         confirmDialog.ask("Apply " + what + (orQuit ? " before quitting?" : "?"), actions.join("\n"), () => {
+            const spot = listingSpot();
             const r = JSON.parse(koil.apply());
-            showListing(true, "");
+            showListing(true, spot.name, spot);
             report(r);
             if (r.ok && quit)
                 Qt.quit();
@@ -406,10 +415,26 @@ ApplicationWindow {
             return;
         vim.showMessage("");
         confirmDialog.ask("Undo the last apply?", r.steps.join("\n"), () => {
+            const spot = listingSpot();
             const u = JSON.parse(koil.undo());
-            showListing(true, "");
+            showListing(true, spot.name, spot);
             report(u);
         });
+    }
+
+    // Where the cursor is in the listing (its line's name, line and column)
+    // and how far it's scrolled, for showListing to keep after an apply or
+    // its undo, which show the listing from scratch.
+    function listingSpot() {
+        const t = editorView.textArea.text, p = vim.cursor;
+        const ls = Txt.lineStart(t, p), text = t.slice(ls, Txt.lineEnd(t, ls));
+        const gap = text.indexOf("  ");
+        return {
+            name: gap < 0 ? "" : text.slice(gap + 2).trim(),
+            line: Txt.lineOf(t, p) - 1,
+            column: Txt.column(t, p),
+            contentY: editorView.flickable.contentY
+        };
     }
 
     // Shows what apply or undo did, `{ ok, message }`.
@@ -638,17 +663,17 @@ ApplicationWindow {
         // In the path field, Shift+Enter updates like Enter but stays
         // there; in the listing it's vim's Enter.
         commandKeys: root.listing ? Object.assign({
-                "  ": "update",
-                " a": "apply",
-                "-": "parent",
-                "<CR>": root.activeView === pathView ? "openPath" : "open",
-                "<Tab>": "switch",
-                "g.": "hidden",
-                "gi": "gitignore",
-                "gr": "regex"
-            }, root.activeView === pathView ? {
-                "<S-CR>": "update"
-            } : {}) : root.filePath ? ({
+            "  ": "update",
+            " a": "apply",
+            "-": "parent",
+            "<CR>": root.activeView === pathView ? "openPath" : "open",
+            "<Tab>": "switch",
+            "g.": "hidden",
+            "gi": "gitignore",
+            "gr": "regex"
+        }, root.activeView === pathView ? {
+            "<S-CR>": "update"
+        } : {}) : root.filePath ? ({
                 "-": "back"
             }) : ({})
 

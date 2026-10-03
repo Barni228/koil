@@ -259,7 +259,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - **Apply and undo**: `Space a`, `:w`, File > Save (renamed Apply Changes…)
   update, then `ConfirmDialog` lists `listing::actions` (paths relative to
   the open dir); yes applies, then vim starts over (koil refreshed: new IDs
-  for renamed paths). `u` or Cmd+Z with nothing left to undo in vim emits
+  for renamed paths), with the cursor where it was (`listingSpot`: on its
+  entry's line, else the same line) and the view as it was; so does undoing
+  an apply. `u` or Cmd+Z with nothing left to undo in vim emits
   `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
   buffer back past an update) and asks to run koil's undo, listing its
   steps; koil refuses while changes are pending. Not from the path field,
