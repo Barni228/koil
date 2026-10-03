@@ -347,11 +347,8 @@ ApplicationWindow {
     // dir's, with the cursor on its entry. Unsaved changes are saved (or
     // dropped) first, if the user says so.
     function leaveFile(force) {
-        if (modified && !force) {
-            confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => {
-                if (doc.saveFile(filePath, editorView.textArea.text))
-                    leaveFile(true);
-            }, () => leaveFile(true));
+        if (!force) {
+            askToSave(() => leaveFile(true));
             return;
         }
         if (!openedFrom) {
@@ -458,6 +455,37 @@ ApplicationWindow {
 
     function openFile() {
         openDialog.open();
+    }
+
+    // Runs `open`, which shows something else in place of the file, once
+    // the file's unsaved changes are saved or dropped, as the user says
+    // (Cancel keeps the file open). At once in the listing, whose edits
+    // Koil keeps.
+    function askToSave(open) {
+        if (listing || !modified) {
+            open();
+            return;
+        }
+        confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => {
+            if (!doc.saveFile(filePath, editorView.textArea.text))
+                return;
+            // Saved, even if what's opened next can't be.
+            modified = false;
+            open();
+        }, open);
+    }
+
+    // Opens a file or dir dropped on the window, as File > Open or Open
+    // Folder would.
+    function openDropped(path) {
+        askToSave(() => {
+            if (doc.isFile(path)) {
+                openedFrom = "";
+                readFile(path);
+            } else {
+                openFolder(path);
+            }
+        });
     }
 
     // Saves the file, asking for a path if it has none, then quits if
@@ -778,6 +806,64 @@ ApplicationWindow {
         }
     }
 
+    // A file or dir dragged over the window: dropped, it opens (the first
+    // one, if there are several; see openDropped). In the overlay, so the
+    // status line takes it too. Not while a dialog is open.
+    DropArea {
+        id: dropArea
+
+        // The path of what the drag would open, and its name.
+        property string path: ""
+        readonly property string name: path.split(/[\\/]/).filter(part => part).pop() || path
+
+        parent: root.Overlay.overlay
+        anchors.fill: parent
+        keys: ["text/uri-list"]
+        enabled: !confirmDialog.opened && !help.opened && !root.askingConflicts
+
+        onEntered: event => {
+            dropArea.path = "";
+            for (const url of event.urls) {
+                dropArea.path = doc.urlToPath(url);
+                if (dropArea.path)
+                    break;
+            }
+            // Something else, like a web link.
+            event.accepted = dropArea.path !== "";
+        }
+        onDropped: event => {
+            event.accept(Qt.CopyAction);
+            // Later, so the app the drag came from isn't kept waiting while
+            // a long file or listing opens.
+            Qt.callLater(root.openDropped, dropArea.path);
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            visible: dropArea.containsDrag
+            color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.08)
+            border.color: theme.accent
+            border.width: 2 * theme.zoom
+
+            Panel {
+                anchors.centerIn: parent
+                width: dropLabel.implicitWidth
+                height: dropLabel.implicitHeight
+                theme: theme
+
+                Text {
+                    id: dropLabel
+
+                    padding: 10 * theme.zoom
+                    text: qsTr("Open “%1”").arg(dropArea.name)
+                    font.pixelSize: Math.round(13 * theme.zoom)
+                    color: theme.text
+                    textFormat: Text.PlainText
+                }
+            }
+        }
+    }
+
     HelpPanel {
         id: help
 
@@ -877,15 +963,21 @@ ApplicationWindow {
 
         fileMode: FileDialog.OpenFile
         onAccepted: {
-            root.openedFrom = "";
-            root.readFile(doc.urlToPath(selectedFile));
+            const path = doc.urlToPath(selectedFile);
+            root.askToSave(() => {
+                root.openedFrom = "";
+                root.readFile(path);
+            });
         }
     }
 
     FolderDialog {
         id: folderDialog
 
-        onAccepted: root.openFolder(doc.urlToPath(selectedFolder))
+        onAccepted: {
+            const path = doc.urlToPath(selectedFolder);
+            root.askToSave(() => root.openFolder(path));
+        }
     }
 
     FileDialog {

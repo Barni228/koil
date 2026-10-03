@@ -296,13 +296,19 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   plain editor: no colors or problems, only `-` of `commandKeys`, and `:w`
   saves. `-` goes back to what's still open in koil, on `openedFrom` (the
   entry Enter was on), or for a file opened otherwise, opens its dir. Unsaved
-  changes are asked about first (save, drop, or stay). While the listing has
+  changes are asked about first (save, drop, or stay: `askToSave`), there
+  and before File > Open, Open Folder or a drop opens something else
+  (after the pick, so a dialog cancelled asks nothing). While the listing has
   pending changes, every quit command in a file (`quitApp`) goes back to the
   listing instead, once the file is saved or dropped as the command says
   (`:q` still fails on its unsaved changes); `:confirm q` and `ZZ` then ask
   about applying them. `:qa!` and Cmd+Q still quit. File > Open Folder
   (Cmd+Shift+O) and a dir or pattern on the command line list it; with no
-  argument Koil lists the home dir. A file that can't be read (one that
+  argument Koil lists the home dir. A file or dir dropped on the window
+  opens as those would (`openDropped`; the first local one of several):
+  `dropArea` is in the overlay, so the status line takes drops too, and
+  opens it with `Qt.callLater`, so the app it came from isn't kept
+  waiting while a long file or listing opens. A file that can't be read (one that
   isn't UTF-8, like a picture) isn't opened, and the status line says why,
   as for a save that fails (no `MessageDialog`, whose macOS style can't
   be themed), naming only the file, so a long path doesn't push why out
