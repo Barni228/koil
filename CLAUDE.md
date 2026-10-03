@@ -394,9 +394,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   bridge allows no `#[allow(dead_code)]` for a signal only C++ uses), and
   main.qml opens it as a dropped file (`openDropped`). A cold start shows
   the home dir first, as the event comes once the event loop runs. On
-  Windows, the installer adds Koil to every file's Open With list
-  (`*\OpenWithList`) and registers it under `Applications\koil.exe`, which
-  gives it the path on the command line, without taking any extension.
+  Windows, the installer does as vim-edit's: a `Koil.Text` ProgID, in the
+  `OpenWithProgids` of a list of text and source code extensions (`Exts` in
+  `installer.iss`; what the Open With menu shows), and those extensions as
+  `Applications\koil.exe`'s `SupportedTypes` (so "Choose another app" offers
+  it only for them). Both give it the path on the command line, without
+  taking any extension. Earlier versions put it in every file's Open With
+  list (`*\OpenWithList`, which only "Choose another app" shows), which the
+  installer now deletes.
 - **App icon**: macOS draws icons as they are, so `Koil.icns` shrinks
   `icon.png`'s rounded square to Apple's grid (824 of 1024 pixels);
   Windows' fills its square. Qt gives windows the exe's `IDI_ICON1` on
