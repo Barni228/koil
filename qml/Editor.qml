@@ -349,7 +349,7 @@ Item {
         width: shape === "bar" ? 2 : charMetrics.advanceWidth
         height: shape === "underline" ? Math.max(2, Math.round(cell.height / 8)) : cell.height
         color: editor.color
-        visible: shown && (shape !== "bar" || editor.activeFocus && editor.blinkOn)
+        visible: shown && (shape !== "bar" || editor.activeFocus)
         opacity: editor.activeFocus ? 1 : 0.4
 
         TextMetrics {
@@ -394,8 +394,6 @@ Item {
             // Bumped on every change to the text, for things that must
             // refresh after one.
             property int revision: 0
-            // Whether the insert-mode bars are in the visible half of a blink.
-            property bool blinkOn: true
 
             font.family: view.vim.fontFamily
             font.pointSize: view.vim.fontSize
@@ -419,7 +417,6 @@ Item {
             // moves before `text` has the new text, which vim would read:
             // vim starts over after.
             onCursorPositionChanged: {
-                blinkOn = true;
                 if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
             }
@@ -482,13 +479,13 @@ Item {
                 onHoveredChanged: hover.pointerAt(hovered ? point.position : null)
             }
 
-            // Insert mode: a blinking bar. The editor puts the delegate at its
+            // Insert mode: a bar, which doesn't blink. The editor puts the delegate at its
             // cursor rectangle; the bar itself fills the line.
             cursorDelegate: Item {
                 id: bar
 
                 width: 2
-                visible: view.vim.mode === "insert" && editor.activeFocus && editor.blinkOn
+                visible: view.vim.mode === "insert" && editor.activeFocus
 
                 Rectangle {
                     y: view.cellAt(editor.cursorPosition).y - bar.y
@@ -496,15 +493,6 @@ Item {
                     height: view.lineHeight
                     color: editor.color
                 }
-            }
-
-            // The bars blink together: the one above and the extra cursors'.
-            Timer {
-                interval: 530
-                repeat: true
-                running: view.vim.mode === "insert" && editor.activeFocus
-                onRunningChanged: editor.blinkOn = true
-                onTriggered: editor.blinkOn = !editor.blinkOn
             }
 
             // Alt+click adds a cursor (or removes one). A plain click goes

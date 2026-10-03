@@ -543,8 +543,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   moves them too (`moveCursors`; each keeps its own `col` for j/k, and
   `motion(..., quiet)` doesn't scroll), and `execute` runs operators and
   `everyCursorActions` once per cursor (`atEveryCursor`), swapping in each
-  extra cursor's own `registers`. They're drawn like the main one, blinking
-  with the real bar via `editor.blinkOn`, but only those in view
+  extra cursor's own `registers`. They're drawn like the main one (no cursor
+  blinks), but only those in view
   (`visibleCursors`): drawing a block insert's 100,000 took minutes a key.
 - **Hidden text**: an icon (any one character; in the listing, a file's
   icon, hiding its ID) can hide some text. The document holds the plain
