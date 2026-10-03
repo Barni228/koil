@@ -137,6 +137,9 @@ QtObject {
     // motions). "." does too, through the command it repeats.
     readonly property var everyCursorActions: ["i", "a", "I", "A", "gI", "o", "O", "x", "<Del>", "X", "s",
         "S", "C", "D", "Y", "p", "P", "J", "gJ", "~", "r", "R", "<C-a>", "<C-x>"]
+    // The registers vim fills itself, and the actions that write a register.
+    readonly property var readOnlyRegisters: [".", ":", "/", "%"]
+    readonly property var writingActions: ["d", "c", "y", "x", "<Del>", "X", "s", "S", "C", "D", "Y"]
     readonly property var visualModes: ({ "v": "visual", "V": "visualLine", "<C-v>": "visualBlock" })
     // Marks the clipboard data this Koil writes. Another Koil's hidden texts
     // (IDs) mean other things, so its icons are pasted without them.
@@ -149,6 +152,10 @@ QtObject {
 
     property var keys: []
     property var registers: ({})
+    // The text the last insert typed (the ". register).
+    property string lastInsert: ""
+    // The file or listing being edited (the "% register).
+    property string fileName: ""
     property var undoStack: []
     property var redoStack: []
     property var change: null
@@ -845,7 +852,7 @@ QtObject {
         if (keys[0] === "\"") {
             if (keys.length < 2)
                 return more;
-            if (!/^[a-zA-Z0-9"+*_-]$/.test(keys[1]))
+            if (!/^[a-zA-Z0-9"+*_\-.:\/%]$/.test(keys[1]))
                 return bad;
             cmd.reg = keys[1];
             i = 2;
@@ -1025,6 +1032,12 @@ QtObject {
             outside(() => keyCommand(cmd.command, cmd.count));
             return;
         }
+        // ". ": "/ and "% can only be pasted.
+        if (readOnlyRegisters.includes(cmd.reg) && (cmd.op || writingActions.includes(cmd.action)
+                || isVisual && cmd.action === "R")) {
+            typeahead = [];
+            return;
+        }
         const changing = isChange(cmd);
         if (changing) {
             beginChange();
@@ -1141,6 +1154,8 @@ QtObject {
                 range = { start: Txt.lineStart(t, a), end: Math.min(Txt.lineEnd(t, b) + 1, n), linewise: true };
             else
                 range = { start: a, end: r.type === "inclusive" ? Txt.charEnd(t, b) : Math.min(b, n), linewise: false };
+            // Deleting with these always fills "1, even within a line, as in Vi.
+            range.regOne = ["%", "n", "N", "{", "}"].includes(cmd.motion.name);
         }
         applyOperator(cmd.op, range, cmd.reg, count,
             range.linewise ? Math.min(cursor, target) : range.start);
@@ -1164,7 +1179,7 @@ QtObject {
                 showMessage(lines + " fewer lines");
             break;
         case "c": {
-            yank(t, range, reg);
+            yank(t, range, reg, true);
             let s = range.start, e = range.end;
             if (range.linewise) {
                 if (e > s && t[e - 1] === "\n")
@@ -1540,6 +1555,8 @@ QtObject {
     function leaveInsert(repeat) {
         const s = insertSession;
         insertSession = null;
+        if (s)
+            lastInsert = insertedText(s.keys);
         if (s && !s.broken) {
             if (s.dot)
                 s.dot.insertKeys = s.keys.slice();
@@ -1604,6 +1621,21 @@ QtObject {
             }));
         }
         done();
+    }
+
+    // The text the keys of an insert typed, with what its Backspaces took
+    // back from it (not from the text before the insert) gone.
+    function insertedText(keys) {
+        let s = "";
+        for (const k of keys) {
+            if (k === "<BS>")
+                s = s.slice(0, s ? Txt.charStart(s, s.length - 1) : 0);
+            else if (k === "<D-BS>")
+                s = s.slice(0, s.lastIndexOf("\n") + 1);
+            else if (k === "<CR>" || k === "<Tab>" || !isSpecial(k))
+                s += k === "<CR>" ? "\n" : typedText(k);
+        }
+        return s;
     }
 
     // The text an insert-mode key types (one that isn't <BS> or <Del>).
@@ -2697,8 +2729,10 @@ QtObject {
 
     // `entries` are the hidden-text entries for `text`, if it has any. A
     // blockwise register holds a visual block, one line of it per line.
-    function setRegister(name, text, linewise, isYank, entries, blockwise) {
-        if (name === "_")
+    // With no name, a yank goes in "0, and a delete of lines (or with a
+    // `regOne` motion) in "1, the older ones moving up to "9, else in "-.
+    function setRegister(name, text, linewise, isYank, entries, blockwise, regOne) {
+        if (name === "_" || readOnlyRegisters.includes(name))
             return;
         entries = entries || [];
         blockwise = !!blockwise;
@@ -2727,6 +2761,15 @@ QtObject {
             registers[name] = entry;
         } else if (isYank) {
             registers["0"] = entry;
+        } else {
+            const small = !linewise && !text.includes("\n");
+            if (!small || regOne) {
+                for (let i = 9; i > 1; i--)
+                    registers[i] = registers[i - 1];
+                registers["1"] = entry;
+            }
+            if (small)
+                registers["-"] = entry;
         }
         registers["\""] = entry;
     }
@@ -2746,14 +2789,22 @@ QtObject {
             const s = clipboard.clipboardText();
             return s ? { text: s, linewise: s.endsWith("\n"), hidden: [] } : null;
         }
+        if (readOnlyRegisters.includes(name)) {
+            const commands = history[":"];
+            const s = name === "." ? lastInsert : name === "/" ? (lastSearch ? lastSearch.pattern : "")
+                : name === ":" ? (commands.length ? commands[commands.length - 1] : "") : fileName;
+            return s ? { text: s, linewise: false, hidden: [] } : null;
+        }
         return registers[(name || "\"").toLowerCase()] || null;
     }
 
-    function yank(t, range, reg) {
+    // `deleting` for the text a change deletes.
+    function yank(t, range, reg, deleting) {
         let text = t.slice(range.start, range.end);
         if (range.linewise && !text.endsWith("\n"))
             text += "\n";
-        setRegister(reg, text, range.linewise, true, hiddenIn(hidden, range.start, range.end));
+        setRegister(reg, text, range.linewise, !deleting, hiddenIn(hidden, range.start, range.end), false,
+            range.regOne);
     }
 
     function deleteRange(t, range, reg) {
@@ -2765,7 +2816,8 @@ QtObject {
             if (s > 0)
                 s--;
         }
-        setRegister(reg, text, range.linewise, false, hiddenIn(hidden, range.start, range.end));
+        setRegister(reg, text, range.linewise, false, hiddenIn(hidden, range.start, range.end), false,
+            range.regOne);
         replaceRange(s, range.end, "");
         const nt = bufferText();
         if (range.linewise)

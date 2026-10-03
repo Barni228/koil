@@ -647,6 +647,7 @@ ApplicationWindow {
         completer: root.listing && root.activeView === pathView ? (line, cursor) => JSON.parse(koil.complete(line, cursor)) : null
         linePrefixes: root.listing && root.activeView === editorView
         clipboard: system
+        fileName: root.listing ? root.location : root.filePath
         lineHeight: editorView.lineHeight
         charWidth: editorView.charWidth
         number: settings.number

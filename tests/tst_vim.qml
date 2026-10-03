@@ -1167,6 +1167,34 @@ TestCase {
         compare(vim.getRegister("a").hidden.length, 2);
     }
 
+    // "0 keeps the last yank, deletes and changes go in "1 to "9 (lines)
+    // or "- (within a line), and ". ": "/ are vim's own.
+    function test_specialRegisters() {
+        load("one\ntwo\nthree");
+        keys("yyjddx\"0p");
+        compare(editor.text, "one\nhree\none");
+        compare(vim.getRegister("1").text, "two\n");
+        compare(vim.getRegister("-").text, "t");
+        keys("ggddcwx<Esc>");
+        compare(vim.getRegister("0").text, "one\n");
+        compare(vim.getRegister("1").text, "one\n");
+        compare(vim.getRegister("2").text, "two\n");
+        compare(vim.getRegister("-").text, "hree");
+        compare(vim.getRegister(".").text, "x");
+        keys("\"_dd");
+        compare(vim.getRegister("\"").text, "hree");
+        load("a b");
+        keys("Afoo<BS>x<Esc>/b<CR>:noh<CR>");
+        compare(vim.getRegister(".").text, "fox");
+        compare(vim.getRegister("/").text, "b");
+        compare(vim.getRegister(":").text, "noh");
+        keys("\".P");
+        compare(editor.text, "a foxbfox");
+        // They can't be written.
+        keys("\".dd");
+        compare(editor.text, "a foxbfox");
+    }
+
     // Other apps get the icons; Koil gets the hidden text back.
     function test_clipboard() {
         load("M  a");

@@ -458,7 +458,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `setCursor`, and typing, a `Qt.callLater`), and at a name's start in the
   listing the whole prefix, so `0` scrolls all the way left. Vim keeps its own undo stack (diffs per change), so native
   undo (Cmd+Z) is routed to it. Only the `"+`/`"*` registers use the system
-  clipboard. The `TextArea` does nothing on Cmd+Backspace, so on macOS
+  clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
+  deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
+  `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
+  are read from vim's state and can't be written. The `TextArea` does nothing on Cmd+Backspace, so on macOS
   it's vim's `<D-BS>`: typed by vim in insert mode (`typedEdit`: back to
   the line's start, the name's in the listing, and there Backspace),
   `Ctrl-U` in the command line, nothing in the other modes.

@@ -169,7 +169,8 @@ Popup {
         },
         {
             title: "Registers and macros",
-            tags: ["registers", "register", "reg", "clipboard", "\"", "\"+", "+", "*", "macros", "macro",
+            tags: ["registers", "register", "reg", "clipboard", "\"", "\"+", "+", "*", "\"0", "\"_", "\"-",
+                "\"1", "\".", "\":", "\"/", "\"%", "macros", "macro",
                 "q", "@", "@@", "record", "recording", "yank", "paste", "p", "y"],
             rows: [
                 ["\"+  \"*", "The system clipboard, e.g. `\"+yy` or `\"+p`. Other registers (and "
@@ -179,6 +180,10 @@ Popup {
                 ["\"a … \"z", "Named registers, e.g. `\"ayw`. `\"A` appends to `a`."],
                 ["\"0  \"_", "The last yank; and the black hole, e.g. `\"_dd` deletes without "
                     + "changing any register."],
+                ["\"1 … \"9  \"-", "Deleted or changed lines, the newest in `1`; text deleted "
+                    + "within a line."],
+                ["\".  \":  \"/  \"%", "The last text typed, command line and search, and the "
+                    + "file (or dir) open. They can only be pasted."],
                 ["qa … q", "Record the keys you type into register `a`. `qA` appends to it."],
                 ["@a  3@a  @@", "Run the macro in `a`, three times, or the last one run again. "
                     + "`u` undoes all of a run. A long one shows how far it is; Esc or Ctrl-C stops it "
