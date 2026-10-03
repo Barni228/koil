@@ -103,14 +103,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   takes as `path`. Users write only `/`, also on Windows: koil opens a
   plain path with `\` (a pasted one), but in a pattern `\` is an escape, and
   a pattern's base dir ends only at a `/`. So every path Koil shows has `/`
-  (`listing::slashes`: `show_path`, the confirmations, the hover, messages;
-  koil gives names with `/` itself), and once a pasted `C:\src` opens, the
-  field shows `C:/src`, after which a pattern can be typed. `show_location`
-  writes the dir, a `/` and the pattern as it is (`join_shown`), and `~` is
-  only written at the start, as text (`with_tilde`), so a pattern's `\` is
-  never touched. koil-core reads a `~` back (`Koil::read_location`). Apply and
-  undo errors name only paths, so they get `/` too (`describe_paths`); open
-  errors can quote a pattern, so they don't. The icon hides the entry's ID
+  (`koil_core::with_slashes`: `show_path`, the confirmations, the hover;
+  koil gives names and the paths in its messages with `/` itself, and only
+  those, so a pattern an error quotes keeps its `\`), and once a pasted
+  `C:\src` opens, the field shows `C:/src`, after which a pattern can be
+  typed. `show_location` is `Koil::location` (the dir, a `/` and the pattern
+  as it is) with `~` written only at the start, as text (`with_tilde`), so a
+  pattern's `\` is never touched. koil-core reads a `~` back
+  (`Koil::read_location`). The icon hides the entry's ID
   (`Id.0`, as text) as vim's hidden text, so it yanks, pastes and undoes
   with its line. `parse` reads a
   line as an existing entry if its first character is an icon with a hidden
@@ -204,14 +204,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   the Enter/`-` target, else the path field's path if it changed (like
   koil-cli, where it's the first line). The field is read with the listing
   wherever the update comes from, so a path typed there and left without
-  Enter is opened by the next update. If opening fails, `listing::update`
-  puts koil back as it was before it (a clone), since the listing isn't
-  shown again: koil keeping the new settings would read the shown listing
-  as missing what they show (`g.` with a bad path, then fixing it, deleted
-  every hidden entry).
+  Enter is opened by the next update. koil-core does all of it as one step
+  (`Koil::update_and_open`), so if opening fails, koil stays as it was, since
+  the listing isn't shown again: koil keeping the new settings would read the
+  shown listing as missing what they show (`g.` with a bad path, then fixing
+  it, deleted every hidden entry).
   The listing is then shown again. If what's shown stayed the same (same
-  dir and pattern, compared as `Pattern`s, since paths are equal without a
-  trailing `/`; same hidden/gitignore; `moved` is false), the new text replaces
+  dir and pattern, same hidden/gitignore: koil's `Updated::moved` is
+  false), the new text replaces
   the old as one vim change (`vim.replaceText`, which changes only the span
   that differs), so `u` can take it back: Koil reads the buffer as a whole
   each time, so undoing to an earlier listing of the same view is safe.
@@ -252,7 +252,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   and `/`-ending names (`theme.directory`). It's text-based, so it follows
   edits. A pending entry's icon (one applying would change: new, but not
   `../`, or at a path that isn't its ID's on disk, so renamed, copied or
-  moved here; `listing::pending_lines`) is pure white in a dark theme and
+  moved here; `listing::pending_lines`, from `Koil::is_pending`) is pure white in a dark theme and
   pure black in a light one (`PENDING_COLOR`, sent as `pendingColor`), and
   `listing::apart` moves devicons' colors that come within `APART` of those
   (its white icons, like `vercel.json`'s) a fifth away. main.qml finds the

@@ -237,7 +237,7 @@ impl qobject::Koil {
             },
             Err(error) => Outcome {
                 ok: false,
-                message: listing::describe_paths(&error),
+                message: listing::describe(&error),
             },
         };
         to_json(&outcome)
@@ -259,7 +259,7 @@ impl qobject::Koil {
             },
             Err(error) => Outcome {
                 ok: false,
-                message: listing::describe_paths(&error),
+                message: listing::describe(&error),
             },
         };
         to_json(&outcome)

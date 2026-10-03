@@ -14,7 +14,7 @@ use devicons::Theme;
 use koil_core::apply::Undo;
 use koil_core::{
     Action, Entry, EntryErrorKind, EntryWarning, Id, Koil, OpenError, Pattern, Settings,
-    UpdateError, Warning,
+    UpdateError, UpdateOpenError, Warning, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -290,19 +290,14 @@ fn problem(parsed: &Parsed, entry: usize, severity: Severity, message: String) -
 }
 
 /// The lines (from 0) of entries that aren't on disk as the listing shows
-/// them yet, which applying would change: new ones (but `../`), and ones
-/// whose path isn't their ID's (renamed, copied, or moved here from another
-/// dir). Their icons get `PENDING_COLOR`.
+/// them yet, which applying would change (`Koil::is_pending`): new ones (but
+/// `../`), and ones whose path isn't their ID's (renamed, copied, or moved
+/// here from another dir). Their icons get `PENDING_COLOR`.
 pub fn pending_lines(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
     let parsed = parse(text, hidden);
-    let dir = koil.current_dir();
-    let pending = |entry: &Entry| match entry.id {
-        None => !entry.is_parent(),
-        Some(id) => koil.path_of(id) != Some(dir.join(&entry.name).as_path()),
-    };
     let entries = parsed.entries.iter().zip(&parsed.spots);
     entries
-        .filter(|(entry, _)| pending(entry))
+        .filter(|(entry, _)| koil.is_pending(entry))
         .map(|(_, &(line, _))| line)
         .collect()
 }
@@ -328,11 +323,11 @@ pub struct Updated {
     pub message: String,
 }
 
-/// Reads the edited listing into `koil` (see `Koil::update`), then uses
-/// `settings`, and then opens `open` (a dir, relative to the open one) if
-/// given, else `path` (the path field, as written) if it changed. Like
-/// koil-cli, which reads the entries with the settings they were listed
-/// with. If anything fails, `koil` is left as it was.
+/// Reads the edited listing into `koil`, then uses `settings`, and then opens
+/// `open` (a dir, relative to the open one) if given, else `path` (the path
+/// field, as written) if it changed, all in `Koil::update_and_open`, which
+/// reads the entries with the settings they were listed with. If anything
+/// fails, `koil` is left as it was.
 pub fn update(
     koil: &mut Koil,
     path: &str,
@@ -356,19 +351,12 @@ pub fn update(
         let message = "Write the path to open".to_string();
         return failed(Vec::new(), vec![path_problem(path, &message)], message);
     }
-    let before = view(koil);
     let before_dir = koil.current_dir().to_path_buf();
-    let shown = show_location(koil);
-    let target = open.or((location != shown).then_some(location));
-    // Opening it can fail after the listing is read and the settings are
-    // used: then koil is put back as it was. Left with the new settings, it
-    // would take what the editor shows as listed with them, so the next
-    // update would delete every hidden entry the editor doesn't show (after
-    // `:set hidden` with a path that isn't there).
-    let kept = target.map(|target| (target, koil.clone()));
-    let problems = match koil.update(&parsed.entries) {
-        Ok(warnings) => warning_problems(&parsed, &warnings),
-        Err(error) => {
+    let target = open.or((location != show_location(koil)).then_some(location));
+    let entries = &parsed.entries;
+    let updated = match koil.update_and_open(entries, settings.clone(), target.map(Path::new)) {
+        Ok(updated) => updated,
+        Err(UpdateOpenError::Update(error)) => {
             let problems = update_problems(&parsed, &error);
             let count = error.errors.len();
             let message = match count {
@@ -377,36 +365,28 @@ pub fn update(
             };
             return failed(problems, Vec::new(), message);
         }
-    };
-
-    let mut messages = Vec::new();
-    if koil.settings() != settings {
-        match koil.set_settings(settings.clone()) {
-            Ok(warning) => messages.extend(warning.as_ref().map(describe_warning)),
-            Err(error) => messages.push(describe(&error)),
+        Err(UpdateOpenError::Open(error)) => {
+            let message = describe_open(&error);
+            // The path field's, unless the dir was Enter's or `-`'s.
+            let path_problems = match (open, target) {
+                (None, Some(_)) => vec![path_problem(path, &message)],
+                _ => Vec::new(),
+            };
+            return failed(Vec::new(), path_problems, message);
         }
-    }
-    if let Some((target, kept)) = kept
-        && let Err(error) = koil.open(target)
-    {
-        *koil = kept;
-        let message = describe_open(&error);
-        let path_problems = match open {
-            Some(_) => Vec::new(),
-            None => vec![path_problem(path, &message)],
-        };
-        return failed(problems, path_problems, message);
-    }
+    };
     let from = before_dir.strip_prefix(koil.current_dir()).ok();
     let from = from.and_then(|rest| rest.components().next());
     Updated {
         ok: true,
-        problems,
-        moved: view(koil) != before,
+        problems: warning_problems(&parsed, &updated.warnings),
+        moved: updated.moved,
         from: from
             .map(|dir| format!("{}/", dir.as_os_str().to_string_lossy()))
             .unwrap_or_default(),
-        message: messages.join("; "),
+        message: (updated.warning.as_ref())
+            .map(describe_warning)
+            .unwrap_or_default(),
         ..Updated::default()
     }
 }
@@ -420,20 +400,6 @@ fn path_problem(path: &str, message: &str) -> Problem {
         severity: Severity::Error,
         message: message.to_string(),
     }
-}
-
-/// What decides which entries the listing shows: what's open, and the
-/// settings that hide some (`regex` only changes how a path is read).
-fn view(koil: &Koil) -> (PathBuf, Option<Pattern>, bool, bool) {
-    let settings = koil.settings();
-    (
-        koil.current_dir().to_path_buf(),
-        // Not in `location()`: paths are equal without their trailing `/`,
-        // and a glob and a regex can be written the same.
-        koil.pattern().cloned(),
-        settings.show_hidden,
-        settings.respect_gitignore,
-    )
 }
 
 /// What Enter on a line of the listing opens (see [`target_on_line`]).
@@ -508,7 +474,7 @@ pub fn undo_steps(koil: &Koil) -> Result<Vec<String>, String> {
         Undo::Restore(t) => format!("RESTORE {}", path(&t.original)),
         Undo::Rename(s, d) => format!("MOVE    {} -> {}", dir(s), path(d)),
     };
-    let steps = koil.undo_steps().map_err(|e| describe_paths(&e))?;
+    let steps = koil.undo_steps().map_err(|e| describe(&e))?;
     Ok(steps.unwrap_or_default().iter().map(step).collect())
 }
 
@@ -665,29 +631,27 @@ fn repetition_end(chars: &[(usize, char)], i: usize) -> Option<usize> {
 }
 
 /// `path` as the confirmations show it: relative to the open dir if it's in
-/// it, else as [`show_path`] does.
+/// it (`Koil::relative`), else as [`show_path`] does.
 fn relative(koil: &Koil, path: &Path) -> String {
-    match path.strip_prefix(koil.current_dir()) {
-        Ok(rest) if !rest.as_os_str().is_empty() => slashes(rest.display().to_string()),
-        _ => show_path(path),
+    match koil.relative(path) {
+        Some(rest) => rest.to_string_lossy().into_owned(),
+        None => show_path(path),
     }
 }
 
-/// What `koil` has open, as the path field shows it: the dir (see
-/// [`show_path`]), then a `/` and the pattern as written, if there is one.
+/// What `koil` has open, as the path field shows it: `Koil::location` (the
+/// dir, then a `/` and the pattern as written, if there is one), with `~`
+/// for the home dir.
 pub fn show_location(koil: &Koil) -> String {
-    let dir = show_path(koil.current_dir());
-    match koil.pattern() {
-        Some(pattern) => join_shown(dir, pattern.as_str()),
-        None => dir,
-    }
+    with_tilde(&koil.location().to_string_lossy())
 }
 
 /// `path` (a dir or a file, not a pattern) as Koil shows it: with `/`
-/// between its parts, also on Windows (see [`slashes`]), and `~` for the
-/// home dir.
+/// between its parts, also on Windows (`koil_core::with_slashes`: users
+/// write only `/`, as koil reads a `\` in a pattern as an escape, and ends a
+/// pattern's base dir only at a `/`), and `~` for the home dir.
 pub fn show_path(path: &Path) -> String {
-    with_tilde(&slashes(path.display().to_string()))
+    with_tilde(&with_slashes(path).to_string_lossy())
 }
 
 /// `path` (as Koil shows it, with `/`) with `~` for the home dir at its
@@ -712,21 +676,10 @@ pub fn join_shown(dir: String, rest: &str) -> String {
     }
 }
 
-/// `path` with `/` for every `\` on Windows, where both are separators (and
-/// no name has either), but in a `\\?\` path, where only `\` is one. Users
-/// write only `/`: koil reads a `\` in a pattern as an escape, and ends a
-/// pattern's base dir only at a `/`, so a path Koil shows must have none.
-pub fn slashes(path: String) -> String {
-    match cfg!(windows) && !path.starts_with(r"\\?\") {
-        true => path.replace('\\', "/"),
-        false => path,
-    }
-}
-
-/// The home dir, as Koil shows it (see [`slashes`]).
+/// The home dir, as Koil shows it (see [`show_path`]).
 fn home() -> Option<String> {
     let home = std::env::home_dir()?;
-    Some(slashes(home.to_string_lossy().into_owned()))
+    Some(with_slashes(&home).to_string_lossy().into_owned())
 }
 
 /// A warning from opening the dir again, with its paths as Koil shows them.
@@ -753,12 +706,6 @@ pub fn describe_open(error: &OpenError) -> String {
         }
         error => describe(error),
     }
-}
-
-/// An error that names only paths (not a pattern, where `\` is an escape),
-/// like applying's, with `/` in them (see [`slashes`]).
-pub fn describe_paths(error: &dyn Error) -> String {
-    slashes(describe(error))
 }
 
 /// An error, followed by what caused it.

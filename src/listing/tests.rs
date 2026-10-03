@@ -570,7 +570,7 @@ fn test_home() {
     // with `/`, also on Windows
     assert_eq!(show_path(&home.join("a").join("b")), "~/a/b");
     // only the home dir is read, so a pattern's `\` and trailing `/` stay
-    let shown = slashes(home.to_string_lossy().into_owned());
+    let shown = with_slashes(&home).to_string_lossy().into_owned();
     assert_eq!(with_tilde(&format!(r"{shown}/\w+/")), r"~/\w+/");
     assert_eq!(with_tilde(&format!("{shown}x")), format!("{shown}x"));
 }

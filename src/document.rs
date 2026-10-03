@@ -122,7 +122,7 @@ impl qobject::Document {
 }
 
 /// `arg` (from the command line) made absolute from the dir Koil started
-/// in, by writing it after that dir and a `/` (see `listing::slashes`), so
+/// in, by writing it after that dir and a `/` (`koil_core::with_slashes`), so
 /// it keeps a trailing `/` (a pattern's), `..` and `\` as written, which
 /// koil reads: on Windows `std::path::absolute` would make every `/` a `\`,
 /// and `join` would put a `\` before it, where koil doesn't end a pattern's
@@ -133,6 +133,6 @@ fn absolute(arg: String) -> Option<String> {
         return Some(arg);
     }
     let dir = std::env::current_dir().ok()?;
-    let dir = listing::slashes(dir.to_string_lossy().into_owned());
+    let dir = koil_core::with_slashes(&dir).to_string_lossy().into_owned();
     Some(listing::join_shown(dir, &arg))
 }
