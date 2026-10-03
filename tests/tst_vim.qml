@@ -459,6 +459,97 @@ TestCase {
         vim.fontSize = size;
     }
 
+    // A count's repeat of an insert that deletes (or of a replace) goes key
+    // by key, as a long command, which Esc stops; leaving the insert waits
+    // for it.
+    function test_longInsertRepeat() {
+        load("x");
+        vim.chunkTime = 0;
+        keys("4ia<BS>b<Esc>");
+        vim.chunkTimer.stop();
+        compare(vim.progress, "4i 33%");
+        compare(editor.text, "bbx");
+        compare(vim.mode, "insert");
+        step();
+        step();
+        compare(vim.running, null);
+        compare(vim.mode, "normal");
+        compare(render(), "bbbbx");
+        compare(vim.cursor, 3);
+        keys("u");
+        compare(render(), "x");
+        keys("3Rab<BS><Esc>");
+        vim.chunkTimer.stop();
+        compare(vim.progress, "3R 50%");
+        keys("<Esc>");
+        compare(vim.running, null);
+        compare(vim.message, "Interrupted");
+        compare(vim.mode, "normal");
+        compare(render(), "aa");
+        keys("u");
+        compare(render(), "x");
+        // Leaving the buffer doesn't repeat it, as moving the cursor doesn't.
+        keys("4ia<BS>b");
+        const state = switchTo(other, null);
+        compare(vim.running, null);
+        compare(editor.text, "bx");
+        // In the path field, Enter runs after it.
+        other.text = "x";
+        vim.singleLine = true;
+        vim.commandKeys = {
+            "<CR>": "open"
+        };
+        keyCommands.clear();
+        keys("4ia<BS>b<CR>");
+        vim.chunkTimer.stop();
+        compare(keyCommands.count, 0);
+        vim.chunkTimer.start();
+        tryCompare(vim, "running", null);
+        compare(other.text, "bbbbx");
+        compare(vim.mode, "normal");
+        compare(keyCommands.signalArguments.map(a => a[0]), ["open"]);
+        switchTo(editor, state);
+    }
+
+    // A huge count takes no longer than one that's just big enough: a
+    // motion stops where it can't go further, and a search stops going
+    // round its matches.
+    function test_hugeCounts() {
+        const huge = "99999999";
+        for (const m of ["w", "W", "e", "E", "b", "B", "ge", "gE", "}", "{"]) {
+            for (const from of [0, 6, 12]) {
+                load("one two\n\nthree, four");
+                vim.setCursor(from);
+                keys("20" + m);
+                const target = vim.cursor;
+                vim.setCursor(from);
+                keys(huge + m);
+                compare(vim.cursor, target, m + " from " + from);
+            }
+        }
+        load("a b\nc d");
+        keys("d20w");
+        const deleted = editor.text;
+        load("a b\nc d");
+        keys("d" + huge + "w");
+        compare(editor.text, deleted);
+        load("a b\nc d");
+        keys("c" + huge + "wx<Esc>");
+        compare(editor.text, "x");
+        // 99999999 is 3 times 33333333: round to where it started.
+        load("a b a c a");
+        keys("/a<CR>");
+        compare(vim.cursor, 4);
+        keys(huge + "n");
+        compare(vim.cursor, 4);
+        keys("1" + huge + "n"); // 1 more
+        compare(vim.cursor, 8);
+        keys(huge + "N");
+        compare(vim.cursor, 8);
+        keys("0" + huge + "*");
+        compare(vim.cursor, 0);
+    }
+
     // However many edits a key makes (J, a block's lines), the editor gets
     // one: each has Qt go over all the text.
     function test_oneEditPerKey() {

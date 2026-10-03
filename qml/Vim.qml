@@ -355,7 +355,11 @@ QtObject {
             return commandLineKey(tok);
         if (singleLine && inserting && (tok === "<CR>" || tok === "<S-CR>")) {
             leaveInsert();
-            feed(tok);
+            // After the insert's repeat, if it goes on (see Runs).
+            if (task)
+                typeahead.push({ keys: [tok], next: 0, runs: 1 });
+            else
+                feed(tok);
             return true;
         }
         if (mode === "insert")
@@ -523,8 +527,10 @@ QtObject {
         interrupt();
         if (commandLine !== "")
             commandLineKey("<Esc>");
+        // Without the count's repeat, which would go on after (see Runs), as
+        // when the cursor moves.
         if (inserting)
-            leaveInsert();
+            leaveInsert(false);
         if (isVisual) {
             setMode("normal");
             setCursor(clampNormal(bufferText(), cursor));
@@ -1020,6 +1026,9 @@ QtObject {
             atEveryCursor(() => executeAction(cmd));
         else
             executeAction(cmd);
+        // What the status line calls the insert's repeat (see repeatInsert).
+        if (insertSession && insertSession.count > 1)
+            insertSession.label = insertSession.count + cmd.action;
         if (changing && !inserting)
             commitChange();
     }
@@ -1099,11 +1108,9 @@ QtObject {
             if (cmd.op === "c" && (cmd.motion.name === "w" || cmd.motion.name === "W")
                     && Txt.charClass(t[cursor], false) !== 0) {
                 const big = cmd.motion.name === "W";
-                let q = cursor;
-                for (let i = 0; i < count; i++)
-                    if (i > 0 || Txt.charClass(t[Txt.charEnd(t, q)], big) === Txt.charClass(t[q], big))
-                        q = wordStep(t, q, q => Txt.wordEnd(t, q, big));
-                r = { pos: q, type: "inclusive" };
+                const last = Txt.charClass(t[Txt.charEnd(t, cursor)], big) !== Txt.charClass(t[cursor], big);
+                const end = steps(cursor, last ? count - 1 : count, q => wordStep(t, q, q => Txt.wordEnd(t, q, big)));
+                r = { pos: end, type: "inclusive" };
             } else {
                 r = motion(t, cursor, cmd.motion, count, cmd.count > 0, true);
             }
@@ -1509,14 +1516,25 @@ QtObject {
         beginChange();
     }
 
-    function leaveInsert() {
+    // Types what the insert typed again for its count (unless the cursor
+    // moved, or `repeat` is false), then goes back to normal mode. A long
+    // repeat runs in chunks (see repeatInsert), and leaving insert mode
+    // waits for it.
+    function leaveInsert(repeat) {
         const s = insertSession;
+        insertSession = null;
         if (s && !s.broken) {
-            repeatInsert(s);
             if (s.dot)
                 s.dot.insertKeys = s.keys.slice();
+            if (repeat !== false) {
+                repeatInsert(s, endInsert);
+                return;
+            }
         }
-        insertSession = null;
+        endInsert();
+    }
+
+    function endInsert() {
         replaceStack = [];
         // Back to one cursor. After a block insert it goes back to where the
         // insert started (unless the cursors moved), otherwise it steps back
@@ -1533,16 +1551,33 @@ QtObject {
     }
 
     // Types what the insert `s` typed count - 1 more times (3ix<Esc>), each
-    // time on a new line for o and O. Text alone goes in as one edit at each
-    // cursor rather than key by key, as each edit has Qt and vim go over all
-    // the text (10000osome text<Esc> took about two minutes). Not with
-    // Enter in the listing, which depends on where it's typed (typedEdit).
-    function repeatInsert(s) {
+    // time on a new line for o and O, then calls done(). Text alone goes in
+    // as one edit at each cursor rather than key by key, as each edit has
+    // Qt and vim go over all the text (10000osome text<Esc> took about two
+    // minutes). Keys that delete, Enter in the listing (which depends on
+    // where it's typed, see typedEdit) and replace mode go key by key, as a
+    // long command (see startTask): 10000ia<BS>b<Esc> took over a minute,
+    // which nothing could stop.
+    function repeatInsert(s, done) {
         const n = s.count - 1;
-        if (n <= 0)
-            return;
         const keyByKey = k => k === "<BS>" || k === "<Del>" || k === "<D-BS>" || linePrefixes && k === "<CR>";
-        if (mode === "insert" && !s.keys.some(keyByKey)) {
+        if (n > 0 && (mode !== "insert" || s.keys.some(keyByKey))) {
+            let i = 0;
+            startTask(s.label, n, () => {
+                if (s.openLine) {
+                    setCursor(editAll(q => {
+                        const le = Txt.lineEnd(bufferText(), q);
+                        replaceRange(le, le, lineBreak);
+                        return le + lineBreak.length;
+                    }));
+                }
+                for (const k of s.keys)
+                    typeKey(k);
+                return ++i < n;
+            }, done);
+            return;
+        }
+        if (n > 0) {
             const typed = s.keys.map(typedText).join("");
             const text = (s.openLine ? lineBreak + typed : typed).repeat(n);
             setCursor(editAll(q => {
@@ -1550,19 +1585,8 @@ QtObject {
                 replaceRange(at, at, text);
                 return at + text.length;
             }));
-            return;
         }
-        for (let i = 0; i < n; i++) {
-            if (s.openLine) {
-                setCursor(editAll(q => {
-                    const le = Txt.lineEnd(bufferText(), q);
-                    replaceRange(le, le, lineBreak);
-                    return le + lineBreak.length;
-                }));
-            }
-            for (const k of s.keys)
-                typeKey(k);
-        }
+        done();
     }
 
     // The text an insert-mode key types (one that isn't <BS> or <Del>).
@@ -3035,6 +3059,18 @@ QtObject {
         return r;
     }
 
+    // q after `count` steps of a motion (step(q)), or after the first that
+    // doesn't move.
+    function steps(q, count, step) {
+        for (let i = 0; i < count; i++) {
+            const next = step(q);
+            if (next === q)
+                break;
+            q = next;
+        }
+        return q;
+    }
+
     // A text object (see Txt.textObject), which doesn't start in a prefix:
     // `aw` takes the blanks before a name's first word, say.
     function textObject(t, p, obj, count) {
@@ -3301,7 +3337,10 @@ QtObject {
     // Each returns { pos, type: "exclusive" | "inclusive" | "linewise" } or
     // null when the motion fails. `quiet` (for extra cursors) leaves the view
     // where it is. None ends in a prefix (see Prefixes): one that would ends
-    // after it, but a character found there isn't found.
+    // after it, but a character found there isn't found. One that goes
+    // `count` steps stops at the first that doesn't move, as no later one
+    // would (99999999w took a minute), and a search stops going round its
+    // matches (see search).
 
     function motion(t, p, m, count, explicit, forOp, quiet) {
         const r = rawMotion(t, p, m, count, explicit, forOp, quiet);
@@ -3376,7 +3415,7 @@ QtObject {
         case "W": {
             const big = m.name === "W";
             let q = p, prev = p;
-            for (let i = 0; i < count; i++) {
+            for (let i = 0; i < count && (i === 0 || q !== prev); i++) {
                 prev = q;
                 q = wordStep(t, q, q => Txt.nextWordStart(t, q, big));
             }
@@ -3390,23 +3429,17 @@ QtObject {
         }
         case "b":
         case "B": {
-            let q = p;
-            for (let i = 0; i < count; i++)
-                q = wordStep(t, q, q => Txt.prevWordStart(t, q, m.name === "B"));
+            const q = steps(p, count, q => wordStep(t, q, q => Txt.prevWordStart(t, q, m.name === "B")));
             return q === p ? null : { pos: q, type: "exclusive" };
         }
         case "e":
         case "E": {
-            let q = p;
-            for (let i = 0; i < count; i++)
-                q = wordStep(t, q, q => Txt.wordEnd(t, q, m.name === "E"));
+            const q = steps(p, count, q => wordStep(t, q, q => Txt.wordEnd(t, q, m.name === "E")));
             return q === p ? null : { pos: q, type: "inclusive" };
         }
         case "ge":
         case "gE": {
-            let q = p;
-            for (let i = 0; i < count; i++)
-                q = wordStep(t, q, q => Txt.prevWordEnd(t, q, m.name === "gE"));
+            const q = steps(p, count, q => wordStep(t, q, q => Txt.prevWordEnd(t, q, m.name === "gE")));
             return q === p ? null : { pos: q, type: "inclusive" };
         }
         case "f":
@@ -3430,18 +3463,10 @@ QtObject {
             }
             return Txt.matchPair(t, p);
         }
-        case "}": {
-            let q = p;
-            for (let i = 0; i < count; i++)
-                q = Txt.nextParagraph(t, q);
-            return { pos: q, type: "exclusive" };
-        }
-        case "{": {
-            let q = p;
-            for (let i = 0; i < count; i++)
-                q = Txt.prevParagraph(t, q);
-            return { pos: q, type: "exclusive" };
-        }
+        case "}":
+            return { pos: steps(p, count, q => Txt.nextParagraph(t, q)), type: "exclusive" };
+        case "{":
+            return { pos: steps(p, count, q => Txt.prevParagraph(t, q)), type: "exclusive" };
         case "n":
         case "N": {
             if (!lastSearch) {
@@ -3521,15 +3546,22 @@ QtObject {
         }
     }
 
+    // Back at the first match it found, a search has gone round all of them
+    // (wrapping at the end), and would go round again and again: the rounds
+    // left are skipped (999999n).
     function search(t, pattern, forward, count, from) {
         const re = searchRegExp(pattern);
-        let p = from;
+        let p = from, first = -1;
         for (let i = 0; i < count; i++) {
             const q = forward ? searchForward(re, t, p, false) : searchBackward(re, t, p, false);
             if (q < 0) {
                 showError("E486: Pattern not found: " + pattern);
                 return null;
             }
+            if (i === 0)
+                first = q;
+            else if (q === first)
+                i += Math.floor((count - 1 - i) / i) * i;
             p = q;
         }
         return p;
