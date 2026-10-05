@@ -48,7 +48,7 @@ Popup {
                     + "ask only when something is deleted, or never). `:wq` quits afterwards."],
                 ["Space a", "Apply the changes, always showing what they'll do first, whatever Settings says "
                     + "(so does File > Apply Changes…)."],
-                ["[x]", "Applying lists the changes picked: `j` and `k` go through them, Space or `x` (or a "
+                ["󰄲", "Applying lists the changes picked: `j` and `k` go through them, Space or `x` (or a "
                     + "click on the box) leaves one out or picks it again, along with what goes with it (a "
                     + "swap's other half, the new dir a file goes in), and `a` picks all or none. What's left "
                     + "out is forgotten, so Yes with none picked discards every change."],

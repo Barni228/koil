@@ -278,7 +278,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - **Apply and undo**: `Space Space`, `:w`, File > Apply Changes… update,
   then `ConfirmDialog` lists `listing::actions` (paths relative to
   the open dir; `Koil::changes`, so a swap is its two renames, not the
-  three steps through a temp name), each with `[x]` before it, all picked.
+  three steps through a temp name), each with a checked box before it
+  (a Nerd Font icon, `boxes`, with two spaces after it), all picked.
   The user leaves some out (j and k move the current line, Space or x or a
   click on the box toggles it, a picks all or none; the current line is
   highlighted only once one of those is used, and the first j or k only

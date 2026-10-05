@@ -11,14 +11,14 @@ import QtQuick.Layouts
 // the highlight, which starts on Yes, Enter answers the highlighted choice,
 // and j and k (or Up and Down) scroll. Its text is in the editor's font and
 // can be selected and copied.
-// The list can be one to pick from (what to apply), each line with `[x]`
-// (picked) or `[ ]` before it, all picked at first. Then j and k move the
-// current line instead, Space or x (or a click on its box) picks it or
-// leaves it out, along with the lines it needs or that need it, and a picks
-// all of them, or none if all are. Yes with none picked applies nothing,
-// which forgets them all (see applyChanges in main.qml). The current
-// line is highlighted only once one of those is used: the first j or k
-// shows it where it is, on the first line.
+// The list can be one to pick from (what to apply), each line with a
+// checked box (picked) or an empty one before it, all picked at first.
+// Then j and k move the current line instead, Space or x (or a click on
+// its box) picks it or leaves it out, along with the lines it needs or
+// that need it, and a picks all of them, or none if all are. Yes with none
+// picked applies nothing, which forgets them all (see applyChanges in
+// main.qml). The current line is highlighted only once one of those is
+// used: the first j or k shows it where it is, on the first line.
 Popup {
     id: dialog
 
@@ -45,7 +45,12 @@ Popup {
     // Where the first line to pick from is in the text, for the boxes'
     // clicks.
     property real listTop: 0
-    readonly property string list: items.length ? items.map((item, i) => (picked[i] ? "[x] " : "[ ] ") + item.text).join("\n")
+    // What goes before a line to pick from, left out and picked: the Nerd
+    // Font's nf-md-checkbox_blank_outline and nf-md-checkbox_marked, and
+    // two spaces, as it draws them wider than a column (as the listing's
+    // icons). Both are as long.
+    readonly property var boxes: ["󰄱  ", "󰄲  "]
+    readonly property string list: items.length ? items.map((item, i) => boxes[picked[i] ? 1 : 0] + item.text).join("\n")
         : details
     // What the answers do, and what's done after any of them (see ask).
     property var yesAction: null
@@ -78,7 +83,7 @@ Popup {
             for (const j of item.needs)
                 by[j].push(i);
             const at = start;
-            start += 4 + item.text.length + 1;
+            start += boxes[0].length + item.text.length + 1;
             return at;
         });
         neededBy = by;
@@ -160,7 +165,7 @@ Popup {
             return;
         const start = text.length + 2 + starts[row];
         const top = label.positionToRectangle(start);
-        const bottom = label.positionToRectangle(start + 4 + items[row].text.length);
+        const bottom = label.positionToRectangle(start + boxes[0].length + items[row].text.length);
         listTop = label.positionToRectangle(text.length + 2).y;
         rowHighlight.y = top.y;
         rowHighlight.height = bottom.y + bottom.height - top.y;
@@ -344,7 +349,7 @@ Popup {
                     id: box
 
                     font: dialog.theme.font
-                    text: "[x]"
+                    text: dialog.boxes[1]
                 }
 
                 // The boxes: a click on one picks its line or leaves it out.
