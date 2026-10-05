@@ -125,8 +125,9 @@ pub mod qobject {
         fn has_changes(self: &Koil) -> bool;
 
         /// Applies the changes of the lines `picked` (a list of indexes into
-        /// what `actions` gave last), forgetting the others, then reads the
-        /// open dir again. Returns `{ ok, message }`.
+        /// what `actions` gave last), forgetting the others (all of them, if
+        /// none is picked), then reads the open dir again. Returns `{ ok,
+        /// message }`.
         #[qinvokable]
         fn apply(self: Pin<&mut Koil>, picked: &QString) -> QString;
 
@@ -416,7 +417,19 @@ impl qobject::Koil {
         let actions: Vec<Action> = (picked.iter())
             .filter_map(|&i| this.shown.get(i).cloned())
             .collect();
+        let shown = this.shown.len();
         let outcome = match this.koil.apply_only(&actions) {
+            // Nothing picked: every change is forgotten.
+            Ok(report) if actions.is_empty() => Outcome {
+                ok: true,
+                message: report_message(
+                    Report {
+                        changes: shown,
+                        ..report
+                    },
+                    "discarded",
+                ),
+            },
             // As many as the confirmation listed, not Koil's steps (a swap
             // takes three).
             Ok(report) => Outcome {

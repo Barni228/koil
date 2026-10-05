@@ -15,7 +15,8 @@ import QtQuick.Layouts
 // (picked) or `[ ]` before it, all picked at first. Then j and k move the
 // current line instead, Space or x (or a click on its box) picks it or
 // leaves it out, along with the lines it needs or that need it, and a picks
-// all of them, or none if all are. Yes needs something picked. The current
+// all of them, or none if all are. Yes with none picked applies nothing,
+// which forgets them all (see applyChanges in main.qml). The current
 // line is highlighted only once one of those is used: the first j or k
 // shows it where it is, on the first line.
 Popup {
@@ -46,7 +47,6 @@ Popup {
     property real listTop: 0
     readonly property string list: items.length ? items.map((item, i) => (picked[i] ? "[x] " : "[ ] ") + item.text).join("\n")
         : details
-    readonly property bool canSayYes: !items.length || pickedCount > 0
     // What the answers do, and what's done after any of them (see ask).
     property var yesAction: null
     property var noAction: null
@@ -94,8 +94,6 @@ Popup {
     }
 
     function answer(choice) {
-        if (choice === "yes" && !canSayYes)
-            return;
         const action = choice === "yes" ? yesAction : choice === "no" ? noAction : null;
         const chosen = [];
         picked.forEach((p, i) => {
@@ -221,8 +219,6 @@ Popup {
         padding: 4 * dialog.zoom
         leftPadding: 12 * dialog.zoom
         rightPadding: 12 * dialog.zoom
-        // Yes, with nothing picked.
-        enabled: modelData.answer !== "yes" || dialog.canSayYes
         focusPolicy: Qt.NoFocus
         hoverEnabled: true
         text: modelData.label
@@ -239,7 +235,7 @@ Popup {
         contentItem: Text {
             text: choice.text
             font: dialog.theme.font
-            color: choice.enabled ? dialog.theme.text : dialog.theme.dim
+            color: dialog.theme.text
             textFormat: Text.PlainText
         }
     }

@@ -471,10 +471,12 @@ ApplicationWindow {
             apply(actions.map((a, i) => i));
             return;
         }
+        // With none picked, Yes applies nothing, which forgets them all.
         const total = actions.length;
-        const what = picked => total === 1 ? "this change" : picked === total ? "these " + total + " changes"
-            : picked + " of these " + total + " changes";
-        confirmDialog.ask(picked => "Apply " + what(picked) + (orQuit ? " before quitting?" : "?"), actions, apply,
+        const these = total === 1 ? "this change" : "these " + total + " changes";
+        const what = picked => !picked ? "Discard " + these : picked === total ? "Apply " + these
+            : "Apply " + picked + " of " + these;
+        confirmDialog.ask(picked => what(picked) + (orQuit ? " before quitting?" : "?"), actions, apply,
             orQuit ? () => Qt.quit() : null);
     }
 

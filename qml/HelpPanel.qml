@@ -51,7 +51,7 @@ Popup {
                 ["[x]", "Applying lists the changes picked: `j` and `k` go through them, Space or `x` (or a "
                     + "click on the box) leaves one out or picks it again, along with what goes with it (a "
                     + "swap's other half, the new dir a file goes in), and `a` picks all or none. What's left "
-                    + "out is forgotten."],
+                    + "out is forgotten, so Yes with none picked discards every change."],
                 ["u", "With no edit left to undo: undo the last apply, after showing what that will do. "
                     + "Deleted entries come back from the trash."],
                 ["Enter", "Open the dir or file on the cursor's line. A file opens as it is on disk, even "

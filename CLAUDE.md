@@ -286,10 +286,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   what it needs (`needs`: a swap's other half, the new dir a file goes
   in): picking one picks those, leaving one out leaves out what needs it.
   The boxes are text in the one `TextEdit`, so the list still selects and
-  copies as it is. The question counts what's picked, and Yes needs
-  something. Yes applies the picked lines (`Koil.apply(picked)`, indexes
-  into the `shown` actions `actions()` kept, given to `Koil::apply_only`, so
-  only what the user saw is applied) and forgets the rest, then vim starts
+  copies as it is. The question counts what's picked. Yes applies the
+  picked lines (`Koil.apply(picked)`, indexes into the `shown` actions
+  `actions()` kept, given to `Koil::apply_only`, so only what the user saw
+  is applied) and forgets the rest; with none picked, it discards them all
+  ("Discard these 3 changes?", "3 changes discarded"). Then vim starts
   over (koil refreshed: new IDs for renamed paths), with the cursor where it was (`listingSpot`: on its
   entry's line, else the same line; the listing's cursor even while vim is
   in the path field) and the view as it was; so does undoing an apply. `u` or Cmd+Z with nothing left to undo in vim emits
