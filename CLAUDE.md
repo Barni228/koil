@@ -274,7 +274,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   the open dir; `Koil::changes`, so a swap is its two renames, not the
   three steps through a temp name), each with `[x]` before it, all picked.
   The user leaves some out (j and k move the current line, Space or x or a
-  click on the box toggles it, a picks all or none), and a line goes with
+  click on the box toggles it, a picks all or none; the current line is
+  highlighted only once one of those is used, and the first j or k only
+  shows it, on the first line), and a line goes with
   what it needs (`needs`: a swap's other half, the new dir a file goes
   in): picking one picks those, leaving one out leaves out what needs it.
   The boxes are text in the one `TextEdit`, so the list still selects and

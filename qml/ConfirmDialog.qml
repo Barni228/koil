@@ -15,7 +15,9 @@ import QtQuick.Layouts
 // (picked) or `[ ]` before it, all picked at first. Then j and k move the
 // current line instead, Space or x (or a click on its box) picks it or
 // leaves it out, along with the lines it needs or that need it, and a picks
-// all of them, or none if all are. Yes needs something picked.
+// all of them, or none if all are. Yes needs something picked. The current
+// line is highlighted only once one of those is used: the first j or k
+// shows it where it is, on the first line.
 Popup {
     id: dialog
 
@@ -35,8 +37,10 @@ Popup {
     property var neededBy: []
     property var starts: []
     readonly property int pickedCount: picked.filter(p => p).length
-    // The line j and k move, and Space picks or leaves out.
+    // The line j and k move, and Space picks or leaves out, and whether
+    // it's highlighted (see moveRow).
     property int row: 0
+    property bool rowShown: false
     // Where the first line to pick from is in the text, for the boxes'
     // clicks.
     property real listTop: 0
@@ -79,6 +83,7 @@ Popup {
         });
         neededBy = by;
         row = 0;
+        rowShown = false;
         dialog.question = question;
         yesAction = yes;
         noAction = no || null;
@@ -119,6 +124,14 @@ Popup {
                 todo.push(k);
         }
         picked = p;
+    }
+
+    // j and k: moves the current line by `step`, but only shows it if it
+    // isn't yet, as the user hasn't seen where it is.
+    function moveRow(step) {
+        if (rowShown)
+            row = Math.max(0, Math.min(items.length - 1, row + step));
+        rowShown = true;
     }
 
     function pickAll() {
@@ -170,6 +183,7 @@ Popup {
     }
 
     onRowChanged: Qt.callLater(showRow)
+    onRowShownChanged: Qt.callLater(showRow)
 
     parent: Overlay.overlay
     anchors.centerIn: parent
@@ -245,14 +259,16 @@ Popup {
             else if (event.key === Qt.Key_Right || event.key === Qt.Key_L || event.key === Qt.Key_Tab)
                 dialog.current = Math.min(dialog.choices.length - 1, dialog.current + 1);
             else if (dialog.items.length && (event.key === Qt.Key_Down || event.key === Qt.Key_J))
-                dialog.row = Math.min(dialog.items.length - 1, dialog.row + 1);
+                dialog.moveRow(1);
             else if (dialog.items.length && (event.key === Qt.Key_Up || event.key === Qt.Key_K))
-                dialog.row = Math.max(0, dialog.row - 1);
-            else if (dialog.items.length && (event.key === Qt.Key_Space || event.key === Qt.Key_X))
+                dialog.moveRow(-1);
+            else if (dialog.items.length && (event.key === Qt.Key_Space || event.key === Qt.Key_X)) {
+                dialog.rowShown = true;
                 dialog.toggle(dialog.row);
-            else if (dialog.items.length && event.key === Qt.Key_A)
+            } else if (dialog.items.length && event.key === Qt.Key_A) {
+                dialog.rowShown = true;
                 dialog.pickAll();
-            else if (event.key === Qt.Key_Down || event.key === Qt.Key_J)
+            } else if (event.key === Qt.Key_Down || event.key === Qt.Key_J)
                 dialog.scrollBy(step);
             else if (event.key === Qt.Key_Up || event.key === Qt.Key_K)
                 dialog.scrollBy(-step);
@@ -323,7 +339,7 @@ Popup {
 
                     z: -1
                     width: label.width
-                    visible: dialog.items.length > 0
+                    visible: dialog.items.length > 0 && dialog.rowShown
                     radius: 2 * dialog.zoom
                     color: dialog.theme.hover
                 }
@@ -347,6 +363,7 @@ Popup {
                         if (i < 0)
                             return;
                         dialog.row = i;
+                        dialog.rowShown = true;
                         dialog.toggle(i);
                     }
                 }
