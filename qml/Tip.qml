@@ -1,14 +1,16 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 
 // A tooltip in the style of the hover box, with the keys that do the same
-// (`shortcut`, if any) after its text, as code: in the editor's font, on a
-// shade of their own. Whoever shows it places it.
+// (`shortcuts`, if any) after its text, as code: each in the editor's font,
+// on a shade of its own. Whoever shows it places it.
 ToolTip {
     id: tip
 
     required property Theme theme
-    property string shortcut
+    property list<string> shortcuts
 
     delay: 600
     leftPadding: 8 * theme.zoom
@@ -41,26 +43,33 @@ ToolTip {
             color: tip.theme.text
             textFormat: Text.PlainText
         }
-        Rectangle {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: tip.shortcut !== ""
-            width: keys.implicitWidth
-            height: keys.implicitHeight
-            radius: 3 * tip.theme.zoom
-            color: tip.theme.code
+        Repeater {
+            model: tip.shortcuts
 
-            Text {
-                id: keys
+            Rectangle {
+                id: key
 
-                leftPadding: 4 * tip.theme.zoom
-                rightPadding: 4 * tip.theme.zoom
-                topPadding: 1 * tip.theme.zoom
-                bottomPadding: 1 * tip.theme.zoom
-                text: tip.shortcut
-                font.family: tip.theme.font.family
-                font.pixelSize: Math.round(12 * tip.theme.zoom)
-                color: tip.theme.text
-                textFormat: Text.PlainText
+                required property string modelData
+
+                anchors.verticalCenter: parent.verticalCenter
+                width: keyText.implicitWidth
+                height: keyText.implicitHeight
+                radius: 3 * tip.theme.zoom
+                color: tip.theme.code
+
+                Text {
+                    id: keyText
+
+                    leftPadding: 4 * tip.theme.zoom
+                    rightPadding: 4 * tip.theme.zoom
+                    topPadding: 1 * tip.theme.zoom
+                    bottomPadding: 1 * tip.theme.zoom
+                    text: key.modelData
+                    font.family: tip.theme.font.family
+                    font.pixelSize: Math.round(12 * tip.theme.zoom)
+                    color: tip.theme.text
+                    textFormat: Text.PlainText
+                }
             }
         }
     }

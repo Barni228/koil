@@ -14,7 +14,7 @@ AbstractButton {
     property bool underline
     property color color: theme.text
     property string tip
-    property string shortcut
+    property list<string> shortcuts
 
     implicitWidth: 22 * theme.zoom
     implicitHeight: 22 * theme.zoom
@@ -28,7 +28,7 @@ AbstractButton {
         theme: button.theme
         visible: button.hovered && button.tip !== ""
         text: button.tip
-        shortcut: button.shortcut
+        shortcuts: button.shortcuts
         x: Math.round((button.width - width) / 2)
         y: button.height + 6 * button.theme.zoom
     }

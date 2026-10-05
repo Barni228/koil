@@ -829,7 +829,7 @@ ApplicationWindow {
                 checkable: true
                 checked: vim.showHidden
                 tip: qsTr("Show Hidden Entries")
-                shortcut: "g."
+                shortcuts: ["g."]
                 onToggled: vim.showHidden = checked
             }
             IconButton {
@@ -838,7 +838,7 @@ ApplicationWindow {
                 checkable: true
                 checked: vim.gitignore
                 tip: qsTr("Hide Ignored Entries")
-                shortcut: "gi"
+                shortcuts: ["gi"]
                 onToggled: vim.gitignore = checked
             }
             IconButton {
@@ -847,7 +847,7 @@ ApplicationWindow {
                 checkable: true
                 checked: vim.regex
                 tip: qsTr("Use Regular Expression")
-                shortcut: "gr"
+                shortcuts: ["gr"]
                 onToggled: vim.regex = checked
             }
         }
