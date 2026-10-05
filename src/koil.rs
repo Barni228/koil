@@ -130,6 +130,19 @@ pub mod qobject {
         #[qinvokable]
         fn apply(self: Pin<&mut Koil>, picked: &QString) -> QString;
 
+        /// What creating the new file at `path` before the other changes
+        /// are applied takes (see `listing::create_steps`): `{ steps,
+        /// message }`, where `message` says why it can't be, and then
+        /// `steps` is empty.
+        #[qinvokable]
+        fn create_steps(self: &Koil, path: &QString) -> QString;
+
+        /// Creates the new file at `path` now, with the new dirs it's in,
+        /// keeping the other changes, then reads the open dir again (see
+        /// `listing::create_now`). Returns `{ ok, message }`.
+        #[qinvokable]
+        fn create(self: Pin<&mut Koil>, path: &QString) -> QString;
+
         /// What undoing the last apply would do: `{ steps, message }`, where
         /// `steps` is empty if there's nothing to undo, and `message` says why
         /// it can't be undone now.
@@ -420,6 +433,24 @@ impl qobject::Koil {
                 ok: false,
                 message: listing::describe(&error),
             },
+        };
+        to_json(&outcome)
+    }
+
+    fn create_steps(&self, path: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        let value = match listing::create_steps(&self.koil, &path) {
+            Ok(steps) => json!({ "steps": steps, "message": "" }),
+            Err(message) => json!({ "steps": [], "message": message }),
+        };
+        to_json(&value)
+    }
+
+    fn create(self: Pin<&mut Self>, path: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        let outcome = match listing::create_now(&mut self.rust_mut().koil, &path) {
+            Ok(message) => Outcome { ok: true, message },
+            Err(message) => Outcome { ok: false, message },
         };
         to_json(&outcome)
     }

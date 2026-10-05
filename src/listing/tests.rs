@@ -411,7 +411,13 @@ fn test_target_on_line() {
             name: "main.rs".into()
         })
     );
-    assert_eq!(target(2), Some(Target::New("new.txt".into())));
+    assert_eq!(
+        target(2),
+        Some(Target::New {
+            path: root.join("new.txt"),
+            name: "new.txt".into()
+        })
+    );
     assert_eq!(target(4), None);
     // `..`, a blank line, and a dir whose `/` was taken off
     let text = format!("../\n\n{}dir", rendered.hidden[0].icon);
@@ -1070,4 +1076,52 @@ fn test_sync_lines_out_of_order() {
     fs::write(temp.path().join("m"), "").unwrap();
     let (_, text, _) = synced_text(&mut koil, &text, &hidden);
     assert_eq!(names(&text), ["dir/", "m", "notes", "file.rs"]);
+}
+
+// Enter on a new file creates it (with its new dir) before the other
+// changes, which stay, and the listing then shows it on disk.
+#[test]
+fn test_create_now() {
+    let (temp, mut koil) = koil();
+    let rendered = render(&koil);
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "notes" => Some("new/file.txt\nother".to_string()),
+        _ => Some(line.to_string()),
+    });
+    let settings = koil.settings().clone();
+    let updated = update(&mut koil, &rendered.path, &text, &hidden, &settings, None);
+    assert!(updated.ok, "{updated:?}");
+    let path = koil.current_dir().join("new/file.txt");
+    assert_eq!(
+        create_steps(&koil, &path),
+        Ok(vec![
+            "CREATE new/".to_string(),
+            "CREATE new/file.txt".to_string()
+        ])
+    );
+    assert_eq!(
+        create_now(&mut koil, &path),
+        Ok("`new/file.txt` created".to_string())
+    );
+    assert!(temp.path().join("new/file.txt").is_file());
+    assert_eq!(
+        action_texts(&koil),
+        ["DELETE notes", "CREATE other"].map(String::from)
+    );
+    // `new/` has an ID now, so it isn't pending
+    let rendered = render(&koil);
+    let line = rendered.names.iter().position(|n| n == "new/").unwrap();
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    assert!(!pending_lines(&koil, text, hidden).contains(&line));
+    // a file that's there until it's moved away can't be
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "file.rs" => Some(format!("{}\nfile.rs", line.replace("file.rs", "main.rs"))),
+        _ => Some(line.to_string()),
+    });
+    let updated = update(&mut koil, &rendered.path, &text, &hidden, &settings, None);
+    assert!(updated.ok, "{updated:?}");
+    assert_eq!(
+        create_steps(&koil, &koil.current_dir().join("file.rs")),
+        Err("`file.rs` can't be created before the other changes are applied (Space a)".into())
+    );
 }

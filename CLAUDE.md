@@ -236,8 +236,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   and `g.`, `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex`
   (like the buttons). Enter in the listing opens the dir or file on its line
   (`listing::target_on_line`: a dir if the name ends with `/`, else the file
-  its ID points to on disk, even if the line renames it; a new entry isn't
-  there to open); on a line without an entry it's vim's Enter. Enter in the
+  its ID points to on disk, even if the line renames it; a new file is
+  created first, see Files); on a line without an entry it's vim's Enter.
+  Enter in the
   path field (`openPath`, also from insert mode: see `singleLine`) updates
   and goes to the listing, unless the update fails; Shift+Enter there only
   updates, so vim stays in the field. In a file with a path,
@@ -326,7 +327,15 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   leave the listing (updating it first, so its edits stay in koil) for a
   plain editor: no colors or problems, only `-` of `commandKeys`, and `:w`
   saves. `-` goes back to what's still open in koil, on `openedFrom` (the
-  entry Enter was on), or for a file opened otherwise, opens its dir. Unsaved
+  entry Enter was on), or for a file opened otherwise, opens its dir. Enter
+  on a new file (`createFile`) updates, then asks to create it, listing the
+  new dirs it's in (`Koil.createSteps`, koil-core's `Koil::create_steps`),
+  and Yes creates them (`Koil.create`, `Koil::create_now`: an undo step like
+  an apply's, keeping the other changes) and opens it. The listing starts
+  over first, as after an apply: undo mustn't bring back its line without
+  its ID, which koil would read as new again. One that needs other changes
+  (a new `a` where `a` is moved away, or in a renamed dir) isn't created,
+  and the status line says to apply them. Unsaved
   changes are asked about first (save, drop, or stay: `askToSave`), there
   and before File > Open, Open Folder or a drop opens something else
   (after the pick, so a dialog cancelled asks nothing). While the listing has

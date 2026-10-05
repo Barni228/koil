@@ -30,7 +30,7 @@ xattr -cr "/Applications/Koil.app"
 ```
 
 **Windows**: run the setup `.exe`. If SmartScreen blocks it, choose
-*More info → Run anyway*.
+_More info → Run anyway_.
 
 ## Build
 

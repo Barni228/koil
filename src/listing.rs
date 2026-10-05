@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 use devicons::Theme;
 use koil_core::apply::Undo;
 use koil_core::{
-    Action, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil, OpenError,
-    Pattern, Settings, UpdateError, UpdateOpenError, Warning, with_slashes,
+    Action, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil, KoilError,
+    OpenError, Pattern, Settings, UpdateError, UpdateOpenError, Warning, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -871,8 +871,10 @@ pub enum Target {
     Dir(String),
     /// A file on disk, and its name on the line.
     File { path: PathBuf, name: String },
-    /// A new file, which isn't there until the changes are applied.
-    New(String),
+    /// A new file, which isn't there until the changes are applied (or
+    /// until it's created on its own, see [`create_steps`]): where it goes,
+    /// and its name on the line.
+    New { path: PathBuf, name: String },
 }
 
 /// What Enter on `line` opens: the dir of an entry whose name ends with `/`,
@@ -888,7 +890,8 @@ pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -
         return Some(Target::Dir(name));
     }
     let Some(id) = entry.id else {
-        return Some(Target::New(name));
+        let path = koil.current_dir().join(&entry.name);
+        return Some(Target::New { path, name });
     };
     let path = koil.path_of(id)?;
     Some(match path.is_dir() {
@@ -927,23 +930,65 @@ pub struct ActionLine {
 /// `MOVE a -> b`: a swap's renames are two lines, not the three steps
 /// through a temp name that `Koil::apply` takes.
 pub fn actions(koil: &Koil) -> Vec<ActionLine> {
+    (koil.changes().into_iter())
+        .map(|change| ActionLine {
+            text: action_text(koil, &change.action),
+            needs: change.needs,
+            action: change.action,
+        })
+        .collect()
+}
+
+/// `action` as the user sees it, like `MOVE a -> b`.
+fn action_text(koil: &Koil, action: &Action) -> String {
     let path = |p: &Path| relative(koil, p);
     let dir = |p: &Path| format!("{}{}", path(p), if p.is_dir() { "/" } else { "" });
-    let action = |action: &Action| match action {
+    match action {
         Action::CreateFile(p) => format!("CREATE {}", path(p)),
         Action::CreateDir(p) => format!("CREATE {}/", path(p)),
         Action::DeleteFile(p) => format!("DELETE {}", path(p)),
         Action::DeleteDir(p) => format!("DELETE {}/", path(p)),
         Action::Rename(s, d) => format!("MOVE   {} -> {}", dir(s), path(d)),
         Action::Copy(s, d) => format!("COPY   {} -> {}", dir(s), path(d)),
-    };
-    (koil.changes().into_iter())
-        .map(|change| ActionLine {
-            text: action(&change.action),
-            needs: change.needs,
-            action: change.action,
-        })
-        .collect()
+    }
+}
+
+/// What creating the new file at `path` before the other changes are
+/// applied takes (`Koil::create_steps`), like `actions`' lines: its create,
+/// after those of the new dirs it's in. Fails if it can't be created on its
+/// own (see [`describe_create`]).
+pub fn create_steps(koil: &Koil, path: &Path) -> Result<Vec<String>, String> {
+    let steps = koil
+        .create_steps(path)
+        .map_err(|e| describe_create(koil, &e))?;
+    Ok(steps.iter().map(|a| action_text(koil, a)).collect())
+}
+
+/// Creates the new file at `path` now, with the new dirs it's in, keeping
+/// the other changes (`Koil::create_now`). Returns what the status line
+/// says, like "`notes` created", or why it can't be created.
+pub fn create_now(koil: &mut Koil, path: &Path) -> Result<String, String> {
+    let name = relative(koil, path);
+    match koil.create_now(path) {
+        Ok(report) => Ok(match report.warning {
+            Some(warning) => format!("`{name}` created; {}", describe_warning(&warning)),
+            None => format!("`{name}` created"),
+        }),
+        Err(error) => Err(describe_create(koil, &error)),
+    }
+}
+
+/// Why `Koil::create_steps` or `Koil::create_now` failed, naming the path
+/// as the listing does.
+pub fn describe_create(koil: &Koil, error: &KoilError) -> String {
+    match error {
+        KoilError::NotNew(path) => format!("`{}` isn't new", relative(koil, path)),
+        KoilError::NeedsChanges(path) => format!(
+            "`{}` can't be created before the other changes are applied (Space a)",
+            relative(koil, path)
+        ),
+        error => describe(error),
+    }
 }
 
 /// What `Koil::undo` would do, as the user sees it, like `TRASH a`: empty if

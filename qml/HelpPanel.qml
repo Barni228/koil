@@ -52,7 +52,8 @@ Popup {
                 ["u", "With no edit left to undo: undo the last apply, after showing what that will do. "
                     + "Deleted entries come back from the trash."],
                 ["Enter", "Open the dir or file on the cursor's line. A file opens as it is on disk, even "
-                    + "if its line renames it."],
+                    + "if its line renames it. A new file is created first, if you say so (the other "
+                    + "changes stay)."],
                 ["Shift+Enter", "Vim's Enter: the first character of the next line."],
                 ["icons", "The cursor stays out of an icon and the two spaces after it: `0` goes to the "
                     + "name, and `o` (or Enter) starts a line after three spaces. Backspace at a name's "

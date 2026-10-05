@@ -352,13 +352,45 @@ ApplicationWindow {
         } else if (target.dir !== undefined) {
             updateListing(target.dir);
         } else if (target.new !== undefined) {
-            vim.showError("“" + target.new + "” isn't there until the changes are applied (Space a)");
+            createFile(target.new);
         } else {
             // The file on disk, even if the line renames it; loadFile updates
             // the listing first.
             openedFrom = target.file.name;
             readFile(target.file.path);
         }
+    }
+
+    // Enter on a new file (`{ path, name }`): once the user says so, creates
+    // it (with the new dirs it's in) before the other changes, which stay,
+    // and opens it.
+    function createFile(target) {
+        // Koil must have the new entry, and the rest of the listing.
+        if (!updateListing())
+            return;
+        const r = JSON.parse(koil.createSteps(target.path));
+        if (r.message) {
+            vim.showError(r.message);
+            return;
+        }
+        // Only the new dirs need saying.
+        const details = r.steps.length > 1 ? r.steps.join("\n") : "";
+        confirmDialog.ask("“" + target.name + "” doesn't exist yet. Create it?", details, () => {
+            const spot = listingSpot();
+            const c = JSON.parse(koil.create(target.path));
+            // From scratch, as after an apply: undo mustn't bring back its
+            // line without its ID, which Koil would read as new again.
+            showListing(true, spot.name, spot);
+            if (!c.ok) {
+                vim.showError(c.message);
+                return;
+            }
+            openedFrom = target.name;
+            readFile(target.path);
+            // Opened, else the status line says why.
+            if (!listing)
+                vim.showMessage(c.message);
+        });
     }
 
     // `-` in a file: back to the listing it was opened from, or else its
