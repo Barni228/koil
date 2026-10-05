@@ -661,6 +661,9 @@ ApplicationWindow {
         property string confirmChanges: "always"
         property bool number: false
         property bool relativeNumber: false
+        // The dir Koil lists when no path is given (see Document.startDir),
+        // read only at startup; empty for the home dir.
+        property string startDir: ""
     }
 
     Theme {
@@ -1008,6 +1011,7 @@ ApplicationWindow {
         app: root
         settings: settings
         theme: theme
+        document: doc
     }
 
     footer: Pane {
@@ -1347,9 +1351,12 @@ ApplicationWindow {
 
         applyColorScheme();
         // A file opens as a file; anything else (a dir, a pattern) Koil
-        // lists, and with nothing given, the home dir.
-        const start = doc.startupPath();
-        if (start && doc.isFile(start)) {
+        // lists, and with nothing given, the dir the Settings window's
+        // "Start in" says (which, like the path field, can't be a file), else
+        // the home dir.
+        const arg = doc.startupPath();
+        const start = arg || doc.startDir(settings.startDir);
+        if (arg && doc.isFile(arg)) {
             // Once the editor is done: before its own onCompleted, it doesn't
             // have the line numbers' padding, and adding it then had Qt lay
             // out all of a long file again (100,000 lines took a second).

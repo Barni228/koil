@@ -2,14 +2,16 @@ pragma ComponentBehavior: Bound
 
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Templates as T
 
-// The Settings window (Cmd+,): font, font size, line numbers, theme and
-// when applying asks first. It
+// The Settings window (Cmd+,): font, font size, line numbers, theme, when
+// applying asks first, and the dir Koil starts in. It
 // shows the saved settings, which Koil starts with; changes here are saved
-// and apply at once (app.changeSetting). The zoom and :set change only the
-// settings in use, so they don't show here. Each setting has a button that
+// and apply at once (app.changeSetting), but the dir only at the next start.
+// The zoom and :set change only the settings in use, so they don't show
+// here. Each setting has a button that
 // resets it to its default, and Restore Defaults resets them all.
 Window {
     id: win
@@ -17,9 +19,12 @@ Window {
     // main.qml's window: the defaults, the fonts, changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // colorScheme, confirmChanges.
+    // colorScheme, confirmChanges, startDir.
     required property var settings
     required property Theme theme
+    // main.qml's Document, for the folder picked (a var, so this file needs
+    // no `import Koil`).
+    required property var document
 
     readonly property real zoom: theme.zoom
     readonly property color textColor: theme.windowText
@@ -52,6 +57,7 @@ Window {
     readonly property bool customLineNumbers: lineNumberMode !== 0
     readonly property bool customColorScheme: settings.colorScheme !== "system"
     readonly property bool customConfirm: settings.confirmChanges !== "always"
+    readonly property bool customStartDir: settings.startDir !== ""
 
     function setFontSize(size) {
         app.changeSetting("fontSize", Math.max(app.minFontSize, Math.min(app.maxFontSize, size)));
@@ -66,6 +72,7 @@ Window {
         setLineNumberMode(0);
         app.changeSetting("colorScheme", "system");
         app.changeSetting("confirmChanges", "always");
+        settings.startDir = "";
     }
 
     // Shows the window, centered near the top of the main window the first
@@ -80,6 +87,8 @@ Window {
             fontSearch.deselect();
             sizeInput.focus = false;
             sizeInput.deselect();
+            startInput.focus = false;
+            startInput.deselect();
         }
         show();
         raise();
@@ -520,6 +529,73 @@ Window {
                 enabled: win.customConfirm
                 onClicked: win.app.changeSetting("confirmChanges", "always")
             }
+
+            SettingLabel {
+                text: qsTr("Start in")
+            }
+            // The dir (or pattern) Koil lists when it's opened with no path,
+            // written as in the path field (from the home dir), or picked.
+            // Empty for the home dir. Saved for the next start, not opened.
+            Rectangle {
+                Layout.fillWidth: true
+                implicitWidth: 180 * win.zoom
+                implicitHeight: 26 * win.zoom
+                radius: 4 * win.zoom
+                color: win.theme.field
+                border.color: startInput.activeFocus ? win.accent : win.borderColor
+
+                TextInput {
+                    id: startInput
+
+                    x: 8 * win.zoom
+                    width: parent.width - x - folderButton.width - 2 * win.zoom
+                    height: parent.height
+                    clip: true
+                    text: win.settings.startDir
+                    font.pixelSize: Math.round(13 * win.zoom)
+                    color: win.textColor
+                    verticalAlignment: TextInput.AlignVCenter
+                    selectByMouse: true
+                    selectionColor: win.theme.highlight
+                    selectedTextColor: win.theme.highlightedText
+                    Accessible.name: qsTr("Start in")
+                    onEditingFinished: {
+                        win.settings.startDir = text.trim();
+                        text = Qt.binding(() => win.settings.startDir);
+                    }
+
+                    // The home dir, as Koil shows it.
+                    Text {
+                        anchors.fill: parent
+                        visible: !startInput.text
+                        text: "~"
+                        font: startInput.font
+                        color: win.textColor
+                        opacity: 0.5
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+                SettingButton {
+                    id: folderButton
+
+                    anchors.right: parent.right
+                    anchors.rightMargin: 2 * win.zoom
+                    anchors.verticalCenter: parent.verticalCenter
+                    iconPath: "M2 4.5 Q2 3.5 3 3.5 H6 L7.5 5 H13 Q14 5 14 6 V12 Q14 13 13 13 H3 Q2 13 2 12 Z"
+                    tip: qsTr("Choose Folder")
+                    onClicked: folderPicker.open()
+                }
+
+                FolderDialog {
+                    id: folderPicker
+
+                    onAccepted: win.settings.startDir = win.document.shownPath(win.document.urlToPath(selectedFolder))
+                }
+            }
+            ResetButton {
+                enabled: win.customStartDir
+                onClicked: win.settings.startDir = ""
+            }
         }
 
         AbstractButton {
@@ -529,7 +605,7 @@ Window {
             implicitWidth: restoreText.implicitWidth + 24 * win.zoom
             implicitHeight: 26 * win.zoom
             enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme
-                || win.customConfirm
+                || win.customConfirm || win.customStartDir
             opacity: enabled ? 1 : 0.4
             focusPolicy: Qt.TabFocus
             hoverEnabled: true

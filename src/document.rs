@@ -55,6 +55,13 @@ pub mod qobject {
         #[qinvokable]
         fn startup_path(self: &Document) -> QString;
 
+        /// The dir (or pattern) Koil lists when no path is given, as the
+        /// Settings window's "Start in" `setting` has it: read from the home
+        /// dir if it's relative (and doesn't start with `~`). Empty if the
+        /// setting is, for the home dir.
+        #[qinvokable]
+        fn start_dir(self: &Document, setting: &QString) -> QString;
+
         /// `path` as the path field shows it, with `~` for the home dir.
         #[qinvokable]
         fn shown_path(self: &Document, path: &QString) -> QString;
@@ -68,7 +75,8 @@ pub mod qobject {
         #[qinvokable]
         fn dir_of(self: &Document, path: &QString) -> QString;
 
-        /// The home dir, which Koil lists when no path is given.
+        /// The home dir, which Koil lists when no path is given (and the
+        /// Settings window doesn't say otherwise).
         #[qinvokable]
         fn home_dir(self: &Document) -> QString;
 
@@ -115,9 +123,13 @@ impl qobject::Document {
         std::env::args()
             .skip(1)
             .find(|arg| !arg.starts_with('-'))
-            .and_then(absolute)
+            .and_then(|arg| Some(absolute(&std::env::current_dir().ok()?, arg)))
             .map(|path| QString::from(path.as_str()))
             .unwrap_or_default()
+    }
+
+    fn start_dir(&self, setting: &QString) -> QString {
+        QString::from(start_dir(setting.to_string()).as_str())
     }
 
     fn shown_path(&self, path: &QString) -> QString {
@@ -180,20 +192,27 @@ fn cannot(doing: &str, path: &str, err: &io::Error) -> String {
     format!("Can't {doing} `{name}`: {why}")
 }
 
-/// `arg` (from the command line) made absolute from the dir Koil started
-/// in, by writing it after that dir and a `/` (`koil_core::with_slashes`), so
-/// it keeps a trailing `/` (a pattern's), `..` and `\` as written, which
-/// koil reads: on Windows `std::path::absolute` would make every `/` a `\`,
-/// and `join` would put a `\` before it, where koil doesn't end a pattern's
-/// base dir.
-fn absolute(arg: String) -> Option<String> {
-    let first = Path::new(&arg).components().next();
-    if matches!(first, Some(Component::Prefix(_) | Component::RootDir)) {
-        return Some(arg);
+/// See `Document::start_dir`.
+fn start_dir(setting: String) -> String {
+    if setting.is_empty() || setting == "~" || setting.starts_with("~/") {
+        return setting;
     }
-    let dir = std::env::current_dir().ok()?;
-    let dir = koil_core::with_slashes(&dir).to_string_lossy().into_owned();
-    Some(listing::join_shown(dir, &arg))
+    absolute(&std::env::home_dir().unwrap_or_default(), setting)
+}
+
+/// `path` (from the command line, or a setting) made absolute from `dir`
+/// (the dir Koil started in, or the home dir), by writing it after that dir
+/// and a `/` (`koil_core::with_slashes`), so it keeps a trailing `/` (a
+/// pattern's), `..` and `\` as written, which koil reads: on Windows
+/// `std::path::absolute` would make every `/` a `\`, and `join` would put a
+/// `\` before it, where koil doesn't end a pattern's base dir.
+fn absolute(dir: &Path, path: String) -> String {
+    let first = Path::new(&path).components().next();
+    if matches!(first, Some(Component::Prefix(_) | Component::RootDir)) {
+        return path;
+    }
+    let dir = koil_core::with_slashes(dir).to_string_lossy().into_owned();
+    listing::join_shown(dir, &path)
 }
 
 #[cfg(test)]
@@ -212,5 +231,19 @@ mod tests {
         );
         std::fs::write(path, "text").unwrap();
         assert_eq!(read(path), Ok("text".to_string()));
+    }
+
+    #[test]
+    fn test_start_dir() {
+        let home = std::env::home_dir().unwrap();
+        let home = koil_core::with_slashes(&home)
+            .to_string_lossy()
+            .into_owned();
+        for setting in ["", "~", "~/src", "~/src/*.rs", "/tmp"] {
+            assert_eq!(start_dir(setting.to_string()), setting);
+        }
+        assert_eq!(start_dir("src".to_string()), format!("{home}/src"));
+        assert_eq!(start_dir("../x".to_string()), format!("{home}/../x"));
+        assert_eq!(start_dir("~x".to_string()), format!("{home}/~x"));
     }
 }

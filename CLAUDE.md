@@ -77,7 +77,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 ## Build and test
 
 - Local Qt comes from Homebrew (`qtbase`, `qtdeclarative`); `qmake` must be on
-  `PATH`. `cargo build`, `cargo run` (lists the home dir), `cargo run -- dir`
+  `PATH`. `cargo build`, `cargo run` (lists the home dir, or the
+  Start in setting's), `cargo run -- dir`
   (or a pattern), `cargo run -- file` to open a file. Try applying in a
   scratch dir: it really moves and trashes files.
 - `cargo test` runs listing.rs's tests; `cargo clippy --all-targets`,
@@ -171,8 +172,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   path that isn't there or is a file (`OpenError::NotFound`,
   `NotADirectory`, naming its first part that isn't a dir, which
   `listing::describe_open` shows with `~`), rather than opening its closest
-  parent, so it can be fixed. A path on the command line that can't be
-  opened lists the home dir, with it in the path field and its problem
+  parent, so it can be fixed. A path on the command line (or the Start in
+  setting, see Settings) that can't be opened lists the home dir, with it
+  in the path field and its problem
   (`Document.startupPath` makes it absolute from the dir Koil started in,
   since the field is read relative to the open dir, by writing it after that
   dir and a `/`: `std::path::absolute` would make a pattern's `/` a `\`, and
@@ -361,7 +363,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   (`:q` still fails on its unsaved changes); `:confirm q` and `ZZ` then ask
   about applying them. `:qa!` and Cmd+Q still quit. File > Open Folder
   (Cmd+Shift+O) and a dir or pattern on the command line list it; with no
-  argument Koil lists the home dir. A file or dir dropped on the window
+  argument Koil lists the Start in setting's dir (see Settings), else the
+  home dir. A file or dir dropped on the window
   opens as those would (`openDropped`; the first local one of several):
   `dropArea` is in the overlay, so the status line takes drops too, and
   opens it with `Qt.callLater`, so the app it came from isn't kept
@@ -443,7 +446,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   call `document::file_opened` (C++ can't emit a cxx-qt signal, and the
   bridge allows no `#[allow(dead_code)]` for a signal only C++ uses), and
   main.qml opens it as a dropped file (`openDropped`). A cold start shows
-  the home dir first, as the event comes once the event loop runs. On
+  the home dir (or Start in) first, as the event comes once the event loop runs. On
   Windows, the installer does as vim-edit's: a `Koil.Text` ProgID, in the
   `OpenWithProgids` of a list of text and source code extensions (`Exts` in
   `installer.iss`; what the Open With menu shows), and those extensions as
@@ -750,7 +753,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   doesn't show them. Their defaults (Cmd+0, `:set fs&`) are the saved values
   (vim's `default*` properties are bound to `settings`), not Koil's defaults.
   Koil's own options (`:set hidden`, `gitignore`, `regex`) aren't saved, and
-  start off. The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
+  start off. Start in (`startDir`, empty for the home dir) is only read at
+  startup, with no path on the command line, so the Settings window writes
+  it to `settings` alone. It's a dir or pattern as the path field takes it,
+  read from the home dir (`Document.startDir`), so it can't open a file;
+  the folder button puts a picked one in with `~`. The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
   also switches the palette, title bar and menus; "system" unsets it. The
   Settings window's size follows the zoom, so it isn't resizable. They're
   stored in `~/Library/Preferences/com.koil.Koil.plist` on macOS, the registry
