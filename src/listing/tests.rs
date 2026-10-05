@@ -264,6 +264,12 @@ fn test_update_actions() {
             "MOVE   file.rs -> main.rs"
         ]
     );
+    // only the delete says it deletes
+    let deletes: Vec<_> = (super::actions(&koil).into_iter())
+        .filter(|line| line.deletes)
+        .map(|line| line.text)
+        .collect();
+    assert_eq!(deletes, ["DELETE notes"]);
     // the listing shows the changes, and reads back the same
     let rendered = render(&koil);
     assert_eq!(rendered.names, ["dir/", "main.rs", "new/"]);

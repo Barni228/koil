@@ -5,7 +5,8 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Templates as T
 
-// The Settings window (Cmd+,): font, font size, line numbers and theme. It
+// The Settings window (Cmd+,): font, font size, line numbers, theme and
+// when applying asks first. It
 // shows the saved settings, which Koil starts with; changes here are saved
 // and apply at once (app.changeSetting). The zoom and :set change only the
 // settings in use, so they don't show here. Each setting has a button that
@@ -16,7 +17,7 @@ Window {
     // main.qml's window: the defaults, the fonts, changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // colorScheme.
+    // colorScheme, confirmChanges.
     required property var settings
     required property Theme theme
 
@@ -39,11 +40,18 @@ Window {
         { label: qsTr("Light"), value: "light" },
         { label: qsTr("Dark"), value: "dark" }
     ]
+    // When applying the listing's changes (or creating a file) asks first.
+    readonly property var confirmModes: [
+        { label: qsTr("Always"), value: "always" },
+        { label: qsTr("When deleting"), value: "deleting" },
+        { label: qsTr("Never"), value: "never" }
+    ]
 
     readonly property bool customFontFamily: settings.fontFamily !== app.defaultFontFamily
     readonly property bool customFontSize: settings.fontSize !== app.defaultFontSize
     readonly property bool customLineNumbers: lineNumberMode !== 0
     readonly property bool customColorScheme: settings.colorScheme !== "system"
+    readonly property bool customConfirm: settings.confirmChanges !== "always"
 
     function setFontSize(size) {
         app.changeSetting("fontSize", Math.max(app.minFontSize, Math.min(app.maxFontSize, size)));
@@ -57,6 +65,7 @@ Window {
         setFontSize(app.defaultFontSize);
         setLineNumberMode(0);
         app.changeSetting("colorScheme", "system");
+        app.changeSetting("confirmChanges", "always");
     }
 
     // Shows the window, centered near the top of the main window the first
@@ -498,6 +507,19 @@ Window {
                 enabled: win.customColorScheme
                 onClicked: win.app.changeSetting("colorScheme", "system")
             }
+
+            SettingLabel {
+                text: qsTr("Ask before applying")
+            }
+            Segmented {
+                options: win.confirmModes
+                current: win.confirmModes.findIndex(m => m.value === win.settings.confirmChanges)
+                onPicked: index => win.app.changeSetting("confirmChanges", win.confirmModes[index].value)
+            }
+            ResetButton {
+                enabled: win.customConfirm
+                onClicked: win.app.changeSetting("confirmChanges", "always")
+            }
         }
 
         AbstractButton {
@@ -507,6 +529,7 @@ Window {
             implicitWidth: restoreText.implicitWidth + 24 * win.zoom
             implicitHeight: 26 * win.zoom
             enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme
+                || win.customConfirm
             opacity: enabled ? 1 : 0.4
             focusPolicy: Qt.TabFocus
             hoverEnabled: true

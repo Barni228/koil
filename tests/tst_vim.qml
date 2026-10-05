@@ -800,18 +800,21 @@ TestCase {
         load("one\n  two\nthree");
         vim.commandKeys = {
             "  ": "apply",
+            " a": "applyAsking",
             "-": "parent",
             "<CR>": "open"
         };
         keyCommands.clear();
         keys("  ");
+        keys(" a");
         keys("3-");
         keys("<CR>");
-        compare(keyCommands.signalArguments.map(a => [a[0], a[1]]), [["apply", 0], ["parent", 3], ["open", 0]]);
+        compare(keyCommands.signalArguments.map(a => [a[0], a[1]]),
+            [["apply", 0], ["applyAsking", 0], ["parent", 3], ["open", 0]]);
         compare(vim.cursor, 0);
         // Space then anything else is a mistake, as vim's own bad keys are.
         keys(" l");
-        compare(keyCommands.count, 3);
+        compare(keyCommands.count, 4);
         compare(vim.cursor, 0);
         compare(vim.pendingKeys, "");
         // Shift+Enter is vim's Enter, and so is "-" after an operator or in
@@ -820,10 +823,10 @@ TestCase {
         compare(vim.cursor, 6);
         keys("d-");
         compare(render(), "three");
-        compare(keyCommands.count, 3);
+        compare(keyCommands.count, 4);
         vim.commandKeys = {};
         keys("<CR>");
-        compare(keyCommands.count, 3);
+        compare(keyCommands.count, 4);
     }
 
     // Koil's g. and the like leave vim's own g commands alone.

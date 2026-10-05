@@ -231,7 +231,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   reading its quotes. A completion goes into the insert as Backspaces and
   its text, so `.` and counts repeat it.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
-  listing and the path field): `Space Space` applies, `-` opens `..`
+  listing and the path field): `Space Space` applies (`Space a` too, but
+  always asking first, whatever the setting: see Apply), `-` opens `..`
   (`3-`: `../../..`), Tab goes to the other editor (`activate`), and `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
   buttons). Cmd+S (File > Save, named Update in the listing) updates.
@@ -295,7 +296,13 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
   buffer back past an update) and asks to run koil's undo, listing its
   steps; koil refuses while changes are pending. Not from the path field,
-  whose undo history is its own.
+  whose undo history is its own. The "Ask before applying" setting
+  (`confirmChanges`: always, when deleting, never; `asksFirst`) can skip
+  the confirmation (but not `Space a`'s or File > Apply Changes…'s: `ask`),
+  applying every line (`deletes` says which delete), and Enter's create's
+  too. Undoing an apply always asks (a `u` too many mustn't change files
+  unasked), and so do `:confirm q` and `ZZ`, whose question is whether to
+  quit without the changes.
 - **Changes on disk** (koil-core's `Koil::sync`; read its CLAUDE.md): the
   listing shows what changes on disk as it happens, keeping the user's
   edits. `Koil.watch()` (after every `showListing`, sync and answer) has a
@@ -733,8 +740,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   gutter width (the digits and two spaces) to it. Only visible lines get a row.
 - **Settings**: `settings` (a QtCore `Settings` in main.qml) holds the saved
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
-  `relativeNumber`, which `:set` changes: `root.vimSettings`) and
-  `root.colorScheme`, bound to the saved ones at startup. The Settings window
+  `relativeNumber`, which `:set` changes: `root.vimSettings`),
+  `root.colorScheme` and `root.confirmChanges`, bound to the saved ones at
+  startup. The Settings window
   shows the saved ones and changes both (`changeSetting`). The zoom and `:set`
   change only the ones in use, until Koil quits, so the Settings window
   doesn't show them. Their defaults (Cmd+0, `:set fs&`) are the saved values

@@ -115,8 +115,8 @@ pub mod qobject {
         fn id_path(self: &Koil, id: &QString) -> QString;
 
         /// What applying would do, as a list of `listing::ActionLine`s
-        /// (`{ text, needs }`, `text` like `MOVE a -> b`), which `apply`
-        /// picks from.
+        /// (`{ text, needs, deletes }`, `text` like `MOVE a -> b`), which
+        /// `apply` picks from.
         #[qinvokable]
         fn actions(self: Pin<&mut Koil>) -> QString;
 

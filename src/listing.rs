@@ -921,6 +921,9 @@ pub struct ActionLine {
     /// The lines it can't be applied without (`Change::needs`), which the
     /// confirmation picks with it, and leaves out without it.
     pub needs: Vec<usize>,
+    /// Whether it deletes something, which the "When deleting" setting
+    /// asks about before applying.
+    pub deletes: bool,
     /// What it does, for `Koil::apply_only`.
     #[serde(skip)]
     pub action: Action,
@@ -934,6 +937,7 @@ pub fn actions(koil: &Koil) -> Vec<ActionLine> {
         .map(|change| ActionLine {
             text: action_text(koil, &change.action),
             needs: change.needs,
+            deletes: matches!(change.action, Action::DeleteFile(_) | Action::DeleteDir(_)),
             action: change.action,
         })
         .collect()

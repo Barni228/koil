@@ -67,8 +67,11 @@ ApplicationWindow {
     // them loads every font, which takes a moment, so it waits until
     // they're needed (loadFontFamilies).
     property var fontFamilies: []
-    // "system", "light" or "dark". The other settings in use are vim's.
+    // "system", "light" or "dark".
     property string colorScheme: settings.colorScheme
+    // When applying asks first (see asksFirst): "always", "deleting" or
+    // "never". The other settings in use are vim's.
+    property string confirmChanges: settings.confirmChanges
     // The settings vim keeps, which :set changes (see changeSetting).
     readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber"]
 
@@ -334,6 +337,8 @@ ApplicationWindow {
             updateListing();
         else if (name === "apply")
             applyChanges(false, false);
+        else if (name === "applyAsking")
+            applyChanges(false, false, true);
         else if (name === "parent")
             updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
         else if (name === "open")
@@ -383,9 +388,7 @@ ApplicationWindow {
             vim.showError(r.message);
             return;
         }
-        // Only the new dirs need saying.
-        const details = r.steps.length > 1 ? r.steps.join("\n") : "";
-        confirmDialog.ask("“" + target.name + "” doesn't exist yet. Create it?", details, () => {
+        const create = () => {
             const spot = listingSpot();
             const c = JSON.parse(koil.create(target.path));
             // From scratch, as after an apply: undo mustn't bring back its
@@ -400,7 +403,20 @@ ApplicationWindow {
             // Opened, else the status line says why.
             if (!listing)
                 vim.showMessage(c.message);
-        });
+        };
+        if (!asksFirst(false)) {
+            create();
+            return;
+        }
+        // Only the new dirs need saying.
+        const details = r.steps.length > 1 ? r.steps.join("\n") : "";
+        confirmDialog.ask("“" + target.name + "” doesn't exist yet. Create it?", details, create);
+    }
+
+    // Whether changing files asks first, as the confirmChanges setting
+    // says: always, only if something is deleted, or never.
+    function asksFirst(deletes) {
+        return confirmChanges === "always" || confirmChanges === "deleting" && deletes;
     }
 
     // `-` in a file: back to the listing it was opened from, or else its
@@ -422,12 +438,14 @@ ApplicationWindow {
     }
 
     // Applies the listing's changes once the user confirms them (Space
-    // Space, :w, File > Apply Changes…), those they leave picked (the
-    // others are forgotten), then quits if `quit` is set. With `orQuit`
-    // (:confirm q, ZZ), No quits without applying, and if the listing can't be read (its errors, or a path that
+    // Space, Space a, :w, File > Apply Changes…), those they leave picked
+    // (the others are forgotten), then quits if `quit` is set. When
+    // confirmChanges says not to ask (asksFirst), it applies them all,
+    // unless `ask` is set (Space a, File > Apply Changes…). With `orQuit` (:confirm q, ZZ), it
+    // always asks, and No quits without applying; if the listing can't be read (its errors, or a path that
     // can't be opened), it asks to quit without the changes, saying why (the
     // status line's error, which updateListing just showed).
-    function applyChanges(quit, orQuit) {
+    function applyChanges(quit, orQuit, ask) {
         if (!updateListing()) {
             if (orQuit)
                 confirmDialog.ask("The changes can't be applied. Quit without them?", vim.message, () => Qt.quit());
@@ -441,17 +459,23 @@ ApplicationWindow {
                 vim.showMessage("Nothing to apply");
             return;
         }
-        const total = actions.length;
-        const what = picked => total === 1 ? "this change" : picked === total ? "these " + total + " changes"
-            : picked + " of these " + total + " changes";
-        confirmDialog.ask(picked => "Apply " + what(picked) + (orQuit ? " before quitting?" : "?"), actions, picked => {
+        const apply = picked => {
             const spot = listingSpot();
             const r = JSON.parse(koil.apply(JSON.stringify(picked)));
             showListing(true, "", spot);
             report(r);
             if (r.ok && quit)
                 Qt.quit();
-        }, orQuit ? () => Qt.quit() : null);
+        };
+        if (!ask && !orQuit && !asksFirst(actions.some(a => a.deletes))) {
+            apply(actions.map((a, i) => i));
+            return;
+        }
+        const total = actions.length;
+        const what = picked => total === 1 ? "this change" : picked === total ? "these " + total + " changes"
+            : picked + " of these " + total + " changes";
+        confirmDialog.ask(picked => "Apply " + what(picked) + (orQuit ? " before quitting?" : "?"), actions, apply,
+            orQuit ? () => Qt.quit() : null);
     }
 
     // u with no change left to undo: undoes Koil's last apply, once the user
@@ -615,7 +639,8 @@ ApplicationWindow {
 
     onColorSchemeChanged: applyColorScheme()
 
-    // Saves a setting and uses it now: one of vimSettings, or colorScheme.
+    // Saves a setting and uses it now: one of vimSettings, colorScheme or
+    // confirmChanges.
     function changeSetting(name, value) {
         (vimSettings.includes(name) ? vim : root)[name] = value;
         settings[name] = value;
@@ -631,6 +656,7 @@ ApplicationWindow {
         property int fontSize: root.defaultFontSize
         property string fontFamily: root.defaultFontFamily
         property string colorScheme: "system"
+        property string confirmChanges: "always"
         property bool number: false
         property bool relativeNumber: false
     }
@@ -723,6 +749,7 @@ ApplicationWindow {
         // there; in the listing it's vim's Enter.
         commandKeys: root.listing ? Object.assign({
             "  ": "apply",
+            " a": "applyAsking",
             "-": "parent",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",
@@ -1108,7 +1135,8 @@ ApplicationWindow {
                     shortcut: "Ctrl+Shift+O"
                     onTriggered: folderDialog.open()
                 }
-                // In the listing, Cmd+S updates; applying is its own item.
+                // In the listing, Cmd+S updates; applying is its own item,
+                // which always asks first, as Space a does.
                 Platform.MenuItem {
                     text: root.listing ? qsTr("Update") : qsTr("Save")
                     shortcut: StandardKey.Save
@@ -1117,7 +1145,7 @@ ApplicationWindow {
                 Platform.MenuItem {
                     text: qsTr("Apply Changes…")
                     enabled: root.listing
-                    onTriggered: root.save()
+                    onTriggered: root.applyChanges(false, false, true)
                 }
                 Platform.MenuItem {
                     text: qsTr("Save As…")
@@ -1210,7 +1238,7 @@ ApplicationWindow {
                 Action {
                     text: qsTr("A&pply Changes…")
                     enabled: root.listing
-                    onTriggered: root.save()
+                    onTriggered: root.applyChanges(false, false, true)
                 }
                 Action {
                     text: qsTr("Save &As…")

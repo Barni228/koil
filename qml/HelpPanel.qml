@@ -44,7 +44,10 @@ Popup {
             rows: [
                 [cmdKey + "S", "Update: Koil reads the listing (keeping the changes, also in other dirs) "
                     + "and shows it again, opening the path in the field if it changed."],
-                ["Space Space  :w", "Apply the changes, after showing what they'll do. `:wq` quits afterwards."],
+                ["Space Space  :w", "Apply the changes, after showing what they'll do (Settings can make it "
+                    + "ask only when something is deleted, or never). `:wq` quits afterwards."],
+                ["Space a", "Apply the changes, always showing what they'll do first, whatever Settings says "
+                    + "(so does File > Apply Changes…)."],
                 ["[x]", "Applying lists the changes picked: `j` and `k` go through them, Space or `x` (or a "
                     + "click on the box) leaves one out or picks it again, along with what goes with it (a "
                     + "swap's other half, the new dir a file goes in), and `a` picks all or none. What's left "
@@ -52,8 +55,8 @@ Popup {
                 ["u", "With no edit left to undo: undo the last apply, after showing what that will do. "
                     + "Deleted entries come back from the trash."],
                 ["Enter", "Open the dir or file on the cursor's line. A file opens as it is on disk, even "
-                    + "if its line renames it. A new file is created first, if you say so (the other "
-                    + "changes stay)."],
+                    + "if its line renames it. A new file is created first, asking as applying does (the "
+                    + "other changes stay)."],
                 ["Shift+Enter", "Vim's Enter: the first character of the next line."],
                 ["icons", "The cursor stays out of an icon and the two spaces after it: `0` goes to the "
                     + "name, and `o` (or Enter) starts a line after three spaces. Backspace at a name's "
