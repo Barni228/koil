@@ -7,10 +7,10 @@ It edits a directory as text, like [oil.nvim](https://github.com/stevearc/oil.nv
 the first line is the directory (or a glob or regex of files), then each entry
 is a line with its icon and name. Rename, delete, copy and create entries by
 editing the lines, and move them by cutting a line in one directory and
-pasting it in another. `Space Space` updates the listing, `Space a` applies
-the changes once you confirm them (deleted files go to the trash), and `u`
-after that undoes them. Enter opens a directory or a file, and `-` the
-directory above (or, in a file, goes back to the listing).
+pasting it in another. `Cmd+S` (`Ctrl+S`) updates the listing, `Space Space`
+applies the changes once you confirm them (deleted files go to the trash),
+and `u` after that undoes them. Enter opens a directory or a file, and `-`
+the directory above (or, in a file, goes back to the listing).
 `:help` (or `:h`) lists everything that isn't standard vim.
 
 The icons are [Nerd Font](https://www.nerdfonts.com) glyphs. Koil comes with

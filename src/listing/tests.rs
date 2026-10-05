@@ -1122,6 +1122,6 @@ fn test_create_now() {
     assert!(updated.ok, "{updated:?}");
     assert_eq!(
         create_steps(&koil, &koil.current_dir().join("file.rs")),
-        Err("`file.rs` can't be created before the other changes are applied (Space a)".into())
+        Err("`file.rs` can't be created before the other changes are applied (Space Space)".into())
     );
 }

@@ -421,10 +421,10 @@ ApplicationWindow {
         showListing(true, openedFrom || fileName, openedFrom ? fileSpot : null);
     }
 
-    // Applies the listing's changes once the user confirms them (Space a,
-    // :w), those they leave picked (the others are forgotten), then quits if
-    // `quit` is set. With `orQuit` (:confirm q, ZZ), No quits without
-    // applying, and if the listing can't be read (its errors, or a path that
+    // Applies the listing's changes once the user confirms them (Space
+    // Space, :w, File > Apply Changes…), those they leave picked (the
+    // others are forgotten), then quits if `quit` is set. With `orQuit`
+    // (:confirm q, ZZ), No quits without applying, and if the listing can't be read (its errors, or a path that
     // can't be opened), it asks to quit without the changes, saying why (the
     // status line's error, which updateListing just showed).
     function applyChanges(quit, orQuit) {
@@ -722,8 +722,7 @@ ApplicationWindow {
         // In the path field, Shift+Enter updates like Enter but stays
         // there; in the listing it's vim's Enter.
         commandKeys: root.listing ? Object.assign({
-            "  ": "update",
-            " a": "apply",
+            "  ": "apply",
             "-": "parent",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",
@@ -1109,9 +1108,15 @@ ApplicationWindow {
                     shortcut: "Ctrl+Shift+O"
                     onTriggered: folderDialog.open()
                 }
+                // In the listing, Cmd+S updates; applying is its own item.
                 Platform.MenuItem {
-                    text: root.listing ? qsTr("Apply Changes…") : qsTr("Save")
+                    text: root.listing ? qsTr("Update") : qsTr("Save")
                     shortcut: StandardKey.Save
+                    onTriggered: root.listing ? root.updateListing() : root.save()
+                }
+                Platform.MenuItem {
+                    text: qsTr("Apply Changes…")
+                    enabled: root.listing
                     onTriggered: root.save()
                 }
                 Platform.MenuItem {
@@ -1198,8 +1203,13 @@ ApplicationWindow {
                     onTriggered: folderDialog.open()
                 }
                 Action {
-                    text: root.listing ? qsTr("&Apply Changes…") : qsTr("&Save")
+                    text: root.listing ? qsTr("&Update") : qsTr("&Save")
                     shortcut: StandardKey.Save
+                    onTriggered: root.listing ? root.updateListing() : root.save()
+                }
+                Action {
+                    text: qsTr("A&pply Changes…")
+                    enabled: root.listing
                     onTriggered: root.save()
                 }
                 Action {

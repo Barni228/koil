@@ -231,10 +231,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   reading its quotes. A completion goes into the insert as Backspaces and
   its text, so `.` and counts repeat it.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
-  listing and the path field): `Space Space` updates, `Space a` applies, `-`
-  opens `..` (`3-`: `../../..`), Tab goes to the other editor (`activate`),
-  and `g.`, `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex`
-  (like the buttons). Enter in the listing opens the dir or file on its line
+  listing and the path field): `Space Space` applies, `-` opens `..`
+  (`3-`: `../../..`), Tab goes to the other editor (`activate`), and `g.`,
+  `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
+  buttons). Cmd+S (File > Save, named Update in the listing) updates.
+  Enter in the listing opens the dir or file on its line
   (`listing::target_on_line`: a dir if the name ends with `/`, else the file
   its ID points to on disk, even if the line renames it; a new file is
   created first, see Files); on a line without an entry it's vim's Enter.
@@ -273,8 +274,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `gitignore`), the cursor stays on its entry (`listingSpot`), even if the
   update moved it (a rename or a new entry goes where it sorts), at the
   same column and the same place in the view, else on the same line.
-- **Apply and undo**: `Space a`, `:w`, File > Save (renamed Apply Changes…)
-  update, then `ConfirmDialog` lists `listing::actions` (paths relative to
+- **Apply and undo**: `Space Space`, `:w`, File > Apply Changes… update,
+  then `ConfirmDialog` lists `listing::actions` (paths relative to
   the open dir; `Koil::changes`, so a swap is its two renames, not the
   three steps through a temp name), each with `[x]` before it, all picked.
   The user leaves some out (j and k move the current line, Space or x or a

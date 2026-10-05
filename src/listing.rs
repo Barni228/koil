@@ -984,7 +984,7 @@ pub fn describe_create(koil: &Koil, error: &KoilError) -> String {
     match error {
         KoilError::NotNew(path) => format!("`{}` isn't new", relative(koil, path)),
         KoilError::NeedsChanges(path) => format!(
-            "`{}` can't be created before the other changes are applied (Space a)",
+            "`{}` can't be created before the other changes are applied (Space Space)",
             relative(koil, path)
         ),
         error => describe(error),

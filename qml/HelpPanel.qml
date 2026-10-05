@@ -42,9 +42,9 @@ Popup {
                 + "without an icon to create, like `new.txt` or `new/dir/`. A line cut here and pasted in "
                 + "another dir moves the entry. Nothing changes on disk until it's applied.",
             rows: [
-                ["Space Space", "Update: Koil reads the listing (keeping the changes, also in other dirs) "
+                [cmdKey + "S", "Update: Koil reads the listing (keeping the changes, also in other dirs) "
                     + "and shows it again, opening the path in the field if it changed."],
-                ["Space a  :w", "Apply the changes, after showing what they'll do. `:wq` quits afterwards."],
+                ["Space Space  :w", "Apply the changes, after showing what they'll do. `:wq` quits afterwards."],
                 ["[x]", "Applying lists the changes picked: `j` and `k` go through them, Space or `x` (or a "
                     + "click on the box) leaves one out or picks it again, along with what goes with it (a "
                     + "swap's other half, the new dir a file goes in), and `a` picks all or none. What's left "
@@ -235,7 +235,7 @@ Popup {
             rows: [
                 ["", "Koil's problems with the listing get a wavy underline, orange or red, and a message "
                     + "after the end of their line, as in VS Code. An error (like a name written twice) "
-                    + "stops Space Space and applying; a warning (like a name a shell needs quoted) doesn't. "
+                    + "stops updating and applying; a warning (like a name a shell needs quoted) doesn't. "
                     + "A name Windows can't use is a warning, but an error on Windows."],
                 ["gh", "Show the message of the warning or error under the cursor (so does resting the "
                     + "mouse on it, or on the message)."]
