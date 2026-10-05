@@ -3823,8 +3823,10 @@ QtObject {
                 return null;
             }
             const forward = m.name === "n" ? lastSearch.forward : !lastSearch.forward;
-            highlightPattern = lastSearch.pattern;
             const q = search(t, lastSearch.pattern, forward, count, p);
+            // One that found nothing highlights nothing, even once the text
+            // has it (until n finds it).
+            highlightPattern = q === null ? "" : lastSearch.pattern;
             return q === null ? null : { pos: q, type: "exclusive" };
         }
         case "*":

@@ -748,6 +748,13 @@ TestCase {
         compare(vim.cursor, 3);
         keys("/A(<CR>"); // not a valid regular expression: literal, and no match
         verify(vim.messageIsError);
+        // A search that found nothing highlights nothing, even once the text
+        // has it.
+        compare(vim.highlightPattern, "");
+        keys("0iA(<Esc>");
+        compare(vim.searchHighlights(), []);
+        keys("n");
+        compare(vim.highlightPattern, "A(");
         verify(Txt.ignoresCase("\\x4a\\u00C9\\cM\\D", true));
         verify(!Txt.ignoresCase("\\\\S", true));
         verify(!Txt.ignoresCase("\\S", false));
