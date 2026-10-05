@@ -910,8 +910,23 @@ pub fn id_path(koil: &Koil, id: &str) -> Option<String> {
     Some(format!("{}{slash}", relative(koil, path)))
 }
 
-/// What `Koil::apply` would do, as the user sees it, like `MOVE a -> b`.
-pub fn actions(koil: &Koil) -> Vec<String> {
+/// A line of what applying would do (see [`actions`]).
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct ActionLine {
+    /// Like `MOVE a -> b`.
+    pub text: String,
+    /// The lines it can't be applied without (`Change::needs`), which the
+    /// confirmation picks with it, and leaves out without it.
+    pub needs: Vec<usize>,
+    /// What it does, for `Koil::apply_only`.
+    #[serde(skip)]
+    pub action: Action,
+}
+
+/// What applying would do (`Koil::changes`), as the user sees it, like
+/// `MOVE a -> b`: a swap's renames are two lines, not the three steps
+/// through a temp name that `Koil::apply` takes.
+pub fn actions(koil: &Koil) -> Vec<ActionLine> {
     let path = |p: &Path| relative(koil, p);
     let dir = |p: &Path| format!("{}{}", path(p), if p.is_dir() { "/" } else { "" });
     let action = |action: &Action| match action {
@@ -922,7 +937,13 @@ pub fn actions(koil: &Koil) -> Vec<String> {
         Action::Rename(s, d) => format!("MOVE   {} -> {}", dir(s), path(d)),
         Action::Copy(s, d) => format!("COPY   {} -> {}", dir(s), path(d)),
     };
-    koil.compute_actions().iter().map(action).collect()
+    (koil.changes().into_iter())
+        .map(|change| ActionLine {
+            text: action(&change.action),
+            needs: change.needs,
+            action: change.action,
+        })
+        .collect()
 }
 
 /// What `Koil::undo` would do, as the user sees it, like `TRASH a`: empty if

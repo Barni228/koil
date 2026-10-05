@@ -11,14 +11,38 @@ import QtQuick.Layouts
 // the highlight, which starts on Yes, Enter answers the highlighted choice,
 // and j and k (or Up and Down) scroll. Its text is in the editor's font and
 // can be selected and copied.
+// The list can be one to pick from (what to apply), each line with `[x]`
+// (picked) or `[ ]` before it, all picked at first. Then j and k move the
+// current line instead, Space or x (or a click on its box) picks it or
+// leaves it out, along with the lines it needs or that need it, and a picks
+// all of them, or none if all are. Yes needs something picked.
 Popup {
     id: dialog
 
     required property Theme theme
 
     readonly property real zoom: theme.zoom
-    property string text
+    // The question, or a function of how many lines are picked that gives
+    // it (see ask).
+    property var question: ""
+    readonly property string text: typeof question === "function" ? question(pickedCount) : question
     property string details
+    // The lines to pick from (see ask), which of them are picked, which need
+    // each one (`needs` the other way round), and where each starts in
+    // `list`.
+    property var items: []
+    property var picked: []
+    property var neededBy: []
+    property var starts: []
+    readonly property int pickedCount: picked.filter(p => p).length
+    // The line j and k move, and Space picks or leaves out.
+    property int row: 0
+    // Where the first line to pick from is in the text, for the boxes'
+    // clicks.
+    property real listTop: 0
+    readonly property string list: items.length ? items.map((item, i) => (picked[i] ? "[x] " : "[ ] ") + item.text).join("\n")
+        : details
+    readonly property bool canSayYes: !items.length || pickedCount > 0
     // What the answers do, and what's done after any of them (see ask).
     property var yesAction: null
     property var noAction: null
@@ -35,9 +59,27 @@ Popup {
     // Asks `question`, with `details` (a list, maybe "") under it. `yes` is
     // what Yes does, and `no` what No does, if anything. `after` runs after
     // either, or if it's closed some other way (the next question, say).
+    // `details` can also be lines to pick from, `{ text, needs }`, where
+    // `needs` are the indexes of the lines it can't go without: then
+    // `question` can be a function of how many are picked, and `yes` gets the
+    // indexes of the picked ones.
     function ask(question, details, yes, no, after) {
-        text = question;
-        dialog.details = details || "";
+        const pick = Array.isArray(details);
+        items = pick ? details : [];
+        dialog.details = pick ? "" : details || "";
+        picked = items.map(() => true);
+        const by = items.map(() => []);
+        let start = 0;
+        starts = items.map((item, i) => {
+            for (const j of item.needs)
+                by[j].push(i);
+            const at = start;
+            start += 4 + item.text.length + 1;
+            return at;
+        });
+        neededBy = by;
+        row = 0;
+        dialog.question = question;
         yesAction = yes;
         noAction = no || null;
         afterAction = after || null;
@@ -47,19 +89,87 @@ Popup {
     }
 
     function answer(choice) {
+        if (choice === "yes" && !canSayYes)
+            return;
         const action = choice === "yes" ? yesAction : choice === "no" ? noAction : null;
+        const chosen = [];
+        picked.forEach((p, i) => {
+            if (p)
+                chosen.push(i);
+        });
         const after = afterAction;
         afterAction = null;
         close();
         if (action)
-            action();
+            action(chosen);
         if (after)
             after();
     }
 
-    function scrollBy(dy) {
-        scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY + dy));
+    // Picks line `i`, with the lines it needs, or leaves it out, with the
+    // lines that need it.
+    function toggle(i) {
+        const on = !picked[i], p = picked.slice(), todo = [i];
+        while (todo.length) {
+            const j = todo.pop();
+            if (p[j] === on)
+                continue;
+            p[j] = on;
+            for (const k of on ? items[j].needs : neededBy[j])
+                todo.push(k);
+        }
+        picked = p;
     }
+
+    function pickAll() {
+        const all = pickedCount < items.length;
+        picked = items.map(() => all);
+    }
+
+    // The line to pick from at `position` in the text, or -1.
+    function itemAt(position) {
+        const offset = position - text.length - 2;
+        if (!items.length || offset < 0)
+            return -1;
+        let low = 0, high = starts.length - 1;
+        while (low < high) {
+            const mid = (low + high + 1) >> 1;
+            if (starts[mid] <= offset)
+                low = mid;
+            else
+                high = mid - 1;
+        }
+        return low;
+    }
+
+    // Puts the highlight on the current line, and scrolls to it (to the top
+    // for the first, so the question shows).
+    function showRow() {
+        if (!items.length)
+            return;
+        const start = text.length + 2 + starts[row];
+        const top = label.positionToRectangle(start);
+        const bottom = label.positionToRectangle(start + 4 + items[row].text.length);
+        listTop = label.positionToRectangle(text.length + 2).y;
+        rowHighlight.y = top.y;
+        rowHighlight.height = bottom.y + bottom.height - top.y;
+        if (row === 0)
+            scrollTo(0);
+        else if (top.y < scroller.contentY)
+            scrollTo(top.y);
+        else if (bottom.y + bottom.height > scroller.contentY + scroller.height)
+            scrollTo(bottom.y + bottom.height - scroller.height);
+    }
+
+    function scrollBy(dy) {
+        scrollTo(scroller.contentY + dy);
+    }
+
+    function scrollTo(y) {
+        scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, y));
+    }
+
+    onRowChanged: Qt.callLater(showRow)
 
     parent: Overlay.overlay
     anchors.centerIn: parent
@@ -97,6 +207,8 @@ Popup {
         padding: 4 * dialog.zoom
         leftPadding: 12 * dialog.zoom
         rightPadding: 12 * dialog.zoom
+        // Yes, with nothing picked.
+        enabled: modelData.answer !== "yes" || dialog.canSayYes
         focusPolicy: Qt.NoFocus
         hoverEnabled: true
         text: modelData.label
@@ -113,7 +225,7 @@ Popup {
         contentItem: Text {
             text: choice.text
             font: dialog.theme.font
-            color: dialog.theme.text
+            color: choice.enabled ? dialog.theme.text : dialog.theme.dim
             textFormat: Text.PlainText
         }
     }
@@ -132,6 +244,14 @@ Popup {
                 dialog.current = Math.max(0, dialog.current - 1);
             else if (event.key === Qt.Key_Right || event.key === Qt.Key_L || event.key === Qt.Key_Tab)
                 dialog.current = Math.min(dialog.choices.length - 1, dialog.current + 1);
+            else if (dialog.items.length && (event.key === Qt.Key_Down || event.key === Qt.Key_J))
+                dialog.row = Math.min(dialog.items.length - 1, dialog.row + 1);
+            else if (dialog.items.length && (event.key === Qt.Key_Up || event.key === Qt.Key_K))
+                dialog.row = Math.max(0, dialog.row - 1);
+            else if (dialog.items.length && (event.key === Qt.Key_Space || event.key === Qt.Key_X))
+                dialog.toggle(dialog.row);
+            else if (dialog.items.length && event.key === Qt.Key_A)
+                dialog.pickAll();
             else if (event.key === Qt.Key_Down || event.key === Qt.Key_J)
                 dialog.scrollBy(step);
             else if (event.key === Qt.Key_Up || event.key === Qt.Key_K)
@@ -178,7 +298,7 @@ Popup {
                 // Room for the scroll bar, which the width can't depend on
                 // needing: that depends on the height, which depends on it.
                 width: scroller.width - scrollBar.width
-                text: dialog.details ? dialog.text + "\n\n" + dialog.details : dialog.text
+                text: dialog.list ? dialog.text + "\n\n" + dialog.list : dialog.text
                 font: dialog.theme.font
                 color: dialog.theme.text
                 textFormat: TextEdit.PlainText
@@ -190,9 +310,45 @@ Popup {
                 persistentSelection: true
                 selectionColor: dialog.theme.highlight
                 selectedTextColor: dialog.theme.highlightedText
+                onTextChanged: Qt.callLater(dialog.showRow)
+                onContentHeightChanged: Qt.callLater(dialog.showRow)
 
                 HoverHandler {
                     cursorShape: Qt.IBeamCursor
+                }
+
+                // The current line to pick from, under the text.
+                Rectangle {
+                    id: rowHighlight
+
+                    z: -1
+                    width: label.width
+                    visible: dialog.items.length > 0
+                    radius: 2 * dialog.zoom
+                    color: dialog.theme.hover
+                }
+
+                TextMetrics {
+                    id: box
+
+                    font: dialog.theme.font
+                    text: "[x]"
+                }
+
+                // The boxes: a click on one picks its line or leaves it out.
+                MouseArea {
+                    y: dialog.listTop
+                    width: box.advanceWidth
+                    height: label.height - y
+                    visible: dialog.items.length > 0
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: mouse => {
+                        const i = dialog.itemAt(label.positionAt(mouse.x, mouse.y + y));
+                        if (i < 0)
+                            return;
+                        dialog.row = i;
+                        dialog.toggle(i);
+                    }
                 }
             }
         }

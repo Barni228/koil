@@ -57,8 +57,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious;
   `:reg` shows the registers in it (`showList`).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
-  the question: `:confirm q`, applying, undoing an apply, and what changed
-  on disk against the user's edits.
+  the question: `:confirm q`, applying (a list to pick from), undoing an
+  apply, and what changed on disk against the user's edits.
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
   look the app's own controls share (see Theme).
@@ -259,8 +259,18 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   the cursor on the dir `-` came from.
 - **Apply and undo**: `Space a`, `:w`, File > Save (renamed Apply Changes…)
   update, then `ConfirmDialog` lists `listing::actions` (paths relative to
-  the open dir); yes applies, then vim starts over (koil refreshed: new IDs
-  for renamed paths), with the cursor where it was (`listingSpot`: on its
+  the open dir; `Koil::changes`, so a swap is its two renames, not the
+  three steps through a temp name), each with `[x]` before it, all picked.
+  The user leaves some out (j and k move the current line, Space or x or a
+  click on the box toggles it, a picks all or none), and a line goes with
+  what it needs (`needs`: a swap's other half, the new dir a file goes
+  in): picking one picks those, leaving one out leaves out what needs it.
+  The boxes are text in the one `TextEdit`, so the list still selects and
+  copies as it is. The question counts what's picked, and Yes needs
+  something. Yes applies the picked lines (`Koil.apply(picked)`, indexes
+  into the `shown` actions `actions()` kept, given to `Koil::apply_only`, so
+  only what the user saw is applied) and forgets the rest, then vim starts
+  over (koil refreshed: new IDs for renamed paths), with the cursor where it was (`listingSpot`: on its
   entry's line, else the same line) and the view as it was; so does undoing
   an apply. `u` or Cmd+Z with nothing left to undo in vim emits
   `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the

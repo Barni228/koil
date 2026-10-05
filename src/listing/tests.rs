@@ -5,6 +5,11 @@ use tempfile::TempDir;
 
 use super::*;
 
+/// The lines of what applying would do.
+fn action_texts(koil: &Koil) -> Vec<String> {
+    actions(koil).into_iter().map(|line| line.text).collect()
+}
+
 /// A temp dir with `dir/`, `.hidden`, `file.rs` and `notes`, and a Koil that
 /// has it open.
 fn koil() -> (TempDir, Koil) {
@@ -248,7 +253,7 @@ fn test_update_actions() {
     let updated = update_listing(&mut koil, &text, &hidden);
     assert!(updated.ok, "{updated:?}");
     assert!(!updated.moved);
-    let mut actions = actions(&koil);
+    let mut actions = action_texts(&koil);
     actions.sort();
     assert_eq!(
         actions,
@@ -927,7 +932,7 @@ fn test_sync_keeps_edits() {
     assert_eq!(names(&text), ["dir/", "alpha", "todo"]);
     let updated = update_listing(&mut koil, &text, &hidden);
     assert!(updated.ok, "{updated:?}");
-    let mut actions = actions(&koil);
+    let mut actions = action_texts(&koil);
     actions.sort();
     assert_eq!(actions, ["DELETE file.rs", "MOVE   notes -> todo"]);
 }
@@ -966,7 +971,7 @@ fn test_sync_asks() {
     assert_eq!(names(&text), ["dir/", "main.rs"]);
     let updated = update_listing(&mut koil, &text, &hidden);
     assert!(updated.ok, "{updated:?}");
-    assert_eq!(actions(&koil), ["DELETE notes.md"]);
+    assert_eq!(action_texts(&koil), ["DELETE notes.md"]);
 }
 
 #[test]

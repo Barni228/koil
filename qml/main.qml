@@ -370,10 +370,11 @@ ApplicationWindow {
     }
 
     // Applies the listing's changes once the user confirms them (Space a,
-    // :w), then quits if `quit` is set. With `orQuit` (:confirm q, ZZ), No
-    // quits without applying, and if the listing can't be read (its errors,
-    // or a path that can't be opened), it asks to quit without the changes,
-    // saying why (the status line's error, which updateListing just showed).
+    // :w), those they leave picked (the others are forgotten), then quits if
+    // `quit` is set. With `orQuit` (:confirm q, ZZ), No quits without
+    // applying, and if the listing can't be read (its errors, or a path that
+    // can't be opened), it asks to quit without the changes, saying why (the
+    // status line's error, which updateListing just showed).
     function applyChanges(quit, orQuit) {
         if (!updateListing()) {
             if (orQuit)
@@ -388,10 +389,12 @@ ApplicationWindow {
                 vim.showMessage("Nothing to apply");
             return;
         }
-        const what = actions.length === 1 ? "this change" : "these " + actions.length + " changes";
-        confirmDialog.ask("Apply " + what + (orQuit ? " before quitting?" : "?"), actions.join("\n"), () => {
+        const total = actions.length;
+        const what = picked => total === 1 ? "this change" : picked === total ? "these " + total + " changes"
+            : picked + " of these " + total + " changes";
+        confirmDialog.ask(picked => "Apply " + what(picked) + (orQuit ? " before quitting?" : "?"), actions, picked => {
             const spot = listingSpot();
-            const r = JSON.parse(koil.apply());
+            const r = JSON.parse(koil.apply(JSON.stringify(picked)));
             showListing(true, spot.name, spot);
             report(r);
             if (r.ok && quit)

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
-use koil_core::{Conflict, Settings, Watched};
+use koil_core::{Action, Conflict, Report, Settings, Watched};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -114,18 +114,21 @@ pub mod qobject {
         #[qinvokable]
         fn id_path(self: &Koil, id: &QString) -> QString;
 
-        /// What applying would do, as a list of lines like `MOVE a -> b`.
+        /// What applying would do, as a list of `listing::ActionLine`s
+        /// (`{ text, needs }`, `text` like `MOVE a -> b`), which `apply`
+        /// picks from.
         #[qinvokable]
-        fn actions(self: &Koil) -> QString;
+        fn actions(self: Pin<&mut Koil>) -> QString;
 
         /// Whether there are changes to apply.
         #[qinvokable]
         fn has_changes(self: &Koil) -> bool;
 
-        /// Applies the changes, then reads the open dir again. Returns
-        /// `{ ok, message }`.
+        /// Applies the changes of the lines `picked` (a list of indexes into
+        /// what `actions` gave last), forgetting the others, then reads the
+        /// open dir again. Returns `{ ok, message }`.
         #[qinvokable]
-        fn apply(self: Pin<&mut Koil>) -> QString;
+        fn apply(self: Pin<&mut Koil>, picked: &QString) -> QString;
 
         /// What undoing the last apply would do: `{ steps, message }`, where
         /// `steps` is empty if there's nothing to undo, and `message` says why
@@ -148,6 +151,9 @@ pub struct KoilRust {
     gitignore: bool,
     regex: bool,
     koil: koil_core::Koil,
+    /// What `actions` showed, which `apply` picks from: what the user saw,
+    /// so a change they didn't see is never applied.
+    shown: Vec<Action>,
     /// Made on the first `watch`, None if it can't be.
     watcher: Option<DiskWatcher>,
 }
@@ -381,19 +387,34 @@ impl qobject::Koil {
         QString::from(path.unwrap_or_default().as_str())
     }
 
-    fn actions(&self) -> QString {
-        to_json(&listing::actions(&self.koil))
+    fn actions(mut self: Pin<&mut Self>) -> QString {
+        let lines = listing::actions(&self.koil);
+        self.as_mut().rust_mut().shown = lines.iter().map(|l| l.action.clone()).collect();
+        to_json(&lines)
     }
 
     fn has_changes(&self) -> bool {
         !self.koil.compute_actions().is_empty()
     }
 
-    fn apply(self: Pin<&mut Self>) -> QString {
-        let outcome = match self.rust_mut().koil.apply() {
+    fn apply(self: Pin<&mut Self>, picked: &QString) -> QString {
+        let picked: Vec<usize> = serde_json::from_str(&picked.to_string()).unwrap_or_default();
+        let mut this = self.rust_mut();
+        let actions: Vec<Action> = (picked.iter())
+            .filter_map(|&i| this.shown.get(i).cloned())
+            .collect();
+        let outcome = match this.koil.apply_only(&actions) {
+            // As many as the confirmation listed, not Koil's steps (a swap
+            // takes three).
             Ok(report) => Outcome {
                 ok: true,
-                message: report_message(report, "applied"),
+                message: report_message(
+                    Report {
+                        changes: actions.len(),
+                        ..report
+                    },
+                    "applied",
+                ),
             },
             Err(error) => Outcome {
                 ok: false,
@@ -427,7 +448,7 @@ impl qobject::Koil {
 }
 
 /// Like "3 changes applied", and a warning if there is one.
-fn report_message(report: koil_core::Report, done: &str) -> String {
+fn report_message(report: Report, done: &str) -> String {
     let changes = match report.changes {
         1 => "1 change".to_string(),
         n => format!("{n} changes"),
