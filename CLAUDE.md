@@ -268,7 +268,11 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   Otherwise vim starts over (`vim.reset`): undo must never bring back
   another view's entries, which Koil would read as this one's (missing
   hidden entries would be deleted, other dirs' IDs moved here). `from` puts
-  the cursor on the dir `-` came from.
+  the cursor on the dir `-` came from. Whenever the same location is shown
+  again (the same listing, or other entries of it: `:set hidden`,
+  `gitignore`), the cursor stays on its entry (`listingSpot`), even if the
+  update moved it (a rename or a new entry goes where it sorts), at the
+  same column and the same place in the view, else on the same line.
 - **Apply and undo**: `Space a`, `:w`, File > Save (renamed Apply Changes…)
   update, then `ConfirmDialog` lists `listing::actions` (paths relative to
   the open dir; `Koil::changes`, so a swap is its two renames, not the
@@ -285,8 +289,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   into the `shown` actions `actions()` kept, given to `Koil::apply_only`, so
   only what the user saw is applied) and forgets the rest, then vim starts
   over (koil refreshed: new IDs for renamed paths), with the cursor where it was (`listingSpot`: on its
-  entry's line, else the same line) and the view as it was; so does undoing
-  an apply. `u` or Cmd+Z with nothing left to undo in vim emits
+  entry's line, else the same line; the listing's cursor even while vim is
+  in the path field) and the view as it was; so does undoing an apply. `u` or Cmd+Z with nothing left to undo in vim emits
   `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
   buffer back past an update) and asks to run koil's undo, listing its
   steps; koil refuses while changes are pending. Not from the path field,
@@ -329,7 +333,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   leave the listing (updating it first, so its edits stay in koil) for a
   plain editor: no colors or problems, only `-` of `commandKeys`, and `:w`
   saves. `-` goes back to what's still open in koil, on `openedFrom` (the
-  entry Enter was on), or for a file opened otherwise, opens its dir. Enter
+  entry Enter was on), with the column and view it had (`fileSpot`), or
+  for a file opened otherwise, opens its dir. Enter
   on a new file (`createFile`) updates, then asks to create it, listing the
   new dirs it's in (`Koil.createSteps`, koil-core's `Koil::create_steps`),
   and Yes creates them (`Koil.create`, `Koil::create_now`: an undo step like

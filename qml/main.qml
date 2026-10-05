@@ -44,6 +44,9 @@ ApplicationWindow {
     // The listing's entry a file was opened from (with Enter), which `-`
     // goes back to; "" for a file opened otherwise.
     property string openedFrom: ""
+    // Where the cursor was in the listing when a file was opened (see
+    // listingSpot), which `-` goes back to with openedFrom.
+    property var fileSpot: null
     // A file's unsaved changes, or the listing's edits and changes that
     // aren't applied.
     property bool modified: false
@@ -95,8 +98,11 @@ ApplicationWindow {
     // Shows a file that was read, leaving the listing (whose edits Koil
     // keeps, if they can be read).
     function loadFile(text, path) {
-        if (listing && !updateListing())
-            return;
+        if (listing) {
+            if (!updateListing())
+                return;
+            fileSpot = listingSpot();
+        }
         listing = false;
         problems = [];
         load(text, [], path);
@@ -127,38 +133,42 @@ ApplicationWindow {
 
     // Shows Koil's listing of what's open (see listing.rs), and its path in
     // the path field. For the same listing as before (`moved` false), the
-    // new text replaces the old as an edit, which undo can take back, and
-    // the cursor stays on its line. Otherwise it starts over: undo mustn't
-    // bring back another dir's entries, which Koil would read as this one's.
-    // The cursor goes to the entry `from` (the dir `-` came from), or else
-    // to the first one. With `keep` (see listingSpot), it goes back to
-    // where it was, on its entry's line if that's still there, and the
-    // view stays. Vim stays in the path field if it was there.
+    // new text replaces the old as an edit, which undo can take back.
+    // Otherwise it starts over: undo mustn't bring back another dir's
+    // entries, which Koil would read as this one's. The cursor goes to the
+    // entry `from` (the dir `-` came from), or else to the first one. With
+    // `keep` (see listingSpot), it goes back to where it was, on its entry's
+    // line if that's still there (or `from`'s), which stays where it was in
+    // the view; so it does whenever the same location is shown again, as
+    // the same listing, or with other entries (:set hidden, gitignore). Vim
+    // stays in the path field if it was there.
     function showListing(moved, from, keep) {
         const r = JSON.parse(koil.render());
+        if (listing && !keep && (!moved || r.path === location))
+            keep = listingSpot();
         iconColors = Object.assign({}, iconColors, r.colors);
         pendingIconColor = r.pendingColor;
         location = r.path;
         const inPath = listing && activeView === pathView;
         activate(editorView);
-        let line, column;
         if (listing && !moved) {
-            const t = editorView.textArea.text;
-            line = Txt.lineOf(t, vim.cursor) - 1;
-            column = Txt.column(t, vim.cursor);
             vim.replaceText(r.text, r.hidden);
         } else {
             listing = true;
             load(r.text, r.hidden, "");
-            const i = from ? r.names.indexOf(from) : -1;
-            line = i >= 0 ? i : keep ? keep.line : 0;
-            column = keep ? keep.column : 0; // 0: jumpTo puts it after the icon and two spaces
-            if (keep) {
-                // Before jumpTo, which then scrolls only if the line is out of view.
-                const f = editorView.flickable;
-                f.contentY = Math.min(keep.contentY, Math.max(0, f.contentHeight - f.height));
-            }
         }
+        // An entry an update moved (a rename, a new one, which go where
+        // they sort) takes the cursor with it.
+        const name = from || (keep ? keep.name : "");
+        const i = name ? r.names.indexOf(name) : -1;
+        const line = i >= 0 ? i : keep ? keep.line : 0;
+        const column = keep ? keep.column : 0; // 0: jumpTo puts it after the icon and two spaces
+        const f = editorView.flickable;
+        const y = keep ? keep.contentY + (line - keep.line) * editorView.lineHeight : f.contentY;
+        // Before jumpTo, which then scrolls only if the line is out of view.
+        // Entries that came or went above it don't move it.
+        if (y !== f.contentY)
+            f.contentY = Math.max(0, Math.min(y, f.contentHeight - f.height));
         const t = editorView.textArea.text;
         const ls = Txt.lineToPos(t, Math.min(line + 1, Txt.countLines(t)));
         vim.jumpTo(Txt.atColumn(t, ls, column));
@@ -380,7 +390,7 @@ ApplicationWindow {
             const c = JSON.parse(koil.create(target.path));
             // From scratch, as after an apply: undo mustn't bring back its
             // line without its ID, which Koil would read as new again.
-            showListing(true, spot.name, spot);
+            showListing(true, "", spot);
             if (!c.ok) {
                 vim.showError(c.message);
                 return;
@@ -408,7 +418,7 @@ ApplicationWindow {
                 return;
             }
         }
-        showListing(true, openedFrom || fileName);
+        showListing(true, openedFrom || fileName, openedFrom ? fileSpot : null);
     }
 
     // Applies the listing's changes once the user confirms them (Space a,
@@ -437,7 +447,7 @@ ApplicationWindow {
         confirmDialog.ask(picked => "Apply " + what(picked) + (orQuit ? " before quitting?" : "?"), actions, picked => {
             const spot = listingSpot();
             const r = JSON.parse(koil.apply(JSON.stringify(picked)));
-            showListing(true, spot.name, spot);
+            showListing(true, "", spot);
             report(r);
             if (r.ok && quit)
                 Qt.quit();
@@ -462,16 +472,18 @@ ApplicationWindow {
         confirmDialog.ask("Undo the last apply?", r.steps.join("\n"), () => {
             const spot = listingSpot();
             const u = JSON.parse(koil.undo());
-            showListing(true, spot.name, spot);
+            showListing(true, "", spot);
             report(u);
         });
     }
 
     // Where the cursor is in the listing (its line's name, line and column)
-    // and how far it's scrolled, for showListing to keep after an apply or
-    // its undo, which show the listing from scratch.
+    // and how far it's scrolled, for showListing to keep when it shows the
+    // listing from scratch (an apply, its undo, back from a file). The
+    // listing's cursor, also while vim is in the path field.
     function listingSpot() {
-        const t = editorView.textArea.text, p = vim.cursor;
+        const t = editorView.textArea.text;
+        const p = activeView === editorView ? vim.cursor : editorView.saved?.cursor ?? 0;
         const ls = Txt.lineStart(t, p), text = t.slice(ls, Txt.lineEnd(t, ls));
         const gap = text.indexOf("  ");
         return {
