@@ -555,6 +555,14 @@ function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Whether a search for pattern ignores case, as vim's 'smartcase' does: it
+// does unless the pattern has an uppercase letter. In a regular expression
+// (regex), the letters of an escape don't count (`\S`, `\x4A`, `\cM`).
+function ignoresCase(pattern, regex) {
+    const s = regex ? pattern.replace(/\\(?:u\{?[0-9a-fA-F]*\}?|x[0-9a-fA-F]{0,2}|c[a-zA-Z]?|[^])/g, "") : pattern;
+    return s === s.toLowerCase();
+}
+
 // Adds the highlight of a match [start, end) to spans, split into one
 // { start, end, current } span per line, where current means it's the
 // match to show as the current one.

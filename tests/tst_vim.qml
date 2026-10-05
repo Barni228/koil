@@ -732,6 +732,27 @@ TestCase {
         verify(vim.messageIsError);
     }
 
+    // Smart case: a search ignores case unless it has an uppercase letter,
+    // not counting an escape's.
+    function test_smartCase() {
+        load("Ab ab AB");
+        keys("/ab<CR>");
+        compare(vim.cursor, 3);
+        keys("n");
+        compare(vim.cursor, 6);
+        keys("/AB<CR>");
+        compare(vim.cursor, 6);
+        keys("n");
+        compare(vim.cursor, 6);
+        keys("0/\\Sb<CR>");
+        compare(vim.cursor, 3);
+        keys("/A(<CR>"); // not a valid regular expression: literal, and no match
+        verify(vim.messageIsError);
+        verify(Txt.ignoresCase("\\x4a\\u00C9\\cM\\D", true));
+        verify(!Txt.ignoresCase("\\\\S", true));
+        verify(!Txt.ignoresCase("\\S", false));
+    }
+
     // & goes back to the defaults Koil gives (the saved settings).
     function test_setDefault() {
         load("a");

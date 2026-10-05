@@ -3886,12 +3886,13 @@ QtObject {
     }
 
     // A pattern that isn't a valid regular expression (e.g. while it's still
-    // being typed) is searched for literally.
+    // being typed) is searched for literally. Either way, one without an
+    // uppercase letter ignores case (smart case).
     function searchRegExp(pattern) {
         try {
-            return new RegExp(pattern, "gm");
+            return new RegExp(pattern, Txt.ignoresCase(pattern, true) ? "gmi" : "gm");
         } catch (e) {
-            return new RegExp(Txt.escapeRegExp(pattern), "gm");
+            return new RegExp(Txt.escapeRegExp(pattern), Txt.ignoresCase(pattern, false) ? "gmi" : "gm");
         }
     }
 

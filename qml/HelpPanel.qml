@@ -168,8 +168,9 @@ Popup {
             tags: ["search", "/", "?", "regex", "regexp", "pattern", "find", "replace", "n", "*"],
             rows: [
                 ["/pattern  ?pattern", "Search forward or backward. Patterns are JavaScript regular "
-                    + "expressions, not vim's, and match case: `\\bword\\b`, `(a|b)+`, `\\d{3}`. "
-                    + "One that isn't valid (yet) is searched for as plain text."],
+                    + "expressions, not vim's: `\\bword\\b`, `(a|b)+`, `\\d{3}`. "
+                    + "One that isn't valid (yet) is searched for as plain text. They ignore case, "
+                    + "unless they have an uppercase letter (an escape's, like `\\S`, doesn't count)."],
                 ["n  N", "Next or previous match."],
                 ["*  #", "Search for the word under the cursor."],
                 [cmdKey + "F", "The find bar. Its matches are highlighted while it's open."],
