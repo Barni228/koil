@@ -271,6 +271,7 @@ TestCase {
         vim.linePrefixes = false;
         vim.commandKeys = {};
         vim.completer = null;
+        vim.lineHistory = null;
     }
 
     // Makes vim edit `to` (the editor, `other` or `narrowText`, scrolled by
@@ -960,6 +961,65 @@ TestCase {
         keys("a!<CR>");
         compare(other.text, "a b one two xz!");
         compare(vim.mode, "normal");
+    }
+
+    // A one-line buffer's history (Koil's path field's): k and j, and Up
+    // and Down also while typing, put what was entered before back.
+    function test_lineHistory() {
+        other.text = "now";
+        switchTo(other, null);
+        vim.singleLine = true;
+        vim.lineHistory = ["a", "now", "b"];
+        // The one before, skipping what's there already, with the cursor at
+        // its end.
+        keys("k");
+        compare([other.text, vim.cursor], ["b", 0]);
+        keys("k");
+        compare(other.text, "a");
+        // Nothing older: it stays.
+        keys("k");
+        compare(other.text, "a");
+        // After the newest, what it was.
+        keys("2j");
+        compare([other.text, vim.cursor], ["now", 2]);
+        keys("j");
+        compare(other.text, "now");
+        keys("<Up>");
+        compare(other.text, "b");
+        // Each is a change, which undo takes back.
+        keys("u");
+        compare(other.text, "now");
+        keys("<Down>");
+        compare(other.text, "now");
+        // Once the line is edited, it starts over from it.
+        keys("kA2<Esc>");
+        compare(other.text, "b2");
+        keys("k");
+        compare(other.text, "b");
+        keys("j");
+        compare(other.text, "b2");
+        // While typing, Up and Down do it, and k and j are typed.
+        keys("cc<Up>");
+        compare([other.text, vim.mode, vim.cursor], ["b", "insert", 1]);
+        keys("<Up>k<Esc>");
+        compare(other.text, "nowk");
+        keys("u");
+        compare(other.text, "now");
+        keys("u");
+        compare(other.text, "b");
+        keys("u");
+        compare(other.text, "");
+        keys("u");
+        compare(other.text, "b2");
+        // A new history starts over.
+        keys("k");
+        vim.lineHistory = ["c"];
+        keys("k");
+        compare(other.text, "c");
+        // Without one, k is vim's, which can't go up from one line.
+        vim.lineHistory = null;
+        keys("k");
+        compare(other.text, "c");
     }
 
     // A completer like Koil's (see listing::complete) of the dirs `dirs`,

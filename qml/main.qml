@@ -38,6 +38,9 @@ ApplicationWindow {
     // the path they're for.
     property var pathSyntax: []
     property string pathLine: ""
+    // Every location listed since Koil started, oldest first, each once,
+    // which k and j in the path field put back (see Vim.lineHistory).
+    property var pathHistory: []
     // The listing's entry a file was opened from (with Enter), which `-`
     // goes back to; "" for a file opened otherwise.
     property string openedFrom: ""
@@ -70,6 +73,13 @@ ApplicationWindow {
     height: 650
     visible: true
     title: (listing ? location : fileName) + (modified ? " •" : "") + " — Koil"
+
+    // Last in the history, however it got there (the path field, Enter, -,
+    // a dir renamed on disk), keeping the newest 100.
+    onLocationChanged: {
+        if (location)
+            pathHistory = pathHistory.filter(p => p !== location).concat([location]).slice(-100);
+    }
 
     // Shows `text` as a new document, whose icons hide the texts in
     // `entries` (see Hidden text in Vim.qml). `path` is its file, if any.
@@ -648,6 +658,7 @@ ApplicationWindow {
         // Tab while typing in the path field completes the dir being
         // written (see Koil.complete).
         completer: root.listing && root.activeView === pathView ? (line, cursor) => JSON.parse(koil.complete(line, cursor)) : null
+        lineHistory: root.pathHistory
         linePrefixes: root.listing && root.activeView === editorView
         clipboard: system
         fileName: root.listing ? root.location : root.filePath

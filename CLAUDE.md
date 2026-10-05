@@ -195,6 +195,17 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   shown. After the update the field shows the location as Koil does, with
   no quotes (`showPath`). koil-core also reads a `~` at the start as the
   home dir, also right after a quote (`"~/x"`, unlike a shell).
+- **Path history** (`pathHistory` in main.qml, `vim.lineHistory`): every
+  location the listing shows goes last in the history (`onLocationChanged`,
+  so from the field, Enter, `-`, Open Folder, or the open dir renamed on
+  disk), once, keeping the newest 100, until Koil quits (it isn't saved).
+  It's the location as shown, so not relative to the dir a path was
+  typed in. In the field, `k` and `j` (Up and Down, also in insert mode)
+  put the one before or after in (`browseLines`), skipping ones that are
+  what the field had before browsing (usually the location), and after
+  the newest, that again, as the command line's history does. Each is a
+  change undo takes back, and a field edited since starts over
+  (`lineBrowse.shown`).
 - **Completion** (Completion in Vim.qml, `listing::complete`, koil-core's
   `Koil::complete`): Tab while typing in the path field (`vim.completer`,
   set only there) completes the dir being written, like a shell. koil-core

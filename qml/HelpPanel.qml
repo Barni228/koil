@@ -71,7 +71,9 @@ Popup {
                     + "Write paths with `/`, also on Windows: a path pasted with `\\` opens, and then shows "
                     + "with `/`, but in a pattern `\\` escapes, like `\\.`. It's one line, edited with vim's "
                     + "keys too; Enter (also in insert mode) opens it and "
-                    + "goes back to the listing, and Shift+Enter opens it but stays in the field."],
+                    + "goes back to the listing, and Shift+Enter opens it but stays in the field. `k` and `j` "
+                    + "(Up and Down, also while typing) go through the dirs and patterns listed before, "
+                    + "since Koil started."],
                 ["Tab", "In normal mode: go from the listing to the path field, or back. So does a click. "
                     + "While typing a path: complete the dir being written, like a shell, as far as it can; "
                     + "with nothing more to fill in, list the dirs it can be: Tab and Shift+Tab (or Down and "

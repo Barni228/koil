@@ -80,6 +80,15 @@ QtObject {
     // options, index } (the picked one), or null. Moving the cursor (or
     // leaving insert mode) closes them.
     property var completion: null
+    // The lines a buffer of one line had before (Koil's path field: the
+    // locations listed), oldest first: k and j (and Up and Down, also
+    // while typing) put the one before or after in (see browseLines). Null
+    // where there's none.
+    property var lineHistory: null
+    // While going through it: { index, typed, shown }, the entry shown
+    // (lineHistory.length for `typed`), what the line was before, and the
+    // text put in, so a line edited since starts over.
+    property var lineBrowse: null
     // Koil's listing: each line starts with a prefix, its entry's icon
     // and two spaces, or three spaces on a line that has none, which the
     // cursor never goes into (see Prefixes). A line without one is plain.
@@ -251,6 +260,7 @@ QtObject {
     // after it moves the cursor).
     onCursorChanged: completion = null
     onModeChanged: completion = null
+    onLineHistoryChanged: lineBrowse = null
 
     // ---- Entry points ------------------------------------------------------
 
@@ -641,8 +651,13 @@ QtObject {
             tok = own;
         if (tok === null)
             return false;
+        if ((tok === "<Up>" || tok === "<Down>") && lineStep(tok)) {
+            breakInsert();
+            browseLines(lineStep(tok), 1);
+            return true;
+        }
         const s = insertSession;
-        const move = ["<Left>", "<Right>", "<Up>", "<Down>", "<Home>", "<End>", "<PageUp>", "<PageDown>"].includes(tok);
+        const move =["<Left>", "<Right>", "<Up>", "<Down>", "<Home>", "<End>", "<PageUp>", "<PageDown>"].includes(tok);
         const typed = !isSpecial(tok) || ["<CR>", "<Tab>", "<BS>", "<Del>", "<D-BS>"].includes(tok);
         if (move)
             breakInsert();
@@ -818,6 +833,45 @@ QtObject {
         const text = kind + (i >= list.length ? historyTyped : list[i]);
         commandCursor = text.length;
         commandLine = text;
+    }
+
+    // Where k and j (Up and Down) go in lineHistory, where there's one: a
+    // step back (-1) or on (1). 0 elsewhere, and for other keys.
+    function lineStep(tok) {
+        return singleLine && lineHistory ? ({ "k": -1, "<Up>": -1, "j": 1, "<Down>": 1 })[tok] || 0 : 0;
+    }
+
+    // Puts the entry of lineHistory `count` steps before (-1) or after (1)
+    // the one shown in the line, with the cursor at its end, as a change of
+    // its own. Entries that are what the line was before are skipped, as
+    // they'd change nothing, and after the newest it's that again. False if
+    // there's nothing there.
+    function browseLines(step, count) {
+        const list = lineHistory, t = bufferText();
+        const b = lineBrowse && lineBrowse.shown === t ? lineBrowse : { index: list.length, typed: t };
+        let i = b.index;
+        for (let n = 0; n < count; n++) {
+            let j = i + step;
+            while (j >= 0 && j < list.length && list[j] === b.typed)
+                j += step;
+            if (j < 0 || j > list.length)
+                break;
+            i = j;
+        }
+        if (i === b.index)
+            return false;
+        const text = i < list.length ? list[i] : b.typed;
+        clearCursors();
+        commitChange();
+        beginChange();
+        replaceRange(0, t.length, text);
+        commitChange();
+        if (inserting)
+            beginChange();
+        lineBrowse = { index: i, typed: b.typed, shown: text };
+        setCursor(inserting ? text.length : clampNormal(text, text.length));
+        wantCol = Txt.column(text, cursor);
+        return true;
     }
 
     function feed(tok) {
@@ -1052,7 +1106,10 @@ QtObject {
             atEveryCursor(() => executeOperator(cmd));
         else if (cmd.op)
             executeOperator(cmd);
-        else if (cmd.motion)
+        else if (cmd.motion && lineStep(cmd.motion.name)) {
+            if (!browseLines(lineStep(cmd.motion.name), Math.max(cmd.count, 1)))
+                typeahead = []; // as a motion that fails
+        } else if (cmd.motion)
             moveBy(cmd); // moves the extra cursors itself
         else if (cursors.length && everyCursorActions.includes(cmd.action))
             atEveryCursor(() => executeAction(cmd));
