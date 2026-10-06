@@ -28,64 +28,47 @@ Popup {
     property var shownSections: sections
 
     // Each section: a title, the :help topics that go to it, an optional
-    // intro and note, and rows of [keys, what they do]. `code` in text is
-    // shown in the editor's font.
+    // intro and note, and rows of [keys, what they do]. `code` in any of
+    // them (a key, in keys) is shown in the editor's font, on a shade of
+    // its own as in a Tip (see CodeText).
     readonly property var sections: [
         {
             title: "The listing",
             tags: ["koil", "listing", "list", "entry", "entries", "space", "update", "apply", "-", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
                 "gr"],
-            intro: "Koil shows a dir as text: its path in a field at the top, then a line per entry: its icon "
-                + "(which hides its ID), two spaces, and its name, with `/` after a dir's. Edit the names to "
-                + "rename, delete lines to delete, copy lines (icon and all) to copy, and write lines "
-                + "without an icon to create, like `new.txt` or `new/dir/`. A line cut here and pasted in "
-                + "another dir moves the entry. Nothing changes on disk until it's applied.",
+            intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
+                + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
+                + "copy lines to copy, and write new ones to create (`new.txt`, `new/dir/`). A line cut "
+                + "and pasted in another dir moves. Nothing changes on disk until you apply, and changes "
+                + "stay while you go to other dirs.",
             rows: [
-                [cmdKey + "S", "Update: Koil reads the listing (keeping the changes, also in other dirs) "
-                    + "and shows it again, opening the path in the field if it changed."],
-                ["Space Space  :w", "Apply the changes, after showing what they'll do (Settings can make it "
-                    + "ask only when something is deleted, or never). `:wq` quits afterwards."],
-                ["Space a", "Apply the changes, always showing what they'll do first, whatever Settings says "
-                    + "(so does File > Apply Changes…)."],
-                ["󰄲", "Applying lists the changes picked: `j` and `k` go through them, Space or `x` (or a "
-                    + "click on the box) leaves one out or picks it again, along with what goes with it (a "
-                    + "swap's other half, the new dir a file goes in), and `a` picks all or none. What's left "
-                    + "out is forgotten, so Yes with none picked discards every change."],
-                ["u", "With no edit left to undo: undo the last apply, after showing what that will do. "
-                    + "Deleted entries come back from the trash."],
-                ["Enter", "Open the dir or file on the cursor's line. A file opens as it is on disk, even "
-                    + "if its line renames it. A new file is created first, asking as applying does (the "
-                    + "other changes stay)."],
-                ["Shift+Enter", "Vim's Enter: the first character of the next line."],
-                ["icons", "The cursor stays out of an icon and the two spaces after it: `0` goes to the "
-                    + "name, and `o` (or Enter) starts a line after three spaces. Backspace at a name's "
-                    + "start clears its icon (making the entry new), then joins the line to the one "
-                    + "above; `X` there only clears the icon. Whole lines (`dd`, `yy`, `V`) take their icons along, and pasted ones go "
-                    + "first on their lines."],
-                ["-", "Open the dir above (`3-`: three dirs up). In a file: back to the listing, on the "
-                    + "file's line (asking to save it first, if it has changes)."],
-                ["quitting", "`:conf q` and `ZZ` ask to apply the changes (No quits without them), or, "
-                    + "while the listing has errors, whether to quit without them. In a file, while the "
-                    + "listing has changes that aren't applied, `:q`, `:wq`, `ZZ`, `:q!` and the rest (but "
-                    + "`:qa!`) go back to the listing instead (saving or dropping the file as they say), "
-                    + "where `:conf q` and `ZZ` then ask."],
-                ["path", "The field at the top: a dir, or a pattern of files, like `~/src/**/*.rs`, or a "
-                    + "regex with `:set regex` (where `,` is any character but `/`), whose parts get colors. "
-                    + "Write paths with `/`, also on Windows: a path pasted with `\\` opens, and then shows "
-                    + "with `/`, but in a pattern `\\` escapes, like `\\.`. It's one line, edited with vim's "
-                    + "keys too; Enter (also in insert mode) opens it and "
-                    + "goes back to the listing, and Shift+Enter opens it but stays in the field. `k` and `j` "
-                    + "(Up and Down, also while typing) go through the dirs and patterns listed before, "
-                    + "since Koil started."],
-                ["Tab", "In normal mode: go from the listing to the path field, or back. So does a click. "
-                    + "While typing a path: complete the dir being written, like a shell, as far as it can; "
-                    + "with nothing more to fill in, list the dirs it can be: Tab and Shift+Tab (or Down and "
-                    + "Up) pick one, Enter takes it, Esc closes the list, and typing narrows it."],
-                ["g.  gi  gr", "Turn `:set hidden`, `gitignore` and `regex` on or off, like the buttons beside "
+                ["`" + cmdKey + "S`", "Update: read the edits and show the listing again."],
+                ["`Space Space`  `:w`", "Apply the changes, listing them first (Settings can skip that). `:wq` "
+                    + "then quits."],
+                ["`Space a`", "Apply, always listing the changes first (so does File > Apply Changes…)."],
+                ["󰄲", "In that list: `j` and `k` move, `Space`, `x` or a click picks or leaves out a change "
+                    + "(with what it needs), and `a` picks all or none. What's left out is discarded."],
+                ["`u`", "With nothing left to undo: undo the last apply, asking first. Deleted files come back "
+                    + "from the trash."],
+                ["`Enter`", "Open the dir or file on the line. A new file is created first, after asking."],
+                ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
+                ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing."],
+                ["icons", "The cursor skips each line's icon and the spaces after it, so `0` goes to the "
+                    + "name. `Backspace` there clears the icon (the entry becomes new), then joins lines."],
+                ["quitting", "`:conf q` and `ZZ` ask to apply the changes first. In a file, quitting goes "
+                    + "back to the listing while it has changes (`:qa!` still quits)."],
+                ["path", "The field at the top: a dir or a glob, like `~/src/**/*.rs` (a regex with `:set "
+                    + "regex`). Write `/`, also on Windows: in a pattern, `\\` escapes."],
+                ["`Enter`  `Shift+Enter`", "In the path field: open it and go to the listing, or open it and "
+                    + "stay."],
+                ["`k`  `j`", "In the path field: the dirs listed before (`↑` and `↓` while typing)."],
+                ["`Tab`", "Go between the listing and the path field (so does a click)."],
+                ["`Tab`  `Shift+Tab`", "While typing a path: complete the dir, like a shell. With several to "
+                    + "pick from, they go through them, and `Enter` takes one."],
+                ["`g.`  `gi`  `gr`", "Toggle `:set hidden`, `gitignore` and `regex`, like the buttons beside "
                     + "the path."],
-                [(isMac ? "⇧⌘O" : "Ctrl+Shift+O"), "Open a folder. " + cmdKey + "O opens a file to edit "
-                    + "instead."]
+                [isMac ? "`⇧⌘O`" : "`Ctrl+Shift+O`", "Open a folder (`" + cmdKey + "O`: a file)."]
             ]
         },
         {
@@ -93,20 +76,18 @@ Popup {
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
                 "number", "nu", "relativenumber", "rnu", "sidescrolloff", "siso", "hidden", "hid", "gitignore",
                 "ignore", "regex", "re"],
-            intro: "`:set` with no arguments lists the options that aren't at their default. "
-                + "Several can be set at once: `:set nu rnu fs=18`.",
+            intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
+                + "once: `:set nu rnu fs=18`.",
             rows: [
-                ["fontsize, fs", "Font size in points, 6 to 72. Default 16."],
-                ["guifont, gfn", "Font: an installed monospaced one, in any case. Default `"
-                    + defaultFontFamily + "`, which comes with Koil. Any font shows the listing's icons."],
-                ["number, nu", "Line numbers."],
-                ["relativenumber, rnu", "Line numbers counted from the cursor's line. With `nu` too, "
-                    + "the cursor's line shows its own number."],
-                ["sidescrolloff, siso", "Columns kept in view on either side of the cursor when the text "
-                    + "scrolls sideways. Default 4. At a name's start, its icon is always in view."],
-                ["hidden, hid", "Show hidden entries (starting with `.`), and `../` to open the dir above."],
-                ["gitignore, ignore", "Hide what git ignores, and `.git`."],
-                ["regex, re", "Read the path as a regex, not a glob."]
+                ["`fontsize`  `fs`", "Font size in points, 6 to 72. Default 16."],
+                ["`guifont`  `gfn`", "An installed monospaced font. Default `" + defaultFontFamily
+                    + "` (comes with Koil). Icons show in any font."],
+                ["`number`  `nu`", "Line numbers."],
+                ["`relativenumber`  `rnu`", "Line numbers counted from the cursor's line."],
+                ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
+                ["`hidden`  `hid`", "Show entries starting with `.`, and `../`."],
+                ["`gitignore`  `ignore`", "Hide what git ignores, and `.git`."],
+                ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."]
             ],
             note: "An entry with changes is shown even if it's hidden or ignored."
         },
@@ -114,73 +95,69 @@ Popup {
             title: "Setting an on/off option",
             tags: [],
             rows: [
-                [":set nu", "Turn it on."],
-                [":set nonu", "Turn it off."],
-                [":set nu!  :set invnu", "Toggle it."],
-                [":set nu?", "Show it: `number` or `nonumber`."],
-                [":set nu&", "Back to what Settings says."]
+                ["`:set nu`", "Turn it on."],
+                ["`:set nonu`", "Turn it off."],
+                ["`:set nu!`  `:set invnu`", "Toggle it."],
+                ["`:set nu?`", "Show it: `number` or `nonumber`."],
+                ["`:set nu&`", "Back to what Settings says."]
             ]
         },
         {
             title: "Setting a number option",
             tags: [],
             rows: [
-                [":set fs=16  :set fs:16", "Set it."],
-                [":set fs+=2  fs-=2  fs^=2", "Add, subtract, multiply."],
-                [":set fs  :set fs?", "Show it: `fontsize=16`."],
-                [":set fs&", "Back to the size in Settings."]
+                ["`:set fs=16`  `:set fs:16`", "Set it."],
+                ["`:set fs+=2`  `fs-=2`  `fs^=2`", "Add, subtract, multiply."],
+                ["`:set fs`  `:set fs?`", "Show it: `fontsize=16`."],
+                ["`:set fs&`", "Back to the size in Settings."]
             ]
         },
         {
             title: "Setting the font",
             tags: [],
             rows: [
-                [":set gfn=Monaco", "Set it."],
-                [":set gfn=Fira\\ Code", "A backslash before a space."],
-                [":set gfn  :set gfn?", "Show it: `guifont=Monaco`."],
-                [":set gfn&  :set gfn=", "Back to the font in Settings."]
+                ["`:set gfn=Monaco`", "Set it."],
+                ["`:set gfn=Fira\\ Code`", "A backslash before a space."],
+                ["`:set gfn`  `:set gfn?`", "Show it: `guifont=Monaco`."],
+                ["`:set gfn&`  `:set gfn=`", "Back to the font in Settings."]
             ],
-            note: "Zoom and `:set` last until Koil quits, and don't change Settings (" + cmdKey
-                + ",), which Koil starts with and `&` goes back to."
+            note: "Zoom and `:set` last until Koil quits. Settings (`" + cmdKey + ",`) holds what Koil "
+                + "starts with and `&` goes back to."
         },
         {
             title: "Commands",
             tags: ["commands", "command", "ex", "w", "write", "quit", "wq", "x", "confirm", "conf", "noh",
                 "nohlsearch", "help", "h", "history"],
             rows: [
-                [":w", "Save (in the listing: apply)."],
-                [":wq  :x", "Save and quit."],
-                ["ZZ", "Save and quit (in the listing: `:confirm q`)."],
-                [":q  :qa", "Quit, unless there are unsaved changes."],
-                [":q!  ZQ", "Quit without saving."],
-                [":qa!", "Quit without saving anything, also from a file while the listing has changes."],
-                [":conf q  :confirm q", "Quit, asking whether to save unsaved changes: `y`, `n`, or `c` (or "
-                    + "Esc) to cancel. Left and Right pick a choice for Enter."],
-                [":42  :$", "Go to line 42, or the last line."],
-                [":noh", "Clear the search highlights (so does Esc in normal mode)."],
-                [":reg  :reg [names]", "Show what the registers hold, e.g. `:reg a0`. `c`, `l` and `b` "
-                    + "say whether one holds characters, lines or a block."],
-                [":h  :help [topic]", "This help, e.g. `:h set`, `:h search`, `:h macros`."],
-                ["↑ ↓", "In the command line: earlier and later commands (or searches)."],
-                ["Ctrl-U  Ctrl-W", "In the command line: delete to the start, or the word before the cursor."],
-                ["@:", "Run the last command again."]
+                ["`:w`", "Save (in the listing: apply)."],
+                ["`:wq`  `:x`", "Save and quit."],
+                ["`ZZ`", "Save and quit (in the listing: `:confirm q`)."],
+                ["`:q`  `:qa`", "Quit, unless there are unsaved changes."],
+                ["`:q!`  `ZQ`", "Quit without saving."],
+                ["`:qa!`", "Quit without saving anything."],
+                ["`:conf q`  `:confirm q`", "Quit, asking whether to save first (`y`, `n`, or `c` to cancel)."],
+                ["`:42`  `:$`", "Go to line 42, or the last line."],
+                ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
+                ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
+                ["`:h`  `:help [topic]`", "This help, e.g. `:h set`, `:h search`, `:h macros`."],
+                ["`↑`  `↓`", "In the command line: earlier and later commands (or searches)."],
+                ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
+                ["`@:`", "Run the last command again."]
             ]
         },
         {
             title: "Search",
             tags: ["search", "/", "?", "regex", "regexp", "pattern", "find", "replace", "n", "*"],
             rows: [
-                ["/pattern  ?pattern", "Search forward or backward. Patterns are JavaScript regular "
-                    + "expressions, not vim's: `\\bword\\b`, `(a|b)+`, `\\d{3}`. "
-                    + "One that isn't valid (yet) is searched for as plain text. They ignore case, "
-                    + "unless they have an uppercase letter (an escape's, like `\\S`, doesn't count)."],
-                ["n  N", "Next or previous match."],
-                ["*  #", "Search for the word under the cursor."],
-                [cmdKey + "F", "The find bar. Its matches are highlighted while it's open."],
-                [isMac ? "⌘G  ⇧⌘G" : "F3  Shift+F3  Ctrl+G  Ctrl+Shift+G",
-                    "Next or previous find bar match (opens the bar if it has nothing to find)."],
-                [isMac ? "⌘⌥F" : "Ctrl+H", "Find and replace."],
-                [isMac ? "⌃⌥C  ⌃⌥W  ⌃⌥R" : "Alt+C  Alt+W  Alt+R",
+                ["`/pattern`  `?pattern`", "Search forward or backward, with JavaScript regexes (`\\bword\\b`, "
+                    + "`\\d{3}`), not vim's. Case counts only if there's an uppercase letter."],
+                ["`n`  `N`", "Next or previous match."],
+                ["`*`  `#`", "Search for the word under the cursor."],
+                ["`" + cmdKey + "F`", "The find bar. Its matches are highlighted while it's open."],
+                [isMac ? "`⌘G`  `⇧⌘G`" : "`F3`  `Shift+F3`  `Ctrl+G`  `Ctrl+Shift+G`",
+                    "Next or previous find bar match."],
+                [isMac ? "`⌘⌥F`" : "`Ctrl+H`", "Find and replace."],
+                [isMac ? "`⌃⌥C`  `⌃⌥W`  `⌃⌥R`" : "`Alt+C`  `Alt+W`  `Alt+R`",
                     "In the find bar: match case, whole word, regular expression."]
             ]
         },
@@ -190,21 +167,15 @@ Popup {
                 "\"1", "\".", "\":", "\"/", "\"%", "macros", "macro",
                 "q", "@", "@@", "record", "recording", "yank", "paste", "p", "y"],
             rows: [
-                ["\"+  \"*", "The system clipboard, e.g. `\"+yy` or `\"+p`. Other registers (and "
-                    + "plain `y`, `d`, `p`) don't touch the clipboard; " + (isMac ? "⌘C and ⌘V do."
-                    : "Ctrl+C does (on a selection), and so does Ctrl+V in insert mode. Elsewhere "
-                    + "Ctrl+V starts a visual block, and Shift+Insert pastes.")],
-                ["\"a … \"z", "Named registers, e.g. `\"ayw`. `\"A` appends to `a`."],
-                ["\"0  \"_", "The last yank; and the black hole, e.g. `\"_dd` deletes without "
-                    + "changing any register."],
-                ["\"1 … \"9  \"-", "Deleted or changed lines, the newest in `1`; text deleted "
-                    + "within a line."],
-                ["\".  \":  \"/  \"%", "The last text typed, command line and search, and the "
-                    + "file (or dir) open. They can only be pasted."],
-                ["qa … q", "Record the keys you type into register `a`. `qA` appends to it."],
-                ["@a  3@a  @@", "Run the macro in `a`, three times, or the last one run again. "
-                    + "`u` undoes all of a run. A long one shows how far it is; Esc or Ctrl-C stops it "
-                    + "(so do `5000u`, `5000 Ctrl-R` and `100@:`)."]
+                ["`\"+`  `\"*`", "The system clipboard, e.g. `\"+yy`. Plain `y` and `p` don't use it; "
+                    + (isMac ? "`⌘C` and `⌘V` do." : "`Ctrl+C` does, and `Ctrl+V` while typing.")],
+                ["`\"a` … `\"z`", "Named registers, e.g. `\"ayw`. `\"A` appends to `a`."],
+                ["`\"0`  `\"_`", "The last yank; the black hole (`\"_dd` changes no register)."],
+                ["`\"1` … `\"9`  `\"-`", "Deleted lines, the newest in `1`; text deleted within a line."],
+                ["`\".`  `\":`  `\"/`  `\"%`", "The last insert, command and search, and the open file or dir."],
+                ["`qa` … `q`", "Record keys into register `a`. `qA` appends to it."],
+                ["`@a`  `3@a`  `@@`", "Run the macro in `a`, three times, or the last one again. `u` undoes a "
+                    + "whole run, and `Esc` stops a long one."]
             ]
         },
         {
@@ -212,23 +183,21 @@ Popup {
             tags: ["block", "visualblock", "ctrl-v", "<c-v>", "cursors", "cursor", "multiple", "multi",
                 "alt-click", "click"],
             rows: [
-                ["Ctrl-V", "Visual block. On Windows too, where Ctrl+V pastes only in insert mode."],
-                ["I  A  c", "In a block: type on every line of it at once."],
-                ["$", "In a block: reach the end of every line."],
-                [altKey + "click", "Add a cursor, or remove one. A plain click goes back to one."],
-                ["", "With several cursors, motions and edits happen at each, each with its own "
-                    + "registers. Esc goes back to one cursor."]
+                ["`Ctrl-V`", "Visual block, also on Windows (where `Ctrl+V` pastes while typing)."],
+                ["`I`  `A`  `c`", "In a block: type on every line of it at once."],
+                ["`$`", "In a block: reach the end of every line."],
+                ["`" + altKey + "click`", "Add or remove a cursor. A plain click goes back to one."],
+                ["", "Motions and edits happen at every cursor, each with its own registers. `Esc` goes "
+                    + "back to one."]
             ]
         },
         {
             title: "Hidden text",
             tags: ["hide", "reveal", "icon", "icons", "id", "gh"],
             rows: [
-                ["icons", "In the listing, each icon hides its entry's ID. The cursor can't go on it, but "
-                    + "whole lines take it along: yank, delete and paste them (see `:h listing`)."],
-                ["gh", "Show the text behind the icon of the cursor's line, unless there's a warning or "
-                    + "error under the cursor (so does resting the mouse on the icon). An ID shows as the "
-                    + "path it stands for, even if its line renames it."],
+                ["icons", "In the listing, each icon hides its entry's ID, which whole lines take along."],
+                ["`gh`", "Show what the line's icon hides: an ID shows as its path (so does resting the "
+                    + "mouse on the icon)."],
                 ["", "Yanks, undo and copying keep the hidden text. Other apps get the icons."]
             ]
         },
@@ -236,12 +205,9 @@ Popup {
             title: "Warnings and errors",
             tags: ["warning", "warnings", "error", "errors", "diagnostics", "squiggle"],
             rows: [
-                ["", "Koil's problems with the listing get a wavy underline, orange or red, and a message "
-                    + "after the end of their line, as in VS Code. An error (like a name written twice) "
-                    + "stops updating and applying; a warning (like a name a shell needs quoted) doesn't. "
-                    + "A name Windows can't use is a warning, but an error on Windows."],
-                ["gh", "Show the message of the warning or error under the cursor (so does resting the "
-                    + "mouse on it, or on the message)."]
+                ["", "Problems get a wavy underline and a message after the line. An error (like a name "
+                    + "written twice) blocks updating and applying; a warning doesn't."],
+                ["`gh`", "Show the message under the cursor (or rest the mouse on it)."]
             ]
         },
         {
@@ -249,14 +215,16 @@ Popup {
             tags: ["keys", "other", "ctrl-a", "ctrl-x", "g?", "rot13", "ctrl-e", "ctrl-y", "scroll", "zoom",
                 "settings", "undo", "gv", "zz"],
             rows: [
-                ["Ctrl-A  Ctrl-X", "Add to or subtract from the number under or after the cursor."],
-                ["g?  g~  gu  gU", "ROT13, toggle case, lowercase, uppercase (with a motion, e.g. `g?w`)."],
-                ["Ctrl-E  Ctrl-Y", "Scroll a line down or up. The cursor stays, unless it would leave the screen."],
-                ["zz  zt  zb", "Scroll the cursor's line to the middle, top or bottom."],
-                ["gv", "Select the last visual selection again."],
-                [isMac ? "⌘Z  ⇧⌘Z" : "Ctrl+Z  Ctrl+Shift+Z", "Undo and redo, the same as `u` and `Ctrl-R`."],
-                [isMac ? "⌘+  ⌘-  ⌘0" : "Ctrl+=  Ctrl+-  Ctrl+0", "Zoom in, out, back to the size in Settings."],
-                [cmdKey + ",", "Settings: font size, line numbers, theme."]
+                ["`Ctrl-A`  `Ctrl-X`", "Add to or subtract from the number at or after the cursor."],
+                ["`g?`  `g~`  `gu`  `gU`", "ROT13, toggle case, lowercase, uppercase (e.g. `g?w`)."],
+                ["`Ctrl-E`  `Ctrl-Y`", "Scroll a line down or up."],
+                ["`zz`  `zt`  `zb`", "Scroll the cursor's line to the middle, top or bottom."],
+                ["`gv`", "Select the last visual selection again."],
+                [isMac ? "`⌘Z`  `⇧⌘Z`" : "`Ctrl+Z`  `Ctrl+Shift+Z`",
+                    "Undo and redo, like `u` and `Ctrl-R`."],
+                [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",
+                    "Zoom in, out, or back to the Settings size."],
+                ["`" + cmdKey + ",`", "Settings: font, line numbers, theme, when applying asks, start dir."]
             ]
         }
     ]
@@ -311,10 +279,36 @@ Popup {
             selected.copy();
     }
 
-    // `code` in the editor's font, the rest as plain text.
-    function styled(text) {
-        const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        return escaped.replace(/`([^`]+)`/g, "<span style=\"font-family:'" + monoFamily + "'\">$1</span>");
+    // How far a code's shade reaches past its text, as in a Tip.
+    readonly property real codePadding: 4 * zoom
+
+    // Text with `code` as rich text, the code in the editor's font, and
+    // where each code is in it, to shade it (see CodeText). Letter spacing
+    // on the characters before and at the end of a code makes room for
+    // its shade, and copies as nothing. Spaces in a code don't break, and
+    // copy as spaces.
+    function parseCode(text) {
+        const escape = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const spaced = s => {
+            const last = /[\udc00-\udfff]$/.test(s) ? 2 : 1;
+            return s === "" ? "" : escape(s.slice(0, -last)) + "<span style=\"letter-spacing:" + codePadding
+                + "px\">" + escape(s.slice(-last)) + "</span>";
+        };
+        const parts = text.split("`");
+        const codes = [];
+        let html = "", length = 0;
+        parts.forEach((part, i) => {
+            if (i % 2 === 1) {
+                codes.push({ start: length, text: part });
+                html += "<span style=\"font-family:'" + monoFamily + "'\">" + spaced(part.replace(/ /g, " "))
+                    + "</span>";
+            } else {
+                part = part.replace(/ +/g, " "); // as rich text shows it
+                html += i + 1 < parts.length ? spaced(part) : escape(part);
+            }
+            length += part.length;
+        });
+        return { html: html, codes: codes };
     }
 
     parent: Overlay.overlay
@@ -370,6 +364,68 @@ Popup {
         }
     }
 
+    // Text with `code` (see parseCode), each code on a shade of its own,
+    // drawn behind the text so it still selects and copies. `plain` shows
+    // the text as it is (a :reg list).
+    component CodeText: HelpText {
+        id: codeText
+
+        property string markup
+        property bool plain
+        readonly property var parsed: plain ? { html: "", codes: [] } : help.parseCode(markup)
+        // The shades are placed once the text is laid out.
+        readonly property var layout: [text, width, contentWidth, contentHeight]
+        property var shades: []
+        readonly property FontMetrics codeMetrics: FontMetrics {
+            font.family: help.monoFamily
+            font.pixelSize: codeText.font.pixelSize
+        }
+
+        // A shade behind each code, one per line it's on (a code can break
+        // at a `/` or `-`).
+        function placeShades() {
+            const pad = help.codePadding;
+            const rects = [];
+            for (const code of parsed.codes) {
+                let from = positionToRectangle(code.start);
+                for (let i = 1; i <= code.text.length; i++) {
+                    const at = positionToRectangle(code.start + i);
+                    if (at.y === from.y && i < code.text.length)
+                        continue;
+                    // At the code's end, the room after it is in `at`.
+                    const right = at.y === from.y ? at.x : positionToRectangle(code.start + i - 1).x
+                        + codeMetrics.advanceWidth(code.text[i - 1]) + pad;
+                    rects.push(Qt.rect(from.x - pad, from.y, right - from.x + pad, from.height));
+                    from = at;
+                }
+            }
+            shades = rects;
+        }
+
+        // Room for a shade at a line's start (so all text has it).
+        leftPadding: help.codePadding
+        text: plain ? markup : parsed.html
+        textFormat: plain ? TextEdit.PlainText : TextEdit.RichText
+        wrapMode: TextEdit.Wrap
+        onLayoutChanged: Qt.callLater(placeShades)
+
+        Repeater {
+            model: codeText.shades
+
+            Rectangle {
+                required property rect modelData
+
+                z: -1
+                x: modelData.x
+                y: modelData.y
+                width: modelData.width
+                height: modelData.height
+                radius: 3 * help.zoom
+                color: help.theme.code
+            }
+        }
+    }
+
     contentItem: Item {
         Item {
             id: header
@@ -380,15 +436,16 @@ Popup {
             HelpText {
                 id: title
 
+                leftPadding: help.codePadding // as CodeText's
                 text: help.heading
                 font.pixelSize: Math.round(18 * help.zoom)
                 font.bold: true
                 color: help.theme.text
             }
-            HelpText {
+            CodeText {
                 anchors.right: parent.right
                 anchors.baseline: title.baseline
-                text: "Esc or q to close · j k to scroll"
+                markup: "`Esc` or `q` to close · `j` `k` to scroll"
                 font.pixelSize: Math.round(12 * help.zoom)
                 color: help.theme.dim
             }
@@ -474,17 +531,16 @@ Popup {
 
                         HelpText {
                             visible: !!section.modelData.title
+                            leftPadding: help.codePadding
                             text: section.modelData.title
                             font.pixelSize: Math.round(15 * help.zoom)
                             font.bold: true
                             color: help.theme.accent
                         }
-                        HelpText {
+                        CodeText {
                             width: parent.width
                             visible: !!section.modelData.intro
-                            text: help.styled(section.modelData.intro || "")
-                            textFormat: TextEdit.RichText
-                            wrapMode: TextEdit.Wrap
+                            markup: section.modelData.intro || ""
                             font.pixelSize: Math.round(13 * help.zoom)
                             color: help.theme.text
                         }
@@ -498,36 +554,33 @@ Popup {
 
                                 spacing: 12 * help.zoom
 
-                                HelpText {
+                                CodeText {
                                     id: keysText
 
                                     width: section.modelData.keyColumns
                                         ? Math.ceil(section.modelData.keyColumns * monoMetrics.averageCharacterWidth)
                                         : Math.round(body.width * 0.34)
-                                    text: row.modelData[0]
-                                    textFormat: TextEdit.PlainText
-                                    wrapMode: TextEdit.Wrap
+                                    markup: row.modelData[0]
+                                    plain: !!section.modelData.plain
                                     font.family: help.monoFamily
                                     font.pixelSize: Math.round(13 * help.zoom)
                                     color: help.theme.text
                                 }
-                                HelpText {
+                                CodeText {
                                     width: body.width - keysText.width - row.spacing
-                                    text: section.modelData.plain ? row.modelData[1] : help.styled(row.modelData[1])
-                                    textFormat: section.modelData.plain ? TextEdit.PlainText : TextEdit.RichText
-                                    wrapMode: section.modelData.plain ? TextEdit.WrapAnywhere : TextEdit.Wrap
-                                    font.family: section.modelData.plain ? help.monoFamily : help.font.family
+                                    markup: row.modelData[1]
+                                    plain: !!section.modelData.plain
+                                    wrapMode: plain ? TextEdit.WrapAnywhere : TextEdit.Wrap
+                                    font.family: plain ? help.monoFamily : help.font.family
                                     font.pixelSize: Math.round(13 * help.zoom)
                                     color: help.theme.text
                                 }
                             }
                         }
-                        HelpText {
+                        CodeText {
                             width: parent.width
                             visible: !!section.modelData.note
-                            text: help.styled(section.modelData.note || "")
-                            textFormat: TextEdit.RichText
-                            wrapMode: TextEdit.Wrap
+                            markup: section.modelData.note || ""
                             font.pixelSize: Math.round(12 * help.zoom)
                             color: help.theme.dim
                         }
