@@ -3887,22 +3887,11 @@ QtObject {
         return { pos: Txt.atColumn(t, ls, wantCol), type: "linewise", keepCol: true };
     }
 
-    // A pattern that isn't a valid regular expression (e.g. while it's still
-    // being typed) is searched for literally. Either way, one without an
-    // uppercase letter ignores case (smart case).
-    function searchRegExp(pattern) {
-        try {
-            return new RegExp(pattern, Txt.ignoresCase(pattern, true) ? "gmi" : "gm");
-        } catch (e) {
-            return new RegExp(Txt.escapeRegExp(pattern), Txt.ignoresCase(pattern, false) ? "gmi" : "gm");
-        }
-    }
-
     // Back at the first match it found, a search has gone round all of them
     // (wrapping at the end), and would go round again and again: the rounds
     // left are skipped (999999n).
     function search(t, pattern, forward, count, from) {
-        const re = searchRegExp(pattern);
+        const re = Txt.searchRegExp(pattern);
         let p = from, first = -1;
         for (let i = 0; i < count; i++) {
             const q = forward ? searchForward(re, t, p, false) : searchBackward(re, t, p, false);
@@ -3985,7 +3974,7 @@ QtObject {
         if (!searchView && flickable)
             searchView = { x: flickable.contentX, y: flickable.contentY };
         const t = bufferText();
-        const re = searchRegExp(pattern);
+        const re = Txt.searchRegExp(pattern);
         searchTarget = pattern === "" ? -1
             : commandLine[0] === "/" ? searchForward(re, t, cursor, true) : searchBackward(re, t, cursor, true);
         if (!flickable)
@@ -4016,7 +4005,7 @@ QtObject {
             return [];
         const t = bufferText();
         const v = visibleRange(t);
-        const re = searchRegExp(pattern);
+        const re = Txt.searchRegExp(pattern);
         const spans = [];
         re.lastIndex = v.from;
         let m;

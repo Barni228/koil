@@ -244,6 +244,12 @@ TestCase {
         theme: theme
     }
 
+    HelpPanel {
+        id: help
+
+        theme: theme
+    }
+
     property int defaultChunkTime
     property real defaultCharWidth
     property real defaultLineHeight
@@ -1732,5 +1738,99 @@ TestCase {
         vim.nativeUndo(false);
         compare(render(), "a <M:h1> a <C:h2> a");
         findBar.close();
+    }
+
+    // ---- Help ----------------------------------------------------------------
+
+    function test_helpSearch() {
+        help.showList("Test", [["a", "one two"], ["b", "two three two"], ["c", "x"]], 4);
+        tryCompare(help, "opened", true);
+        keys("n");
+        compare(help.searchMessage, "E35: No previous regular expression");
+        keys("<Esc>");
+        verify(help.opened);
+
+        // Matches as it's typed, from the top of the view.
+        keys("/tw");
+        compare(help.searchKind, "/");
+        compare(help.matches.length, 3);
+        compare(help.matchIndex, 0);
+        compare(help.matchMarks["0/1t"], "0,2,0;10,12,0");
+        keys("o<CR>");
+        compare(help.searchKind, "");
+        compare(help.lastPattern, "two");
+        compare(help.matchIndex, 0);
+        compare(help.matchMarks["0/0t"], "4,7,1");
+
+        keys("nn");
+        compare(help.matchIndex, 2);
+        keys("n");
+        compare(help.matchIndex, 0);
+        compare(help.searchMessage, "search hit BOTTOM, continuing at TOP");
+        keys("N");
+        compare(help.matchIndex, 2);
+        compare(help.searchMessage, "search hit TOP, continuing at BOTTOM");
+        // An empty search searches for the last pattern, the new way.
+        keys("?<CR>");
+        compare(help.matchIndex, 1);
+        compare(help.searchMessage, "");
+        keys("n");
+        compare(help.matchIndex, 0);
+        keys("N");
+        compare(help.matchIndex, 1);
+        // Find Next and Previous go down and up, whichever way n goes.
+        help.searchAgain(true);
+        compare(help.matchIndex, 2);
+        help.searchAgain(false);
+        compare(help.matchIndex, 1);
+
+        // Find while typing selects the search, which typing replaces.
+        keys("/tw");
+        help.startSearch("/");
+        compare(help.searchKind, "/");
+        compare(help.searchPattern, "tw");
+        verify(help.holds(tc.Window.window.activeFocusItem));
+        keys("two<CR>");
+        compare(help.lastPattern, "two");
+        verify(help.holds(tc.Window.window.activeFocusItem));
+        verify(!help.holds(editor));
+
+        keys("/zzz<CR>");
+        compare(help.matchIndex, -1);
+        compare(help.searchMessage, "E486: Pattern not found: zzz");
+        verify(help.searchFailed);
+
+        // Esc while typing goes back to before, as does Backspace on nothing.
+        keys("/thr");
+        compare(help.matches.length, 1);
+        keys("<Esc>");
+        compare(help.searchKind, "");
+        compare(help.searchPattern, "zzz");
+        verify(help.opened);
+        keys("/<Up>");
+        compare(help.searchPattern, "zzz");
+        keys("<Up>");
+        compare(help.searchPattern, "two");
+        compare(help.matchIndex, 0);
+        keys("<Down><Down>");
+        compare(help.searchPattern, "zzz");
+        keys("<BS>");
+        compare(help.searchKind, "");
+
+        // Esc clears the highlights, and then closes the help.
+        keys("<Esc>");
+        compare(help.searchPattern, "");
+        verify(help.opened);
+        keys("<Esc>");
+        tryCompare(help, "opened", false);
+
+        // Codes are searched as they're shown.
+        help.show("");
+        tryCompare(help, "opened", true);
+        keys("/Space Space<CR>");
+        compare(help.matches.length, 1);
+        compare(help.matchMarks["0/1k"], "0,11,1");
+        keys("<Esc><Esc>");
+        tryCompare(help, "opened", false);
     }
 }

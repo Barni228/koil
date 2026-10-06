@@ -563,6 +563,18 @@ function ignoresCase(pattern, regex) {
     return s === s.toLowerCase();
 }
 
+// What a search for pattern (vim's, the help's) looks for. A pattern that
+// isn't a valid regular expression (e.g. while it's still being typed) is
+// searched for literally. Either way, one without an uppercase letter
+// ignores case (smart case).
+function searchRegExp(pattern) {
+    try {
+        return new RegExp(pattern, ignoresCase(pattern, true) ? "gmi" : "gm");
+    } catch (e) {
+        return new RegExp(escapeRegExp(pattern), ignoresCase(pattern, false) ? "gmi" : "gm");
+    }
+}
+
 // Adds the highlight of a match [start, end) to spans, split into one
 // { start, end, current } span per line, where current means it's the
 // match to show as the current one.

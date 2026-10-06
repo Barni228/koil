@@ -55,6 +55,10 @@ ApplicationWindow {
     // being asked about.
     property bool diskChanged: false
     property bool askingConflicts: false
+    // A box over the editor that has the keys (:help, or a question), while
+    // which the menu can't open, save or edit anything (see also
+    // keepHelpKeys).
+    readonly property bool boxOpen: help.opened || confirmDialog.opened
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
     property bool quitAfterSave: false
@@ -228,7 +232,8 @@ ApplicationWindow {
     function syncListing() {
         if (!diskChanged || !listing)
             return;
-        if (confirmDialog.opened || askingConflicts || vim.running || activeView === pathView && vim.inserting) {
+        // Not under :help either, as merging can switch to the listing.
+        if (boxOpen || askingConflicts || vim.running || activeView === pathView && vim.inserting) {
             syncTimer.start();
             return;
         }
@@ -310,6 +315,37 @@ ApplicationWindow {
     function checkListing() {
         checkTimer.stop();
         problems = listing ? JSON.parse(koil.check(editorView.textArea.text, JSON.stringify(editorView.hidden))) : [];
+    }
+
+    // Find and Replace (`replace`): in :help while it's open (its `/`),
+    // else the find bar.
+    function find(replace) {
+        if (help.opened)
+            help.startSearch("/");
+        else
+            findBar.open(replace);
+    }
+
+    // Find Next (`step` 1) and Previous (-1): in :help while it's open.
+    function findNext(step) {
+        if (help.opened)
+            help.searchAgain(step > 0);
+        else
+            findBar.findNext(step);
+    }
+
+    // Nothing else may take the keys while :help is open: it would stay
+    // open over the editor, with no key reaching it to close it. If
+    // something does (boxOpen keeps the menu from it), it closes. Not when
+    // the window just isn't active (another app, the Settings window).
+    function keepHelpKeys() {
+        if (help.opened && active && activeFocusItem && !help.holds(activeFocusItem))
+            help.close();
+    }
+
+    onActiveFocusItemChanged: {
+        if (help.opened)
+            Qt.callLater(keepHelpKeys);
     }
 
     // Makes vim edit `view`: the listing's editor or the path field. It
@@ -991,9 +1027,17 @@ ApplicationWindow {
     HelpPanel {
         id: help
 
+        // Whether it had the keys as it closed: if something else took
+        // them (see keepHelpKeys), that keeps them.
+        property bool hadKeys
+
         theme: theme
         defaultFontFamily: root.defaultFontFamily
-        onClosed: root.activeView.textArea.forceActiveFocus()
+        onAboutToHide: hadKeys = !root.activeFocusItem || holds(root.activeFocusItem)
+        onClosed: {
+            if (hadKeys)
+                root.activeView.textArea.forceActiveFocus();
+        }
     }
 
     // :confirm q with unsaved changes, and applying the listing's changes
@@ -1133,11 +1177,13 @@ ApplicationWindow {
 
                 Platform.MenuItem {
                     text: qsTr("Open…")
+                    enabled: !root.boxOpen
                     shortcut: StandardKey.Open
                     onTriggered: root.openFile()
                 }
                 Platform.MenuItem {
                     text: qsTr("Open Folder…")
+                    enabled: !root.boxOpen
                     shortcut: "Ctrl+Shift+O"
                     onTriggered: folderDialog.open()
                 }
@@ -1145,17 +1191,18 @@ ApplicationWindow {
                 // which always asks first, as Space a does.
                 Platform.MenuItem {
                     text: root.listing ? qsTr("Update") : qsTr("Save")
+                    enabled: !root.boxOpen
                     shortcut: StandardKey.Save
                     onTriggered: root.listing ? root.updateListing() : root.save()
                 }
                 Platform.MenuItem {
                     text: qsTr("Apply Changes…")
-                    enabled: root.listing
+                    enabled: root.listing && !root.boxOpen
                     onTriggered: root.applyChanges(false, false, true)
                 }
                 Platform.MenuItem {
                     text: qsTr("Save As…")
-                    enabled: !root.listing
+                    enabled: !root.listing && !root.boxOpen
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }
@@ -1177,23 +1224,27 @@ ApplicationWindow {
 
                 Platform.MenuItem {
                     text: qsTr("Find")
+                    enabled: !confirmDialog.opened
                     shortcut: StandardKey.Find
-                    onTriggered: findBar.open(false)
+                    onTriggered: root.find(false)
                 }
                 Platform.MenuItem {
                     text: qsTr("Replace")
+                    enabled: !confirmDialog.opened
                     shortcut: "Ctrl+Alt+F" // Cmd+Option+F, as in VS Code
-                    onTriggered: findBar.open(true)
+                    onTriggered: root.find(true)
                 }
                 Platform.MenuItem {
                     text: qsTr("Find Next")
+                    enabled: !confirmDialog.opened
                     shortcut: StandardKey.FindNext
-                    onTriggered: findBar.findNext(1)
+                    onTriggered: root.findNext(1)
                 }
                 Platform.MenuItem {
                     text: qsTr("Find Previous")
+                    enabled: !confirmDialog.opened
                     shortcut: StandardKey.FindPrevious
-                    onTriggered: findBar.findNext(-1)
+                    onTriggered: root.findNext(-1)
                 }
             }
             Platform.Menu {
@@ -1228,27 +1279,30 @@ ApplicationWindow {
 
                 Action {
                     text: qsTr("&Open…")
+                    enabled: !root.boxOpen
                     shortcut: StandardKey.Open
                     onTriggered: root.openFile()
                 }
                 Action {
                     text: qsTr("Open &Folder…")
+                    enabled: !root.boxOpen
                     shortcut: "Ctrl+Shift+O"
                     onTriggered: folderDialog.open()
                 }
                 Action {
                     text: root.listing ? qsTr("&Update") : qsTr("&Save")
+                    enabled: !root.boxOpen
                     shortcut: StandardKey.Save
                     onTriggered: root.listing ? root.updateListing() : root.save()
                 }
                 Action {
                     text: qsTr("A&pply Changes…")
-                    enabled: root.listing
+                    enabled: root.listing && !root.boxOpen
                     onTriggered: root.applyChanges(false, false, true)
                 }
                 Action {
                     text: qsTr("Save &As…")
-                    enabled: !root.listing
+                    enabled: !root.listing && !root.boxOpen
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }
@@ -1271,25 +1325,29 @@ ApplicationWindow {
 
                 Action {
                     text: qsTr("&Find")
+                    enabled: !confirmDialog.opened
                     shortcut: StandardKey.Find
-                    onTriggered: findBar.open(false)
+                    onTriggered: root.find(false)
                 }
                 Action {
                     text: qsTr("&Replace")
+                    enabled: !confirmDialog.opened
                     shortcut: StandardKey.Replace // Ctrl+H, as in VS Code
-                    onTriggered: findBar.open(true)
+                    onTriggered: root.find(true)
                 }
                 // F3, plus Ctrl+G from findNextShortcut. Written out, since
                 // an Action takes only the first of a StandardKey's keys.
                 Action {
                     text: qsTr("Find &Next")
+                    enabled: !confirmDialog.opened
                     shortcut: "F3"
-                    onTriggered: findBar.findNext(1)
+                    onTriggered: root.findNext(1)
                 }
                 Action {
                     text: qsTr("Find &Previous")
+                    enabled: !confirmDialog.opened
                     shortcut: "Shift+F3"
-                    onTriggered: findBar.findNext(-1)
+                    onTriggered: root.findNext(-1)
                 }
             }
             Menu {
@@ -1331,14 +1389,14 @@ ApplicationWindow {
     Shortcut {
         id: findNextShortcut
 
-        enabled: !root.isMac
+        enabled: !root.isMac && !confirmDialog.opened
         sequence: "Ctrl+G"
-        onActivated: findBar.findNext(1)
+        onActivated: root.findNext(1)
     }
     Shortcut {
-        enabled: !root.isMac
+        enabled: !root.isMac && !confirmDialog.opened
         sequence: "Ctrl+Shift+G"
-        onActivated: findBar.findNext(-1)
+        onActivated: root.findNext(-1)
     }
 
     Component.onCompleted: {

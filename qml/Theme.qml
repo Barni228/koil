@@ -63,6 +63,9 @@ QtObject {
     // Behind code in a box, like a tooltip's shortcut (over what's behind
     // the box, which shows through).
     readonly property color code: dark ? "#26ffffff" : "#14000000"
+    // A search match, and the current one, under dark text.
+    readonly property color searchMatch: "#f5d547"
+    readonly property color currentMatch: "#ff9f1a"
     // A dir's name in Koil's listing, and the path it lists.
     readonly property color directory: dark ? "#6cb6ff" : "#0b62c4"
     // The parts of a regex on the listing's path line (see listing::Span),

@@ -3,12 +3,14 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 
+import "text.js" as Txt
+
 // :help, a box over the editor with what isn't obvious: Koil's listing,
 // :set and its forms, the commands, search, registers and macros, visual
 // block and multiple cursors, hidden text and other keys. :help topic scrolls to a section.
 // :reg shows the registers in it too (showList).
-// Keys scroll it as in a vim help buffer; Esc or q closes it. Its text can be
-// selected with the mouse and copied.
+// Keys scroll it as in a vim help buffer, / and ? search it (see Search);
+// Esc or q closes it. Its text can be selected with the mouse and copied.
 Popup {
     id: help
 
@@ -238,6 +240,7 @@ Popup {
             return false;
         heading = "Koil Help";
         shownSections = sections;
+        clearSearch();
         open();
         shownSection = i;
         showSection();
@@ -250,6 +253,7 @@ Popup {
     function showList(title, rows, keyColumns) {
         heading = title;
         shownSections = [{ title: "", rows: rows, plain: true, keyColumns: keyColumns }];
+        clearSearch();
         open();
         shownSection = 0;
         showSection();
@@ -282,39 +286,301 @@ Popup {
     // How far a code's shade reaches past its text, as in a Tip.
     readonly property real codePadding: 4 * zoom
 
-    // Text with `code` as rich text, the code in the editor's font, and
-    // where each code is in it, to shade it (see CodeText). Letter spacing
-    // on the characters before and at the end of a code makes room for
-    // its shade, and copies as nothing. Spaces in a code don't break, and
-    // copy as spaces.
-    function parseCode(text) {
-        const escape = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        const spaced = s => {
-            const last = /[\udc00-\udfff]$/.test(s) ? 2 : 1;
-            return s === "" ? "" : escape(s.slice(0, -last)) + "<span style=\"letter-spacing:" + codePadding
-                + "px\">" + escape(s.slice(-last)) + "</span>";
-        };
-        const parts = text.split("`");
+    // Text with `code` as the text it shows: each code without its
+    // backticks, and the spaces between collapsed, as rich text shows
+    // them; and where each code is in it. `plain` text is as it is.
+    function parseCode(text, plain) {
+        if (plain)
+            return { text: text, codes: [] };
         const codes = [];
-        let html = "", length = 0;
-        parts.forEach((part, i) => {
-            if (i % 2 === 1) {
-                codes.push({ start: length, text: part });
-                html += "<span style=\"font-family:'" + monoFamily + "'\">" + spaced(part.replace(/ /g, " "))
-                    + "</span>";
-            } else {
-                part = part.replace(/ +/g, " "); // as rich text shows it
-                html += i + 1 < parts.length ? spaced(part) : escape(part);
-            }
-            length += part.length;
+        let shown = "";
+        text.split("`").forEach((part, i) => {
+            if (i % 2 === 1)
+                codes.push({ start: shown.length, text: part });
+            else
+                part = part.replace(/ +/g, " ");
+            shown += part;
         });
-        return { html: html, codes: codes };
+        return { text: shown, codes: codes };
+    }
+
+    // The rich text that shows parsed text (see parseCode): its codes in
+    // the editor's font, with letter spacing on the characters before and
+    // at the end of each, which makes room for its shade and copies as
+    // nothing, and the search matches in `marks` ([start, end, current])
+    // in black, as they're on a highlight. Spaces in a code (or in plain
+    // text) don't break or collapse, and copy as spaces.
+    function codeHtml(parsed, marks, plain) {
+        const t = parsed.text;
+        const inCode = 1, spaced = 2, marked = 4;
+        const flags = new Uint8Array(t.length);
+        // Letter spacing goes after a character, so on both of a pair of
+        // surrogates.
+        const space = i => {
+            flags[i] |= spaced;
+            if (i > 0 && /[\udc00-\udfff]/.test(t[i]))
+                flags[i - 1] |= spaced;
+        };
+        for (const code of parsed.codes) {
+            const end = code.start + code.text.length;
+            for (let i = code.start; i < end; i++)
+                flags[i] |= inCode;
+            if (code.start > 0)
+                space(code.start - 1);
+            space(end - 1);
+        }
+        for (const mark of marks) {
+            for (let i = mark[0]; i < mark[1]; i++)
+                flags[i] |= marked;
+        }
+        let html = "";
+        for (let i = 0, j; i < t.length; i = j) {
+            const f = flags[i];
+            for (j = i + 1; j < t.length && flags[j] === f;)
+                j++;
+            let run = t.slice(i, j).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            if (plain || f & inCode)
+                run = run.replace(/ /g, " ");
+            const style = (f & inCode ? "font-family:'" + monoFamily + "';" : "")
+                + (f & spaced ? "letter-spacing:" + codePadding + "px;" : "") + (f & marked ? "color:black;" : "");
+            html += style ? "<span style=\"" + style + "\">" + run + "</span>" : run;
+        }
+        return html;
+    }
+
+    // ---- Search ------------------------------------------------------------
+    // As vim's: / and ? type a search (on the search line, at the bottom),
+    // highlighting its matches and going to the one Enter goes to as it's
+    // typed; n and N go on. A search goes from the match it went to last,
+    // if that's in view, else from the top of the view. Esc clears the
+    // highlights, and then closes the help.
+
+    // The search being typed ("/" or "?"), or "".
+    property string searchKind: ""
+    // The pattern whose matches are highlighted ("" for none), the last one
+    // searched for (which n searches for again), and which way.
+    property string searchPattern: ""
+    property string lastPattern: ""
+    property bool lastForward: true
+    // The match a search went to (in matches), or -1.
+    property int matchIndex: -1
+    // What the search line says after a search went round the end, or
+    // found nothing (searchFailed).
+    property string searchMessage: ""
+    property bool searchFailed: false
+    // The patterns searched for (the newest last), which Up and Down go
+    // through as a search is typed (from historyAt, the one shown).
+    property var searchHistory: []
+    property int historyAt: -1
+    property string typedSearch: ""
+    // The view, highlights and match before a search was typed, which
+    // cancelling it goes back to, and the match it goes from (or null).
+    property var searchStart: null
+    // The CodeTexts by key, to find a match on the screen.
+    property var textItems: ({})
+
+    readonly property bool searchShown: searchPattern !== "" || searchMessage !== ""
+
+    // Every text of shownSections, in order, as search sees them ({ key,
+    // text }, where key is CodeText's), and each key's place in that order.
+    readonly property var searchTexts: {
+        const list = [], order = {};
+        shownSections.forEach((section, s) => {
+            const add = (part, markup) => {
+                if (!markup)
+                    return;
+                order[s + "/" + part] = list.length;
+                list.push({ key: s + "/" + part, text: parseCode(markup, !!section.plain).text });
+            };
+            add("title", section.title);
+            add("intro", section.intro);
+            section.rows.forEach((row, r) => {
+                add(r + "k", row[0]);
+                add(r + "t", row[1]);
+            });
+            add("note", section.note);
+        });
+        return { list: list, order: order };
+    }
+
+    // Each match of searchPattern: { key, start, end }, in order. Empty
+    // ones don't count.
+    readonly property var matches: {
+        if (searchPattern === "")
+            return [];
+        const re = Txt.searchRegExp(searchPattern), found = [];
+        for (const t of searchTexts.list) {
+            re.lastIndex = 0;
+            let m;
+            while ((m = re.exec(t.text)) !== null) {
+                if (m[0] === "")
+                    re.lastIndex++;
+                else
+                    found.push({ key: t.key, start: m.index, end: m.index + m[0].length });
+            }
+        }
+        return found;
+    }
+
+    // Each text's matches, as CodeText.marks: "start,end,current;…" (a
+    // string, so a text whose matches stay the same isn't laid out again).
+    readonly property var matchMarks: {
+        const marks = {};
+        matches.forEach((m, i) => {
+            const mark = m.start + "," + m.end + "," + (i === matchIndex ? 1 : 0);
+            marks[m.key] = marks[m.key] ? marks[m.key] + ";" + mark : mark;
+        });
+        return marks;
+    }
+
+    // Where match m's line is in the body.
+    function matchY(m) {
+        const item = textItems[m.key];
+        return item ? item.mapToItem(body, 0, item.positionToRectangle(m.start).y).y : 0;
+    }
+
+    function inView(m) {
+        const y = matchY(m);
+        return y >= scroller.contentY && y < scroller.contentY + scroller.height;
+    }
+
+    // Scrolls match i to the middle, if it's out of view.
+    function reveal(i) {
+        shownSection = -1;
+        const item = textItems[matches[i].key];
+        if (!item)
+            return;
+        const height = item.positionToRectangle(matches[i].start).height;
+        const y = matchY(matches[i]);
+        if (y < scroller.contentY || y + height > scroller.contentY + scroller.height)
+            scroller.contentY = Math.max(0, Math.min(scroller.maxY, y - (scroller.height - height) / 2));
+    }
+
+    // The match a search goes to, from `from` (a match, maybe of another
+    // search), else from the top of the view, going round at the end:
+    // { index, wrapped }, or null if there's none.
+    function nextMatch(forward, from) {
+        const order = searchTexts.order;
+        const compare = m => from ? order[m.key] - order[from.key] || m.start - from.start
+            : matchY(m) >= scroller.contentY ? 1 : -1;
+        if (forward) {
+            const i = matches.findIndex(m => compare(m) > 0);
+            return i >= 0 ? { index: i, wrapped: false } : matches.length ? { index: 0, wrapped: true } : null;
+        }
+        for (let i = matches.length - 1; i >= 0; i--) {
+            if (compare(matches[i]) < 0)
+                return { index: i, wrapped: false };
+        }
+        return matches.length ? { index: matches.length - 1, wrapped: true } : null;
+    }
+
+    // Searches for lastPattern from `from` (see nextMatch).
+    function goToMatch(forward, from) {
+        searchPattern = lastPattern;
+        const target = nextMatch(forward, from);
+        matchIndex = target ? target.index : -1;
+        searchFailed = !target;
+        searchMessage = !target ? "E486: Pattern not found: " + lastPattern
+            : !target.wrapped ? "" : forward ? "search hit BOTTOM, continuing at TOP"
+            : "search hit TOP, continuing at BOTTOM";
+        if (target)
+            reveal(target.index);
+    }
+
+    // n and N (and Find Next and Previous, `forward` or not).
+    function searchAgain(forward) {
+        if (lastPattern === "") {
+            searchFailed = true;
+            searchMessage = "E35: No previous regular expression";
+            return;
+        }
+        const from = matchIndex >= 0 && inView(matches[matchIndex]) ? matches[matchIndex] : null;
+        goToMatch(forward, from);
+    }
+
+    // / or ? (and Find). Find while a search is typed selects it.
+    function startSearch(kind) {
+        if (searchKind) {
+            searchField.selectAll();
+            return;
+        }
+        const from = matchIndex >= 0 && inView(matches[matchIndex]) ? matches[matchIndex] : null;
+        searchStart = { pattern: searchPattern, index: matchIndex, from: from, contentY: scroller.contentY };
+        shownSection = -1;
+        searchMessage = "";
+        historyAt = -1;
+        searchField.text = "";
+        searchKind = kind;
+        searchField.forceActiveFocus();
+    }
+
+    // Shows the matches of the search being typed, and the one Enter would
+    // go to (vim's 'incsearch').
+    function previewSearch(pattern) {
+        scroller.contentY = searchStart.contentY;
+        searchPattern = pattern || searchStart.pattern;
+        const target = pattern ? nextMatch(searchKind === "/", searchStart.from) : null;
+        matchIndex = pattern ? (target ? target.index : -1) : searchStart.index;
+        if (target)
+            reveal(target.index);
+    }
+
+    // Enter (`accept`), or Esc. An empty search searches for the last
+    // pattern again.
+    function finishSearch(accept) {
+        const typed = searchField.text, forward = searchKind === "/";
+        searchKind = "";
+        scroller.forceActiveFocus();
+        scroller.contentY = searchStart.contentY;
+        searchPattern = searchStart.pattern;
+        matchIndex = searchStart.index;
+        if (!accept || !typed && !lastPattern)
+            return;
+        if (typed) {
+            searchHistory = searchHistory.filter(p => p !== typed).concat([typed]).slice(-100);
+            lastPattern = typed;
+        }
+        lastForward = forward;
+        goToMatch(forward, searchStart.from);
+    }
+
+    // Up (`back`) and Down while a search is typed.
+    function browseHistory(back) {
+        if (historyAt < 0) {
+            if (!back || searchHistory.length === 0)
+                return;
+            typedSearch = searchField.text;
+            historyAt = searchHistory.length - 1;
+        } else if (back) {
+            historyAt = Math.max(0, historyAt - 1);
+        } else if (++historyAt >= searchHistory.length) {
+            historyAt = -1;
+        }
+        searchField.text = historyAt < 0 ? typedSearch : searchHistory[historyAt];
+    }
+
+    // Whether item is in the help (as the item with the keys, say).
+    function holds(item) {
+        for (let i = item; i; i = i.parent) {
+            if (i === contentItem.parent)
+                return true;
+        }
+        return false;
+    }
+
+    function clearSearch() {
+        searchKind = "";
+        searchPattern = "";
+        matchIndex = -1;
+        searchMessage = "";
+        searchFailed = false;
     }
 
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(parent ? parent.width - 48 * zoom : 700, 760 * zoom)
-    height: Math.min(parent ? parent.height - 48 * zoom : 500, body.height + header.height + 2 * padding)
+    height: Math.min(parent ? parent.height - 48 * zoom : 500,
+        body.height + header.height + searchLine.height + 2 * padding)
     padding: 16 * zoom
     modal: true
     focus: true
@@ -365,49 +631,90 @@ Popup {
     }
 
     // Text with `code` (see parseCode), each code on a shade of its own,
-    // drawn behind the text so it still selects and copies. `plain` shows
-    // the text as it is (a :reg list).
+    // drawn behind the text so it still selects and copies, and its search
+    // matches highlighted. `plain` shows the text as it is (a :reg list).
     component CodeText: HelpText {
         id: codeText
 
         property string markup
         property bool plain
-        readonly property var parsed: plain ? { html: "", codes: [] } : help.parseCode(markup)
-        // The shades are placed once the text is laid out.
+        // Which text of shownSections it is ("" for none), which search
+        // goes through (see searchTexts).
+        property string key
+        readonly property var parsed: help.parseCode(markup, plain)
+        // Its search matches, if search went through its text: the
+        // Repeater deletes the old texts some time after shownSections
+        // changes, and those mustn't take the new ones' matches.
+        readonly property string marks: key !== "" && help.matchMarks[key]
+            && help.searchTexts.list[help.searchTexts.order[key]].text === parsed.text ? help.matchMarks[key] : ""
+        readonly property var markList: marks === "" ? [] : marks.split(";").map(m => m.split(",").map(Number))
+        // The shades and highlights are placed once the text is laid out.
         readonly property var layout: [text, width, contentWidth, contentHeight]
         property var shades: []
+        property var highlights: []
         readonly property FontMetrics codeMetrics: FontMetrics {
             font.family: help.monoFamily
             font.pixelSize: codeText.font.pixelSize
         }
+        readonly property FontMetrics textMetrics: FontMetrics {
+            font: codeText.font
+        }
 
-        // A shade behind each code, one per line it's on (a code can break
-        // at a `/` or `-`).
-        function placeShades() {
-            const pad = help.codePadding;
+        function inCode(i) {
+            return parsed.codes.some(code => i >= code.start && i < code.start + code.text.length);
+        }
+
+        // Rectangles over the characters [start, end), one per line they're
+        // on (a code can break at a `/` or `-`): from `before` px before
+        // start (`pad` on the next lines) to where the character after end
+        // starts (past its letter spacing), less `trim`, or `pad` past a
+        // line's last character.
+        function rectsOver(start, end, before, pad, trim) {
             const rects = [];
-            for (const code of parsed.codes) {
-                let from = positionToRectangle(code.start);
-                for (let i = 1; i <= code.text.length; i++) {
-                    const at = positionToRectangle(code.start + i);
-                    if (at.y === from.y && i < code.text.length)
-                        continue;
-                    // At the code's end, the room after it is in `at`.
-                    const right = at.y === from.y ? at.x : positionToRectangle(code.start + i - 1).x
-                        + codeMetrics.advanceWidth(code.text[i - 1]) + pad;
-                    rects.push(Qt.rect(from.x - pad, from.y, right - from.x + pad, from.height));
-                    from = at;
-                }
+            let from = positionToRectangle(start), left = from.x - before;
+            for (let i = start + 1; i <= end; i++) {
+                const at = positionToRectangle(i);
+                if (at.y === from.y && i < end)
+                    continue;
+                const right = at.y === from.y ? at.x - trim : positionToRectangle(i - 1).x
+                    + (inCode(i - 1) ? codeMetrics : textMetrics).advanceWidth(parsed.text[i - 1]) + pad;
+                rects.push(Qt.rect(left, from.y, right - left, from.height));
+                from = at;
+                left = at.x - pad;
             }
-            shades = rects;
+            return rects;
+        }
+
+        // A shade behind each code, and a highlight behind each match. One
+        // that starts or ends with a code covers its shade there.
+        function place() {
+            const pad = help.codePadding;
+            const starts = parsed.codes.map(code => code.start);
+            const s = [], h = [];
+            for (const code of parsed.codes)
+                s.push(...rectsOver(code.start, code.start + code.text.length, pad, pad, 0));
+            for (const [start, end, current] of markList) {
+                for (const r of rectsOver(start, end, starts.includes(start) ? pad : 0, 0, starts.includes(end) ? pad : 0))
+                    h.push({ rect: r, current: current === 1 });
+            }
+            shades = s;
+            highlights = h;
         }
 
         // Room for a shade at a line's start (so all text has it).
         leftPadding: help.codePadding
-        text: plain ? markup : parsed.html
-        textFormat: plain ? TextEdit.PlainText : TextEdit.RichText
+        text: help.codeHtml(parsed, markList, plain)
+        textFormat: TextEdit.RichText
         wrapMode: TextEdit.Wrap
-        onLayoutChanged: Qt.callLater(placeShades)
+        onLayoutChanged: Qt.callLater(place)
+        Component.onCompleted: {
+            if (key !== "")
+                help.textItems[key] = codeText;
+        }
+        Component.onDestruction: {
+            if (help.textItems[key] === codeText)
+                delete help.textItems[key];
+        }
 
         Repeater {
             model: codeText.shades
@@ -422,6 +729,21 @@ Popup {
                 height: modelData.height
                 radius: 3 * help.zoom
                 color: help.theme.code
+            }
+        }
+        Repeater {
+            model: codeText.highlights
+
+            Rectangle {
+                required property var modelData
+
+                z: -0.5
+                x: modelData.rect.x
+                y: modelData.rect.y
+                width: modelData.rect.width
+                height: modelData.rect.height
+                radius: 3 * help.zoom
+                color: modelData.current ? help.theme.currentMatch : help.theme.searchMatch
             }
         }
     }
@@ -445,7 +767,7 @@ Popup {
             CodeText {
                 anchors.right: parent.right
                 anchors.baseline: title.baseline
-                markup: "`Esc` or `q` to close · `j` `k` to scroll"
+                markup: "`/` to search · `j` `k` to scroll · `Esc` or `q` to close"
                 font.pixelSize: Math.round(12 * help.zoom)
                 color: help.theme.dim
             }
@@ -457,7 +779,7 @@ Popup {
             readonly property real maxY: Math.max(0, contentHeight - height)
 
             anchors.top: header.bottom
-            anchors.bottom: parent.bottom
+            anchors.bottom: searchLine.top
             width: parent.width
             contentWidth: width
             contentHeight: body.height
@@ -486,8 +808,14 @@ Popup {
                 const page = height - help.lineStep;
                 if (event.matches(StandardKey.Copy))
                     help.copySelection();
+                else if (event.key === Qt.Key_Escape && help.searchShown)
+                    help.clearSearch();
                 else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q && !event.modifiers)
                     help.close();
+                else if (!ctrl && (event.text === "/" || event.text === "?"))
+                    help.startSearch(event.text);
+                else if (!ctrl && (event.text === "n" || event.text === "N"))
+                    help.searchAgain(event.text === "n" ? help.lastForward : !help.lastForward);
                 else if (event.key === Qt.Key_J && !ctrl || event.key === Qt.Key_Down || ctrl && event.key === Qt.Key_E)
                     help.scrollBy(help.lineStep);
                 else if (event.key === Qt.Key_K && !ctrl || event.key === Qt.Key_Up || ctrl && event.key === Qt.Key_Y)
@@ -525,14 +853,15 @@ Popup {
                         id: section
 
                         required property var modelData
+                        required property int index
 
                         width: body.width
                         spacing: 6 * help.zoom
 
-                        HelpText {
+                        CodeText {
                             visible: !!section.modelData.title
-                            leftPadding: help.codePadding
-                            text: section.modelData.title
+                            key: section.index + "/title"
+                            markup: section.modelData.title
                             font.pixelSize: Math.round(15 * help.zoom)
                             font.bold: true
                             color: help.theme.accent
@@ -540,6 +869,7 @@ Popup {
                         CodeText {
                             width: parent.width
                             visible: !!section.modelData.intro
+                            key: section.index + "/intro"
                             markup: section.modelData.intro || ""
                             font.pixelSize: Math.round(13 * help.zoom)
                             color: help.theme.text
@@ -551,6 +881,7 @@ Popup {
                                 id: row
 
                                 required property var modelData
+                                required property int index
 
                                 spacing: 12 * help.zoom
 
@@ -560,6 +891,7 @@ Popup {
                                     width: section.modelData.keyColumns
                                         ? Math.ceil(section.modelData.keyColumns * monoMetrics.averageCharacterWidth)
                                         : Math.round(body.width * 0.34)
+                                    key: section.index + "/" + row.index + "k"
                                     markup: row.modelData[0]
                                     plain: !!section.modelData.plain
                                     font.family: help.monoFamily
@@ -568,6 +900,7 @@ Popup {
                                 }
                                 CodeText {
                                     width: body.width - keysText.width - row.spacing
+                                    key: section.index + "/" + row.index + "t"
                                     markup: row.modelData[1]
                                     plain: !!section.modelData.plain
                                     wrapMode: plain ? TextEdit.WrapAnywhere : TextEdit.Wrap
@@ -580,12 +913,84 @@ Popup {
                         CodeText {
                             width: parent.width
                             visible: !!section.modelData.note
+                            key: section.index + "/note"
                             markup: section.modelData.note || ""
                             font.pixelSize: Math.round(12 * help.zoom)
                             color: help.theme.dim
                         }
                     }
                 }
+            }
+        }
+
+        // The search line, as vim's command line: the search being typed,
+        // else the last one, or what it says, and which match it's at.
+        Item {
+            id: searchLine
+
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: visible ? searchPrefix.height + 6 * help.zoom : 0
+            visible: help.searchKind !== "" || help.searchShown
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: help.theme.panelBorder
+            }
+            Text {
+                id: searchPrefix
+
+                anchors.left: parent.left
+                anchors.leftMargin: help.codePadding
+                anchors.bottom: parent.bottom
+                width: help.searchKind ? implicitWidth : Math.min(implicitWidth, matchCount.x - x - 12 * help.zoom)
+                text: help.searchKind || help.searchMessage || (help.lastForward ? "/" : "?") + help.lastPattern
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                font.family: help.monoFamily
+                font.pixelSize: Math.round(13 * help.zoom)
+                color: help.searchFailed && !help.searchKind ? help.theme.error : help.theme.text
+            }
+            TextInput {
+                id: searchField
+
+                anchors.left: searchPrefix.right
+                anchors.right: matchCount.left
+                anchors.rightMargin: 12 * help.zoom
+                anchors.baseline: searchPrefix.baseline
+                visible: help.searchKind !== ""
+                clip: true
+                font: searchPrefix.font
+                color: help.theme.text
+                selectByMouse: true
+                selectionColor: help.theme.highlight
+                selectedTextColor: help.theme.highlightedText
+                onTextChanged: {
+                    if (help.searchKind)
+                        help.previewSearch(text);
+                }
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                        help.finishSearch(true);
+                    else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace && text === "")
+                        help.finishSearch(false);
+                    else if (event.key === Qt.Key_Up || event.key === Qt.Key_Down)
+                        help.browseHistory(event.key === Qt.Key_Up);
+                    else
+                        return;
+                    event.accepted = true;
+                }
+            }
+            Text {
+                id: matchCount
+
+                anchors.right: parent.right
+                anchors.rightMargin: help.codePadding
+                anchors.baseline: searchPrefix.baseline
+                text: help.matchIndex >= 0 ? "[" + (help.matchIndex + 1) + "/" + help.matches.length + "]" : ""
+                font: searchPrefix.font
+                color: help.theme.dim
             }
         }
 

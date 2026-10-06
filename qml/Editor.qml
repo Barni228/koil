@@ -591,7 +591,7 @@ Item {
                         y: startRect.y
                         width: endRect.x - startRect.x
                         height: startRect.height
-                        color: modelData.current ? "#ff9f1a" : "#f5d547"
+                        color: modelData.current ? view.theme.currentMatch : view.theme.searchMatch
 
                         // Redraw the matched text on top, dark on the highlight.
                         Text {

@@ -55,14 +55,16 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious;
-  `:reg` shows the registers in it (`showList`).
+  `:reg` shows the registers in it (`showList`). `/` and `?` search it (see
+  Help).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
   the question: `:confirm q`, applying (a list to pick from), undoing an
   apply, and what changed on disk against the user's edits.
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
   look the app's own controls share (see Theme).
-- `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml and the find bar.
+- `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml, the find bar and the
+  help's search.
 - `scripts/`: `bundle-macos.sh` (makes the `.app`), `package-macos.sh` (the
   `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup
   installer), `make-icons.sh` (the icons, from `packaging/icon.png`).
@@ -786,6 +788,27 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   picker is a field that searches, with the list in a `Popup.Window` (so the
   Settings window doesn't cut it off); the field keeps the keys, but the popup
   takes Esc, so it closes on Esc itself.
+- **Help** (HelpPanel.qml): every text in it is a `CodeText`, rich text whose
+  `` `code` `` (in the keys column, a key) is in the editor's font, on a shade
+  drawn behind the text (`place`), so it still selects and copies. Rich
+  text has no inline padding, so letter spacing on the character before a
+  code and on its last one makes room for the shade (and copies as
+  nothing), and a code's spaces are no-break ones (copied as spaces). Its
+  search is vim's (`Txt.searchRegExp`, so smart case), over each text as
+  shown (`searchTexts`, keyed by section and part), from the match it went
+  to last if that's in view, else from the top of the view; Esc clears the
+  highlights before it closes the help. A text's matches (`matchMarks`, a
+  string per key, so only texts whose matches change are made again) are
+  drawn behind it in the editor's colors (`theme.searchMatch`), and made
+  black in its rich text. The Repeater deletes old texts some time after
+  `shownSections` changes, so a text takes marks only if search went
+  through its text (an old one has a new one's key). It must keep the keys
+  while it's open, or it stays open with no key reaching it to close it:
+  Find, Replace and Find Next/Previous go to its search (`root.find`,
+  `root.findNext`), the menu's items that open, save or edit something
+  are off while it or a question is open (`boxOpen`), syncing waits (it
+  can switch vim's buffer), and if anything else still takes the keys it
+  closes (`keepHelpKeys`, leaving them there: `hadKeys`).
 - **Scrolling boxes**: the help, the hover box and the confirmations are
   `Flickable`s that aren't interactive (a drag selects their text),
   scrolled by a `WheelHandler`. It needs `acceptedDevices` with
