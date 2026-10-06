@@ -472,7 +472,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   reach Qt, which reads the C runtime's startup copy), because the default
   "Windows" style has no dark theme (FluentWinUI3 left the title bar and menus
   light; Fusion doesn't). Fusion frames a TextArea like a text field, so
-  Editor.qml replaces its background with a plain one. The MSVC CRT DLLs are
+  Editor.qml replaces its background with a plain one. `build.rs` compiles
+  the C++ with `/utf-8`: MSVC otherwise reads it in the system's code page,
+  and qmlcachegen writes QML's strings into it as they are (the drop
+  label's “%1” came out garbled). The MSVC CRT DLLs are
   copied app-locally, so no VC++ Redistributable is needed.
   `package-windows.ps1` loads the VS dev shell itself; `ilammy/msvc-dev-cmd`
   was removed because it's stuck on Node 20.

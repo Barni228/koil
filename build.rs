@@ -15,7 +15,19 @@ fn main() {
     // Rebuild when a file is added or removed, not only when one changes.
     println!("cargo::rerun-if-changed=qml");
 
-    CxxQtBuilder::new_qml_module(QmlModule::new("Koil").qml_files(qml_files))
+    let builder = CxxQtBuilder::new_qml_module(QmlModule::new("Koil").qml_files(qml_files));
+    // MSVC reads a source file in the system's code page unless told it's
+    // UTF-8, which garbled qmlcachegen's string literals (the drop label's
+    // “%1”).
+    // SAFETY: only adds a flag, which cxx-qt-build sets nothing against.
+    let builder = unsafe {
+        builder.cc_builder(|cc| {
+            if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+                cc.flag("/utf-8");
+            }
+        })
+    };
+    builder
         .qt_module("Gui")
         .qt_module("Quick")
         .qt_module("QuickControls2")
