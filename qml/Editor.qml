@@ -296,6 +296,16 @@ Item {
         function onContentYChanged() {
             hover.hide();
         }
+        // Qt's TextArea clips its text to the view as it was when it last
+        // drew, which a resize doesn't make it do when the text overflows
+        // the view either way: the window made bigger showed none of the
+        // text past the old edges until something drew it.
+        function onWidthChanged() {
+            editor.update();
+        }
+        function onHeightChanged() {
+            editor.update();
+        }
     }
 
     HoverBox {

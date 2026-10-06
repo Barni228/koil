@@ -746,6 +746,12 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   style makes room for it (Fusion draws it over the text): keeping that
   room even without one saved most of a second, but left a strip the text
   didn't reach.
+  Qt's `TextArea` clips its text to the view as it was when it last drew
+  (`QQuickTextArea::updatePaintNode`), and a resize doesn't make it draw
+  when the text overflows the view both ways, so the window made bigger
+  showed none of a short text past the old edges (a long one draws again
+  as the view changes). Editor.qml calls `editor.update()` when the
+  view's size changes.
 - **Line numbers** (`:set nu`/`rnu`): the `gutter` is a child of the
   `TextArea` (so it scrolls with the text), kept at `contentX` and drawn over
   text scrolled under it. The styles hard-code `leftPadding` (7 on macOS,
