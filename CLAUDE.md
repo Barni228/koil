@@ -368,8 +368,13 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   opens as those would (`openDropped`; the first local one of several):
   `dropArea` is in the overlay, so the status line takes drops too, and
   opens it with `Qt.callLater`, so the app it came from isn't kept
-  waiting while a long file or listing opens. A file that can't be read (one that
-  isn't UTF-8, like a picture) isn't opened, and the status line says why,
+  waiting while a long file or listing opens. A file is UTF-8, or UTF-16
+  after a BOM (what Windows PowerShell 5 writes), and saving writes it
+  back as it was, BOM and all (`Document`'s `encoding`; Save As too).
+  Other encodings aren't opened: without a BOM they can't be told apart,
+  and a Latin-1 fallback (vim's) would open a picture as text. A file that
+  can't be read (one that isn't text, like a picture) isn't opened, and
+  the status line says why,
   as for a save that fails (no `MessageDialog`, whose macOS style can't
   be themed), naming only the file, so a long path doesn't push why out
   of view; one on the command line lists its dir instead, on its entry.
