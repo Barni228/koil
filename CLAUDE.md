@@ -513,7 +513,17 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   Changing `readOnly` makes the editor scroll to a stale cursor position, so
   `setMode` restores the view and then scrolls only if the cursor is out of it
   (`showCursor`: to all of the character under the block, and the padding
-  after it, since Qt's cursor rectangle is a thin bar). Sideways, the
+  after it, since Qt's cursor rectangle is a thin bar). The view scrolls
+  past the text's end as far as its last line at the top (`scrollRoom` in
+  Editor.qml: the `Flickable`'s `bottomMargin`, not the `TextArea`'s
+  padding, above which it scrolls to show its cursor), for `zz`, `zt`,
+  Ctrl-E, Ctrl-F (`pageForward`, as vim's), edits and the wheel
+  (`maxScroll`; a click there goes to the last line), but a search and
+  the other page keys stop at the text's end, as vim's jumps do
+  (`endScroll`). The vertical scroll bar shows only when the text itself
+  doesn't fit, and then on macOS it's `AlwaysOn`: with `AsNeeded`, the
+  style's `visible` reads its size, which follows the room, and the two
+  bars, which take room from each other, made a binding loop. Sideways, the
   cursor keeps `:set sidescrolloff` (default 4) columns in view on either
   side wherever it moves (`showColumn`, after Qt's own scroll: `flush`,
   `setCursor`, and typing, a `Qt.callLater`), and at a name's start in the

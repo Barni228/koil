@@ -2574,7 +2574,7 @@ QtObject {
         const restore = () => {
             if (view) {
                 flickable.contentX = Math.min(view.x, Math.max(0, flickable.contentWidth - flickable.width));
-                flickable.contentY = Math.min(view.y, Math.max(0, flickable.contentHeight - flickable.height));
+                flickable.contentY = Math.min(view.y, maxScroll());
             }
         };
         syncing = true;
@@ -3855,6 +3855,8 @@ QtObject {
             return { pos: firstNonBlank(t, Txt.lineToPos(t, line + 1)), type: "linewise" };
         }
         default: { // page scrolling
+            if ((m.name === "<C-f>" || m.name === "<PageDown>") && flickable && !forOp && !quiet)
+                return pageForward(t, count);
             const half = m.name === "<C-d>" || m.name === "<C-u>";
             const down = ["<C-d>", "<C-f>", "<PageDown>"].includes(m.name);
             const lines = (half ? Math.floor(pageLines / 2) : pageLines - 2) * (down ? 1 : -1);
@@ -3863,6 +3865,27 @@ QtObject {
             return lineMotion(t, p, lines);
         }
         }
+    }
+
+    // Ctrl-F, as vim's: `count` pages down, each leaving the last two
+    // lines in view at the top, or, with the last line in view, as far as
+    // that at the top (past the text's end). The cursor goes to the top
+    // line. With nothing left to scroll, it fails.
+    function pageForward(t, count) {
+        if (batch)
+            flush(); // for where the view is
+        const f = flickable, h = lineHeight, pad = editor.topPadding, n = Txt.countLines(t);
+        const from = Math.max(0, Math.ceil((f.contentY - pad) / h - 1e-6));
+        // The first line not in view (as scrollText counts them).
+        let below = Math.floor((f.contentY + f.height - pad) / h + 0.25), top = from;
+        for (let i = 0; i < count && top < n - 1; i++) {
+            top = below >= n ? n - 1 : Math.max(top + 1, below - 2);
+            below = top + pageLines;
+        }
+        if (top === from)
+            return null;
+        f.contentY = Math.min(maxScroll(), top * h); // as zt puts it
+        return { pos: Txt.atColumn(t, Txt.lineToPos(t, top + 1), wantCol), type: "linewise", keepCol: true };
     }
 
     function lineMotion(t, p, delta) {
@@ -3986,14 +4009,13 @@ QtObject {
         }
         const r = editor.positionToRectangle(searchTarget);
         const maxX = Math.max(0, flickable.contentWidth - flickable.width);
-        const maxY = Math.max(0, flickable.contentHeight - flickable.height);
         // Text in the left padding is under the line numbers, if they're on.
         const x = r.x < searchView.x + editor.leftPadding || r.x + r.width > searchView.x + flickable.width
             ? r.x - flickable.width / 2 : searchView.x;
         const y = r.y < searchView.y || r.y + r.height > searchView.y + flickable.height
-            ? r.y - flickable.height / 2 : searchView.y;
+            ? Math.min(r.y - flickable.height / 2, endScroll()) : searchView.y;
         flickable.contentX = Math.max(0, Math.min(x, maxX));
-        flickable.contentY = Math.max(0, Math.min(y, maxY));
+        flickable.contentY = Math.max(0, y);
     }
 
     // Matches of the search being typed (or else of the last search, until
@@ -4038,12 +4060,25 @@ QtObject {
         return { from: Txt.lineToPos(t, v.top + 1), to: Txt.lineEnd(t, Txt.lineToPos(t, v.bottom + 1)) };
     }
 
+    // How far down the view scrolls at most: into the room the editor
+    // leaves below the text (Editor.qml's `scrollRoom`), as far as the last
+    // line at its top, where zz, zt and Ctrl-E can take it.
+    function maxScroll() {
+        return Math.max(0, flickable.contentHeight + flickable.bottomMargin - flickable.height);
+    }
+
+    // How far down the view goes to show something (a search, a page):
+    // the text's end at its bottom, as vim's jumps never show past it.
+    function endScroll() {
+        return Math.max(0, flickable.contentHeight - flickable.height);
+    }
+
     function scrollLines(lines) {
         if (!flickable)
             return;
         if (batch)
             flush(); // the view follows the cursor only after a chunk
-        const max = Math.max(0, flickable.contentHeight - flickable.height);
+        const max = Math.max(endScroll(), flickable.contentY); // not back up from past the end
         flickable.contentY = Math.max(0, Math.min(flickable.contentY + lines * lineHeight, max));
     }
 
@@ -4052,11 +4087,10 @@ QtObject {
         if (!flickable || batch)
             return; // after the chunk (see flush)
         const f = flickable, top = editor.topPadding + (Txt.lineOf(bufferText(), cursor) - 1) * lineHeight;
-        const maxY = Math.max(0, f.contentHeight - f.height);
         if (top < f.contentY)
             f.contentY = top <= editor.topPadding ? 0 : top;
         else if (top + lineHeight > f.contentY + f.height)
-            f.contentY = Math.min(maxY, top + lineHeight - f.height);
+            f.contentY = Math.min(endScroll(), top + lineHeight - f.height);
         showColumn();
     }
 
@@ -4100,7 +4134,7 @@ QtObject {
         const f = flickable, h = lineHeight, pad = editor.topPadding;
         const at = Math.max(0, (f.contentY - pad) / h); // the top line, maybe partly hidden
         const top = Math.max(0, lines > 0 ? Math.floor(at + 1e-6) + lines : Math.ceil(at - 1e-6) + lines);
-        f.contentY = top === 0 ? 0 : Math.min(Math.max(0, f.contentHeight - f.height), pad + top * h);
+        f.contentY = top === 0 ? 0 : Math.min(maxScroll(), pad + top * h);
         const t = bufferText(), n = Txt.countLines(t);
         const first = Math.min(n - 1, Math.max(0, Math.ceil((f.contentY - pad) / h - 1e-6)));
         // A line counts as shown with the space below its text cut off.
@@ -4120,7 +4154,6 @@ QtObject {
         const y = where === "t" ? r.y - editor.topPadding
             : where === "b" ? r.y + r.height + editor.bottomPadding - flickable.height
             : r.y + r.height / 2 - flickable.height / 2;
-        const max = Math.max(0, flickable.contentHeight - flickable.height);
-        flickable.contentY = Math.max(0, Math.min(y, max));
+        flickable.contentY = Math.max(0, Math.min(y, maxScroll()));
     }
 }

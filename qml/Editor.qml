@@ -379,6 +379,20 @@ Item {
         }
     }
 
+    // Room below the text for the view to scroll into, as far as the last
+    // line at its top, so zz and zt work on the last lines, as do Ctrl-E
+    // and the wheel (vim's jumps still stop at the text's end: see
+    // Vim.endScroll). A margin, not padding: the TextArea scrolls to show
+    // its cursor above its bottom padding.
+    Binding {
+        id: scrollRoom
+
+        target: view.flickable
+        property: "bottomMargin"
+        value: Math.max(0, view.flickable.height - view.lineHeight - editor.bottomPadding)
+        when: !view.pathField
+    }
+
     // A line with a cursor, a shade off the background as in other editors.
     component Band: Rectangle {
         required property rect row
@@ -394,9 +408,16 @@ Item {
         id: scrollView
 
         anchors.fill: parent
-        // The path field scrolls with vim's cursor, or the wheel.
+        // The path field scrolls with vim's cursor, or the wheel. The room
+        // below the text (see `scrollRoom`) doesn't make a scroll bar. On
+        // macOS, AlwaysOn where the text overflows, which shows it as
+        // AsNeeded would: with AsNeeded, the style's `visible` reads the
+        // bar's size too, which follows the room, and as the bars there
+        // take room from each other's view, that made a binding loop.
+        // Fusion draws them over the text, where AlwaysOn wouldn't fade.
         ScrollBar.horizontal.policy: view.pathField ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
-        ScrollBar.vertical.policy: view.pathField ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
+        ScrollBar.vertical.policy: view.pathField || view.flickable.contentHeight <= view.flickable.height
+            ? ScrollBar.AlwaysOff : Qt.platform.os === "osx" ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
 
         TextArea {
             id: editor
@@ -521,6 +542,28 @@ Item {
                     } else {
                         view.vim.clearCursors();
                         mouse.accepted = false;
+                    }
+                }
+            }
+
+            // The room below the text (see `scrollRoom`) isn't the
+            // editor's: a click there goes to the last line, as one under
+            // a short text does.
+            MouseArea {
+                y: editor.height
+                width: editor.width
+                height: view.flickable.bottomMargin
+                cursorShape: Qt.IBeamCursor
+                onPressed: mouse => {
+                    if (!view.active)
+                        view.activated();
+                    editor.forceActiveFocus();
+                    const p = editor.positionAt(mouse.x, editor.height + mouse.y);
+                    if (mouse.modifiers & Qt.AltModifier) {
+                        view.vim.toggleCursor(p);
+                    } else {
+                        view.vim.clearCursors();
+                        editor.cursorPosition = p;
                     }
                 }
             }

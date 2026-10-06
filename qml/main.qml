@@ -175,7 +175,7 @@ ApplicationWindow {
         // Before jumpTo, which then scrolls only if the line is out of view.
         // Entries that came or went above it don't move it.
         if (y !== f.contentY)
-            f.contentY = Math.max(0, Math.min(y, f.contentHeight - f.height));
+            f.contentY = Math.max(0, Math.min(y, f.contentHeight + f.bottomMargin - f.height));
         const t = editorView.textArea.text;
         const ls = Txt.lineToPos(t, Math.min(line + 1, Txt.countLines(t)));
         vim.jumpTo(Txt.atColumn(t, ls, column));

@@ -273,6 +273,8 @@ TestCase {
         if (vim.editor !== editor)
             switchTo(editor, null);
         vim.flickable = null;
+        narrow.height = 30;
+        (narrow.contentItem as Flickable).bottomMargin = 0;
         vim.singleLine = false;
         vim.linePrefixes = false;
         vim.commandKeys = {};
@@ -634,6 +636,72 @@ TestCase {
             verify(f.contentY <= r.y && r.y + r.height <= f.contentY + f.height, c.keys + ": the cursor is in view");
             verify(f.contentY <= Math.max(0, f.contentHeight - f.height), c.keys + ": the view is past the end");
         }
+    }
+
+    // With room below the text (Editor.qml's scrollRoom), zz and zt work on
+    // the last line, Ctrl-E and Ctrl-F scroll until it's at the top, and an
+    // edit keeps the view there, but a search and Ctrl-D go no further
+    // than the text's end.
+    function test_scrollPastEnd() {
+        const f = narrow.contentItem as Flickable;
+        const line = n => narrowText.positionToRectangle(Txt.lineToPos(narrowText.text, n));
+        const lines = [];
+        for (let i = 1; i <= 50; i++)
+            lines.push("line" + i);
+        narrow.height = 150;
+        narrowText.text = lines.join("\n");
+        waitForRendering(narrow);
+        vim.lineHeight = line(2).y - line(1).y;
+        f.bottomMargin = f.height - vim.lineHeight - narrowText.bottomPadding;
+        const end = f.contentHeight - f.height, last = line(50);
+        switchTo(narrowText, {
+            cursor: Txt.lineToPos(narrowText.text, 50)
+        }, f);
+        keys("zz");
+        fuzzyCompare(f.contentY, last.y + last.height / 2 - f.height / 2, 0.5);
+        verify(f.contentY > end + 1, "zz scrolls past the end");
+        const y = f.contentY;
+        keys("x");
+        compare(f.contentY, y);
+        keys("zt");
+        fuzzyCompare(f.contentY, last.y - narrowText.topPadding, 0.5);
+        keys("ggG");
+        fuzzyCompare(f.contentY, end, 0.5);
+        keys("100<C-e>");
+        fuzzyCompare(f.contentY, last.y, 0.5);
+        keys("<C-e>");
+        fuzzyCompare(f.contentY, last.y, 0.5);
+        keys("gg/ine50");
+        fuzzyCompare(f.contentY, end, 0.5);
+        keys("<CR>");
+        fuzzyCompare(f.contentY, end, 0.5);
+        keys("gg<C-d><C-d><C-d><C-d><C-d><C-d><C-d><C-d><C-d><C-d><C-d><C-d><C-d>");
+        fuzzyCompare(f.contentY, end, 0.5);
+        keys("Gzt<C-d>");
+        fuzzyCompare(f.contentY, last.y - narrowText.topPadding, 0.5);
+        keys("<C-u>");
+        fuzzyCompare(f.contentY, last.y - narrowText.topPadding - Math.floor(vim.pageLines / 2) * vim.lineHeight, 0.5);
+        // Ctrl-F keeps the last two lines in view, and puts the cursor on
+        // the top line, where zt would have it.
+        const top = n => line(n).y - narrowText.topPadding;
+        const cursorLine = () => Txt.lineOf(narrowText.text, vim.cursor);
+        const page = vim.pageLines - 2;
+        keys("gg<C-f>");
+        fuzzyCompare(f.contentY, top(1 + page), 0.5);
+        compare(cursorLine(), 1 + page);
+        keys("gg3<C-f>");
+        fuzzyCompare(f.contentY, top(1 + 3 * page), 0.5);
+        compare(cursorLine(), 1 + 3 * page);
+        // With the last line in view, it goes to the top.
+        keys("ggG<C-f>");
+        fuzzyCompare(f.contentY, top(50), 0.5);
+        compare(cursorLine(), 50);
+        keys("gg100<C-f>");
+        fuzzyCompare(f.contentY, top(50), 0.5);
+        // Then there's nothing left to scroll.
+        keys("<C-f>");
+        fuzzyCompare(f.contentY, top(50), 0.5);
+        compare(cursorLine(), 50);
     }
 
     // Koil's keys in a macro see its edits so far (main.qml reads the
