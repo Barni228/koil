@@ -521,6 +521,8 @@ ApplicationWindow {
             applyChanges(false, false);
         else if (name === "applyAsking")
             applyChanges(false, false, true);
+        else if (name === "undoApply")
+            undoApply(true);
         else if (name === "parent")
             updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
         else if (name === "open")
@@ -687,9 +689,10 @@ ApplicationWindow {
             orQuit ? () => Qt.quit() : null);
     }
 
-    // u with no change left to undo: undoes Koil's last apply, once the user
-    // confirms it.
-    function undoApply() {
+    // Space u, or u with no change left to undo: undoes Koil's last apply,
+    // once the user confirms it. With `say` (Space u), it says so when
+    // there's none (u has already).
+    function undoApply(say) {
         // Undo may have taken the listing back to before an update, which
         // Koil must see before anything can be undone.
         if (!updateListing())
@@ -699,8 +702,11 @@ ApplicationWindow {
             vim.showError(r.message);
             return;
         }
-        if (!r.steps.length)
+        if (!r.steps.length) {
+            if (say)
+                vim.showMessage("Nothing to undo");
             return;
+        }
         vim.showMessage("");
         confirmDialog.ask("Undo the last apply?", r.steps.join("\n"), () => {
             const spot = listingSpot();
@@ -981,6 +987,7 @@ ApplicationWindow {
         commandKeys: root.listing ? Object.assign({
             "  ": "apply",
             " a": "applyAsking",
+            " u": "undoApply",
             "-": "parent",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",

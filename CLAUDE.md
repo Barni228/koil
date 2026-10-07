@@ -245,7 +245,8 @@ the scratchpad (see Scratchpad).
   its text, so `.` and counts repeat it.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` applies (`Space a` too, but
-  always asking first, whatever the setting: see Apply), `-` opens `..`
+  always asking first, whatever the setting: see Apply), `Space u` undoes
+  the last apply (see Apply and undo), `-` opens `..`
   (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
@@ -313,7 +314,7 @@ the scratchpad (see Scratchpad).
   `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
   buffer back past an update) and asks to run koil's undo, listing its
   steps; koil refuses while changes are pending. Not from the path field,
-  whose undo history is its own. The "Ask before applying" setting
+  whose undo history is its own; `Space u` asks at once, from either. The "Ask before applying" setting
   (`confirmChanges`: always, when deleting, never; `asksFirst`) can skip
   the confirmation (but not `Space a`'s or File > Apply Changes…'s: `ask`),
   applying every line (`deletes` says which delete), and Enter's create's
