@@ -4,6 +4,7 @@ use koil_core::{Entry, Koil, Settings, Sort, SortBy};
 use tempfile::TempDir;
 
 use super::*;
+use crate::sizes::DirSizes;
 
 /// The listing, with none of its dirs' sizes counted.
 fn render(koil: &Koil) -> Rendered {
@@ -717,6 +718,19 @@ fn test_dir_sizes() {
     let mut expected = [id_text(&koil, "dir"), id_text(&koil, "mid")];
     expected.sort();
     assert_eq!(busy, expected);
+    // counted again, it stays where it was, with what it was
+    let mut stale = sizes.clone();
+    stale.insert(root.join("small"), DirSize::Stale(10));
+    let rendered = super::render(&koil, &stale);
+    assert_eq!(
+        rendered.names,
+        [
+            "big/", "small/", "dir/", "mid/", "unread/", "file.rs", "notes"
+        ]
+    );
+    let small = id_text(&koil, "small");
+    assert_eq!(rendered.notes.infos[&small], "10 B...");
+    assert!(rendered.notes.busy.contains(&small));
     // the other way round, the ones not counted first
     koil.set_settings(Settings {
         sort: Sort {

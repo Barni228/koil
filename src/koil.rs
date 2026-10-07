@@ -1,10 +1,12 @@
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
+use koil_core::apply::Undo;
 use koil_core::{Action, Conflict, Id, Report, Settings, Sort, Watched};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -12,7 +14,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::listing::{self, Hidden, Notes};
-use crate::sizes::{DirSizes, Sizes};
+use crate::sizes::{Measure, Sizes};
 
 /// Koil itself (koil-core): the dir or pattern that's open, the changes
 /// written in its listings so far, and applying and undoing them. Takes and
@@ -42,8 +44,9 @@ pub mod qobject {
         fn changed_on_disk(self: Pin<&mut Koil>);
 
         /// Watches what's open, and the dirs of changes made in other
-        /// listings, for `changedOnDisk` (see `koil_core::Koil::watched`).
-        /// Call it after anything that may change them.
+        /// listings, for `changedOnDisk` (see `koil_core::Koil::watched`),
+        /// and the dirs whose sizes are kept (see `Sizes::watches`). Call
+        /// it after anything that may change them.
         #[qinvokable]
         fn watch(self: Pin<&mut Koil>);
 
@@ -186,17 +189,19 @@ pub struct KoilRust {
     /// Made on the first `watch`, None if it can't be.
     watcher: Option<DiskWatcher>,
     /// Counts the sizes of the dirs listed, when it's sorted by size, and
-    /// the IDs of those dirs.
+    /// keeps them, and the IDs of the dirs listed.
     sizes: Sizes,
     sized: Vec<Id>,
 }
 
 /// Watches dirs for changes on disk, and emits `changedOnDisk` for those
-/// that matter.
+/// that matter, and tells `Sizes` what changed.
 struct DiskWatcher {
     watcher: RecommendedWatcher,
-    /// What it watches, as `Watched::dirs`.
-    dirs: Vec<(PathBuf, bool)>,
+    /// What it's asked to watch, and whether what's inside its dirs too,
+    /// and those it couldn't.
+    dirs: BTreeMap<PathBuf, bool>,
+    failed: BTreeSet<PathBuf>,
     /// Which changes matter, which the watcher's thread reads.
     watched: Arc<Mutex<Watched>>,
     /// Whether writing a file matters too: the listing shows its size or
@@ -205,7 +210,7 @@ struct DiskWatcher {
 }
 
 impl DiskWatcher {
-    fn new(thread: CxxQtThread<qobject::Koil>) -> Option<DiskWatcher> {
+    fn new(thread: CxxQtThread<qobject::Koil>, sizes: Sizes) -> Option<DiskWatcher> {
         let watched = Arc::new(Mutex::new(Watched::default()));
         let writes = Arc::new(AtomicBool::new(false));
         // Whether `changedOnDisk` is on its way, so a burst of changes (a
@@ -213,6 +218,23 @@ impl DiskWatcher {
         let queued = Arc::new(AtomicBool::new(false));
         let (filter, with_writes) = (watched.clone(), writes.clone());
         let handler = move |event: notify::Result<notify::Event>| {
+            match &event {
+                // Reading changes no size.
+                Ok(event) if matches!(event.kind, EventKind::Access(_)) => {}
+                Ok(event) if event.paths.is_empty() && event.need_rescan() => sizes.forget(),
+                // What changed in them wasn't told.
+                Ok(event) if event.need_rescan() => {
+                    for path in &event.paths {
+                        sizes.lost(path);
+                    }
+                }
+                Ok(event) => {
+                    for path in &event.paths {
+                        sizes.changed(path);
+                    }
+                }
+                Err(_) => sizes.forget(),
+            }
             let matters = match event {
                 Ok(event) => {
                     let watched = filter.lock().unwrap();
@@ -233,32 +255,77 @@ impl DiskWatcher {
         let watcher = notify::recommended_watcher(handler).ok()?;
         Some(DiskWatcher {
             watcher,
-            dirs: Vec::new(),
+            dirs: BTreeMap::new(),
+            failed: BTreeSet::new(),
             watched,
             writes,
         })
     }
 
-    /// Watches what `watched` says, instead of what it did, and with
-    /// `writes`, files being written too. A watch is changed only if the
-    /// dirs did (on macOS it starts over each time).
-    fn set(&mut self, watched: Watched, writes: bool) {
+    /// Watches what `watched` says, and `sizes` with what's inside them,
+    /// instead of what it did, and with `writes`, files being written too.
+    /// Returns the dirs of `sizes` it can't watch. The watches are changed
+    /// only if the dirs did, and only those that did, at once (on macOS
+    /// it starts over each time), trying again those it couldn't watch.
+    fn set(&mut self, watched: Watched, writes: bool, sizes: &[PathBuf]) -> Vec<PathBuf> {
         self.writes.store(writes, Ordering::Relaxed);
-        if watched.dirs != self.dirs {
-            for (dir, _) in &self.dirs {
-                let _ = self.watcher.unwatch(dir);
-            }
-            for (dir, recursive) in &watched.dirs {
-                let mode = match recursive {
-                    true => RecursiveMode::Recursive,
-                    false => RecursiveMode::NonRecursive,
-                };
-                // A dir that isn't there yet (a new one) can't be watched.
-                let _ = self.watcher.watch(dir, mode);
-            }
-            self.dirs = watched.dirs.clone();
-        }
+        let mut dirs: BTreeMap<PathBuf, bool> = watched.dirs.iter().cloned().collect();
+        dirs.extend(sizes.iter().map(|dir| (dir.clone(), true)));
         *self.watched.lock().unwrap() = watched;
+        if dirs == self.dirs {
+            return Vec::new();
+        }
+        let mut paths = self.watcher.paths_mut();
+        for (dir, recursive) in &self.dirs {
+            if dirs.get(dir) != Some(recursive) && !self.failed.contains(dir) {
+                let _ = paths.remove(dir);
+            }
+        }
+        let mut failed = BTreeSet::new();
+        for (dir, &recursive) in &dirs {
+            if self.dirs.get(dir) == Some(&recursive) && !self.failed.contains(dir) {
+                continue;
+            }
+            let mode = match recursive {
+                true => RecursiveMode::Recursive,
+                false => RecursiveMode::NonRecursive,
+            };
+            // A dir that isn't there yet (a new one) can't be watched.
+            if paths.add(dir, mode).is_err() {
+                failed.insert(dir.clone());
+            }
+        }
+        let _ = paths.commit();
+        self.dirs = dirs;
+        self.failed = failed;
+        (sizes.iter())
+            .filter(|dir| self.failed.contains(*dir))
+            .cloned()
+            .collect()
+    }
+}
+
+/// What to watch for the sizes kept in `dirs` (see `Sizes::watches`): the
+/// dirs, but on Windows the roots of their drives, as a dir that has one
+/// watched in it can't be renamed or deleted there, and the user may want
+/// to, long after leaving it.
+fn size_watches(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        let roots = dirs.iter().filter_map(|dir| dir.ancestors().last());
+        let roots: BTreeSet<PathBuf> = roots.map(Path::to_path_buf).collect();
+        roots.into_iter().collect()
+    }
+    #[cfg(not(windows))]
+    dirs
+}
+
+/// The paths undoing `step` changes on disk.
+fn undo_paths(step: &Undo) -> Vec<&Path> {
+    match step {
+        Undo::Trash(path) => vec![path],
+        Undo::Restore(trashed) => vec![&trashed.original],
+        Undo::Rename(from, to) => vec![from, to],
     }
 }
 
@@ -274,22 +341,29 @@ fn changes_listing(kind: &EventKind, writes: bool) -> bool {
 }
 
 impl KoilRust {
-    /// Counts the sizes of the dirs `notes` show them for, and stops
-    /// counting (and forgets) every other one.
-    fn count_sizes(&mut self, notes: &Notes) {
+    /// Counts the sizes of the dirs `notes` show them for (those that
+    /// aren't known or kept), and stops counting every other one. Those it
+    /// starts are in `notes` as they are after the moment it waits for
+    /// them (see `Sizes::want`).
+    fn count_sizes(&mut self, notes: &mut Notes) {
         self.sized = notes.dirs.iter().map(|&(id, _)| id).collect();
         let dirs = notes.dirs.iter().map(|(_, dir)| dir.clone());
-        let measure = listing::measure(self.koil.settings().sort.by);
-        self.sizes.want(dirs, measure.unwrap_or_default());
+        if !self.sizes.want(dirs, self.measure()) {
+            return;
+        }
+        let sizes = self.sizes.known(self.measure());
+        let now = listing::notes(&self.koil, &sizes, self.sized.iter().copied());
+        for id in &self.sized {
+            notes.infos.remove(&id.0.to_string());
+        }
+        notes.infos.extend(now.infos);
+        notes.busy = now.busy;
     }
 
-    /// The sizes of the dirs counted so far, if they're what the listing is
-    /// sorted by now (size or size on disk).
-    fn known_sizes(&self) -> DirSizes {
-        match listing::measure(self.koil.settings().sort.by) {
-            Some(measure) => self.sizes.known(measure),
-            None => DirSizes::new(),
-        }
+    /// What dirs' sizes are measured by, when the listing is sorted by them
+    /// (only then are they asked for).
+    fn measure(&self) -> Measure {
+        listing::measure(self.koil.settings().sort.by).unwrap_or_default()
     }
 
     fn settings(&self) -> Settings {
@@ -329,24 +403,29 @@ impl qobject::Koil {
     fn watch(self: Pin<&mut Self>) {
         let thread = self.qt_thread();
         let mut rust = self.rust_mut();
+        let rust = &mut *rust;
         if rust.watcher.is_none() {
-            rust.watcher = DiskWatcher::new(thread);
+            rust.watcher = DiskWatcher::new(thread, rust.sizes.clone());
         }
         let watched = rust.koil.watched();
         let writes = rust.koil.settings().sort.by.reads_metadata();
+        let sizes = size_watches(rust.sizes.watches());
         if let Some(watcher) = &mut rust.watcher {
-            watcher.set(watched, writes);
+            for dir in watcher.set(watched, writes, &sizes) {
+                rust.sizes.unwatched(&dir);
+            }
         }
     }
 
     fn sync(self: Pin<&mut Self>, text: &QString, hidden: &QString) -> QString {
         let mut rust = self.rust_mut();
+        let rust = &mut *rust;
         let hidden = read_hidden(hidden);
-        let sizes = rust.known_sizes();
-        let synced = listing::sync(&mut rust.koil, &sizes, &text.to_string(), &hidden);
+        let sizes = rust.sizes.known(rust.measure());
+        let mut synced = listing::sync(&mut rust.koil, &sizes, &text.to_string(), &hidden);
         // Moved, the listing is rendered again.
         if !synced.failed && !synced.moved {
-            rust.count_sizes(&synced.notes);
+            rust.count_sizes(&mut synced.notes);
         }
         to_json(&synced)
     }
@@ -361,7 +440,8 @@ impl qobject::Koil {
         let hidden = read_hidden(hidden);
         let conflicts: Vec<Conflict> =
             serde_json::from_str(&conflicts.to_string()).unwrap_or_default();
-        let sizes = rust.known_sizes();
+        let rust = &mut *rust;
+        let sizes = rust.sizes.known(rust.measure());
         to_json(&listing::resolve(
             &mut rust.koil,
             &sizes,
@@ -392,14 +472,19 @@ impl qobject::Koil {
 
     fn render(self: Pin<&mut Self>) -> QString {
         let mut rust = self.rust_mut();
-        let rendered = listing::render(&rust.koil, &rust.known_sizes());
-        rust.count_sizes(&rendered.notes);
+        // Before it's sorted by them, so the small ones are known.
+        let dirs = listing::size_dirs(&rust.koil);
+        rust.sizes.want(dirs, rust.measure());
+        let sizes = rust.sizes.known(rust.measure());
+        let mut rendered = listing::render(&rust.koil, &sizes);
+        rust.count_sizes(&mut rendered.notes);
         to_json(&rendered)
     }
 
     fn dir_sizes(&self) -> QString {
         let sized = self.sized.iter().copied();
-        to_json(&listing::notes(&self.koil, &self.known_sizes(), sized))
+        let sizes = self.sizes.known(self.measure());
+        to_json(&listing::notes(&self.koil, &sizes, sized))
     }
 
     fn path_syntax(&self, line: &QString) -> QString {
@@ -486,8 +571,6 @@ impl qobject::Koil {
             .filter_map(|&i| this.shown.get(i).cloned())
             .collect();
         let shown = this.shown.len();
-        // What's on disk changed.
-        this.sizes.forget();
         let outcome = match this.koil.apply_only(&actions) {
             // Nothing picked: every change is forgotten.
             Ok(report) if actions.is_empty() => Outcome {
@@ -517,6 +600,12 @@ impl qobject::Koil {
                 message: listing::describe(&error),
             },
         };
+        // The sizes kept that it changed, before the watcher tells.
+        for action in &actions {
+            for path in action.removes().into_iter().chain(action.creates()) {
+                this.sizes.changed(path);
+            }
+        }
         to_json(&outcome)
     }
 
@@ -532,11 +621,12 @@ impl qobject::Koil {
     fn create(self: Pin<&mut Self>, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
         let mut rust = self.rust_mut();
-        rust.sizes.forget();
         let outcome = match listing::create_now(&mut rust.koil, &path) {
             Ok(message) => Outcome { ok: true, message },
             Err(message) => Outcome { ok: false, message },
         };
+        // With the new dirs it's in.
+        rust.sizes.changed(&path);
         to_json(&outcome)
     }
 
@@ -550,7 +640,10 @@ impl qobject::Koil {
 
     fn undo(self: Pin<&mut Self>) -> QString {
         let mut rust = self.rust_mut();
-        rust.sizes.forget();
+        let steps = rust.koil.undo_steps().ok().flatten().unwrap_or_default();
+        let paths: Vec<PathBuf> = (steps.iter().flat_map(undo_paths))
+            .map(Path::to_path_buf)
+            .collect();
         let outcome = match rust.koil.undo() {
             Ok(report) => Outcome {
                 ok: true,
@@ -561,6 +654,9 @@ impl qobject::Koil {
                 message: listing::describe(&error),
             },
         };
+        for path in &paths {
+            rust.sizes.changed(path);
+        }
         to_json(&outcome)
     }
 }

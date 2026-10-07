@@ -19,7 +19,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   disk as edits to the text and questions (`sync`, `resolve`, `merge`).
   Its tests (`src/listing/tests.rs`) use a temp dir.
 - `src/sizes.rs`: `Sizes`, which counts the sizes of dirs on its own
-  threads (see Sorting). Its tests (`src/sizes/tests.rs`) use a temp dir.
+  threads and keeps them (see Kept sizes). Its tests
+  (`src/sizes/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore`, `regex`,
   `sort` and `sortReverse` are properties, bound to vim's `:set` options.
@@ -359,13 +360,12 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   disk takes as long as by size on macOS (3 s for `/System/Library`
   either way: the blocks come with the same `lstat`), but on Windows it
   opens every file, which is why the menu says it's slower there.
-  `Sizes` counts by one measure at a time: asked for by another one (`gss`
-  then `gsd`), it forgets what it had, and `known` gives nothing for
-  another measure, so a render never shows the other one's sizes. `render` and `sync` give the dirs
-  they show sizes for (`Notes::dirs`, by the path their ID was read at),
-  and `Koil` has `Sizes::want` them: those not counted yet start, every
-  other one is dropped and forgotten (so a dir listed again is counted
-  again), and apply, undo and create forget them all. The counts take
+  `Sizes` counts by one measure at a time (asked for by another one,
+  `gss` then `gsd`, its counts stop), and keeps what it counted by each
+  apart, so a render never shows the other one's sizes. `render` and
+  `sync` give the dirs they show sizes for (`Notes::dirs`, by the path
+  their ID was read at), and `Koil` has `Sizes::want` them: those not
+  known or kept start, and every other count stops. The counts take
   turns (`turns`), a dir each, so they all go on at once and small ones
   are done soon, on up to 8 threads that each read a dir at a time
   (reading is mostly waiting for the disk), and stop once no dir is left
@@ -381,11 +381,66 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   the user is halfway through something (it waits), nor if the update
   would fail on errors or open a path typed in the field (the next update
   sorts it).
+- **Kept sizes** (sizes.rs): a count finds the size of every dir in the
+  dir counted on its way (`Count::dirs`, each done once the dirs in it
+  are, adding itself to the one it's in), and keeps them (`kept`, but
+  those that can't be read, and small ones), so a dir listed again, or
+  one in it (Enter, `-`), shows its size at once. A small dir (`SMALL`:
+  no dirs in it, and under 100 entries) is counted again instead, which
+  takes no time, and most dirs are: `render` asks for the dirs it shows
+  (`listing::size_dirs`) before it's made, and `want` waits for those it
+  starts that nothing is known of (`Count::unknown`, which the threads
+  read first; `WAIT`: 40 ms at most, and only while they're done one
+  after another, `QUIET`, as the others take long), so they're known as
+  it's sorted. The counting is on the threads, so a disk that doesn't
+  answer never keeps Koil waiting longer; those not done show `...` as
+  before. Going into `~/Library/Application Scripts` (1,059 small dirs)
+  waits 34 ms, others a few. `sync` waits for those it starts too (dirs
+  that changed, new ones), and `count_sizes` then gives their notes as
+  they are. The listing looks sizes up as it's made (`SizeOf`;
+  `Sizes::known` gives each dir's as it was first asked for, so sorting
+  sees the same throughout). A count adds a dir kept instead of reading
+  it, unless it has files with hard links in it (`Kept::links`: one may
+  be elsewhere in the count too), or it's stale. Those count once in each
+  dir (`Dir::links`, merged into the dir it's in, a file in both taken
+  off once), so a dir's size is the same counted on its own or in
+  another. A home dir of 146,000 dirs keeps 40,000 (5 MB; all of them
+  took 22 MB), and is counted in 10 s, as fast as before sizes were kept.
+- **Stale sizes** (sizes.rs): what's kept goes stale when something
+  changes in it on disk. The watcher (see Changes on disk) also watches
+  the dirs counted and those asked for, with everything in them
+  (`Sizes::watches`; more than `SIBLINGS` in one dir, that dir, as
+  notify's FSEvents goes through every dir watched for each change; on
+  Windows their drives' roots, as a dir with a watched one in it can't
+  be renamed or deleted there), and tells `Sizes::changed` of every
+  change but reads (`Change`): the dirs it's in go stale, and if it isn't
+  a dir any more (gone, or a file), the dirs in it are forgotten; a dir
+  still there changed itself (a file added), not what's in its dirs.
+  Changes missed make everything in them stale (`lost`, for a rescan;
+  `forget`, for a watcher error), and what's kept in a dir that can't be
+  watched is forgotten (`unwatched`). Apply, undo and create tell it what
+  they change themselves, as they show the listing before the watcher
+  tells. A stale dir asked for is counted again, and until it's done it
+  shows what it was with `...` after it (`DirSize::Stale`), and sorts by
+  it, so nothing moves: `~/Library` changes all the time, and counted
+  again it came in as `...`, after the dirs counted, then jumped to its
+  place. Then it moves only if its place changed (`sortCounted`). A dir
+  shown keeps its size until it's asked for again (the next update or
+  sync), and is counted again then (`Wanted::changed`), so a build
+  writing in it doesn't have it counted over and over. A change during a
+  count makes the dirs it's in stale as they're done (`Count::changed`,
+  `missed`, `gone`: what was read of them may be from before), rather
+  than dropping them, as they were before: going into a dir the first
+  time showed `...` for those that changed while they were counted (and
+  in `~/Library` some always do), which nothing was kept of. Its dir is
+  counted again when it's asked for, which reads only those.
 - **Changes on disk** (koil-core's `Koil::sync`; read its CLAUDE.md): the
   listing shows what changes on disk as it happens, keeping the user's
   edits. `Koil.watch()` (after every `showListing`, sync and answer) has a
-  `notify` watcher watch what `Koil::watched` says, changed only if the
-  dirs did (on macOS each change restarts the FSEvents stream). Its thread
+  `notify` watcher watch what `Koil::watched` says, and the dirs whose
+  sizes are kept (see Stale sizes), changing only the watches that
+  changed, at once (`paths_mut`: on macOS each change restarts the
+  FSEvents stream), and only if the dirs did. Its thread
   skips reads, writes (unless sorted by size or a date, see Sorting) and
   events `Watched::affects` says can't matter, and
   queues `changedOnDisk` once per burst (`queued`). `syncTimer` then syncs
