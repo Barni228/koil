@@ -55,6 +55,9 @@ ApplicationWindow {
         { key: "v", by: "natural", label: qsTr("Natural"), first: "a2, a10, B", other: "B, a10, a2" },
         { key: "e", by: "extension", label: qsTr("Extension"), first: qsTr("A to Z"), other: qsTr("Z to A") },
         { key: "s", by: "size", label: qsTr("Size"), first: qsTr("Largest first"), other: qsTr("Smallest first") },
+        // Windows has no size on disk in a dir's listing, so every file is
+        // opened for it (see disk_size in koil-core).
+        { key: "d", by: "disk", label: Qt.platform.os === "windows" ? qsTr("Size on Disk (slower)") : qsTr("Size on Disk"), first: qsTr("Largest first"), other: qsTr("Smallest first") },
         { key: "m", by: "modified", label: qsTr("Modified"), first: qsTr("Newest first"), other: qsTr("Oldest first") },
         { key: "c", by: "created", label: qsTr("Created"), first: qsTr("Newest first"), other: qsTr("Oldest first") },
         { key: "a", by: "accessed", label: qsTr("Accessed"), first: qsTr("Newest first"), other: qsTr("Oldest first") }

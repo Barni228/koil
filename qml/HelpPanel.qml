@@ -71,9 +71,11 @@ Popup {
                 ["`g.`  `gi`  `gr`", "Toggle `:set hidden`, `gitignore` and `regex`, like the buttons beside "
                     + "the path."],
                 ["`gs`", "Sort: shows by what, then a key picks it, like `gss` by size (biggest first) and "
-                    + "`gsS` the other way round. Dirs stay first. By size or a date, each line shows it after "
-                    + "its end. A dir's size is counted in the background, its dots coming and going until it "
-                    + "is; once all are, the dirs are sorted by them."],
+                    + "`gsS` the other way round, or `gsd` by size on disk (what files take up: less if "
+                    + "compressed, a whole block if small" + (Qt.platform.os === "windows"
+                        ? "; slower, as every file is opened" : "") + "). Dirs stay first. By a size or a "
+                    + "date, each line shows it after its end. A dir's size is counted in the background, "
+                    + "its dots coming and going until it is; once all are, the dirs are sorted by them."],
                 [isMac ? "`⇧⌘O`" : "`Ctrl+Shift+O`", "Open a folder (`" + cmdKey + "O`: a file)."]
             ]
         },
@@ -95,7 +97,8 @@ Popup {
                 ["`gitignore`  `ignore`", "Hide what git ignores, and `.git`."],
                 ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."],
                 ["`sort`", "What the listing is sorted by (see `gs`), like `:set sort=size`: `name`, "
-                    + "`natural`, `extension`, `size`, `modified`, `created` or `accessed`. Default `name`."],
+                    + "`natural`, `extension`, `size`, `disk`, `modified`, `created` or `accessed`. Default "
+                    + "`name`."],
                 ["`sortreverse`  `sr`", "Sort the other way round."]
             ],
             note: "An entry with changes is shown even if it's hidden or ignored."

@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::listing::{self, Hidden, Notes};
-use crate::sizes::Sizes;
+use crate::sizes::{DirSizes, Sizes};
 
 /// Koil itself (koil-core): the dir or pattern that's open, the changes
 /// written in its listings so far, and applying and undoing them. Takes and
@@ -278,8 +278,18 @@ impl KoilRust {
     /// counting (and forgets) every other one.
     fn count_sizes(&mut self, notes: &Notes) {
         self.sized = notes.dirs.iter().map(|&(id, _)| id).collect();
-        self.sizes
-            .want(notes.dirs.iter().map(|(_, dir)| dir.clone()));
+        let dirs = notes.dirs.iter().map(|(_, dir)| dir.clone());
+        let measure = listing::measure(self.koil.settings().sort.by);
+        self.sizes.want(dirs, measure.unwrap_or_default());
+    }
+
+    /// The sizes of the dirs counted so far, if they're what the listing is
+    /// sorted by now (size or size on disk).
+    fn known_sizes(&self) -> DirSizes {
+        match listing::measure(self.koil.settings().sort.by) {
+            Some(measure) => self.sizes.known(measure),
+            None => DirSizes::new(),
+        }
     }
 
     fn settings(&self) -> Settings {
@@ -332,7 +342,7 @@ impl qobject::Koil {
     fn sync(self: Pin<&mut Self>, text: &QString, hidden: &QString) -> QString {
         let mut rust = self.rust_mut();
         let hidden = read_hidden(hidden);
-        let sizes = rust.sizes.known();
+        let sizes = rust.known_sizes();
         let synced = listing::sync(&mut rust.koil, &sizes, &text.to_string(), &hidden);
         // Moved, the listing is rendered again.
         if !synced.failed && !synced.moved {
@@ -351,7 +361,7 @@ impl qobject::Koil {
         let hidden = read_hidden(hidden);
         let conflicts: Vec<Conflict> =
             serde_json::from_str(&conflicts.to_string()).unwrap_or_default();
-        let sizes = rust.sizes.known();
+        let sizes = rust.known_sizes();
         to_json(&listing::resolve(
             &mut rust.koil,
             &sizes,
@@ -382,14 +392,14 @@ impl qobject::Koil {
 
     fn render(self: Pin<&mut Self>) -> QString {
         let mut rust = self.rust_mut();
-        let rendered = listing::render(&rust.koil, &rust.sizes.known());
+        let rendered = listing::render(&rust.koil, &rust.known_sizes());
         rust.count_sizes(&rendered.notes);
         to_json(&rendered)
     }
 
     fn dir_sizes(&self) -> QString {
         let sized = self.sized.iter().copied();
-        to_json(&listing::notes(&self.koil, &self.sizes.known(), sized))
+        to_json(&listing::notes(&self.koil, &self.known_sizes(), sized))
     }
 
     fn path_syntax(&self, line: &QString) -> QString {

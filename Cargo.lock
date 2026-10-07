@@ -623,7 +623,7 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#2c878268e6d4df5865ddc5451f22b793968492f9"
+source = "git+https://github.com/Barni228/koil-core#f48d2bb4a70911ae1eb61edfaae58a9a9d61586e"
 dependencies = [
  "dunce",
  "globset",
@@ -638,6 +638,7 @@ dependencies = [
  "thiserror 2.0.21",
  "trash",
  "typed-builder",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

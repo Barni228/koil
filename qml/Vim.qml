@@ -66,7 +66,7 @@ QtObject {
     // of `sorts`, see SortBy in koil-core), and whether the other way round.
     property string sort: "name"
     property bool sortReverse: false
-    readonly property var sorts: ["name", "natural", "extension", "size", "modified", "created", "accessed"]
+    readonly property var sorts: ["name", "natural", "extension", "size", "disk", "modified", "created", "accessed"]
     // Keys that run one of Koil's commands in normal mode instead of what
     // they do in vim, as { keys: name }, like { "-": "parent" }: " " is
     // Space and "<CR>" Enter. Only at the start of a command, so "d-" still

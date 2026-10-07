@@ -21,7 +21,7 @@ use koil_core::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::sizes::{DirSize, DirSizes};
+use crate::sizes::{DirSize, DirSizes, Measure};
 
 /// The icon of a file devicons has none for (its own is `*`, a glob character).
 const FILE_ICON: char = '\u{f016}';
@@ -109,11 +109,21 @@ pub fn render(koil: &Koil, sizes: &DirSizes) -> Rendered {
     rendered
 }
 
-/// `Koil::listing`, but sorted by size, its dirs go by their sizes as far
-/// as they're counted (see [`compare`]).
+/// What dirs' sizes count when the listing is sorted by `by` (see
+/// sizes.rs), None if it isn't sorted by a size.
+pub fn measure(by: SortBy) -> Option<Measure> {
+    match by {
+        SortBy::Size => Some(Measure::Size),
+        SortBy::Disk => Some(Measure::Disk),
+        _ => None,
+    }
+}
+
+/// `Koil::listing`, but sorted by size (or size on disk), its dirs go by
+/// their sizes as far as they're counted (see [`compare`]).
 fn listing(koil: &Koil, sizes: &DirSizes) -> Vec<Entry> {
     let mut entries = koil.listing();
-    if koil.settings().sort.by == SortBy::Size {
+    if measure(koil.settings().sort.by).is_some() {
         // Koil lists them together, and its order stays for the ones that
         // compare equal.
         let start = entries.iter().position(is_dir_with_id).unwrap_or(0);
@@ -125,7 +135,7 @@ fn listing(koil: &Koil, sizes: &DirSizes) -> Vec<Entry> {
 }
 
 /// Where `render` lists `a` against `b`: as `Koil::compare` does, but
-/// sorted by size, dirs go by their sizes as far as they're counted (see
+/// sorted by a size, dirs go by their sizes as far as they're counted (see
 /// [`by_dir_size`]).
 fn compare(koil: &Koil, sizes: &DirSizes, a: &Entry, b: &Entry) -> Ordering {
     let by_size = match is_dir_with_id(a) && is_dir_with_id(b) {
@@ -136,13 +146,13 @@ fn compare(koil: &Koil, sizes: &DirSizes, a: &Entry, b: &Entry) -> Ordering {
 }
 
 /// Where the dir `a` goes against the dir `b` (both with IDs) when the
-/// listing is sorted by size: the ones counted (see sizes.rs) by their
-/// sizes, the biggest first, and the others after them (the other way
-/// round with `reverse`, as Koil sorts what it can't read). Equal where
-/// Koil's own order (how many entries each has) decides.
+/// listing is sorted by size or size on disk: the ones counted (see
+/// sizes.rs) by their sizes, the biggest first, and the others after them
+/// (the other way round with `reverse`, as Koil sorts what it can't read).
+/// Equal where Koil's own order (how many entries each has) decides.
 fn by_dir_size(koil: &Koil, sizes: &DirSizes, a: &Entry, b: &Entry) -> Ordering {
     let sort = koil.settings().sort;
-    if sort.by != SortBy::Size {
+    if measure(sort.by).is_none() {
         return Ordering::Equal;
     }
     let counted = |entry: &Entry| match sizes.get(koil.path_of(entry.id?)?) {
@@ -251,8 +261,8 @@ pub struct Notes {
 }
 
 /// What the listing is sorted by, for each of `ids` (see `Koil::metadata`):
-/// a file's size, a dir's as far as `sizes` has it, or when it was
-/// modified, created or accessed. None when it's sorted by name.
+/// a file's size (or size on disk), a dir's as far as `sizes` has it, or
+/// when it was modified, created or accessed. None when it's sorted by name.
 pub fn notes(koil: &Koil, sizes: &DirSizes, ids: impl IntoIterator<Item = Id>) -> Notes {
     let mut notes = Notes::default();
     let by = koil.settings().sort.by;
@@ -267,7 +277,7 @@ pub fn notes(koil: &Koil, sizes: &DirSizes, ids: impl IntoIterator<Item = Id>) -
         let Some(meta) = koil.metadata(id) else {
             continue;
         };
-        let dir = (by == SortBy::Size && meta.is_dir)
+        let dir = (measure(by).is_some() && meta.is_dir)
             .then(|| koil.path_of(id))
             .flatten();
         let info = match dir {
@@ -289,12 +299,14 @@ pub fn notes(koil: &Koil, sizes: &DirSizes, ids: impl IntoIterator<Item = Id>) -
 }
 
 /// What the listing is sorted by, for an entry with `meta` on disk: a
-/// file's size, or when it was modified, created or accessed. None if it
-/// isn't known, and for a dir's size (see [`dir_info`]).
+/// file's size or size on disk, or when it was modified, created or
+/// accessed. None if it isn't known, and for a dir's size (see
+/// [`dir_info`]).
 fn info(by: SortBy, meta: &Metadata) -> Option<String> {
     match by {
-        SortBy::Size if meta.is_dir => None,
+        SortBy::Size | SortBy::Disk if meta.is_dir => None,
         SortBy::Size => Some(show_size(meta.size)),
+        SortBy::Disk => meta.disk_size.map(show_size),
         SortBy::Modified => meta.modified.map(show_time),
         SortBy::Created => meta.created.map(show_time),
         SortBy::Accessed => meta.accessed.map(show_time),

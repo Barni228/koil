@@ -1,6 +1,6 @@
 //! The sizes of dirs, counted on other threads, so the listing can show them
-//! when it's sorted by size (see `listing::info`) without Koil waiting for
-//! them.
+//! when it's sorted by size or size on disk (see `listing::notes`) without
+//! Koil waiting for them.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 
-/// What's known of the size of a dir: the bytes of everything in it, as
-/// Finder counts (not the dirs' own, and a link's own, not followed), but
-/// what's on another device (a disk mounted in it, as `du -x`), and a file
-/// with hard links in it once (as `du`: Cargo links its builds).
+/// What's known of the size of a dir: everything in it, as `Measure` says,
+/// but what's on another device (a disk mounted in it, as `du -x`), and a
+/// file with hard links in it once (as `du`: Cargo links its builds). A
+/// link is counted itself, not followed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirSize {
     /// The bytes counted so far.
@@ -23,6 +23,17 @@ pub enum DirSize {
 
 /// The sizes known, by the dirs' paths.
 pub type DirSizes = HashMap<PathBuf, DirSize>;
+
+/// What a dir's size counts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Measure {
+    /// The bytes of the files in it, as Finder counts (not the dirs' own).
+    #[default]
+    Size,
+    /// The space they take on disk (see `koil_core::disk_size`), the dirs'
+    /// own too, as `du` counts. On Windows every file is opened for it.
+    Disk,
+}
 
 /// Counts the sizes of the dirs asked for (see `want`).
 #[derive(Default)]
@@ -39,6 +50,8 @@ struct Shared {
 
 #[derive(Default)]
 struct State {
+    /// What the sizes count: they're all of the same.
+    measure: Measure,
     sizes: DirSizes,
     /// The dirs being counted, by a number of their own, so that a read
     /// for one that was dropped isn't added to a new count of it.
@@ -67,13 +80,14 @@ struct Count {
     links: HashSet<(u64, u64)>,
 }
 
-/// A dir to read for a count: whether it's the dir counted, and the
-/// device that dir is on.
+/// A dir to read for a count: whether it's the dir counted, the device
+/// that dir is on, and what's counted.
 struct Job {
     count: u64,
     dir: PathBuf,
     root: bool,
     device: Option<u64>,
+    measure: Measure,
 }
 
 /// What reading a dir found: the bytes of what's in it, but the files
@@ -88,20 +102,29 @@ struct Read {
 }
 
 impl Sizes {
-    /// What's known of the dirs asked for.
-    pub fn known(&self) -> DirSizes {
-        self.lock().sizes.clone()
+    /// What's known of the dirs asked for, if they're counted by `measure`.
+    pub fn known(&self, measure: Measure) -> DirSizes {
+        let state = self.lock();
+        match state.measure == measure {
+            true => state.sizes.clone(),
+            false => DirSizes::new(),
+        }
     }
 
-    /// Counts `dirs` (those not counted or being counted yet), and forgets
-    /// every other dir, stopping its count.
-    pub fn want(&self, dirs: impl IntoIterator<Item = PathBuf>) {
+    /// Counts `dirs` (those not counted or being counted yet) by `measure`,
+    /// and forgets every other dir, stopping its count. Measured another
+    /// way, they're all counted again.
+    pub fn want(&self, dirs: impl IntoIterator<Item = PathBuf>, measure: Measure) {
         let dirs: Vec<PathBuf> = dirs.into_iter().collect();
         let wanted: HashSet<&Path> = dirs.iter().map(PathBuf::as_path).collect();
         let mut state = self.lock();
         let state = &mut *state;
+        if measure != state.measure {
+            state.measure = measure;
+            state.sizes.clear();
+        }
         state.sizes.retain(|dir, _| wanted.contains(dir.as_path()));
-        state.counts.retain(|_, c| wanted.contains(c.dir.as_path()));
+        state.counts.retain(|_, c| state.sizes.contains_key(&c.dir));
         state.turns.retain(|n| state.counts.contains_key(n));
         for dir in dirs {
             if state.sizes.contains_key(&dir) {
@@ -140,7 +163,8 @@ impl Sizes {
     /// Forgets every size, as what's on disk changed: a dir asked for again
     /// is counted again.
     pub fn forget(&self) {
-        self.want([]);
+        let measure = self.lock().measure;
+        self.want([], measure);
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -170,6 +194,7 @@ impl State {
                 dir,
                 root,
                 device: count.device,
+                measure: self.measure,
             });
         }
         None
@@ -237,7 +262,7 @@ fn count(shared: &Shared) {
     }
 }
 
-/// Reads the dir of `job`: the bytes of what's in it, and the dirs in it on
+/// Reads the dir of `job`: the size of what's in it, and the dirs in it on
 /// the same device. None if it's the dir counted, and it can't be read; a
 /// dir in it that can't be read counts as empty.
 fn read(job: &Job) -> Option<Read> {
@@ -247,9 +272,9 @@ fn read(job: &Job) -> Option<Read> {
     };
     if job.root {
         let meta = job.dir.symlink_metadata().ok()?;
+        read.bytes = size(job.measure, || job.dir.clone(), &meta);
         // A link to a dir: the link's size, as a file's.
         if !meta.is_dir() {
-            read.bytes = meta.len();
             return Some(read);
         }
         read.device = device(&meta);
@@ -265,15 +290,29 @@ fn read(job: &Job) -> Option<Read> {
             continue;
         };
         if !meta.is_dir() {
+            let bytes = size(job.measure, || entry.path(), &meta);
             match hard_link(&meta) {
-                Some(file) => read.links.push((file, meta.len())),
-                None => read.bytes += meta.len(),
+                Some(file) => read.links.push((file, bytes)),
+                None => read.bytes += bytes,
             }
         } else if read.device.is_none() || device(&meta) == read.device {
-            read.dirs.push(entry.path());
+            let dir = entry.path();
+            read.bytes += size(job.measure, || dir.clone(), &meta);
+            read.dirs.push(dir);
         }
     }
     Some(read)
+}
+
+/// The size of a file as `measure` counts it (with `Measure::Disk`, a dir's
+/// own too), whose metadata is `meta`, at the path `path` gives (only read
+/// for the size on disk, on Windows).
+fn size(measure: Measure, path: impl FnOnce() -> PathBuf, meta: &fs::Metadata) -> u64 {
+    match measure {
+        Measure::Size if meta.is_dir() => 0,
+        Measure::Size => meta.len(),
+        Measure::Disk => koil_core::disk_size(&path(), meta).unwrap_or(0),
+    }
 }
 
 /// The file `meta` is, if it has other hard links and that can be told:

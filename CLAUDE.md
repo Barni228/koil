@@ -321,7 +321,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   shows the sort menu (`SortMenu`, under the sort button beside the
   options, visible while vim's `pendingKeys` end in `gs`), and a key picks
   one: `gsn` name, `gsv` natural (`a2` before `a10`), `gse` extension,
-  `gss` size (biggest first; a dir's is counted, see below), `gsm`
+  `gss` size (biggest first; a dir's is counted, see below), `gsd` size
+  on disk (koil-core's `SortBy::Disk`; a dir's counted too), `gsm`
   modified, `gsc` created, `gsa` accessed (newest first), shifted the
   other way round (`gsS`). They're `commandKeys` of three keys
   (`root.sorts`, `sortKeys`: `"gss": "sort:size"`), so a key it doesn't
@@ -346,12 +347,21 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   so a file written shows its new size or time; its line stays where it is
   until the next update sorts it again. The sort isn't saved, like Koil's
   other options.
-- **Dir sizes** (sizes.rs): sorted by size, a dir's size is everything in
-  it, counted on other threads (koil-core's `entries`, how many it has, is
-  only the order until then). It's the files' bytes as Finder counts (a
-  link's own, not followed), but not what's on another device (`du -x`),
-  and a file with hard links once (as `du`: Cargo hard-links its builds,
-  which made `target/` a GB too big). `render` and `sync` give the dirs
+- **Dir sizes** (sizes.rs): sorted by size or size on disk, a dir's size
+  is everything in it, counted on other threads (koil-core's `entries`,
+  how many it has, is only the order until then). By size (`Measure::Size`)
+  it's the files' bytes as Finder counts; on disk (`Measure::Disk`), their
+  blocks (koil-core's `disk_size`, which the files' notes use too) and the
+  dirs' own, as `du` counts (`du -skx` gives the same). Either way a link
+  is counted itself, not followed, what's on another device isn't
+  (`du -x`), and a file with hard links counts once (as `du`: Cargo
+  hard-links its builds, which made `target/` a GB too big). Counting on
+  disk takes as long as by size on macOS (3 s for `/System/Library`
+  either way: the blocks come with the same `lstat`), but on Windows it
+  opens every file, which is why the menu says it's slower there.
+  `Sizes` counts by one measure at a time: asked for by another one (`gss`
+  then `gsd`), it forgets what it had, and `known` gives nothing for
+  another measure, so a render never shows the other one's sizes. `render` and `sync` give the dirs
   they show sizes for (`Notes::dirs`, by the path their ID was read at),
   and `Koil` has `Sizes::want` them: those not counted yet start, every
   other one is dropped and forgotten (so a dir listed again is counted

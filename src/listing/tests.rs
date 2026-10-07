@@ -652,6 +652,25 @@ fn test_sync_sorted() {
 }
 
 #[test]
+fn test_disk_size_infos() {
+    let (_temp, mut koil) = koil();
+    let notes = koil.current_dir().join("notes");
+    fs::write(&notes, vec![1; 100_000]).unwrap();
+    koil.set_settings(sorted_by(SortBy::Disk)).unwrap();
+    let rendered = render(&koil);
+    assert_eq!(rendered.names, ["dir/", "notes", "file.rs"]);
+    let info = |name| rendered.notes.infos[&id_text(&koil, name)].as_str();
+    let on_disk = koil_core::disk_size(&notes, &notes.symlink_metadata().unwrap()).unwrap();
+    assert_eq!(info("notes"), show_size(on_disk));
+    // a dir's is counted, as by size
+    assert_eq!(info("dir"), "...");
+    assert_eq!(rendered.notes.busy, [id_text(&koil, "dir")]);
+    let sizes = DirSizes::from([(koil.current_dir().join("dir"), DirSize::Counted(1))]);
+    let rendered = super::render(&koil, &sizes);
+    assert_eq!(rendered.notes.infos[&id_text(&koil, "dir")], "1 B");
+}
+
+#[test]
 fn test_dir_sizes() {
     let (_temp, mut koil) = koil();
     let root = koil.current_dir().to_path_buf();
