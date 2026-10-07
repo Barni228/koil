@@ -177,6 +177,57 @@ function column(t, p) {
     return col;
 }
 
+// How many columns t has from `from` to `to`, roughly: one per code point,
+// so a surrogate pair is one, but an emoji made of several is several. For
+// lining up what's drawn after lines (see inLine), over all of a long text,
+// where `column` would be too slow.
+function columns(t, from, to) {
+    let n = 0;
+    for (let q = from; q < to; q++) {
+        if ((t.charCodeAt(q) & 0xfc00) !== 0xdc00)
+            n++;
+    }
+    return n;
+}
+
+// Where to line up `cells` ({ own, width }: what's drawn after a line, each
+// going at its `own` column, right after the line, unless it's put in line),
+// so the most of them are, and still end by column `room` (where the view
+// ends): one of their own columns, where each whose own column isn't past
+// it goes, if it fits there (one whose own column it is is there anyway). A
+// longer line's stays at its own, and so does one that would end past
+// `room`. -1 for no cells.
+function inLine(cells, room) {
+    const sorted = cells.slice().sort((a, b) => a.own - b.own);
+    // How many of the cells up to the column there are of each width.
+    const widths = [];
+    let best = -1, most = 0;
+    for (let i = 0; i < sorted.length; ) {
+        const column = sorted[i].own;
+        // The ones whose own column it is, but don't fit.
+        let fit = 0;
+        for (; i < sorted.length && sorted[i].own === column; i++) {
+            widths[sorted[i].width] = (widths[sorted[i].width] || 0) + 1;
+            if (sorted[i].width > room - column)
+                fit++;
+        }
+        for (let w = Math.min(room - column, widths.length - 1); w >= 0; w--)
+            fit += widths[w] || 0;
+        // The closer one, if as many fit.
+        if (fit > most) {
+            most = fit;
+            best = column;
+        }
+    }
+    return best;
+}
+
+// Where a cell `width` wide whose own column is `own` goes, with the cells
+// lined up at `column` (see inLine), and the view ending at `room`.
+function cellColumn(own, width, column, room) {
+    return own <= column && column + width <= room ? column : own;
+}
+
 // Position of column `col` in the line starting at ls, or of the line's
 // last character when it's shorter.
 function atColumn(t, ls, col) {

@@ -931,6 +931,34 @@ TestCase {
         compare(keyCommands.count, 2);
     }
 
+    // What's drawn after lines (Editor's notes and messages) goes in a
+    // column where the most of it is, and still ends by the view's edge.
+    function test_inLine() {
+        const cells = (owns, widths) => owns.map((own, i) => ({ own: own, width: widths[i] }));
+        // all of them, after the longest line
+        compare(Txt.inLine(cells([8, 12, 10], [5, 5, 5]), 40), 12);
+        // not after one too long for the view: it keeps its own
+        compare(Txt.inLine(cells([8, 10, 60], [5, 5, 5]), 40), 10);
+        compare(Txt.cellColumn(60, 5, 10, 40), 60);
+        compare(Txt.cellColumn(8, 5, 10, 40), 10);
+        // none fits in line: each stays at its own
+        const narrow = Txt.inLine(cells([8, 10], [5, 5]), 12);
+        compare([Txt.cellColumn(8, 5, narrow, 12), Txt.cellColumn(10, 5, narrow, 12)], [8, 10]);
+        // a wide one that would end past the view stays at its own, and
+        // the others go in line
+        compare(Txt.inLine(cells([6, 6, 20, 20], [30, 4, 4, 4]), 30), 20);
+        compare(Txt.cellColumn(6, 30, 20, 30), 6);
+        // but one that doesn't fit is in line at its own column
+        compare(Txt.inLine(cells([10, 11], [17, 51]), 40), 11);
+        compare(Txt.cellColumn(10, 17, 11, 40), 11);
+        compare(Txt.cellColumn(11, 51, 11, 40), 11);
+        // as many either way: the closer column
+        compare(Txt.inLine(cells([5, 9], [3, 2]), 10), 5);
+        compare(Txt.inLine([], 40), -1);
+        // a column per character, an icon's surrogate pair too
+        compare(Txt.columns("a" + mushroom + "b\nc", 0, 4), 3);
+    }
+
     // gs waits for the key of a sort (Koil's sort menu shows while it
     // does), and a key it doesn't know is a mistake.
     function test_sortKeys() {

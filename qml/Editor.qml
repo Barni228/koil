@@ -679,26 +679,112 @@ Item {
                 }
             }
 
-            // What `infos` has for each line in view, dimmed, four spaces
-            // after the line's end (and a warning's or an error's message
-            // four spaces after it).
+            // Where the notes (`infos`) and the warnings' and errors'
+            // messages go after the lines: four spaces after it, or each
+            // kind lined up in a column, like a table, where the most of
+            // them are and still end in view (see Txt.inLine). A line too
+            // long for that has its own right after it, and so does one
+            // that would end past the view. The columns are worked out for
+            // all the text, so they stay put as it scrolls, but only when
+            // it changes, or what's drawn after it, or the view's width.
+            QtObject {
+                id: aside
+
+                // The spaces before a note, and before a message.
+                readonly property int gap: 4
+                // How many columns of text the view shows.
+                readonly property int room: Math.floor((view.flickable.width - editor.leftPadding - editor.rightPadding) / view.charWidth)
+                // Where the notes and the messages are lined up (-1: not).
+                property int noteColumn: -1
+                property int messageColumn: -1
+                readonly property var inputs: [view.infos, view.hidden, view.problems, editor.revision, room]
+
+                function refresh() {
+                    const t = editor.text, lines = new Map();
+                    // The line starting at ls, as { end, note, message, error }.
+                    const line = ls => {
+                        if (!lines.has(ls))
+                            lines.set(ls, { end: Txt.columns(t, ls, Txt.lineEnd(t, ls)), note: "", message: "", error: false });
+                        return lines.get(ls);
+                    };
+                    let notes = false;
+                    for (const key in view.infos) {
+                        notes = true;
+                        break;
+                    }
+                    for (const h of notes ? view.hidden : []) {
+                        const note = view.infos[h.text], ls = note ? Txt.lineStart(t, h.at) : 0;
+                        if (note && startsLine(t, ls, h.at))
+                            line(ls).note = note;
+                    }
+                    // An error's message, if a line has both, as diagnostics
+                    // shows it.
+                    for (const p of view.problems) {
+                        const l = line(Txt.lineToPos(t, p.line + 1)), error = p.severity === "error";
+                        if (!l.message || error && !l.error)
+                            Object.assign(l, { message: p.message, error: error });
+                    }
+                    const all = Array.from(lines.values());
+                    noteColumn = Txt.inLine(all.filter(l => l.note).map(l => ({ own: l.end + gap, width: l.note.length })), room);
+                    messageColumn = Txt.inLine(all.filter(l => l.message).map(l => ({ own: messageFrom(l.end, l.note), width: l.message.length })), room);
+                }
+
+                // The column a message goes at on a line ending at column
+                // `end`, after its `note`, if it isn't lined up.
+                function messageFrom(end, note) {
+                    return note ? Txt.cellColumn(end + gap, note.length, noteColumn, room) + note.length + gap : end + gap;
+                }
+
+                // Whether the icon at `at` starts the line of t from ls,
+                // after any spaces.
+                function startsLine(t, ls, at) {
+                    for (let q = ls; q < at; q++) {
+                        if (t.charCodeAt(q) !== 32)
+                            return false;
+                    }
+                    return true;
+                }
+
+                // What `infos` has for the line of t from ls to le: for the
+                // text its icon hides.
+                function noteOn(t, ls, le) {
+                    const hidden = view.hidden, h = hidden[view.vim.firstAt(hidden, ls)];
+                    return h && h.at < le && startsLine(t, ls, h.at) ? view.infos[h.text] || "" : "";
+                }
+
+                // Where the note and the message after the line of t from ls
+                // to le start, in pixels: { note, message }, in their
+                // columns if they go there, but never over what's before
+                // them (a character wider than a column, like an emoji).
+                function spots(t, ls, le, note, message) {
+                    const cw = view.charWidth, x0 = view.cellAt(ls).x;
+                    let own = Txt.columns(t, ls, le) + gap, x = view.cellAt(le).x + gap * cw;
+                    const spots = { note: x, message: x };
+                    if (note) {
+                        const column = Txt.cellColumn(own, note.length, noteColumn, room);
+                        spots.note = Math.max(x0 + column * cw, x);
+                        own = column + note.length + gap;
+                        x = spots.note + (note.length + gap) * cw;
+                    }
+                    spots.message = Math.max(x0 + Txt.cellColumn(own, message.length, messageColumn, room) * cw, x);
+                    return spots;
+                }
+
+                onInputsChanged: Qt.callLater(refresh)
+            }
+
+            // What `infos` has for each line in view, dimmed (see aside).
             Layer {
                 id: notes
 
-                // The width of the note after the line ending at lineEnd,
-                // with the four spaces before it, in columns: 0 if none.
-                function columns(lineEnd) {
-                    const note = model.find(n => n.lineEnd === lineEnd);
-                    return note ? 4 + note.text.length : 0;
-                }
-
-                inputs: [view.infos, view.hidden, view.layout, view.viewport]
+                inputs: [view.infos, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room]
                 compute: () => {
                     const list = [], hidden = view.hidden, t = editor.text, v = view.visibleRange();
                     for (let i = view.vim.firstAt(hidden, v.from); i < hidden.length && hidden[i].at <= v.to; i++) {
-                        const h = hidden[i], ls = Txt.lineStart(t, h.at), text = view.infos[h.text];
-                        if (text && /^ *$/.test(t.slice(ls, h.at)))
-                            list.push({ lineEnd: Txt.lineEnd(t, h.at), text: text });
+                        const h = hidden[i], text = view.infos[h.text];
+                        const ls = text ? Txt.lineStart(t, h.at) : 0, le = text ? Txt.lineEnd(t, h.at) : 0;
+                        if (text && aside.startsLine(t, ls, h.at))
+                            list.push({ x: aside.spots(t, ls, le, text, "").note, y: view.cellAt(le).y, text: text });
                     }
                     return list;
                 }
@@ -708,10 +794,9 @@ Item {
 
                     Text {
                         required property var modelData
-                        readonly property rect cell: view.cellAt(modelData.lineEnd)
 
-                        x: cell.x + 4 * spaceMetrics.advanceWidth
-                        y: cell.y + view.textBaseline - baselineOffset
+                        x: modelData.x
+                        y: modelData.y + view.textBaseline - baselineOffset
                         text: modelData.text
                         font: editor.font
                         color: view.theme.faint
@@ -742,8 +827,8 @@ Item {
                 }
 
                 // The warnings and errors on the lines of t from `from` to
-                // `to`, as { start, end, severity, message, lineEnd }, in
-                // order.
+                // `to`, as { start, end, severity, message, lineEnd, x }
+                // (where its message would start, see aside), in order.
                 function find(t, from, to) {
                     const first = Txt.lineOf(t, from) - 1, last = Txt.lineOf(t, to) - 1, list = [];
                     for (const p of view.problems) {
@@ -755,7 +840,8 @@ Item {
                             end: le,
                             severity: p.severity,
                             message: p.message,
-                            lineEnd: le
+                            lineEnd: le,
+                            x: aside.spots(t, ls, le, aside.noteOn(t, ls, le), p.message).message
                         });
                     }
                     return list.sort((a, b) => a.start - b.start);
@@ -795,7 +881,7 @@ Item {
                 Layer {
                     id: squiggles
 
-                    inputs: [view.problems, view.layout, view.viewport]
+                    inputs: [view.problems, view.layout, view.viewport, view.infos, view.hidden, aside.noteColumn, aside.messageColumn, aside.room]
                     compute: () => {
                         const v = view.visibleRange();
                         return diagnostics.find(editor.text, v.from, v.to);
@@ -836,12 +922,12 @@ Item {
 
                     model: diagnostics.messages
 
-                    // Four spaces after the line's end, or after its note.
+                    // After the line's end, and its note (see aside).
                     Text {
                         required property var modelData
                         readonly property rect cell: view.cellAt(modelData.lineEnd)
 
-                        x: cell.x + (4 + notes.columns(modelData.lineEnd)) * spaceMetrics.advanceWidth
+                        x: modelData.x
                         y: cell.y + view.textBaseline - baselineOffset
                         text: modelData.message
                         font: editor.font

@@ -332,10 +332,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   cursor on its entry). Then the view stays where it was (`shownSort`:
   every line moved, so following the cursor's would scroll the rest away),
   scrolling only to show the cursor. Sorted by size or a date, each line
-  shows it, dimmed, four spaces after its end (`listing::info`: `1.2 KB`,
+  shows it, dimmed, after its end (`listing::info`: `1.2 KB`,
   KB as 1000 bytes like macOS; `3 items`; `2026-10-06 14:03`, local time
   through chrono), before a warning's or an error's message (`notes` in
-  Editor.qml). They come as `infos`, `{ id: text }` (`Rendered`, and
+  Editor.qml), lined up (see Notes after lines). They come as `infos`, `{ id: text }` (`Rendered`, and
   `Synced` with what sync read), so a line's goes with its ID wherever it's
   moved or copied, and a new entry has none. Only the lines in view are
   looked up (`firstAt` in the sorted hidden text). While the listing shows
@@ -704,9 +704,23 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
     on neither the target nor the box (and isn't dragging a selection).
 - **Warnings and errors** (`diagnostics` in Editor.qml): Koil's problems
   (see Koil) get a VS Code-style squiggle in the visible lines, and their
-  line shows a message four spaces after its end (an error's before a
-  warning's). The hover box shows the message (with an icon) as it does an
-  icon's text; `targetUnder` also finds the message after the line.
+  line shows a message after its end (an error's before a warning's), and
+  after its note, if it has one. The hover box shows the message (with an
+  icon) as it does an icon's text; `targetUnder` also finds the message
+  after the line.
+- **Notes after lines** (`aside` in Editor.qml): the notes (`infos`) and
+  the messages go in a column each, like a table, at least four spaces
+  after what's before them. A column is where the most of them are and
+  still end in view (`Txt.inLine`: one of their own columns, right after
+  the line), so a line too long for it has its own after its end, and so
+  does one that would end past the view's edge if it went in line (a long
+  message) and is cut there anyway. They're worked out over all the text
+  (`aside.refresh`, counting a column per code point, `Txt.columns`, as
+  `Txt.column` is too slow for all of a long listing), so they don't move
+  as it scrolls, but whenever it changes, or the notes, the problems or the
+  view's width do; the overlays then place the lines in view
+  (`aside.spots`), never over what's before them (an emoji wider than a
+  column).
 - **Quitting**: `:q` with unsaved changes fails (E37); `:confirm q` asks
   instead, in a `ConfirmDialog` rather than a `MessageDialog` (which is native
   on macOS, can't use the editor's font or vim's keys). `ConfirmDialog.ask`
