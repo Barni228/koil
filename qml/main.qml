@@ -85,6 +85,13 @@ ApplicationWindow {
     // Where the cursor was in the listing when a file was opened (see
     // listingSpot), which `-` goes back to with openedFrom.
     property var fileSpot: null
+    // Whether the editor shows the scratchpad (see openScratch), and what
+    // it had when it was left, for when it's back: { text, buffer (see
+    // Vim.leaveBuffer), contentY }, null until it's first left. Whether vim
+    // was in the path field when it opened, to go back there.
+    property bool scratchpad: false
+    property var scratchState: null
+    property bool scratchFromPath: false
     // A file's unsaved changes, or the listing's edits and changes that
     // aren't applied.
     property bool modified: false
@@ -120,7 +127,7 @@ ApplicationWindow {
     width: 900
     height: 650
     visible: true
-    title: (listing ? location : fileName) + (modified ? " •" : "") + " — Koil"
+    title: (listing ? location : scratchpad ? "👻" : fileName) + (modified ? " •" : "") + " — Koil"
 
     // Last in the history, however it got there (the path field, Enter, -,
     // a dir renamed on disk), keeping the newest 100.
@@ -132,6 +139,7 @@ ApplicationWindow {
     // Shows `text` as a new document, whose icons hide the texts in
     // `entries` (see Hidden text in Vim.qml). `path` is its file, if any.
     function load(text, entries, path) {
+        keepScratch();
         activate(editorView);
         editorView.setText(text);
         vim.reset(entries);
@@ -152,6 +160,44 @@ ApplicationWindow {
         problems = [];
         load(text, [], path);
         updatePathSyntax();
+    }
+
+    // _ in the listing: the scratchpad, a text of the user's that's never
+    // saved, as it was left (its cursor, undo history and view: see
+    // keepScratch), until Koil quits. Like a file, it leaves the listing
+    // (whose edits Koil keeps), and _ or - goes back to where the cursor
+    // was (see leaveFile).
+    function openScratch() {
+        if (!updateListing())
+            return;
+        fileSpot = listingSpot();
+        scratchFromPath = activeView === pathView;
+        listing = false;
+        problems = [];
+        const s = scratchState || { text: "", buffer: null, contentY: 0 };
+        // Its hidden text comes back with the buffer: entries pasted there
+        // keep their IDs on purpose, so they can be put aside and pasted
+        // back into a listing (and gh shows their paths).
+        load(s.text, [], "");
+        scratchpad = true;
+        // Before vim's cursor, which then scrolls only if it's out of view.
+        const f = editorView.flickable;
+        f.contentY = Math.max(0, Math.min(s.contentY, f.contentHeight + f.bottomMargin - f.height));
+        vim.enterBuffer(s.buffer);
+        updatePathSyntax();
+    }
+
+    // Keeps what the scratchpad has as it's left (anything else shown in
+    // the editor goes through showListing or load), for openScratch.
+    function keepScratch() {
+        if (!scratchpad)
+            return;
+        scratchState = {
+            text: editorView.textArea.text,
+            buffer: vim.leaveBuffer(),
+            contentY: editorView.flickable.contentY
+        };
+        scratchpad = false;
     }
 
     // Opens the file `path` (see loadFile), or says in the status line why
@@ -192,6 +238,8 @@ ApplicationWindow {
     // stays instead (scrolling only to show the cursor). Vim stays in the
     // path field if it was there.
     function showListing(moved, from, keep) {
+        // Before it's the listing, whose prefixes vim would keep out of.
+        keepScratch();
         const r = JSON.parse(koil.render());
         if (listing && !keep && (!moved || r.path === location))
             keep = listingSpot();
@@ -491,6 +539,8 @@ ApplicationWindow {
             sortBy(name.split(":")[1], name.startsWith("sortReverse"));
         else if (name === "back")
             leaveFile(false);
+        else if (name === "scratch")
+            openScratch();
     }
 
     // Sorts the listing by `by` (one of Vim.sorts), the other way round if
@@ -571,10 +621,17 @@ ApplicationWindow {
 
     // `-` in a file: back to the listing it was opened from, or else its
     // dir's, with the cursor on its entry. Unsaved changes are saved (or
-    // dropped) first, if the user says so.
+    // dropped) first, if the user says so. From the scratchpad (also _),
+    // back to where the cursor was, in the path field if it was there.
     function leaveFile(force) {
         if (!force) {
             askToSave(() => leaveFile(true));
+            return;
+        }
+        if (scratchpad) {
+            showListing(true, "", fileSpot);
+            if (scratchFromPath)
+                activate(pathView);
             return;
         }
         if (!openedFrom) {
@@ -753,6 +810,14 @@ ApplicationWindow {
             applyChanges(!!quit, !!orQuit);
             return;
         }
+        // Nothing to write: :wq and ZZ quit as :q does.
+        if (scratchpad) {
+            if (quit)
+                quitApp(orQuit);
+            else
+                vim.showMessage("The scratchpad isn't saved: it's kept until Koil quits");
+            return;
+        }
         if (!filePath) {
             saveAs();
             quitAfterSave = !!quit;
@@ -921,11 +986,15 @@ ApplicationWindow {
             "<Tab>": "switch",
             "g.": "hidden",
             "gi": "gitignore",
-            "gr": "regex"
+            "gr": "regex",
+            "_": "scratch"
         }, root.sortKeys, root.activeView === pathView ? {
             "<S-CR>": "update"
         } : {}) : root.filePath ? ({
                 "-": "back"
+            }) : root.scratchpad ? ({
+                "-": "back",
+                "_": "back"
             }) : ({})
 
         onFontFamiliesNeeded: root.loadFontFamilies()
@@ -1098,7 +1167,9 @@ ApplicationWindow {
         infoDots: root.infoDots
         onActivated: root.activate(editorView)
         onEdited: {
-            root.modified = true;
+            // The scratchpad is never saved, so there's nothing to ask about.
+            if (!root.scratchpad)
+                root.modified = true;
             if (root.listing) {
                 checkTimer.restart();
                 Qt.callLater(root.updatePendingLines);
@@ -1358,7 +1429,7 @@ ApplicationWindow {
                 }
                 Platform.MenuItem {
                     text: qsTr("Save As…")
-                    enabled: !root.listing && !root.boxOpen
+                    enabled: !root.listing && !root.scratchpad && !root.boxOpen
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }
@@ -1458,7 +1529,7 @@ ApplicationWindow {
                 }
                 Action {
                     text: qsTr("Save &As…")
-                    enabled: !root.listing && !root.boxOpen
+                    enabled: !root.listing && !root.scratchpad && !root.boxOpen
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }

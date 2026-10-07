@@ -4,7 +4,8 @@ Koil desktop app: a vim-style editor in Rust + Qt 6 via cxx-qt 0.10, with the
 UI in QML, that edits a directory as text (like oil.nvim) through koil-core
 (`../koil-core`, a library; `../koil-cli` is its CLI; read their CLAUDE.md for
 how Koil works). The editor is the one from `~/projects/vim-edit`, cleaned up.
-It shows Koil's listing (see Koil), or a file opened with File > Open.
+It shows Koil's listing (see Koil), a file opened with File > Open, or
+the scratchpad (see Scratchpad).
 
 ## Layout
 
@@ -38,8 +39,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `redrawText`).
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
   path field and its option buttons, and Koil's listing (`showListing`,
-  `updateListing`, `applyChanges`, `undoApply`) or a file (`loadFile`), and
-  which of the two editors vim edits (`activate`). It wires the pieces
+  `updateListing`, `applyChanges`, `undoApply`), a file (`loadFile`) or
+  the scratchpad (`openScratch`), and which of the two editors vim edits (`activate`). It wires the pieces
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
   with it: cursors, selection, search highlights, the notes after lines
@@ -245,7 +246,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` applies (`Space a` too, but
   always asking first, whatever the setting: see Apply), `-` opens `..`
-  (`3-`: `../../..`), Tab goes to the other editor (`activate`), `g.`,
+  (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), Tab goes to
+  the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
   buttons), and `gs` and a key sort it (see Sorting). Cmd+S (File > Save,
   named Update in the listing) updates.
@@ -510,6 +512,23 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   be themed), naming only the file, so a long path doesn't push why out
   of view; one on the command line lists its dir instead, on its entry.
   A message too long for the status line loses its middle, not its end.
+- **Scratchpad** (`openScratch`): `_` in the listing (or the path field)
+  shows a text of the user's that's never saved, kept until Koil quits.
+  It leaves the listing as a file does (updating it first, `fileSpot`),
+  and `_` or `-` there goes back (`leaveFile`) to where the cursor was,
+  in the path field if it was there (`scratchFromPath`). It's the
+  listing's editor, so whatever shows something else in it saves the
+  scratchpad's text, cursor, undo history and view first (`keepScratch`,
+  from `showListing` and `load`, as anything shown goes through those),
+  and `openScratch` gives them back (`vim.enterBuffer`). Its hidden text
+  comes back too, on purpose: entries pasted there keep their IDs, as in
+  a register, so they can be put aside and pasted back into a listing,
+  and `gh` shows their paths. An ID means the same path all session, so
+  one pasted back after its file is gone is an error (`NotOnDisk` in
+  koil-core), not another file. Edits don't make it modified, `:w` and
+  Cmd+S only say it isn't saved, `:wq` and `ZZ` quit as `:q` does
+  (`quitApp`: back to the listing while it has changes), and Save As is
+  off.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
   the editor's document colors each line's icon (colors from devicons,
   gathered from every listing shown, `iconColors`, dark or light by theme)

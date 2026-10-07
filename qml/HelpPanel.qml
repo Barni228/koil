@@ -38,7 +38,7 @@ Popup {
             title: "The listing",
             tags: ["koil", "listing", "list", "entry", "entries", "space", "update", "apply", "-", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
-                "gr", "gs", "sort", "sorting"],
+                "gr", "gs", "sort", "sorting", "_", "scratch", "scratchpad"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
                 + "copy lines to copy, and write new ones to create (`new.txt`, `new/dir/`). A line cut "
@@ -56,6 +56,8 @@ Popup {
                 ["`Enter`", "Open the dir or file on the line. A new file is created first, after asking."],
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
                 ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing."],
+                ["`_`", "The scratchpad: text of your own, never saved, kept as you left it until Koil "
+                    + "quits. `_` or `-` there goes back to where you were."],
                 ["icons", "The cursor skips each line's icon and the spaces after it, so `0` goes to the "
                     + "name. `Backspace` there clears the icon (the entry becomes new), then joins lines."],
                 ["quitting", "`:conf q` and `ZZ` ask to apply the changes first. In a file, quitting goes "
