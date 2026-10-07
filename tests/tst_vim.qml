@@ -854,6 +854,15 @@ TestCase {
         verify(vim.showHidden && vim.gitignore && vim.regex);
         keys(":set nohidden gitignore& invregex<CR>");
         verify(!vim.showHidden && !vim.gitignore && !vim.regex);
+        keys(":set sort=size sr<CR>");
+        compare([vim.sort, vim.sortReverse], ["size", true]);
+        keys(":set sort?<CR>");
+        compare(vim.message, "  sort=size");
+        keys(":set sort=big<CR>");
+        verify(vim.messageIsError);
+        compare(vim.sort, "size");
+        keys(":set sort= nosortreverse<CR>");
+        compare([vim.sort, vim.sortReverse], ["name", false]);
     }
 
     // What the quit commands ask for: quitRequested's force, confirm and
@@ -920,6 +929,35 @@ TestCase {
         keys("gx");
         compare(vim.pendingKeys, "");
         compare(keyCommands.count, 2);
+    }
+
+    // gs waits for the key of a sort (Koil's sort menu shows while it
+    // does), and a key it doesn't know is a mistake.
+    function test_sortKeys() {
+        load("one two\nthree");
+        vim.commandKeys = {
+            "gss": "sort:size",
+            "gsS": "sortReverse:size"
+        };
+        keyCommands.clear();
+        keys("gs");
+        compare(vim.pendingKeys, "gs");
+        keys("S");
+        compare(vim.pendingKeys, "");
+        keys("gsx");
+        compare(vim.pendingKeys, "");
+        compare(render(), "one two\nthree");
+        // From outside vim (the sort button, a click in the menu), out of
+        // insert mode first.
+        keys("A!");
+        vim.startCommand(["g", "s"]);
+        compare([vim.mode, vim.pendingKeys], ["normal", "gs"]);
+        vim.startCommand([]);
+        compare(vim.pendingKeys, "");
+        vim.startCommand(["g", "s", "s"]);
+        compare(keyCommands.signalArguments.map(a => a[0]), ["sortReverse:size", "sort:size"]);
+        compare(render(), "one two!\nthree");
+        vim.commandKeys = {};
     }
 
     // Shift+Enter in insert mode is a line break, not Qt's line separator.

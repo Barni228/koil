@@ -53,8 +53,10 @@ QtObject {
     readonly property color hover: dark ? "#26ffffff" : "#1a000000"
     readonly property color checked: Qt.rgba(accent.r, accent.g, accent.b, 0.25)
     readonly property color error: dark ? "#f48771" : "#c42b1c"
-    // Text that matters less, like a hint.
+    // Text that matters less, like a hint, and less still, like the line
+    // numbers.
     readonly property color dim: Qt.tint(base, dark ? "#a0ffffff" : "#a0000000")
+    readonly property color faint: Qt.tint(base, dark ? "#80ffffff" : "#80000000")
     // A box over the editor (see Panel), and its border.
     readonly property color panel: Qt.tint(base, dark ? "#12ffffff" : "#08000000")
     readonly property color panelBorder: Qt.tint(base, dark ? "#40ffffff" : "#30000000")

@@ -38,7 +38,7 @@ Popup {
             title: "The listing",
             tags: ["koil", "listing", "list", "entry", "entries", "space", "update", "apply", "-", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
-                "gr"],
+                "gr", "gs", "sort", "sorting"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
                 + "copy lines to copy, and write new ones to create (`new.txt`, `new/dir/`). A line cut "
@@ -70,6 +70,9 @@ Popup {
                     + "pick from, they go through them, and `Enter` takes one."],
                 ["`g.`  `gi`  `gr`", "Toggle `:set hidden`, `gitignore` and `regex`, like the buttons beside "
                     + "the path."],
+                ["`gs`", "Sort: shows by what, then a key picks it, like `gss` by size (biggest first) and "
+                    + "`gsS` the other way round. Dirs stay first. By size or a date, each line shows it after "
+                    + "its end (a dir's size is how many entries it has)."],
                 [isMac ? "`⇧⌘O`" : "`Ctrl+Shift+O`", "Open a folder (`" + cmdKey + "O`: a file)."]
             ]
         },
@@ -77,7 +80,7 @@ Popup {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
                 "number", "nu", "relativenumber", "rnu", "sidescrolloff", "siso", "hidden", "hid", "gitignore",
-                "ignore", "regex", "re"],
+                "ignore", "regex", "re", "sortreverse", "sr"],
             intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
                 + "once: `:set nu rnu fs=18`.",
             rows: [
@@ -89,7 +92,10 @@ Popup {
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
                 ["`hidden`  `hid`", "Show entries starting with `.`, and `../`."],
                 ["`gitignore`  `ignore`", "Hide what git ignores, and `.git`."],
-                ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."]
+                ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."],
+                ["`sort`", "What the listing is sorted by (see `gs`), like `:set sort=size`: `name`, "
+                    + "`natural`, `extension`, `size`, `modified`, `created` or `accessed`. Default `name`."],
+                ["`sortreverse`  `sr`", "Sort the other way round."]
             ],
             note: "An entry with changes is shown even if it's hidden or ignored."
         },

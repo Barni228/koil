@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
-use koil_core::{Action, Conflict, Report, Settings, Watched};
+use koil_core::{Action, Conflict, Report, Settings, Sort, Watched};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
@@ -31,6 +31,8 @@ pub mod qobject {
         #[qproperty(bool, show_hidden)]
         #[qproperty(bool, gitignore)]
         #[qproperty(bool, regex)]
+        #[qproperty(QString, sort)]
+        #[qproperty(bool, sort_reverse)]
         type Koil = super::KoilRust;
 
         /// Emitted when something changed on disk that can change what
@@ -67,8 +69,8 @@ pub mod qobject {
         #[qinvokable]
         fn open(self: Pin<&mut Koil>, location: &QString) -> QString;
 
-        /// The listing of what's open: `{ path, text, hidden, names, colors }`
-        /// (see `listing::Rendered`).
+        /// The listing of what's open: `{ path, text, hidden, names, colors,
+        /// infos }` (see `listing::Rendered`).
         #[qinvokable]
         fn render(self: &Koil) -> QString;
 
@@ -164,6 +166,10 @@ pub struct KoilRust {
     show_hidden: bool,
     gitignore: bool,
     regex: bool,
+    /// What the listing is sorted by, as `koil_core::SortBy` names it (like
+    /// "size"), and whether the other way round.
+    sort: QString,
+    sort_reverse: bool,
     koil: koil_core::Koil,
     /// What `actions` showed, which `apply` picks from: what the user saw,
     /// so a change they didn't see is never applied.
@@ -180,20 +186,24 @@ struct DiskWatcher {
     dirs: Vec<(PathBuf, bool)>,
     /// Which changes matter, which the watcher's thread reads.
     watched: Arc<Mutex<Watched>>,
+    /// Whether writing a file matters too: the listing shows its size or
+    /// when it changed (see `listing::info`).
+    writes: Arc<AtomicBool>,
 }
 
 impl DiskWatcher {
     fn new(thread: CxxQtThread<qobject::Koil>) -> Option<DiskWatcher> {
         let watched = Arc::new(Mutex::new(Watched::default()));
+        let writes = Arc::new(AtomicBool::new(false));
         // Whether `changedOnDisk` is on its way, so a burst of changes (a
         // build writing thousands of files) sends it once, not once each.
         let queued = Arc::new(AtomicBool::new(false));
-        let filter = watched.clone();
+        let (filter, with_writes) = (watched.clone(), writes.clone());
         let handler = move |event: notify::Result<notify::Event>| {
             let matters = match event {
                 Ok(event) => {
                     let watched = filter.lock().unwrap();
-                    changes_listing(&event.kind)
+                    changes_listing(&event.kind, with_writes.load(Ordering::Relaxed))
                         && (event.need_rescan() || event.paths.iter().any(|p| watched.affects(p)))
                 }
                 // Changes may have been missed.
@@ -212,12 +222,15 @@ impl DiskWatcher {
             watcher,
             dirs: Vec::new(),
             watched,
+            writes,
         })
     }
 
-    /// Watches what `watched` says, instead of what it did. A watch is
-    /// changed only if the dirs did (on macOS it starts over each time).
-    fn set(&mut self, watched: Watched) {
+    /// Watches what `watched` says, instead of what it did, and with
+    /// `writes`, files being written too. A watch is changed only if the
+    /// dirs did (on macOS it starts over each time).
+    fn set(&mut self, watched: Watched, writes: bool) {
+        self.writes.store(writes, Ordering::Relaxed);
         if watched.dirs != self.dirs {
             for (dir, _) in &self.dirs {
                 let _ = self.watcher.unwatch(dir);
@@ -236,21 +249,28 @@ impl DiskWatcher {
     }
 }
 
-/// Whether an event of `kind` can change a listing: not reading or writing
-/// a file.
-fn changes_listing(kind: &EventKind) -> bool {
-    !matches!(
-        kind,
-        EventKind::Access(_) | EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_))
-    )
+/// Whether an event of `kind` can change a listing: not reading a file, nor
+/// writing one, unless `writes` (the listing shows its size or when it
+/// changed).
+fn changes_listing(kind: &EventKind, writes: bool) -> bool {
+    match kind {
+        EventKind::Access(_) => false,
+        EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_)) => writes,
+        _ => true,
+    }
 }
 
 impl KoilRust {
     fn settings(&self) -> Settings {
+        let by = serde_json::Value::String(self.sort.to_string());
         Settings {
             show_hidden: self.show_hidden,
             respect_gitignore: self.gitignore,
             regex: self.regex,
+            sort: Sort {
+                by: serde_json::from_value(by).unwrap_or_default(),
+                reverse: self.sort_reverse,
+            },
         }
     }
 }
@@ -282,8 +302,9 @@ impl qobject::Koil {
             rust.watcher = DiskWatcher::new(thread);
         }
         let watched = rust.koil.watched();
+        let writes = rust.koil.settings().sort.by.reads_metadata();
         if let Some(watcher) = &mut rust.watcher {
-            watcher.set(watched);
+            watcher.set(watched, writes);
         }
     }
 

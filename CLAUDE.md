@@ -14,13 +14,14 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `undo_steps`), the path field's regex parts
-  (`path_syntax`), what Tab completes in it (`complete`), and what changed
-  on disk as edits to the text and questions (`sync`, `resolve`, `merge`).
+  (`path_syntax`), what Tab completes in it (`complete`), what's shown after
+  each line when sorted by size or a date (`info`), and what changed on
+  disk as edits to the text and questions (`sync`, `resolve`, `merge`).
   Its tests (`src/listing/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
-  listing.rs, taking and giving JSON. `showHidden`, `gitignore` and `regex`
-  are properties, bound to vim's `:set` options. It also watches the disk
-  (`watch`, `changedOnDisk`; see Changes on disk).
+  listing.rs, taking and giving JSON. `showHidden`, `gitignore`, `regex`,
+  `sort` and `sortReverse` are properties, bound to vim's `:set` options.
+  It also watches the disk (`watch`, `changedOnDisk`; see Changes on disk).
 - `src/document.rs`: `Document` (QML element): reading and writing files, the
   path on the command line.
 - `src/system.rs`: `System` (QML element): the system clipboard, the
@@ -37,13 +38,16 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   which of the two editors vim edits (`activate`). It wires the pieces
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
-  with it: cursors, selection, search highlights, warnings and errors, line
-  numbers, the `HoverBox` and the `CompletionList`. Both the listing (or
+  with it: cursors, selection, search highlights, the notes after lines
+  (`infos`, see Sorting), warnings and errors, line numbers, the `HoverBox`
+  and the `CompletionList`. Both the listing (or
   file) and the path field are one (`pathField`).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
 - `qml/CompletionList.qml`: the dirs Tab can complete the path field to, in
   a box under it, like VS Code's suggestions (see Completion).
+- `qml/SortMenu.qml`: what `gs` and a key sort the listing by, in a box
+  under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, hidden text, the listing's
   prefixes, `:` and `/`, buffers). It drives the `TextArea` through
@@ -237,9 +241,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` applies (`Space a` too, but
   always asking first, whatever the setting: see Apply), `-` opens `..`
-  (`3-`: `../../..`), Tab goes to the other editor (`activate`), and `g.`,
+  (`3-`: `../../..`), Tab goes to the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
-  buttons). Cmd+S (File > Save, named Update in the listing) updates.
+  buttons), and `gs` and a key sort it (see Sorting). Cmd+S (File > Save,
+  named Update in the listing) updates.
   Enter in the listing opens the dir or file on its line
   (`listing::target_on_line`: a dir if the name ends with `/`, else the file
   its ID points to on disk, even if the line renames it; a new file is
@@ -309,12 +314,42 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   too. Undoing an apply always asks (a `u` too many mustn't change files
   unasked), and so do `:confirm q` and `ZZ`, whose question is whether to
   quit without the changes.
+- **Sorting** (koil-core's `Settings::sort`; read its CLAUDE.md): `gs`
+  shows the sort menu (`SortMenu`, under the sort button beside the
+  options, visible while vim's `pendingKeys` end in `gs`), and a key picks
+  one: `gsn` name, `gsv` natural (`a2` before `a10`), `gse` extension,
+  `gss` size (biggest first; a dir's is how many entries it has), `gsm`
+  modified, `gsc` created, `gsa` accessed (newest first), shifted the
+  other way round (`gsS`). They're `commandKeys` of three keys
+  (`root.sorts`, `sortKeys`: `"gss": "sort:size"`), so a key it doesn't
+  know after `gs` is a bad command, and macros and counts work as for the
+  others. The button and a click in the menu go through vim too
+  (`vim.startCommand`: out of insert or visual mode first, then the keys:
+  `gs`, or `gs` and the clicked key; none hides the menu). They set
+  `:set sort` and `sortreverse` (`vim.sort`, `vim.sortReverse`, which
+  `Koil` binds; `settingChanged` updates, and an update with only the sort
+  changed isn't `moved`, so it's one change undo can take back, with the
+  cursor on its entry). Then the view stays where it was (`shownSort`:
+  every line moved, so following the cursor's would scroll the rest away),
+  scrolling only to show the cursor. Sorted by size or a date, each line
+  shows it, dimmed, four spaces after its end (`listing::info`: `1.2 KB`,
+  KB as 1000 bytes like macOS; `3 items`; `2026-10-06 14:03`, local time
+  through chrono), before a warning's or an error's message (`notes` in
+  Editor.qml). They come as `infos`, `{ id: text }` (`Rendered`, and
+  `Synced` with what sync read), so a line's goes with its ID wherever it's
+  moved or copied, and a new entry has none. Only the lines in view are
+  looked up (`firstAt` in the sorted hidden text). While the listing shows
+  them, the watcher doesn't skip writes to files (`DiskWatcher::writes`),
+  so a file written shows its new size or time; its line stays where it is
+  until the next update sorts it again. The sort isn't saved, like Koil's
+  other options.
 - **Changes on disk** (koil-core's `Koil::sync`; read its CLAUDE.md): the
   listing shows what changes on disk as it happens, keeping the user's
   edits. `Koil.watch()` (after every `showListing`, sync and answer) has a
   `notify` watcher watch what `Koil::watched` says, changed only if the
   dirs did (on macOS each change restarts the FSEvents stream). Its thread
-  skips reads, writes and events `Watched::affects` says can't matter, and
+  skips reads, writes (unless sorted by size or a date, see Sorting) and
+  events `Watched::affects` says can't matter, and
   queues `changedOnDisk` once per burst (`queued`). `syncTimer` then syncs
   (`syncListing`) 100 ms later, and not again for four times as long as
   the last sync took (a pattern's walk can be slow); not while a file is
@@ -778,8 +813,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   change only the ones in use, until Koil quits, so the Settings window
   doesn't show them. Their defaults (Cmd+0, `:set fs&`) are the saved values
   (vim's `default*` properties are bound to `settings`), not Koil's defaults.
-  Koil's own options (`:set hidden`, `gitignore`, `regex`) aren't saved, and
-  start off. Start in (`startDir`, empty for the home dir) is only read at
+  Koil's own options (`:set hidden`, `gitignore`, `regex`, `sort`,
+  `sortreverse`) aren't saved, and start off (sorted by name). Start in
+  (`startDir`, empty for the home dir) is only read at
   startup, with no path on the command line, so the Settings window writes
   it to `settings` alone. It's a dir or pattern as the path field takes it,
   read from the home dir (`Document.startDir`), so it can't open a file;

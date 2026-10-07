@@ -39,6 +39,11 @@ Item {
     // What the hover box shows for the text an icon hides: the text itself,
     // unless this gives something else (main.qml: the path an ID stands for).
     property var describeHidden: text => text
+    // What to show after a line that starts with an icon, by the text it
+    // hides: in the listing, an entry's size or a date, when it's sorted
+    // by one (see listing::info). Keyed by the ID, it goes with its line
+    // wherever the line is moved or copied.
+    property var infos: ({})
     // Vim's state for this editor while it edits another one (see
     // Vim.leaveBuffer), kept here for main.qml to give back.
     property var saved: null
@@ -674,6 +679,47 @@ Item {
                 }
             }
 
+            // What `infos` has for each line in view, dimmed, four spaces
+            // after the line's end (and a warning's or an error's message
+            // four spaces after it).
+            Layer {
+                id: notes
+
+                // The width of the note after the line ending at lineEnd,
+                // with the four spaces before it, in columns: 0 if none.
+                function columns(lineEnd) {
+                    const note = model.find(n => n.lineEnd === lineEnd);
+                    return note ? 4 + note.text.length : 0;
+                }
+
+                inputs: [view.infos, view.hidden, view.layout, view.viewport]
+                compute: () => {
+                    const list = [], hidden = view.hidden, t = editor.text, v = view.visibleRange();
+                    for (let i = view.vim.firstAt(hidden, v.from); i < hidden.length && hidden[i].at <= v.to; i++) {
+                        const h = hidden[i], ls = Txt.lineStart(t, h.at), text = view.infos[h.text];
+                        if (text && /^ *$/.test(t.slice(ls, h.at)))
+                            list.push({ lineEnd: Txt.lineEnd(t, h.at), text: text });
+                    }
+                    return list;
+                }
+
+                Repeater {
+                    model: notes.model
+
+                    Text {
+                        required property var modelData
+                        readonly property rect cell: view.cellAt(modelData.lineEnd)
+
+                        x: cell.x + 4 * spaceMetrics.advanceWidth
+                        y: cell.y + view.textBaseline - baselineOffset
+                        text: modelData.text
+                        font: editor.font
+                        color: view.theme.faint
+                        textFormat: Text.PlainText
+                    }
+                }
+            }
+
             // Koil's warnings and errors, as in VS Code: a wavy underline,
             // orange or red, and a message after the end of the line (an
             // error's, if the line has both). The pointer resting on either
@@ -790,12 +836,12 @@ Item {
 
                     model: diagnostics.messages
 
-                    // Four spaces after the line's end.
+                    // Four spaces after the line's end, or after its note.
                     Text {
                         required property var modelData
                         readonly property rect cell: view.cellAt(modelData.lineEnd)
 
-                        x: cell.x + 4 * spaceMetrics.advanceWidth
+                        x: cell.x + (4 + notes.columns(modelData.lineEnd)) * spaceMetrics.advanceWidth
                         y: cell.y + view.textBaseline - baselineOffset
                         text: modelData.message
                         font: editor.font
@@ -874,7 +920,7 @@ Item {
                         horizontalAlignment: modelData.left ? Text.AlignLeft : Text.AlignRight
                         text: modelData.label
                         font: editor.font
-                        color: modelData.current ? editor.color : Qt.tint(view.theme.base, view.theme.dark ? "#80ffffff" : "#80000000")
+                        color: modelData.current ? editor.color : view.theme.faint
                         textFormat: Text.PlainText
                     }
                 }

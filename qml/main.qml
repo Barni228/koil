@@ -34,6 +34,33 @@ ApplicationWindow {
     property var iconColors: ({})
     property var pendingIconColor: ["", ""]
     property var pendingLines: []
+    // What the listing shows after each entry's line, by its ID: its size
+    // or a date, when it's sorted by one (see Editor.infos).
+    property var infos: ({})
+    // How the listing shown is sorted (see showListing).
+    property string shownSort: ""
+    // What gs and a key sort the listing by (see Vim.sort), and with the
+    // key shifted the other way round: { key, by, label, first, other },
+    // as the sort menu shows them (`first` and `other` are each way).
+    readonly property var sorts: [
+        { key: "n", by: "name", label: qsTr("Name"), first: qsTr("A to Z"), other: qsTr("Z to A") },
+        { key: "v", by: "natural", label: qsTr("Natural"), first: "a2, a10, B", other: "B, a10, a2" },
+        { key: "e", by: "extension", label: qsTr("Extension"), first: qsTr("A to Z"), other: qsTr("Z to A") },
+        { key: "s", by: "size", label: qsTr("Size"), first: qsTr("Largest first"), other: qsTr("Smallest first") },
+        { key: "m", by: "modified", label: qsTr("Modified"), first: qsTr("Newest first"), other: qsTr("Oldest first") },
+        { key: "c", by: "created", label: qsTr("Created"), first: qsTr("Newest first"), other: qsTr("Oldest first") },
+        { key: "a", by: "accessed", label: qsTr("Accessed"), first: qsTr("Newest first"), other: qsTr("Oldest first") }
+    ]
+    // The keys of `sorts`, as Vim.commandKeys: "gss" is "sort:size", "gsS"
+    // "sortReverse:size".
+    readonly property var sortKeys: {
+        const keys = {};
+        for (const s of sorts) {
+            keys["gs" + s.key] = "sort:" + s.by;
+            keys["gs" + s.key.toUpperCase()] = "sortReverse:" + s.by;
+        }
+        return keys;
+    }
     // The parts of the regex in the path field (see Editor.pathSyntax), and
     // the path they're for.
     property var pathSyntax: []
@@ -147,14 +174,20 @@ ApplicationWindow {
     // `keep` (see listingSpot), it goes back to where it was, on its entry's
     // line if that's still there (or `from`'s), which stays where it was in
     // the view; so it does whenever the same location is shown again, as
-    // the same listing, or with other entries (:set hidden, gitignore). Vim
-    // stays in the path field if it was there.
+    // the same listing, or with other entries (:set hidden, gitignore). But
+    // when it's sorted another way, everything moves, and the view stays
+    // instead (scrolling only to show the cursor). Vim stays in the path
+    // field if it was there.
     function showListing(moved, from, keep) {
         const r = JSON.parse(koil.render());
         if (listing && !keep && (!moved || r.path === location))
             keep = listingSpot();
+        const sort = vim.sort + (vim.sortReverse ? " reversed" : "");
+        const resorted = sort !== shownSort;
+        shownSort = sort;
         iconColors = Object.assign({}, iconColors, r.colors);
         pendingIconColor = r.pendingColor;
+        infos = r.infos;
         location = r.path;
         const inPath = listing && activeView === pathView;
         activate(editorView);
@@ -171,7 +204,7 @@ ApplicationWindow {
         const line = i >= 0 ? i : keep ? keep.line : 0;
         const column = keep ? keep.column : 0; // 0: jumpTo puts it after the icon and two spaces
         const f = editorView.flickable;
-        const y = keep ? keep.contentY + (line - keep.line) * editorView.lineHeight : f.contentY;
+        const y = !keep ? f.contentY : resorted ? keep.contentY : keep.contentY + (line - keep.line) * editorView.lineHeight;
         // Before jumpTo, which then scrolls only if the line is out of view.
         // Entries that came or went above it don't move it.
         if (y !== f.contentY)
@@ -243,6 +276,8 @@ ApplicationWindow {
         if (r.moved) {
             showListing(true, "");
         } else {
+            if (!r.failed)
+                infos = r.infos;
             mergeListing(r, false);
             // The open dir was renamed.
             if (r.path !== location) {
@@ -389,8 +424,24 @@ ApplicationWindow {
             vim.gitignore = !vim.gitignore;
         else if (name === "regex")
             vim.regex = !vim.regex;
+        else if (name.startsWith("sort"))
+            sortBy(name.split(":")[1], name.startsWith("sortReverse"));
         else if (name === "back")
             leaveFile(false);
+    }
+
+    // Sorts the listing by `by` (one of Vim.sorts), the other way round if
+    // `reverse`, as :set sort and sortreverse do.
+    function sortBy(by, reverse) {
+        vim.sort = by;
+        vim.sortReverse = reverse;
+    }
+
+    // The sort button: types gs, which shows the sort menu, or hides it,
+    // with the keys going to the editor vim edits.
+    function toggleSortMenu() {
+        vim.startCommand(sortMenu.visible ? [] : ["g", "s"]);
+        activeView.textArea.forceActiveFocus();
     }
 
     // Enter in the listing: opens the dir or file on the cursor's line. On a
@@ -564,8 +615,9 @@ ApplicationWindow {
             vim.showError(r.message);
     }
 
-    // :set hidden, gitignore or regex. As in koil-cli, the listing is read
-    // with the settings it was shown with, and then shown with the new ones.
+    // :set hidden, gitignore, regex, sort or sortreverse. As in koil-cli,
+    // the listing is read with the settings it was shown with, and then
+    // shown with the new ones.
     function settingChanged() {
         if (listing)
             Qt.callLater(updateListing);
@@ -735,6 +787,8 @@ ApplicationWindow {
         showHidden: vim.showHidden
         gitignore: vim.gitignore
         regex: vim.regex
+        sort: vim.sort
+        sortReverse: vim.sortReverse
 
         onChangedOnDisk: {
             root.diskChanged = true;
@@ -797,7 +851,7 @@ ApplicationWindow {
             "g.": "hidden",
             "gi": "gitignore",
             "gr": "regex"
-        }, root.activeView === pathView ? {
+        }, root.sortKeys, root.activeView === pathView ? {
             "<S-CR>": "update"
         } : {}) : root.filePath ? ({
                 "-": "back"
@@ -830,6 +884,8 @@ ApplicationWindow {
         onShowHiddenChanged: root.settingChanged()
         onGitignoreChanged: root.settingChanged()
         onRegexChanged: root.settingChanged()
+        onSortChanged: root.settingChanged()
+        onSortReverseChanged: root.settingChanged()
         onHelpRequested: topic => {
             if (!help.show(topic))
                 vim.showError("E149: Sorry, no help for " + topic);
@@ -846,7 +902,8 @@ ApplicationWindow {
     // Over the listing, a field with the path of what's listed, which vim
     // edits like the listing (Tab goes from one to the other, Enter opens
     // the path, and Shift+Enter opens it but stays in the field), and
-    // Koil's options beside it, which g., gi and gr toggle too.
+    // Koil's options beside it, which g., gi and gr toggle too, and the
+    // sort menu's button (gs).
     Rectangle {
         id: pathBar
 
@@ -917,7 +974,32 @@ ApplicationWindow {
                 shortcuts: ["gr"]
                 onToggled: vim.regex = checked
             }
+            // Checked while the listing isn't sorted as by default.
+            IconButton {
+                id: sortButton
+
+                theme: theme
+                iconPath: "M2 4 H14 M2 8 H10 M2 12 H6"
+                checked: vim.sort !== "name" || vim.sortReverse
+                tip: qsTr("Sort")
+                shortcuts: ["gs"]
+                onClicked: root.toggleSortMenu()
+            }
         }
+    }
+
+    // What gs and a key sort by, under the sort button, while gs waits for
+    // the key (the button types gs too). A click on one sorts by it.
+    SortMenu {
+        id: sortMenu
+
+        theme: theme
+        sorts: root.sorts
+        sort: vim.sort
+        reverse: vim.sortReverse
+        visible: root.listing && /gs$/.test(vim.pendingKeys)
+        anchor: sortButton
+        onPicked: key => vim.startCommand(["g", "s", key])
     }
 
     Editor {
@@ -940,6 +1022,7 @@ ApplicationWindow {
         problems: root.problems
         // An ID as the path it stands for, so the hover says whose it is.
         describeHidden: text => koil.idPath(text) || text
+        infos: root.listing ? root.infos : ({})
         onActivated: root.activate(editorView)
         onEdited: {
             root.modified = true;

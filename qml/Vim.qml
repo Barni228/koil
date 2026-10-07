@@ -62,6 +62,11 @@ QtObject {
     property bool showHidden: false
     property bool gitignore: false
     property bool regex: false
+    // Koil's :set sort and sortreverse: what the listing is sorted by (one
+    // of `sorts`, see SortBy in koil-core), and whether the other way round.
+    property string sort: "name"
+    property bool sortReverse: false
+    readonly property var sorts: ["name", "natural", "extension", "size", "modified", "created", "accessed"]
     // Keys that run one of Koil's commands in normal mode instead of what
     // they do in vim, as { keys: name }, like { "-": "parent" }: " " is
     // Space and "<CR>" Enter. Only at the start of a command, so "d-" still
@@ -559,6 +564,15 @@ QtObject {
     // enterBuffer: { cursor, wantCol, undoStack, redoStack, hidden,
     // lastVisual }.
     function leaveBuffer() {
+        toNormal();
+        commitChange(true); // even in a macro: the step is this buffer's
+        return { cursor: cursor, wantCol: wantCol, undoStack: undoStack, redoStack: redoStack,
+            hidden: hidden, lastVisual: lastVisual };
+    }
+
+    // Ends the mode vim is in (back to normal), the command line, a run and
+    // the extra cursors, and forgets the keys typed so far.
+    function toNormal() {
         interrupt();
         if (commandLine !== "")
             commandLineKey("<Esc>");
@@ -570,13 +584,22 @@ QtObject {
             setMode("normal");
             setCursor(clampNormal(bufferText(), cursor));
         }
-        commitChange(true); // even in a macro: the step is this buffer's
         clearCursors();
         keys = [];
         pendingKeys = "";
         awaitingReplaceChar = false;
-        return { cursor: cursor, wantCol: wantCol, undoStack: undoStack, redoStack: redoStack,
-            hidden: hidden, lastVisual: lastVisual };
+    }
+
+    // Starts a command from outside vim, as if `tokens` were typed in normal
+    // mode, which it goes to first (see toNormal): Koil's sort button types
+    // gs, which shows the sort menu, and a click there types gs and its
+    // sort's key. No tokens only forgets the keys typed so far.
+    function startCommand(tokens) {
+        batched(() => {
+            toNormal();
+            for (const t of tokens)
+                feed(t);
+        });
     }
 
     // Edits the buffer vim was just given, from the state leaveBuffer gave
@@ -3596,11 +3619,13 @@ QtObject {
             showError("E492: Not an editor command: " + c);
     }
 
-    // The options :set knows: full name, short name, property, default,
-    // and for a number option its range. fontsize isn't vim's (gvim has
+    // The options :set knows: full name, short name (if any), property,
+    // default, for a number option its range, and for a string option other
+    // than guifont the values it can have. fontsize isn't vim's (gvim has
     // guifont); its short name is vim's for fsync, which Koil hasn't.
     // guifont is only the family (gvim's also takes a size, like Menlo:h14).
-    // hidden, gitignore and regex are Koil's (vim's hidden is about buffers).
+    // hidden, gitignore, regex, sort and sortreverse are Koil's (vim's hidden
+    // is about buffers; its sr, shiftround, Koil hasn't).
     readonly property var options: [
         { name: "fontsize", short: "fs", property: "fontSize", default: defaultFontSize,
             min: minFontSize, max: maxFontSize },
@@ -3610,7 +3635,9 @@ QtObject {
         { name: "sidescrolloff", short: "siso", property: "sideScrollOff", default: 4, min: 0, max: 999 },
         { name: "hidden", short: "hid", property: "showHidden", default: false },
         { name: "gitignore", short: "ignore", property: "gitignore", default: false },
-        { name: "regex", short: "re", property: "regex", default: false }
+        { name: "regex", short: "re", property: "regex", default: false },
+        { name: "sort", property: "sort", default: "name", values: sorts },
+        { name: "sortreverse", short: "sr", property: "sortReverse", default: false }
     ]
 
     // An option as :set shows it: "  nu", "nonu", "  fs=16" or
@@ -3624,8 +3651,8 @@ QtObject {
     // a number option "fs=16" (or "fs:16"), "fs+=2", "fs-=2", "fs^=2"
     // (multiplies), "fs" or "fs?" (shows it) and "fs&", and for a string
     // option "gfn=Fira\ Code" (a backslash escapes a space; empty is the
-    // default), "gfn", "gfn?" and "gfn&". No args lists the options that
-    // aren't at their default.
+    // default) or "sort=size", "gfn", "gfn?" and "gfn&". No args lists the
+    // options that aren't at their default.
     function setOptions(args) {
         const words = args.match(/(?:\\.|\S)+/g) || [];
         const shown = [];
@@ -3649,6 +3676,13 @@ QtObject {
                 shown.push(optionLabel(o));
             } else if (suffix === "&") {
                 vim[o.property] = o.default;
+            } else if (isString && o.values) {
+                const value = m[5].replace(/\\(.)/g, "$1") || o.default;
+                if (!o.values.includes(value)) {
+                    showError("E474: Invalid argument: " + w + " (" + o.values.join(", ") + ")");
+                    return;
+                }
+                vim[o.property] = value;
             } else if (isString) {
                 const value = m[5].replace(/\\(.)/g, "$1");
                 if (value)

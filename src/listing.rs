@@ -9,12 +9,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use devicons::Theme;
 use koil_core::apply::Undo;
 use koil_core::{
     Action, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil, KoilError,
-    OpenError, Pattern, Settings, UpdateError, UpdateOpenError, Warning, with_slashes,
+    OpenError, Pattern, Settings, SortBy, UpdateError, UpdateOpenError, Warning, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -72,29 +73,33 @@ pub struct Rendered {
     pub colors: HashMap<String, [String; 2]>,
     /// The color of a pending entry's icon (see `PENDING_COLOR`).
     pub pending_color: [&'static str; 2],
+    /// What to show after the line of each ID (see [`info`]).
+    pub infos: HashMap<String, String>,
 }
 
 /// The listing of what `koil` has open.
 pub fn render(koil: &Koil) -> Rendered {
+    let entries = koil.listing();
     let mut rendered = Rendered {
         path: show_location(koil),
         pending_color: PENDING_COLOR,
+        infos: infos(koil, &entries),
         ..Rendered::default()
     };
     // The text's length, kept rather than counted for each line.
     let mut length = 0;
-    for entry in koil.listing() {
+    for entry in &entries {
         if !rendered.names.is_empty() {
             rendered.text.push('\n');
             length += 1;
         }
-        let line = entry_line(koil, &entry, &mut rendered.colors);
+        let line = entry_line(koil, entry, &mut rendered.colors);
         rendered
             .hidden
             .extend(line.hidden.map(|h| Hidden { at: length, ..h }));
         rendered.text.push_str(&line.text);
         length += utf16_len(&line.text);
-        rendered.names.push(entry_name(&entry));
+        rendered.names.push(entry_name(entry));
     }
     rendered
 }
@@ -168,6 +173,76 @@ fn apart(color: &str, dark: bool) -> String {
         false => c + (u8::MAX - c) / 5,
     });
     format!("#{}", moved.map(|c| format!("{c:02x}")).collect::<String>())
+}
+
+/// What the listing is sorted by (see `Koil::metadata`), for the entry `id`,
+/// which the editor shows after its line: a file's size or how many entries
+/// a dir has, or when it was modified, created or accessed. None when it's
+/// sorted by name, or if it can't be read.
+pub fn info(koil: &Koil, id: Id) -> Option<String> {
+    let by = koil.settings().sort.by;
+    if !by.reads_metadata() {
+        return None;
+    }
+    let meta = koil.metadata(id)?;
+    match by {
+        SortBy::Size if meta.is_dir => meta.entries.map(show_entries),
+        SortBy::Size => Some(show_size(meta.size)),
+        SortBy::Modified => meta.modified.map(show_time),
+        SortBy::Created => meta.created.map(show_time),
+        SortBy::Accessed => meta.accessed.map(show_time),
+        SortBy::Name | SortBy::Natural | SortBy::Extension => None,
+    }
+}
+
+/// The [`info`] of the ID of each of `entries` that has one, by the ID as
+/// its icon hides it.
+fn infos<'a>(koil: &Koil, entries: impl IntoIterator<Item = &'a Entry>) -> HashMap<String, String> {
+    if !koil.settings().sort.by.reads_metadata() {
+        return HashMap::new();
+    }
+    let ids = entries.into_iter().filter_map(|e| e.id);
+    ids.filter_map(|id| Some((id.0.to_string(), info(koil, id)?)))
+        .collect()
+}
+
+/// `bytes` as people read a size, with a KB of 1000 bytes, as macOS counts:
+/// `340 B`, `1.2 KB`, `56 MB`.
+fn show_size(bytes: u64) -> String {
+    if bytes < 1000 {
+        return format!("{bytes} B");
+    }
+    let mut size = bytes as f64;
+    let mut shown = String::new();
+    for unit in ["KB", "MB", "GB", "TB", "PB", "EB"] {
+        size /= 1000.0;
+        // A decimal below 10 (1.2 KB, but 12 KB), and 999,999 bytes are
+        // 1.0 MB, not 1000 KB.
+        let number = match size < 9.95 {
+            true => format!("{size:.1}"),
+            false => format!("{size:.0}"),
+        };
+        shown = format!("{number} {unit}");
+        if size < 999.5 {
+            break;
+        }
+    }
+    shown
+}
+
+/// How many entries a dir has: `empty`, `1 item`, `12 items`.
+fn show_entries(entries: u64) -> String {
+    match entries {
+        0 => "empty".to_string(),
+        1 => "1 item".to_string(),
+        n => format!("{n} items"),
+    }
+}
+
+/// `time` in the local time zone, like `2026-10-06 14:03`.
+fn show_time(time: SystemTime) -> String {
+    let time = chrono::DateTime::<chrono::Local>::from(time);
+    time.format("%Y-%m-%d %H:%M").to_string()
 }
 
 /// A listing as the user edited it.
@@ -453,6 +528,9 @@ pub struct Synced {
     pub message: String,
     /// Whether `message` is an error: nothing changed.
     pub failed: bool,
+    /// What to show after the line of each ID (see [`info`]), as it is on
+    /// disk now.
+    pub infos: HashMap<String, String>,
 }
 
 /// A question about the conflicts of one kind, which Yes resolves (see
@@ -481,7 +559,12 @@ pub fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
             };
         }
     };
+    let added = synced.edits.iter().filter_map(|edit| match edit {
+        Edit::Add(entry) | Edit::Change { to: entry, .. } => Some(entry),
+        Edit::Remove(_) => None,
+    });
     Synced {
+        infos: infos(koil, parsed.entries.iter().chain(added)),
         merge: match synced.moved {
             true => Merge::default(),
             false => merge(koil, text, &parsed, &synced.edits),
@@ -528,7 +611,7 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
         .collect();
     let sorted = existing
         .windows(2)
-        .all(|w| listing_order(w[0].0, w[1].0).is_le());
+        .all(|w| koil.compare(w[0].0, w[1].0).is_le());
     // What each changed line becomes (nothing, if it goes), and the lines
     // that go before each line (or at the end, after the last).
     let mut replaced: BTreeMap<usize, Option<Line>> = BTreeMap::new();
@@ -547,7 +630,7 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
             }
             Edit::Add(entry) => {
                 let line = entry_line(koil, entry, &mut colors);
-                let at = insert_at(parsed, &existing, sorted, entry, lines.len());
+                let at = insert_at(koil, parsed, &existing, sorted, entry, lines.len());
                 inserted.entry(at).or_default().push((entry.clone(), line));
             }
         }
@@ -579,7 +662,7 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
         let mut new = Vec::new();
         loop {
             if let Some(mut lines) = inserted.remove(&i) {
-                lines.sort_by(|(a, _), (b, _)| listing_order(a, b));
+                lines.sort_by(|(a, _), (b, _)| koil.compare(a, b));
                 new.extend(lines.into_iter().map(|(_, line)| line));
             }
             match replaced.remove(&i) {
@@ -595,21 +678,14 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
     merged
 }
 
-/// Where `render` lists `a` against `b`: entries with IDs first (dirs, then
-/// files, each by name), then new ones by name.
-fn listing_order(a: &Entry, b: &Entry) -> std::cmp::Ordering {
-    (a.id.is_none().cmp(&b.id.is_none()))
-        .then(b.is_dir.cmp(&a.is_dir))
-        .then_with(|| a.name.cmp(&b.name))
-}
-
 /// The line a new line for `entry` goes before (`lines`, the number of
 /// lines, for after the last one): one with an ID before the first of the
 /// `existing` entries (those with IDs, and their lines; `sorted` if they're
-/// in `render`'s order, as they usually are) that `render` lists after it,
-/// or after the last of them; a new one (or one with an ID, if no other
-/// has one) after the last entry.
+/// in `render`'s order, as they usually are) that `render` lists after it
+/// (`Koil::compare`), or after the last of them; a new one (or one with an
+/// ID, if no other has one) after the last entry.
 fn insert_at(
+    koil: &Koil,
     parsed: &Parsed,
     existing: &[(&Entry, usize)],
     sorted: bool,
@@ -619,7 +695,7 @@ fn insert_at(
     if entry.id.is_some()
         && let Some(&(_, last)) = existing.last()
     {
-        let after = |&(e, _): &(&Entry, usize)| listing_order(e, entry).is_gt();
+        let after = |&(e, _): &(&Entry, usize)| koil.compare(e, entry).is_gt();
         let first = match sorted {
             true => Some(existing.partition_point(|e| !after(e))).filter(|&i| i < existing.len()),
             false => existing.iter().position(after),

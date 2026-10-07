@@ -1,6 +1,6 @@
 use std::fs;
 
-use koil_core::{Entry, Koil, Settings};
+use koil_core::{Entry, Koil, Settings, Sort, SortBy};
 use tempfile::TempDir;
 
 use super::*;
@@ -537,6 +537,104 @@ fn test_settings() {
     );
     assert!(updated.ok && !updated.moved);
     assert!(koil.settings().regex);
+
+    // and so does the order
+    let rendered = render(&koil);
+    let settings = Settings {
+        sort: Sort {
+            by: SortBy::Name,
+            reverse: true,
+        },
+        ..settings
+    };
+    let updated = update(
+        &mut koil,
+        &rendered.path,
+        &rendered.text,
+        &rendered.hidden,
+        &settings,
+        None,
+    );
+    assert!(updated.ok && !updated.moved);
+    assert_eq!(
+        render(&koil).names,
+        ["../", "dir/", "notes", "file.rs", ".hidden"]
+    );
+}
+
+/// The settings with the listing sorted by `by`.
+fn sorted_by(by: SortBy) -> Settings {
+    Settings {
+        sort: Sort { by, reverse: false },
+        ..Settings::default()
+    }
+}
+
+/// The ID of `name` in the open dir, as its icon hides it.
+fn id_text(koil: &Koil, name: &str) -> String {
+    let id = koil.id_of(&koil.current_dir().join(name)).unwrap();
+    id.0.to_string()
+}
+
+#[test]
+fn test_show_size() {
+    let sizes = [0, 999, 1000, 1234, 9949, 9950, 12_345, 999_499];
+    assert_eq!(
+        sizes.map(show_size),
+        [
+            "0 B", "999 B", "1.0 KB", "1.2 KB", "9.9 KB", "10 KB", "12 KB", "999 KB"
+        ]
+    );
+    assert_eq!(show_size(999_999), "1.0 MB");
+    assert_eq!(show_size(5_600_000_000), "5.6 GB");
+    assert_eq!(show_size(u64::MAX), "18 EB");
+}
+
+#[test]
+fn test_infos() {
+    let (temp, mut koil) = koil();
+    fs::write(temp.path().join("notes"), "x".repeat(1234)).unwrap();
+    fs::write(temp.path().join("dir/a"), "").unwrap();
+    // nothing to show when sorted by name
+    assert!(render(&koil).infos.is_empty());
+
+    koil.set_settings(sorted_by(SortBy::Size)).unwrap();
+    let rendered = render(&koil);
+    assert_eq!(rendered.names, ["dir/", "notes", "file.rs"]);
+    let info = |name| rendered.infos[&id_text(&koil, name)].as_str();
+    assert_eq!(
+        [info("dir"), info("notes"), info("file.rs")],
+        ["1 item", "1.2 KB", "0 B"]
+    );
+
+    koil.set_settings(sorted_by(SortBy::Modified)).unwrap();
+    let rendered = render(&koil);
+    let date = &rendered.infos[&id_text(&koil, "notes")];
+    // like 2026-10-06 14:03
+    let digits: String = date.chars().filter(char::is_ascii_digit).collect();
+    assert_eq!((date.len(), digits.len()), (16, 12), "{date}");
+}
+
+#[test]
+fn test_sync_sorted() {
+    let (temp, mut koil) = koil();
+    let root = temp.path();
+    fs::write(root.join("notes"), "1234").unwrap();
+    koil.set_settings(sorted_by(SortBy::Size)).unwrap();
+    let rendered = render(&koil);
+    assert_eq!(rendered.names, ["dir/", "notes", "file.rs"]);
+    // new files go where they sort, with what's shown after them
+    fs::write(root.join("big"), "x".repeat(100)).unwrap();
+    fs::write(root.join("mid"), "12").unwrap();
+    let (synced, text, hidden) = synced_text(&mut koil, &rendered.text, &rendered.hidden);
+    assert_eq!(names(&text), ["dir/", "big", "notes", "mid", "file.rs"]);
+    assert_eq!(synced.infos[&id_text(&koil, "big")], "100 B");
+    // a file written to stays where it is, but shows its new size
+    fs::write(root.join("file.rs"), "x".repeat(5000)).unwrap();
+    let (synced, text, _) = synced_text(&mut koil, &text, &hidden);
+    assert!(synced.merge.edits.is_empty());
+    assert_eq!(names(&text), ["dir/", "big", "notes", "mid", "file.rs"]);
+    assert_eq!(synced.infos[&id_text(&koil, "file.rs")], "5.0 KB");
 }
 
 #[test]
