@@ -182,13 +182,15 @@ ApplicationWindow {
     // Otherwise it starts over: undo mustn't bring back another dir's
     // entries, which Koil would read as this one's. The cursor goes to the
     // entry `from` (the dir `-` came from), or else to the first one. With
-    // `keep` (see listingSpot), it goes back to where it was, on its entry's
-    // line if that's still there (or `from`'s), which stays where it was in
-    // the view; so it does whenever the same location is shown again, as
-    // the same listing, or with other entries (:set hidden, gitignore). But
-    // when it's sorted another way, everything moves, and the view stays
-    // instead (scrolling only to show the cursor). Vim stays in the path
-    // field if it was there.
+    // `keep` (see listingSpot), it goes back to where it was: the same line
+    // and the same view, even if an update moved its entry (a rename, a new
+    // one, which go where they sort); so it does whenever the same location
+    // is shown again, as the same listing, with other entries (:set hidden,
+    // gitignore), or sorted another way. With `from` too (back from a file),
+    // it goes to `from`'s line, which stays where the cursor was in the
+    // view, unless it's sorted another way: everything moved, and the view
+    // stays instead (scrolling only to show the cursor). Vim stays in the
+    // path field if it was there.
     function showListing(moved, from, keep) {
         const r = JSON.parse(koil.render());
         if (listing && !keep && (!moved || r.path === location))
@@ -209,10 +211,7 @@ ApplicationWindow {
             listing = true;
             load(r.text, r.hidden, "");
         }
-        // An entry an update moved (a rename, a new one, which go where
-        // they sort) takes the cursor with it.
-        const name = from || (keep ? keep.name : "");
-        const i = name ? r.names.indexOf(name) : -1;
+        const i = from ? r.names.indexOf(from) : -1;
         const line = i >= 0 ? i : keep ? keep.line : 0;
         const column = keep ? keep.column : 0; // 0: jumpTo puts it after the icon and two spaces
         const f = editorView.flickable;
@@ -345,7 +344,7 @@ ApplicationWindow {
 
     // Sorts the listing again once every dir's size is counted (an update,
     // like gs), as it was sorted before they were (see sortedCounting),
-    // keeping the cursor on its entry. Not while the listing can't change
+    // keeping the cursor on its line. Not while the listing can't change
     // under the user (as syncListing), or they're halfway through
     // something: typing, a selection, a command (it waits for those). Not
     // if the update would do more than sort it, opening a path typed in the
@@ -654,17 +653,14 @@ ApplicationWindow {
         });
     }
 
-    // Where the cursor is in the listing (its line's name, line and column)
-    // and how far it's scrolled, for showListing to keep when it shows the
-    // listing from scratch (an apply, its undo, back from a file). The
-    // listing's cursor, also while vim is in the path field.
+    // Where the cursor is in the listing (its line and column) and how far
+    // it's scrolled, for showListing to keep when it shows the listing from
+    // scratch (an apply, its undo, back from a file). The listing's cursor,
+    // also while vim is in the path field.
     function listingSpot() {
         const t = editorView.textArea.text;
         const p = activeView === editorView ? vim.cursor : editorView.saved?.cursor ?? 0;
-        const ls = Txt.lineStart(t, p), text = t.slice(ls, Txt.lineEnd(t, ls));
-        const gap = text.indexOf("  ");
         return {
-            name: gap < 0 ? "" : text.slice(gap + 2).trim(),
             line: Txt.lineOf(t, p) - 1,
             column: Txt.column(t, p),
             contentY: editorView.flickable.contentY

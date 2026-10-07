@@ -285,9 +285,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   hidden entries would be deleted, other dirs' IDs moved here). `from` puts
   the cursor on the dir `-` came from. Whenever the same location is shown
   again (the same listing, or other entries of it: `:set hidden`,
-  `gitignore`), the cursor stays on its entry (`listingSpot`), even if the
-  update moved it (a rename or a new entry goes where it sorts), at the
-  same column and the same place in the view, else on the same line.
+  `gitignore`, a sort), the cursor stays on the same line (`listingSpot`),
+  even if the update moved its entry (a rename or a new entry goes where
+  it sorts), at the same column and the same place in the view.
 - **Apply and undo**: `Space Space`, `:w`, File > Apply Changes… update,
   then `ConfirmDialog` lists `listing::actions` (paths relative to
   the open dir; `Koil::changes`, so a swap is its two renames, not the
@@ -305,9 +305,9 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `actions()` kept, given to `Koil::apply_only`, so only what the user saw
   is applied) and forgets the rest; with none picked, it discards them all
   ("Discard these 3 changes?", "3 changes discarded"). Then vim starts
-  over (koil refreshed: new IDs for renamed paths), with the cursor where it was (`listingSpot`: on its
-  entry's line, else the same line; the listing's cursor even while vim is
-  in the path field) and the view as it was; so does undoing an apply. `u` or Cmd+Z with nothing left to undo in vim emits
+  over (koil refreshed: new IDs for renamed paths), with the cursor where it was (`listingSpot`: the
+  same line; the listing's cursor even while vim is in the path field) and
+  the view as it was; so does undoing an apply. `u` or Cmd+Z with nothing left to undo in vim emits
   `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
   buffer back past an update) and asks to run koil's undo, listing its
   steps; koil refuses while changes are pending. Not from the path field,
@@ -334,9 +334,10 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `:set sort` and `sortreverse` (`vim.sort`, `vim.sortReverse`, which
   `Koil` binds; `settingChanged` updates, and an update with only the sort
   changed isn't `moved`, so it's one change undo can take back, with the
-  cursor on its entry). Then the view stays where it was (`shownSort`:
-  every line moved, so following the cursor's would scroll the rest away),
-  scrolling only to show the cursor. Sorted by size or a date, each line
+  cursor and the view where they were). Back from a file, sorted another
+  way meanwhile, the view stays too (`shownSort`: every line moved, so
+  following the file's would scroll the rest away), scrolling only to
+  show the cursor. Sorted by size or a date, each line
   shows it, dimmed, after its end (`listing::notes`: `1.2 KB`,
   KB as 1000 bytes like macOS; `2026-10-06 14:03`, local time
   through chrono), before a warning's or an error's message (`notes` in
