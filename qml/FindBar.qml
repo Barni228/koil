@@ -68,15 +68,19 @@ FocusScope {
         field.input.forceActiveFocus();
         field.selectAll();
         const seeded = seed ? (useRegex ? Txt.escapeRegExp(seed.text) : seed.text) : query;
-        if (seeded !== query)
+        if (seeded !== query) {
+            findField.remember();
             query = seeded; // which searches, see onQueryChanged
-        else
+        } else {
             search();
+        }
         if (!withReplace)
             findField.selectAll();
     }
 
     function close() {
+        findField.remember();
+        replaceField.remember();
         active = false;
         editor.forceActiveFocus();
     }
@@ -168,6 +172,7 @@ FocusScope {
     }
 
     function next() {
+        findField.remember();
         refresh();
         const n = matches.length;
         if (!n)
@@ -178,6 +183,7 @@ FocusScope {
     }
 
     function previous() {
+        findField.remember();
         refresh();
         const n = matches.length;
         if (!n)
@@ -268,6 +274,8 @@ FocusScope {
     // Replaces the match at the cursor and moves to the next one. When the
     // cursor isn't at a match, only moves to the next one, as in VS Code.
     function replaceOne() {
+        findField.remember();
+        replaceField.remember();
         refresh();
         if (current < 0) {
             next();
@@ -301,6 +309,8 @@ FocusScope {
     // Replaces every match, as one edit and one undo step. Hidden text
     // between the matches stays hidden.
     function replaceAll() {
+        findField.remember();
+        replaceField.remember();
         const t = editor.text, found = scan(t);
         if (!found.length)
             return;
@@ -448,11 +458,48 @@ FocusScope {
         property bool invalid
         default property alias tools: toolRow.data
 
+        // What the field had when it was used, oldest first (see remember),
+        // which Up and Down put back (see browse). Kept until Koil quits.
+        property var history: []
+        // While browsing: the entry shown (history.length for `typed`), what
+        // the field had before, and what it shows now (once it's edited,
+        // browsing starts over).
+        property var browsing: null
+
         signal enterPressed(int modifiers)
         signal tabPressed(bool backward)
 
         function selectAll() {
             textInput.selectAll();
+        }
+
+        // Puts the text last in the history, once, keeping the newest 100.
+        function remember() {
+            const t = textInput.text;
+            browsing = null;
+            if (t === "")
+                return;
+            const list = history.filter(h => h !== t);
+            list.push(t);
+            history = list.slice(-100);
+        }
+
+        // Puts in the entry before (-1) or after (1) the one shown, with the
+        // cursor at its end. Entries that are what the field had before are
+        // skipped, as they'd change nothing, and after the newest it's that
+        // again.
+        function browse(step) {
+            const t = textInput.text;
+            const b = browsing && browsing.shown === t ? browsing : { index: history.length, typed: t };
+            let i = b.index + step;
+            while (i >= 0 && i < history.length && history[i] === b.typed)
+                i += step;
+            if (i < 0 || i > history.length)
+                return;
+            const text = i < history.length ? history[i] : b.typed;
+            browsing = { index: i, typed: b.typed, shown: text };
+            textInput.text = text;
+            textInput.cursorPosition = text.length;
         }
 
         implicitHeight: 26 * bar.zoom
@@ -485,6 +532,9 @@ FocusScope {
                     bar.close();
                 else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
                     field.tabPressed(event.key === Qt.Key_Backtab);
+                else if ((event.key === Qt.Key_Up || event.key === Qt.Key_Down)
+                         && !(event.modifiers & ~Qt.KeypadModifier))
+                    field.browse(event.key === Qt.Key_Up ? -1 : 1);
                 else
                     return;
                 event.accepted = true;

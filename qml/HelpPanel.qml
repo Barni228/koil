@@ -172,7 +172,8 @@ Popup {
                     "Next or previous find bar match."],
                 [isMac ? "`⌘⌥F`" : "`Ctrl+H`", "Find and replace."],
                 [isMac ? "`⌃⌥C`  `⌃⌥W`  `⌃⌥R`" : "`Alt+C`  `Alt+W`  `Alt+R`",
-                    "In the find bar: match case, whole word, regular expression."]
+                    "In the find bar: match case, whole word, regular expression."],
+                ["`↑`  `↓`", "In the find bar: earlier and later finds (or replacements)."]
             ]
         },
         {

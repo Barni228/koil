@@ -847,7 +847,11 @@ the scratchpad (see Scratchpad).
   search highlights while it's open; Esc in normal mode (`highlightsCleared`)
   closes it. Replace All is one `replaceRange` over the first to last match,
   keeping the hidden text between matches. On Windows, Ctrl+F is Find, not
-  vim's page down.
+  vim's page down. Each field keeps a history (`Field.remember`: the newest
+  100, until Koil quits) of what it had when it was used (a match moved to,
+  a replace, the bar closed, or a query replaced by Find's seed), and Up
+  and Down put those back (`browse`) as the path history does, apart from
+  vim's `/` history (the bar's query isn't a vim pattern).
 - **Theme and zoom**: `Theme` (one, in main.qml, passed to every control)
   takes its colors from the editor's palette, so they follow the light or dark
   theme. When the theme changes, a `Palette` emits only `changed`, not its

@@ -1874,6 +1874,55 @@ TestCase {
         findBar.close();
     }
 
+    // Older entries come from other tests, so this stays among its own.
+    function test_findHistory() {
+        load("one two three");
+        findBar.open(false);
+        findBar.query = "two";
+        findBar.next();
+        findBar.query = "three";
+        findBar.next();
+        findBar.query = "tw";
+        keyClick(Qt.Key_Up);
+        compare(findBar.query, "three");
+        keyClick(Qt.Key_Up);
+        compare(findBar.query, "two");
+        compare(vim.cursor, 4); // it searches, as typing does
+        keyClick(Qt.Key_Down);
+        compare(findBar.query, "three");
+        keyClick(Qt.Key_Down);
+        compare(findBar.query, "tw");
+        keyClick(Qt.Key_Down);
+        compare(findBar.query, "tw");
+        keyClick(Qt.Key_Up, Qt.ShiftModifier);
+        compare(findBar.query, "tw");
+        // What the field has is skipped, and an edit starts over.
+        findBar.query = "three";
+        keyClick(Qt.Key_Up);
+        compare(findBar.query, "two");
+        findBar.query = "x";
+        keyClick(Qt.Key_Up);
+        compare(findBar.query, "three");
+        // Using one puts it last.
+        findBar.query = "two";
+        findBar.previous();
+        findBar.query = "";
+        keyClick(Qt.Key_Up);
+        compare(findBar.query, "two");
+        keyClick(Qt.Key_Up);
+        compare(findBar.query, "three");
+        findBar.close();
+        // The replace field has its own.
+        findBar.open(true);
+        findBar.replacement = "3";
+        findBar.replaceAll();
+        findBar.replacement = "";
+        keyClick(Qt.Key_Up);
+        compare(findBar.replacement, "3");
+        compare(findBar.query, "three");
+        findBar.close();
+    }
+
     // ---- Help ----------------------------------------------------------------
 
     function test_helpSearch() {
