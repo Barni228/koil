@@ -72,7 +72,8 @@ Popup {
                     + "the path."],
                 ["`gs`", "Sort: shows by what, then a key picks it, like `gss` by size (biggest first) and "
                     + "`gsS` the other way round. Dirs stay first. By size or a date, each line shows it after "
-                    + "its end (a dir's size is how many entries it has)."],
+                    + "its end. A dir's size is counted in the background, its dots coming and going until it "
+                    + "is; once all are, the dirs are sorted by them."],
                 [isMac ? "`⇧⌘O`" : "`Ctrl+Shift+O`", "Open a folder (`" + cmdKey + "O`: a file)."]
             ]
         },

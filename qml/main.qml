@@ -35,10 +35,18 @@ ApplicationWindow {
     property var pendingIconColor: ["", ""]
     property var pendingLines: []
     // What the listing shows after each entry's line, by its ID: its size
-    // or a date, when it's sorted by one (see Editor.infos).
+    // or a date, when it's sorted by one (see Editor.infos). Sorted by
+    // size, `busyInfos` has the dirs whose sizes are being counted (see
+    // pollSizes), whose notes show `infoDots` of their three dots.
     property var infos: ({})
-    // How the listing shown is sorted (see showListing).
+    property var busyInfos: ({})
+    property bool counting: false
+    property int infoDots: 1
+    // How the listing shown is sorted (see showListing), and whether it
+    // was sorted before every dir's size was counted, so it's sorted again
+    // once they are (see sortCounted).
     property string shownSort: ""
+    property bool sortedCounting: false
     // What gs and a key sort the listing by (see Vim.sort), and with the
     // key shifted the other way round: { key, by, label, first, other },
     // as the sort menu shows them (`first` and `other` are each way).
@@ -183,11 +191,12 @@ ApplicationWindow {
         if (listing && !keep && (!moved || r.path === location))
             keep = listingSpot();
         const sort = vim.sort + (vim.sortReverse ? " reversed" : "");
-        const resorted = sort !== shownSort;
+        const resorted = sort !== shownSort || sortedCounting && !r.busy.length;
         shownSort = sort;
+        sortedCounting = r.busy.length > 0;
         iconColors = Object.assign({}, iconColors, r.colors);
         pendingIconColor = r.pendingColor;
-        infos = r.infos;
+        setNotes(r);
         location = r.path;
         const inPath = listing && activeView === pathView;
         activate(editorView);
@@ -277,7 +286,7 @@ ApplicationWindow {
             showListing(true, "");
         } else {
             if (!r.failed)
-                infos = r.infos;
+                setNotes(r);
             mergeListing(r, false);
             // The open dir was renamed.
             if (r.path !== location) {
@@ -294,6 +303,58 @@ ApplicationWindow {
         // A pattern's can take a while: not more than a fifth of the time.
         syncTimer.interval = Math.max(100, 4 * (Date.now() - started));
         askConflicts(r.questions);
+    }
+
+    // Takes what the listing shows after its lines (see listing::Notes):
+    // all of it, or with `sizes`, the dirs' sizes as far as they're
+    // counted (see Koil.dirSizes), which change only those.
+    function setNotes(notes, sizes) {
+        const busy = {};
+        for (const id of notes.busy)
+            busy[id] = true;
+        if (!sizes) {
+            infos = notes.infos;
+        } else {
+            // A dir that can't be read has none.
+            const changed = Object.keys(busyInfos).some(id => infos[id] !== notes.infos[id]);
+            if (changed) {
+                const all = Object.assign({}, infos);
+                for (const id in busyInfos)
+                    delete all[id];
+                infos = Object.assign(all, notes.infos);
+            }
+        }
+        busyInfos = busy;
+        counting = notes.busy.length > 0;
+    }
+
+    // While dirs' sizes are being counted (sizeTimer), shows them as far
+    // as they are, with the dots after them coming and going, and sorts
+    // the listing by them once they're all counted.
+    function pollSizes() {
+        if (counting) {
+            infoDots = infoDots % 3 + 1;
+            setNotes(JSON.parse(koil.dirSizes()), true);
+        }
+        if (!counting && sortedCounting)
+            sortCounted();
+    }
+
+    // Sorts the listing again once every dir's size is counted (an update,
+    // like gs), as it was sorted before they were (see sortedCounting),
+    // keeping the cursor on its entry. Not while the listing can't change
+    // under the user (as syncListing), or they're halfway through
+    // something: typing, a selection, a command (it waits for those). Not
+    // if the update would do more than sort it, opening a path typed in the
+    // path field, or fail on the listing's errors: the next one sorts it.
+    function sortCounted() {
+        if (boxOpen || askingConflicts || vim.running || vim.mode !== "normal" || vim.pendingKeys || vim.commandLine)
+            return;
+        checkListing();
+        // showListing keeps the view, as for gs, while sortedCounting is
+        // set, and then clears it.
+        if (pathView.textArea.text !== location || problems.some(p => p.severity === "error") || !updateListing())
+            sortedCounting = false;
     }
 
     // Puts `merge`'s edits (see Koil.sync) in the listing, while vim edits
@@ -806,6 +867,17 @@ ApplicationWindow {
         onTriggered: root.syncListing()
     }
 
+    // Polls the dirs' sizes being counted (see pollSizes), and waits to
+    // sort the listing by them.
+    Timer {
+        id: sizeTimer
+
+        interval: 300
+        repeat: true
+        running: root.listing && (root.counting || root.sortedCounting)
+        onTriggered: root.pollSizes()
+    }
+
     // Checks the listing for problems once typing stops for a moment.
     Timer {
         id: checkTimer
@@ -1023,6 +1095,8 @@ ApplicationWindow {
         // An ID as the path it stands for, so the hover says whose it is.
         describeHidden: text => koil.idPath(text) || text
         infos: root.listing ? root.infos : ({})
+        busyInfos: root.listing ? root.busyInfos : ({})
+        infoDots: root.infoDots
         onActivated: root.activate(editorView)
         onEdited: {
             root.modified = true;

@@ -5,6 +5,16 @@ use tempfile::TempDir;
 
 use super::*;
 
+/// The listing, with none of its dirs' sizes counted.
+fn render(koil: &Koil) -> Rendered {
+    super::render(koil, &DirSizes::new())
+}
+
+/// [`super::sync`], with none of the dirs' sizes counted.
+fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
+    super::sync(koil, &DirSizes::new(), text, hidden)
+}
+
 /// The lines of what applying would do.
 fn action_texts(koil: &Koil) -> Vec<String> {
     actions(koil).into_iter().map(|line| line.text).collect()
@@ -596,20 +606,24 @@ fn test_infos() {
     fs::write(temp.path().join("notes"), "x".repeat(1234)).unwrap();
     fs::write(temp.path().join("dir/a"), "").unwrap();
     // nothing to show when sorted by name
-    assert!(render(&koil).infos.is_empty());
+    assert!(render(&koil).notes.infos.is_empty());
 
     koil.set_settings(sorted_by(SortBy::Size)).unwrap();
     let rendered = render(&koil);
     assert_eq!(rendered.names, ["dir/", "notes", "file.rs"]);
-    let info = |name| rendered.infos[&id_text(&koil, name)].as_str();
+    let info = |name| rendered.notes.infos[&id_text(&koil, name)].as_str();
+    // a dir's size isn't counted yet
     assert_eq!(
         [info("dir"), info("notes"), info("file.rs")],
-        ["1 item", "1.2 KB", "0 B"]
+        ["...", "1.2 KB", "0 B"]
     );
+    assert_eq!(rendered.notes.busy, [id_text(&koil, "dir")]);
+    let dir = koil.current_dir().join("dir");
+    assert_eq!(rendered.notes.dirs, [(koil.id_of(&dir).unwrap(), dir)]);
 
     koil.set_settings(sorted_by(SortBy::Modified)).unwrap();
     let rendered = render(&koil);
-    let date = &rendered.infos[&id_text(&koil, "notes")];
+    let date = &rendered.notes.infos[&id_text(&koil, "notes")];
     // like 2026-10-06 14:03
     let digits: String = date.chars().filter(char::is_ascii_digit).collect();
     assert_eq!((date.len(), digits.len()), (16, 12), "{date}");
@@ -628,13 +642,93 @@ fn test_sync_sorted() {
     fs::write(root.join("mid"), "12").unwrap();
     let (synced, text, hidden) = synced_text(&mut koil, &rendered.text, &rendered.hidden);
     assert_eq!(names(&text), ["dir/", "big", "notes", "mid", "file.rs"]);
-    assert_eq!(synced.infos[&id_text(&koil, "big")], "100 B");
+    assert_eq!(synced.notes.infos[&id_text(&koil, "big")], "100 B");
     // a file written to stays where it is, but shows its new size
     fs::write(root.join("file.rs"), "x".repeat(5000)).unwrap();
     let (synced, text, _) = synced_text(&mut koil, &text, &hidden);
     assert!(synced.merge.edits.is_empty());
     assert_eq!(names(&text), ["dir/", "big", "notes", "mid", "file.rs"]);
-    assert_eq!(synced.infos[&id_text(&koil, "file.rs")], "5.0 KB");
+    assert_eq!(synced.notes.infos[&id_text(&koil, "file.rs")], "5.0 KB");
+}
+
+#[test]
+fn test_dir_sizes() {
+    let (_temp, mut koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    for dir in ["big", "mid", "small", "unread"] {
+        fs::create_dir(root.join(dir)).unwrap();
+    }
+    // Koil's own order is by how many entries each has
+    fs::write(root.join("small/a"), "").unwrap();
+    fs::write(root.join("small/b"), "").unwrap();
+    koil.set_settings(sorted_by(SortBy::Size)).unwrap();
+    assert_eq!(
+        render(&koil).names,
+        [
+            "small/", "big/", "dir/", "mid/", "unread/", "file.rs", "notes"
+        ]
+    );
+    // the ones counted go first, by size, as far as they're counted
+    let sizes = DirSizes::from([
+        (root.join("big"), DirSize::Counted(5000)),
+        (root.join("mid"), DirSize::Counting(1234)),
+        (root.join("small"), DirSize::Counted(10)),
+        (root.join("unread"), DirSize::Unreadable),
+    ]);
+    let rendered = super::render(&koil, &sizes);
+    assert_eq!(
+        rendered.names,
+        [
+            "big/", "small/", "dir/", "mid/", "unread/", "file.rs", "notes"
+        ]
+    );
+    let info = |name| rendered.notes.infos.get(&id_text(&koil, name)).cloned();
+    assert_eq!(
+        ["big", "small", "dir", "mid", "unread"].map(info),
+        [
+            Some("5.0 KB".into()),
+            Some("10 B".into()),
+            Some("...".into()),
+            Some("1.2 KB...".into()),
+            None
+        ]
+    );
+    let mut busy = rendered.notes.busy.clone();
+    busy.sort();
+    let mut expected = [id_text(&koil, "dir"), id_text(&koil, "mid")];
+    expected.sort();
+    assert_eq!(busy, expected);
+    // the other way round, the ones not counted first
+    koil.set_settings(Settings {
+        sort: Sort {
+            by: SortBy::Size,
+            reverse: true,
+        },
+        ..Settings::default()
+    })
+    .unwrap();
+    assert_eq!(
+        super::render(&koil, &sizes).names,
+        [
+            "unread/", "mid/", "dir/", "small/", "big/", "notes", "file.rs"
+        ]
+    );
+
+    // a dir made on disk goes where its size puts it
+    koil.set_settings(sorted_by(SortBy::Size)).unwrap();
+    let rendered = super::render(&koil, &sizes);
+    fs::create_dir(root.join("huge")).unwrap();
+    let mut sizes = sizes;
+    sizes.insert(root.join("huge"), DirSize::Counted(9000));
+    let synced = super::sync(&mut koil, &sizes, &rendered.text, &rendered.hidden);
+    let (text, _) = merged(&rendered.text, &rendered.hidden, &synced.merge.edits);
+    assert_eq!(
+        names(&text),
+        [
+            "huge/", "big/", "small/", "dir/", "mid/", "unread/", "file.rs", "notes"
+        ]
+    );
+    assert_eq!(synced.notes.infos[&id_text(&koil, "huge")], "9.0 KB");
 }
 
 #[test]
@@ -1075,7 +1169,13 @@ fn test_sync_asks() {
     let mut text = text;
     let mut hidden = hidden;
     for question in &synced.questions {
-        let merge = resolve(&mut koil, &text, &hidden, &question.conflicts);
+        let merge = resolve(
+            &mut koil,
+            &DirSizes::new(),
+            &text,
+            &hidden,
+            &question.conflicts,
+        );
         (text, hidden) = merged(&text, &hidden, &merge.edits);
     }
     assert_eq!(names(&text), ["dir/", "main.rs"]);

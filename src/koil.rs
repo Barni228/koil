@@ -5,13 +5,14 @@ use std::sync::{Arc, Mutex};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
-use koil_core::{Action, Conflict, Report, Settings, Sort, Watched};
+use koil_core::{Action, Conflict, Id, Report, Settings, Sort, Watched};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::listing::{self, Hidden};
+use crate::listing::{self, Hidden, Notes};
+use crate::sizes::Sizes;
 
 /// Koil itself (koil-core): the dir or pattern that's open, the changes
 /// written in its listings so far, and applying and undoing them. Takes and
@@ -70,9 +71,17 @@ pub mod qobject {
         fn open(self: Pin<&mut Koil>, location: &QString) -> QString;
 
         /// The listing of what's open: `{ path, text, hidden, names, colors,
-        /// infos }` (see `listing::Rendered`).
+        /// infos, busy }` (see `listing::Rendered`). Counts the sizes of its
+        /// dirs, when it's sorted by size (see `dirSizes`).
         #[qinvokable]
-        fn render(self: &Koil) -> QString;
+        fn render(self: Pin<&mut Koil>) -> QString;
+
+        /// What's shown after the lines of the dirs whose sizes are being
+        /// counted, as far as they are, and which still are: `{ infos, busy
+        /// }` (see `listing::Notes`), for the dirs of the last `render` or
+        /// `sync`.
+        #[qinvokable]
+        fn dir_sizes(self: &Koil) -> QString;
 
         /// The parts of the regex in the path field `line` to color, as a
         /// list of `listing::Span`: none unless it's read as a regex.
@@ -176,6 +185,10 @@ pub struct KoilRust {
     shown: Vec<Action>,
     /// Made on the first `watch`, None if it can't be.
     watcher: Option<DiskWatcher>,
+    /// Counts the sizes of the dirs listed, when it's sorted by size, and
+    /// the IDs of those dirs.
+    sizes: Sizes,
+    sized: Vec<Id>,
 }
 
 /// Watches dirs for changes on disk, and emits `changedOnDisk` for those
@@ -261,6 +274,14 @@ fn changes_listing(kind: &EventKind, writes: bool) -> bool {
 }
 
 impl KoilRust {
+    /// Counts the sizes of the dirs `notes` show them for, and stops
+    /// counting (and forgets) every other one.
+    fn count_sizes(&mut self, notes: &Notes) {
+        self.sized = notes.dirs.iter().map(|&(id, _)| id).collect();
+        self.sizes
+            .want(notes.dirs.iter().map(|(_, dir)| dir.clone()));
+    }
+
     fn settings(&self) -> Settings {
         let by = serde_json::Value::String(self.sort.to_string());
         Settings {
@@ -311,7 +332,13 @@ impl qobject::Koil {
     fn sync(self: Pin<&mut Self>, text: &QString, hidden: &QString) -> QString {
         let mut rust = self.rust_mut();
         let hidden = read_hidden(hidden);
-        to_json(&listing::sync(&mut rust.koil, &text.to_string(), &hidden))
+        let sizes = rust.sizes.known();
+        let synced = listing::sync(&mut rust.koil, &sizes, &text.to_string(), &hidden);
+        // Moved, the listing is rendered again.
+        if !synced.failed && !synced.moved {
+            rust.count_sizes(&synced.notes);
+        }
+        to_json(&synced)
     }
 
     fn resolve(
@@ -324,8 +351,10 @@ impl qobject::Koil {
         let hidden = read_hidden(hidden);
         let conflicts: Vec<Conflict> =
             serde_json::from_str(&conflicts.to_string()).unwrap_or_default();
+        let sizes = rust.sizes.known();
         to_json(&listing::resolve(
             &mut rust.koil,
+            &sizes,
             &text.to_string(),
             &hidden,
             &conflicts,
@@ -351,8 +380,16 @@ impl qobject::Koil {
         to_json(&outcome)
     }
 
-    fn render(&self) -> QString {
-        to_json(&listing::render(&self.koil))
+    fn render(self: Pin<&mut Self>) -> QString {
+        let mut rust = self.rust_mut();
+        let rendered = listing::render(&rust.koil, &rust.sizes.known());
+        rust.count_sizes(&rendered.notes);
+        to_json(&rendered)
+    }
+
+    fn dir_sizes(&self) -> QString {
+        let sized = self.sized.iter().copied();
+        to_json(&listing::notes(&self.koil, &self.sizes.known(), sized))
     }
 
     fn path_syntax(&self, line: &QString) -> QString {
@@ -439,6 +476,8 @@ impl qobject::Koil {
             .filter_map(|&i| this.shown.get(i).cloned())
             .collect();
         let shown = this.shown.len();
+        // What's on disk changed.
+        this.sizes.forget();
         let outcome = match this.koil.apply_only(&actions) {
             // Nothing picked: every change is forgotten.
             Ok(report) if actions.is_empty() => Outcome {
@@ -482,7 +521,9 @@ impl qobject::Koil {
 
     fn create(self: Pin<&mut Self>, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
-        let outcome = match listing::create_now(&mut self.rust_mut().koil, &path) {
+        let mut rust = self.rust_mut();
+        rust.sizes.forget();
+        let outcome = match listing::create_now(&mut rust.koil, &path) {
             Ok(message) => Outcome { ok: true, message },
             Err(message) => Outcome { ok: false, message },
         };
@@ -498,7 +539,9 @@ impl qobject::Koil {
     }
 
     fn undo(self: Pin<&mut Self>) -> QString {
-        let outcome = match self.rust_mut().koil.undo() {
+        let mut rust = self.rust_mut();
+        rust.sizes.forget();
+        let outcome = match rust.koil.undo() {
             Ok(report) => Outcome {
                 ok: true,
                 message: report_message(report, "undone"),

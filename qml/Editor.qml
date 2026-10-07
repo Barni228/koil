@@ -41,9 +41,13 @@ Item {
     property var describeHidden: text => text
     // What to show after a line that starts with an icon, by the text it
     // hides: in the listing, an entry's size or a date, when it's sorted
-    // by one (see listing::info). Keyed by the ID, it goes with its line
-    // wherever the line is moved or copied.
+    // by one (see listing::notes). Keyed by the ID, it goes with its line
+    // wherever the line is moved or copied. Those in `busyInfos` (dirs'
+    // sizes still being counted) end with three dots, and show only
+    // `infoDots` of them, which come and go.
     property var infos: ({})
+    property var busyInfos: ({})
+    property int infoDots: 3
     // Vim's state for this editor while it edits another one (see
     // Vim.leaveBuffer), kept here for main.qml to give back.
     property var saved: null
@@ -777,14 +781,14 @@ Item {
             Layer {
                 id: notes
 
-                inputs: [view.infos, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room]
+                inputs: [view.infos, view.busyInfos, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room]
                 compute: () => {
                     const list = [], hidden = view.hidden, t = editor.text, v = view.visibleRange();
                     for (let i = view.vim.firstAt(hidden, v.from); i < hidden.length && hidden[i].at <= v.to; i++) {
                         const h = hidden[i], text = view.infos[h.text];
                         const ls = text ? Txt.lineStart(t, h.at) : 0, le = text ? Txt.lineEnd(t, h.at) : 0;
                         if (text && aside.startsLine(t, ls, h.at))
-                            list.push({ x: aside.spots(t, ls, le, text, "").note, y: view.cellAt(le).y, text: text });
+                            list.push({ x: aside.spots(t, ls, le, text, "").note, y: view.cellAt(le).y, text: text, busy: !!view.busyInfos[h.text] });
                     }
                     return list;
                 }
@@ -797,7 +801,8 @@ Item {
 
                         x: modelData.x
                         y: modelData.y + view.textBaseline - baselineOffset
-                        text: modelData.text
+                        // Its place is worked out with all three dots.
+                        text: modelData.busy ? modelData.text.slice(0, modelData.text.length - 3 + view.infoDots) : modelData.text
                         font: editor.font
                         color: view.theme.faint
                         textFormat: Text.PlainText

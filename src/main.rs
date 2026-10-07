@@ -5,6 +5,7 @@ mod document;
 mod ffi;
 mod koil;
 mod listing;
+mod sizes;
 mod system;
 
 use cxx_qt_lib::{QByteArray, QGuiApplication, QQmlApplicationEngine, QString, QUrl};

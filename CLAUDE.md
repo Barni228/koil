@@ -15,13 +15,16 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `undo_steps`), the path field's regex parts
   (`path_syntax`), what Tab completes in it (`complete`), what's shown after
-  each line when sorted by size or a date (`info`), and what changed on
+  each line when sorted by size or a date (`notes`), and what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`).
   Its tests (`src/listing/tests.rs`) use a temp dir.
+- `src/sizes.rs`: `Sizes`, which counts the sizes of dirs on its own
+  threads (see Sorting). Its tests (`src/sizes/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore`, `regex`,
   `sort` and `sortReverse` are properties, bound to vim's `:set` options.
-  It also watches the disk (`watch`, `changedOnDisk`; see Changes on disk).
+  It also watches the disk (`watch`, `changedOnDisk`; see Changes on disk),
+  and counts dirs' sizes (`sizes`, `dirSizes`; see Sorting).
 - `src/document.rs`: `Document` (QML element): reading and writing files, the
   path on the command line.
 - `src/system.rs`: `System` (QML element): the system clipboard, the
@@ -318,7 +321,7 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   shows the sort menu (`SortMenu`, under the sort button beside the
   options, visible while vim's `pendingKeys` end in `gs`), and a key picks
   one: `gsn` name, `gsv` natural (`a2` before `a10`), `gse` extension,
-  `gss` size (biggest first; a dir's is how many entries it has), `gsm`
+  `gss` size (biggest first; a dir's is counted, see below), `gsm`
   modified, `gsc` created, `gsa` accessed (newest first), shifted the
   other way round (`gsS`). They're `commandKeys` of three keys
   (`root.sorts`, `sortKeys`: `"gss": "sort:size"`), so a key it doesn't
@@ -332,8 +335,8 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   cursor on its entry). Then the view stays where it was (`shownSort`:
   every line moved, so following the cursor's would scroll the rest away),
   scrolling only to show the cursor. Sorted by size or a date, each line
-  shows it, dimmed, after its end (`listing::info`: `1.2 KB`,
-  KB as 1000 bytes like macOS; `3 items`; `2026-10-06 14:03`, local time
+  shows it, dimmed, after its end (`listing::notes`: `1.2 KB`,
+  KB as 1000 bytes like macOS; `2026-10-06 14:03`, local time
   through chrono), before a warning's or an error's message (`notes` in
   Editor.qml), lined up (see Notes after lines). They come as `infos`, `{ id: text }` (`Rendered`, and
   `Synced` with what sync read), so a line's goes with its ID wherever it's
@@ -343,6 +346,31 @@ It shows Koil's listing (see Koil), or a file opened with File > Open.
   so a file written shows its new size or time; its line stays where it is
   until the next update sorts it again. The sort isn't saved, like Koil's
   other options.
+- **Dir sizes** (sizes.rs): sorted by size, a dir's size is everything in
+  it, counted on other threads (koil-core's `entries`, how many it has, is
+  only the order until then). It's the files' bytes as Finder counts (a
+  link's own, not followed), but not what's on another device (`du -x`),
+  and a file with hard links once (as `du`: Cargo hard-links its builds,
+  which made `target/` a GB too big). `render` and `sync` give the dirs
+  they show sizes for (`Notes::dirs`, by the path their ID was read at),
+  and `Koil` has `Sizes::want` them: those not counted yet start, every
+  other one is dropped and forgotten (so a dir listed again is counted
+  again), and apply, undo and create forget them all. The counts take
+  turns (`turns`), a dir each, so they all go on at once and small ones
+  are done soon, on up to 8 threads that each read a dir at a time
+  (reading is mostly waiting for the disk), and stop once no dir is left
+  to read and none is being read, which could find more. Counting, a dir's
+  note is its size so far with `...` after it (`listing::COUNTING`), and
+  its ID is in `busy`; main.qml's `sizeTimer` polls `Koil.dirSizes` every
+  300 ms while any is, and Editor.qml shows `infoDots` of the three dots,
+  the note's place worked out with all of them (so nothing moves as they
+  come and go). The dirs counted go first, by size (`listing::listing`,
+  `compare`, which `merge` uses too), and the others after, in koil's
+  order. Once they're all counted, `sortCounted` updates (`sortedCounting`:
+  it was sorted before they were), keeping the view as for `gs`; not while
+  the user is halfway through something (it waits), nor if the update
+  would fail on errors or open a path typed in the field (the next update
+  sorts it).
 - **Changes on disk** (koil-core's `Koil::sync`; read its CLAUDE.md): the
   listing shows what changes on disk as it happens, keeping the user's
   edits. `Koil.watch()` (after every `showListing`, sync and answer) has a

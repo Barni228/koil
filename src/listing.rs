@@ -6,6 +6,7 @@
 //!
 //! Positions in the text are in UTF-16 code units, as QML counts them.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::path::{Path, PathBuf};
@@ -15,9 +16,12 @@ use devicons::Theme;
 use koil_core::apply::Undo;
 use koil_core::{
     Action, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil, KoilError,
-    OpenError, Pattern, Settings, SortBy, UpdateError, UpdateOpenError, Warning, with_slashes,
+    Metadata, OpenError, Pattern, Settings, SortBy, UpdateError, UpdateOpenError, Warning,
+    with_slashes,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::sizes::{DirSize, DirSizes};
 
 /// The icon of a file devicons has none for (its own is `*`, a glob character).
 const FILE_ICON: char = '\u{f016}';
@@ -73,17 +77,18 @@ pub struct Rendered {
     pub colors: HashMap<String, [String; 2]>,
     /// The color of a pending entry's icon (see `PENDING_COLOR`).
     pub pending_color: [&'static str; 2],
-    /// What to show after the line of each ID (see [`info`]).
-    pub infos: HashMap<String, String>,
+    #[serde(flatten)]
+    pub notes: Notes,
 }
 
-/// The listing of what `koil` has open.
-pub fn render(koil: &Koil) -> Rendered {
-    let entries = koil.listing();
+/// The listing of what `koil` has open, with the sizes of its dirs counted
+/// so far (see [`listing`]).
+pub fn render(koil: &Koil, sizes: &DirSizes) -> Rendered {
+    let entries = listing(koil, sizes);
     let mut rendered = Rendered {
         path: show_location(koil),
         pending_color: PENDING_COLOR,
-        infos: infos(koil, &entries),
+        notes: notes(koil, sizes, entries.iter().filter_map(|e| e.id)),
         ..Rendered::default()
     };
     // The text's length, kept rather than counted for each line.
@@ -102,6 +107,57 @@ pub fn render(koil: &Koil) -> Rendered {
         rendered.names.push(entry_name(entry));
     }
     rendered
+}
+
+/// `Koil::listing`, but sorted by size, its dirs go by their sizes as far
+/// as they're counted (see [`compare`]).
+fn listing(koil: &Koil, sizes: &DirSizes) -> Vec<Entry> {
+    let mut entries = koil.listing();
+    if koil.settings().sort.by == SortBy::Size {
+        // Koil lists them together, and its order stays for the ones that
+        // compare equal.
+        let start = entries.iter().position(is_dir_with_id).unwrap_or(0);
+        let dirs = entries[start..].iter().take_while(|e| is_dir_with_id(e));
+        let end = start + dirs.count();
+        entries[start..end].sort_by(|a, b| by_dir_size(koil, sizes, a, b));
+    }
+    entries
+}
+
+/// Where `render` lists `a` against `b`: as `Koil::compare` does, but
+/// sorted by size, dirs go by their sizes as far as they're counted (see
+/// [`by_dir_size`]).
+fn compare(koil: &Koil, sizes: &DirSizes, a: &Entry, b: &Entry) -> Ordering {
+    let by_size = match is_dir_with_id(a) && is_dir_with_id(b) {
+        true => by_dir_size(koil, sizes, a, b),
+        false => Ordering::Equal,
+    };
+    by_size.then_with(|| koil.compare(a, b))
+}
+
+/// Where the dir `a` goes against the dir `b` (both with IDs) when the
+/// listing is sorted by size: the ones counted (see sizes.rs) by their
+/// sizes, the biggest first, and the others after them (the other way
+/// round with `reverse`, as Koil sorts what it can't read). Equal where
+/// Koil's own order (how many entries each has) decides.
+fn by_dir_size(koil: &Koil, sizes: &DirSizes, a: &Entry, b: &Entry) -> Ordering {
+    let sort = koil.settings().sort;
+    if sort.by != SortBy::Size {
+        return Ordering::Equal;
+    }
+    let counted = |entry: &Entry| match sizes.get(koil.path_of(entry.id?)?) {
+        Some(&DirSize::Counted(bytes)) => Some(bytes),
+        _ => None,
+    };
+    let order = counted(b).cmp(&counted(a));
+    match sort.reverse {
+        true => order.reverse(),
+        false => order,
+    }
+}
+
+fn is_dir_with_id(entry: &Entry) -> bool {
+    entry.is_dir && entry.id.is_some()
 }
 
 /// A line of the listing, and the ID its icon hides (at its start).
@@ -175,18 +231,69 @@ fn apart(color: &str, dark: bool) -> String {
     format!("#{}", moved.map(|c| format!("{c:02x}")).collect::<String>())
 }
 
-/// What the listing is sorted by (see `Koil::metadata`), for the entry `id`,
-/// which the editor shows after its line: a file's size or how many entries
-/// a dir has, or when it was modified, created or accessed. None when it's
-/// sorted by name, or if it can't be read.
-pub fn info(koil: &Koil, id: Id) -> Option<String> {
+/// What a dir's size ends with while it's being counted, whose dots the
+/// editor animates.
+const COUNTING: &str = "...";
+
+/// What the editor shows after the listing's lines: what it's sorted by
+/// (see [`notes`]).
+#[derive(Debug, Default, Serialize)]
+pub struct Notes {
+    /// By the ID as its icon hides it.
+    pub infos: HashMap<String, String>,
+    /// The IDs whose infos are the sizes of dirs still being counted, which
+    /// end with `COUNTING`.
+    pub busy: Vec<String>,
+    /// The IDs whose infos are dirs' sizes, and their dirs: what to count
+    /// (see sizes.rs).
+    #[serde(skip)]
+    pub dirs: Vec<(Id, PathBuf)>,
+}
+
+/// What the listing is sorted by, for each of `ids` (see `Koil::metadata`):
+/// a file's size, a dir's as far as `sizes` has it, or when it was
+/// modified, created or accessed. None when it's sorted by name.
+pub fn notes(koil: &Koil, sizes: &DirSizes, ids: impl IntoIterator<Item = Id>) -> Notes {
+    let mut notes = Notes::default();
     let by = koil.settings().sort.by;
     if !by.reads_metadata() {
-        return None;
+        return notes;
     }
-    let meta = koil.metadata(id)?;
+    for id in ids {
+        let key = id.0.to_string();
+        if notes.infos.contains_key(&key) {
+            continue;
+        }
+        let Some(meta) = koil.metadata(id) else {
+            continue;
+        };
+        let dir = (by == SortBy::Size && meta.is_dir)
+            .then(|| koil.path_of(id))
+            .flatten();
+        let info = match dir {
+            Some(dir) => {
+                notes.dirs.push((id, dir.to_path_buf()));
+                let size = sizes.get(dir);
+                if !matches!(size, Some(DirSize::Counted(_) | DirSize::Unreadable)) {
+                    notes.busy.push(key.clone());
+                }
+                dir_info(size)
+            }
+            None => info(by, &meta),
+        };
+        if let Some(info) = info {
+            notes.infos.insert(key, info);
+        }
+    }
+    notes
+}
+
+/// What the listing is sorted by, for an entry with `meta` on disk: a
+/// file's size, or when it was modified, created or accessed. None if it
+/// isn't known, and for a dir's size (see [`dir_info`]).
+fn info(by: SortBy, meta: &Metadata) -> Option<String> {
     match by {
-        SortBy::Size if meta.is_dir => meta.entries.map(show_entries),
+        SortBy::Size if meta.is_dir => None,
         SortBy::Size => Some(show_size(meta.size)),
         SortBy::Modified => meta.modified.map(show_time),
         SortBy::Created => meta.created.map(show_time),
@@ -195,15 +302,17 @@ pub fn info(koil: &Koil, id: Id) -> Option<String> {
     }
 }
 
-/// The [`info`] of the ID of each of `entries` that has one, by the ID as
-/// its icon hides it.
-fn infos<'a>(koil: &Koil, entries: impl IntoIterator<Item = &'a Entry>) -> HashMap<String, String> {
-    if !koil.settings().sort.by.reads_metadata() {
-        return HashMap::new();
+/// A dir's size, as far as it's counted (`size`, None before it starts),
+/// with `COUNTING` after it until it is. None if it can't be read.
+fn dir_info(size: Option<&DirSize>) -> Option<String> {
+    match size {
+        Some(&DirSize::Counted(bytes)) => Some(show_size(bytes)),
+        Some(&DirSize::Counting(bytes)) if bytes > 0 => {
+            Some(format!("{}{COUNTING}", show_size(bytes)))
+        }
+        Some(DirSize::Counting(_)) | None => Some(COUNTING.to_string()),
+        Some(DirSize::Unreadable) => None,
     }
-    let ids = entries.into_iter().filter_map(|e| e.id);
-    ids.filter_map(|id| Some((id.0.to_string(), info(koil, id)?)))
-        .collect()
 }
 
 /// `bytes` as people read a size, with a KB of 1000 bytes, as macOS counts:
@@ -228,15 +337,6 @@ fn show_size(bytes: u64) -> String {
         }
     }
     shown
-}
-
-/// How many entries a dir has: `empty`, `1 item`, `12 items`.
-fn show_entries(entries: u64) -> String {
-    match entries {
-        0 => "empty".to_string(),
-        1 => "1 item".to_string(),
-        n => format!("{n} items"),
-    }
 }
 
 /// `time` in the local time zone, like `2026-10-06 14:03`.
@@ -528,9 +628,9 @@ pub struct Synced {
     pub message: String,
     /// Whether `message` is an error: nothing changed.
     pub failed: bool,
-    /// What to show after the line of each ID (see [`info`]), as it is on
-    /// disk now.
-    pub infos: HashMap<String, String>,
+    /// What's shown after the lines, as it is on disk now.
+    #[serde(flatten)]
+    pub notes: Notes,
 }
 
 /// A question about the conflicts of one kind, which Yes resolves (see
@@ -544,8 +644,9 @@ pub struct Question {
 
 /// Reads what `koil` has open from disk again (see `Koil::sync`), and
 /// returns how the listing `text` (with `hidden`), as the user has it now,
-/// changes to show what changed there, and what to ask about.
-pub fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
+/// changes to show what changed there, and what to ask about. `sizes` are
+/// its dirs' as far as they're counted.
+pub fn sync(koil: &mut Koil, sizes: &DirSizes, text: &str, hidden: &[Hidden]) -> Synced {
     let parsed = parse(text, hidden);
     let synced = match koil.sync(&parsed.entries) {
         Ok(synced) => synced,
@@ -563,11 +664,12 @@ pub fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
         Edit::Add(entry) | Edit::Change { to: entry, .. } => Some(entry),
         Edit::Remove(_) => None,
     });
+    let ids = parsed.entries.iter().chain(added).filter_map(|e| e.id);
     Synced {
-        infos: infos(koil, parsed.entries.iter().chain(added)),
+        notes: notes(koil, sizes, ids),
         merge: match synced.moved {
             true => Merge::default(),
-            false => merge(koil, text, &parsed, &synced.edits),
+            false => merge(koil, sizes, text, &parsed, &synced.edits),
         },
         questions: questions(koil, &synced.conflicts),
         moved: synced.moved,
@@ -582,15 +684,21 @@ pub fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
 /// Takes the other way in `conflicts` (a [`Question`]'s, which the user
 /// said yes to), and returns how the listing `text` (with `hidden`) changes
 /// for it.
-pub fn resolve(koil: &mut Koil, text: &str, hidden: &[Hidden], conflicts: &[Conflict]) -> Merge {
+pub fn resolve(
+    koil: &mut Koil,
+    sizes: &DirSizes,
+    text: &str,
+    hidden: &[Hidden],
+    conflicts: &[Conflict],
+) -> Merge {
     let edits: Vec<Edit> = conflicts.iter().flat_map(|c| koil.resolve(c)).collect();
-    merge(koil, text, &parse(text, hidden), &edits)
+    merge(koil, sizes, text, &parse(text, hidden), &edits)
 }
 
 /// `edits` to the entries of the listing `text` (read as `parsed`) as
 /// edits to the text: a line changes or goes for the entry on it, and a new
-/// one goes among the others where `render` would put it.
-fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
+/// one goes among the others where `render` would put it (with `sizes`).
+fn merge(koil: &Koil, sizes: &DirSizes, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
     let lines: Vec<&str> = text.split('\n').collect();
     let mut colors = HashMap::new();
     // The lines of each ID's entries (new entries under none), as a listing
@@ -611,7 +719,7 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
         .collect();
     let sorted = existing
         .windows(2)
-        .all(|w| koil.compare(w[0].0, w[1].0).is_le());
+        .all(|w| compare(koil, sizes, w[0].0, w[1].0).is_le());
     // What each changed line becomes (nothing, if it goes), and the lines
     // that go before each line (or at the end, after the last).
     let mut replaced: BTreeMap<usize, Option<Line>> = BTreeMap::new();
@@ -630,7 +738,7 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
             }
             Edit::Add(entry) => {
                 let line = entry_line(koil, entry, &mut colors);
-                let at = insert_at(koil, parsed, &existing, sorted, entry, lines.len());
+                let at = insert_at(koil, sizes, parsed, &existing, sorted, entry, lines.len());
                 inserted.entry(at).or_default().push((entry.clone(), line));
             }
         }
@@ -662,7 +770,7 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
         let mut new = Vec::new();
         loop {
             if let Some(mut lines) = inserted.remove(&i) {
-                lines.sort_by(|(a, _), (b, _)| koil.compare(a, b));
+                lines.sort_by(|(a, _), (b, _)| compare(koil, sizes, a, b));
                 new.extend(lines.into_iter().map(|(_, line)| line));
             }
             match replaced.remove(&i) {
@@ -682,10 +790,11 @@ fn merge(koil: &Koil, text: &str, parsed: &Parsed, edits: &[Edit]) -> Merge {
 /// lines, for after the last one): one with an ID before the first of the
 /// `existing` entries (those with IDs, and their lines; `sorted` if they're
 /// in `render`'s order, as they usually are) that `render` lists after it
-/// (`Koil::compare`), or after the last of them; a new one (or one with an
-/// ID, if no other has one) after the last entry.
+/// ([`compare`]), or after the last of them; a new one (or one with an ID,
+/// if no other has one) after the last entry.
 fn insert_at(
     koil: &Koil,
+    sizes: &DirSizes,
     parsed: &Parsed,
     existing: &[(&Entry, usize)],
     sorted: bool,
@@ -695,7 +804,7 @@ fn insert_at(
     if entry.id.is_some()
         && let Some(&(_, last)) = existing.last()
     {
-        let after = |&(e, _): &(&Entry, usize)| koil.compare(e, entry).is_gt();
+        let after = |&(e, _): &(&Entry, usize)| compare(koil, sizes, e, entry).is_gt();
         let first = match sorted {
             true => Some(existing.partition_point(|e| !after(e))).filter(|&i| i < existing.len()),
             false => existing.iter().position(after),
