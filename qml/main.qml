@@ -865,6 +865,24 @@ ApplicationWindow {
         saveDialog.open();
     }
 
+    // Save As in the scratchpad: writes its text to the file `path`, and
+    // opens that in its place, as File > Open would, with the cursor and
+    // the view where they were. The scratchpad keeps its text.
+    function saveScratch(path) {
+        if (!doc.saveNewFile(path, editorView.textArea.text))
+            return;
+        const cursor = vim.cursor;
+        const contentY = editorView.flickable.contentY;
+        openedFrom = "";
+        readFile(path);
+        if (scratchpad)
+            return;
+        // Before vim's cursor, which then scrolls only if it's out of view.
+        const f = editorView.flickable;
+        f.contentY = Math.max(0, Math.min(contentY, f.contentHeight + f.bottomMargin - f.height));
+        vim.jumpTo(cursor);
+    }
+
     function loadFontFamilies() {
         if (fontFamilies.length)
             return;
@@ -1414,6 +1432,10 @@ ApplicationWindow {
         fileMode: FileDialog.SaveFile
         onAccepted: {
             const path = doc.urlToPath(selectedFile);
+            if (root.scratchpad) {
+                root.saveScratch(path);
+                return;
+            }
             if (doc.saveFile(path, editorView.textArea.text)) {
                 root.filePath = path;
                 root.modified = false;
@@ -1461,7 +1483,7 @@ ApplicationWindow {
                 }
                 Platform.MenuItem {
                     text: qsTr("Save As…")
-                    enabled: !root.listing && !root.scratchpad && !root.boxOpen
+                    enabled: !root.listing && !root.boxOpen
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }
@@ -1561,7 +1583,7 @@ ApplicationWindow {
                 }
                 Action {
                     text: qsTr("Save &As…")
-                    enabled: !root.listing && !root.scratchpad && !root.boxOpen
+                    enabled: !root.listing && !root.boxOpen
                     shortcut: StandardKey.SaveAs
                     onTriggered: root.saveAs()
                 }

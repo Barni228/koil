@@ -53,6 +53,11 @@ pub mod qobject {
         #[qinvokable]
         fn save_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
 
+        /// Writes `text`, which wasn't read from a file (the scratchpad's),
+        /// to the file `path` as UTF-8; or else emits `failed`.
+        #[qinvokable]
+        fn save_new_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
+
         /// The path passed on the command line, if any: a file to open, or a
         /// dir (or pattern) for Koil to list. Absolute, from the dir Koil was
         /// started in.
@@ -117,8 +122,19 @@ impl qobject::Document {
     }
 
     fn save_file(self: Pin<&mut Self>, path: &QString, text: &QString) -> bool {
+        let encoding = self.encoding;
+        self.write(path, text, encoding)
+    }
+
+    fn save_new_file(self: Pin<&mut Self>, path: &QString, text: &QString) -> bool {
+        self.write(path, text, Encoding::Utf8)
+    }
+
+    /// Writes `text` to the file `path`, stored as `encoding` says; or else
+    /// emits `failed`.
+    fn write(self: Pin<&mut Self>, path: &QString, text: &QString, encoding: Encoding) -> bool {
         let path = path.to_string();
-        match std::fs::write(&path, encode(&text.to_string(), self.encoding)) {
+        match std::fs::write(&path, encode(&text.to_string(), encoding)) {
             Ok(()) => true,
             Err(err) => {
                 self.failed(QString::from(cannot("save", &path, &err).as_str()));

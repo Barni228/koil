@@ -561,8 +561,12 @@ the scratchpad (see Scratchpad).
   one pasted back after its file is gone is an error (`NotOnDisk` in
   koil-core), not another file. Edits don't make it modified, `:w` and
   Cmd+S only say it isn't saved, `:wq` and `ZZ` quit as `:q` does
-  (`quitApp`: back to the listing while it has changes), and Save As is
-  off.
+  (`quitApp`: back to the listing while it has changes). Save As
+  (`saveScratch`) writes its text to a file, as UTF-8
+  (`Document.saveNewFile`: `saveFile` would store it as the file opened
+  last was), and opens that in its place as File > Open does, with the
+  cursor and the view where they were; the scratchpad keeps its text, as
+  it does when anything else is shown.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
   the editor's document colors each line's icon (colors from devicons,
   gathered from every listing shown, `iconColors`, dark or light by theme)
