@@ -229,7 +229,8 @@ the scratchpad (see Scratchpad).
   its last `/`) can be, in the dir before it, read as `open` reads it: not
   hidden ones unless the part starts with `.` or `:set hidden` is on, not
   ignored ones with `gitignore`, new dirs in the diff too, `..` for `.`, and
-  ignoring case only if nothing matches with it. Tab fills in the only one
+  ignoring case unless the part has an uppercase letter (smart case, as
+  search does: `k` gives `Koil` too). Tab fills in the only one
   (with its `/`, which steps over a `/` right after the cursor), or else the
   longest start they share, if that's longer than the part (`fill`).
   Otherwise vim shows them (`vim.completion`, drawn by `CompletionList` in

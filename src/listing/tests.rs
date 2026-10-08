@@ -1057,13 +1057,19 @@ fn test_complete() {
         completed("src"),
         (0, String::new(), vec!["src/".into(), "src-old/".into()])
     );
-    // nor when the options only match ignoring case, and share less than
-    // what's written
+    // case is ignored unless what's written has an uppercase letter, and
+    // what they share is read with case, so it can be less than that
+    assert_eq!(
+        completed("a"),
+        (0, String::new(), vec!["Abc/".into(), "aBd/".into()])
+    );
     assert_eq!(
         completed("ab"),
         (0, String::new(), vec!["Abc/".into(), "aBd/".into()])
     );
     assert_eq!(fill("abc"), "Abc/");
+    assert_eq!(fill("A"), "Abc/");
+    assert_eq!(completed("AB"), (0, String::new(), vec![]));
     // after the spaces before the path, and in UTF-16
     assert_eq!(
         completed("  src-"),
