@@ -24,6 +24,9 @@ Popup {
     // Modifier keys as the OS writes them.
     readonly property string cmdKey: isMac ? "⌘" : "Ctrl+"
     readonly property string altKey: isMac ? "⌥" : "Alt+"
+    // Where Space r shows an entry.
+    readonly property string fileManager: isMac ? "Finder" : Qt.platform.os === "windows" ? "Explorer"
+        : "the file manager"
     readonly property real lineStep: Math.round(20 * zoom)
     // What it shows: the help, or a list (see showList).
     property string heading: "Koil Help"
@@ -38,7 +41,7 @@ Popup {
             title: "The listing",
             tags: ["koil", "listing", "list", "entry", "entries", "space", "update", "apply", "-", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
-                "gr", "gs", "sort", "sorting", "_", "scratch", "scratchpad"],
+                "gr", "gs", "sort", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
                 + "copy lines to copy, and write new ones to create (`new.txt`, `new/dir/`). A line cut "
@@ -56,6 +59,8 @@ Popup {
                     + "picking an older one picks the newer ones that changed the same paths. "
                     + "Deleted files come back from the trash."],
                 ["`Enter`", "Open the dir or file on the line. A new file is created first, after asking."],
+                ["`Space r`", "Show the entry on the line in " + fileManager + " (from the path field, the "
+                    + "open dir)."],
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
                 ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing."],
                 ["`_`", "The scratchpad: text of your own, never saved, kept as you left it until Koil "

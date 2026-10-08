@@ -33,8 +33,9 @@ the scratchpad (see Scratchpad).
 - `src/document.rs`: `Document` (QML element): reading and writing files, the
   path on the command line.
 - `src/system.rs`: `System` (QML element): the system clipboard, the
-  installed monospaced fonts and the Nerd Font's family, and the editor's
-  text, line format and colors.
+  installed monospaced fonts and the Nerd Font's family, the editor's
+  text, line format and colors, and showing a path in Finder or Explorer
+  (`reveal`).
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
@@ -256,7 +257,12 @@ the scratchpad (see Scratchpad).
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` applies (`Space a` too, but
   always asking first, whatever the setting: see Apply), `Space u` lists
-  the applies to undo (see Undo history), `-` opens `..`
+  the applies to undo (see Undo history), `Space r` shows the entry on
+  the cursor's line in Finder or Explorer, selected (`reveal`: where its
+  ID is on disk, as Enter opens it; from the path field, the open dir; a
+  new entry isn't on disk yet, so the status line says so; `System.reveal`
+  runs `open -R`, or `explorer /select,`, or on Linux opens the dir it's
+  in), `-` opens `..`
   (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the

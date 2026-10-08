@@ -454,6 +454,35 @@ fn test_target_on_line() {
 }
 
 #[test]
+fn test_path_on_line() {
+    let (_temp, koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    let rendered = render(&koil);
+    // dir renamed on its line, and a new file and dir
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "dir/" => Some(format!(
+            "{}\nnew.txt\n   new/",
+            line.replace("dir/", "renamed/")
+        )),
+        _ => Some(line.to_string()),
+    });
+    let path = |line| path_on_line(&koil, &text, &hidden, line);
+    assert_eq!(path(0), Some(OnDisk::Path(root.join("dir"))));
+    assert_eq!(path(1), Some(OnDisk::New("new.txt".into())));
+    assert_eq!(path(2), Some(OnDisk::New("new/".into())));
+    assert_eq!(path(3), Some(OnDisk::Path(root.join("file.rs"))));
+    assert_eq!(path(5), None);
+    // `..`, and a blank line
+    let text = "../\n";
+    let parent = root.parent().unwrap().to_path_buf();
+    assert_eq!(
+        path_on_line(&koil, text, &[], 0),
+        Some(OnDisk::Path(parent))
+    );
+    assert_eq!(path_on_line(&koil, text, &[], 1), None);
+}
+
+#[test]
 fn test_id_path() {
     let (_temp, mut koil) = koil();
     let root = koil.current_dir().to_path_buf();

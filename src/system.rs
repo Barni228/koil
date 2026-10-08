@@ -1,10 +1,17 @@
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::thread;
+
 use cxx_qt_lib::{QString, QStringList};
 
 use crate::ffi;
+use crate::listing;
 
-/// What the QML needs from the system through Qt's C++ side: the clipboard,
-/// the installed fonts and the one Koil ships, and the editor's line height
-/// and the listing's and path field's colors.
+/// What the QML needs from the system, mostly through Qt's C++ side: the
+/// clipboard, the installed fonts and the one Koil ships, the editor's line
+/// height and the listing's and path field's colors, and showing a path in
+/// Finder (or Explorer).
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -36,6 +43,12 @@ pub mod qobject {
         /// The family of the Nerd Font Koil ships, the editor's default font.
         #[qinvokable]
         fn nerd_font_family(self: &System) -> QString;
+
+        /// Shows `path` in Finder (Explorer on Windows), selected in the dir
+        /// it's in (elsewhere, opens that dir), for Space r. Returns why it
+        /// can't, or "".
+        #[qinvokable]
+        fn reveal(self: &System, path: &QString) -> QString;
 
         /// Gives every line of a TextEdit's `textDocument` the same height,
         /// plus a margin below it.
@@ -137,6 +150,18 @@ impl qobject::System {
         ffi::nerd_font_family()
     }
 
+    fn reveal(&self, path: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        let why = if path.symlink_metadata().is_err() {
+            format!("“{}” isn't on disk any more", listing::show_path(&path))
+        } else if let Err(e) = reveal(&path) {
+            format!("Can't show “{}”: {e}", listing::show_path(&path))
+        } else {
+            String::new()
+        };
+        QString::from(why.as_str())
+    }
+
     /// # Safety
     ///
     /// `text_document` must be null or point to a live QObject.
@@ -225,4 +250,35 @@ impl qobject::System {
     ) {
         unsafe { ffi::set_keyword_colors(text_document.cast(), keyword_colors) };
     }
+}
+
+/// Shows `path` selected in the dir it's in, in Finder or Explorer, or
+/// elsewhere opens that dir, without waiting for it.
+fn reveal(path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg("-R").arg(path);
+        command
+    };
+    #[cfg(windows)]
+    let mut command = {
+        use std::os::windows::process::CommandExt;
+        // Explorer reads its command line itself: the path, with `\` only,
+        // quoted after the comma (Command would quote all of it).
+        let path = path.to_string_lossy().replace('/', "\\");
+        let mut command = Command::new("explorer");
+        command.raw_arg(format!("/select,\"{path}\""));
+        command
+    };
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(path.parent().unwrap_or(path));
+        command
+    };
+    let mut child = command.spawn()?;
+    // waited for, so it doesn't stay a zombie once it's done
+    thread::spawn(move || child.wait());
+    Ok(())
 }

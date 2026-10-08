@@ -123,6 +123,13 @@ pub mod qobject {
         #[qinvokable]
         fn target_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
+        /// Where the entry on `line` (from 0) is on disk, for Space r, as
+        /// `listing::OnDisk` (like `{ "path": "/a/b" }`, or `{ "new":
+        /// "c.txt" }`), or null; with a negative `line` (the path field),
+        /// the open dir.
+        #[qinvokable]
+        fn path_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
+
         /// The path the ID `id` (an icon's hidden text) stands for (see
         /// `listing::id_path`), or "" if koil doesn't know it.
         #[qinvokable]
@@ -547,6 +554,16 @@ impl qobject::Koil {
             listing::target_on_line(&self.koil, &text.to_string(), &read_hidden(hidden), line)
         });
         to_json(&target)
+    }
+
+    fn path_on_line(&self, text: &QString, hidden: &QString, line: i32) -> QString {
+        let on_disk = match usize::try_from(line) {
+            Ok(line) => {
+                listing::path_on_line(&self.koil, &text.to_string(), &read_hidden(hidden), line)
+            }
+            Err(_) => Some(listing::OnDisk::Path(self.koil.current_dir().to_path_buf())),
+        };
+        to_json(&on_disk)
     }
 
     fn id_path(&self, id: &QString) -> QString {

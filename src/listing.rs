@@ -1121,6 +1121,41 @@ pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -
     })
 }
 
+/// What Space r on a line of the listing shows in Finder (or Explorer)
+/// (see [`path_on_line`]).
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnDisk {
+    /// Where the entry is on disk.
+    Path(PathBuf),
+    /// A new entry's name (with `/` after a dir's), which isn't on disk
+    /// until the changes are applied.
+    New(String),
+}
+
+/// Where the entry on `line` is on disk, for Space r to show: where its ID
+/// points, even if the line renames it (as Enter opens it), or the open
+/// dir's parent for `../`. None on a line without an entry, or with an ID
+/// koil doesn't know.
+pub fn path_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> Option<OnDisk> {
+    let parsed = parse(text, hidden);
+    let i = parsed.spots.iter().position(|&(l, _)| l == line)?;
+    let entry = &parsed.entries[i];
+    let path = match entry.id {
+        Some(id) => koil.path_of(id)?,
+        None if entry.is_parent() => {
+            let dir = koil.current_dir();
+            dir.parent().unwrap_or(dir)
+        }
+        None => {
+            let slash = if entry.is_dir { "/" } else { "" };
+            let name = entry.name.to_string_lossy();
+            return Some(OnDisk::New(format!("{name}{slash}")));
+        }
+    };
+    Some(OnDisk::Path(path.to_path_buf()))
+}
+
 /// The path the ID `id` (an icon's hidden text) stands for, as the hover
 /// shows it: like the confirmations (see [`relative`]), with a `/` after a
 /// dir's. None if it isn't an ID koil knows.

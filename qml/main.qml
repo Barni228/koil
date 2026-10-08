@@ -534,6 +534,8 @@ ApplicationWindow {
             applyChanges(false, false, true);
         else if (name === "undoApply")
             undoApply(true);
+        else if (name === "reveal")
+            reveal();
         else if (name === "parent")
             updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
         else if (name === "open")
@@ -587,6 +589,20 @@ ApplicationWindow {
             openedFrom = target.file.name;
             readFile(target.file.path);
         }
+    }
+
+    // Space r: shows the entry on the cursor's line in Finder (Explorer on
+    // Windows), where it is on disk even if the line renames it, or from
+    // the path field, the open dir.
+    function reveal() {
+        const t = editorView.textArea.text;
+        const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
+        const target = JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
+        const why = !target ? "No entry on this line"
+            : target.new !== undefined ? "“" + target.new + "” isn't on disk until the changes are applied"
+            : system.reveal(target.path);
+        if (why)
+            vim.showError(why);
     }
 
     // Enter on a new file (`{ path, name }`): once the user says so, creates
@@ -1046,6 +1062,7 @@ ApplicationWindow {
             "  ": "apply",
             " a": "applyAsking",
             " u": "undoApply",
+            " r": "reveal",
             "-": "parent",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",
