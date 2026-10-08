@@ -24,12 +24,16 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
-    <!-- Koil opens any file that is UTF-8 text: public.text, which source
-         code and other text types conform to. As an Alternate, it shows in
-         Open With but is never made the default. Files of types nothing
-         declares (dyn.*) aren't offered: Launch Services ignores an
-         Alternate claim on public.data, and a Default one would make Koil
-         their default app. -->
+    <!-- Koil opens any file that is UTF-8 text, as an Alternate: it shows
+         in Open With but isn't made the default of a type another app
+         opens. public.text is what text and source code macOS knows are;
+         public.data matches only files of that type itself: ones with no
+         extension (empty too) and dotfiles (.envrc), not pictures. A file
+         whose extension macOS doesn't know (.toml) has a dyn.* type that
+         no claim on a type it conforms to matches (public.data,
+         public.item), so those extensions are claimed one by one, as VS
+         Code and Zed do; Koil is then the default of one only if no other
+         app claims it. -->
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -42,6 +46,186 @@
             <key>LSItemContentTypes</key>
             <array>
                 <string>public.text</string>
+                <string>public.data</string>
+            </array>
+        </dict>
+        <!-- Apart from the types: a dict with LSItemContentTypes ignores
+             its CFBundleTypeExtensions. Keep in sync with Exts in
+             packaging/windows/installer.iss. -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Text document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>txt</string> <string>text</string> <string>md</string>
+                <string>markdown</string> <string>mdown</string>
+                <string>mkd</string> <string>mdx</string> <string>rst</string>
+                <string>adoc</string> <string>asciidoc</string>
+                <string>org</string> <string>tex</string> <string>ltx</string>
+                <string>sty</string> <string>cls</string> <string>bib</string>
+                <string>typ</string> <string>log</string> <string>nfo</string>
+                <string>srt</string> <string>vtt</string> <string>ics</string>
+                <string>vcf</string> <string>po</string> <string>pot</string>
+                <string>diff</string> <string>patch</string>
+                <string>rej</string> <string>ipynb</string>
+                <string>http</string> <string>pem</string>
+                <string>json</string> <string>jsonc</string>
+                <string>json5</string> <string>jsonl</string>
+                <string>ndjson</string> <string>geojson</string>
+                <string>webmanifest</string> <string>toml</string>
+                <string>yaml</string> <string>yml</string>
+                <string>xml</string> <string>ini</string> <string>cfg</string>
+                <string>conf</string> <string>config</string>
+                <string>cnf</string> <string>env</string>
+                <string>properties</string> <string>lock</string>
+                <string>ron</string> <string>kdl</string> <string>hcl</string>
+                <string>tf</string> <string>tfvars</string>
+                <string>nix</string> <string>csv</string> <string>tsv</string>
+                <string>sql</string> <string>graphql</string>
+                <string>gql</string> <string>proto</string>
+                <string>thrift</string> <string>avsc</string>
+                <string>prisma</string> <string>puml</string>
+                <string>plantuml</string> <string>mmd</string>
+                <string>mermaid</string> <string>gv</string>
+                <string>html</string> <string>htm</string>
+                <string>xhtml</string> <string>xsd</string>
+                <string>xsl</string> <string>xslt</string>
+                <string>dtd</string> <string>rss</string>
+                <string>atom</string> <string>svg</string>
+                <string>xaml</string> <string>resx</string>
+                <string>xlf</string> <string>xliff</string>
+                <string>nuspec</string> <string>manifest</string>
+                <string>sln</string> <string>csproj</string>
+                <string>vcxproj</string> <string>fsproj</string>
+                <string>vbproj</string> <string>props</string>
+                <string>targets</string> <string>filters</string>
+                <string>reg</string> <string>inf</string> <string>rc</string>
+                <string>gitignore</string> <string>gitattributes</string>
+                <string>gitmodules</string> <string>gitconfig</string>
+                <string>gitkeep</string> <string>mailmap</string>
+                <string>editorconfig</string> <string>envrc</string>
+                <string>bashrc</string> <string>bash_profile</string>
+                <string>bash_logout</string> <string>zshrc</string>
+                <string>zprofile</string> <string>zshenv</string>
+                <string>profile</string> <string>inputrc</string>
+                <string>vimrc</string> <string>npmrc</string>
+                <string>nvmrc</string> <string>yarnrc</string>
+                <string>prettierrc</string> <string>eslintrc</string>
+                <string>babelrc</string> <string>dockerignore</string>
+                <string>npmignore</string> <string>prettierignore</string>
+                <string>eslintignore</string> <string>clang-format</string>
+                <string>clang-tidy</string> <string>clangd</string>
+                <string>tool-versions</string> <string>htaccess</string>
+                <string>flake8</string> <string>pylintrc</string>
+                <string>coveragerc</string> <string>desktop</string>
+                <string>service</string> <string>xcconfig</string>
+                <string>pbxproj</string> <string>rs</string>
+                <string>c</string> <string>h</string> <string>cc</string>
+                <string>cpp</string> <string>cxx</string> <string>c++</string>
+                <string>hpp</string> <string>hh</string> <string>hxx</string>
+                <string>h++</string> <string>inl</string> <string>ipp</string>
+                <string>tpp</string> <string>ixx</string>
+                <string>cppm</string> <string>cu</string> <string>cuh</string>
+                <string>m</string> <string>mm</string> <string>def</string>
+                <string>cs</string> <string>csx</string> <string>vb</string>
+                <string>fs</string> <string>fsi</string> <string>fsx</string>
+                <string>java</string> <string>kt</string> <string>kts</string>
+                <string>scala</string> <string>sc</string>
+                <string>sbt</string> <string>groovy</string>
+                <string>gvy</string> <string>gradle</string>
+                <string>clj</string> <string>cljs</string>
+                <string>cljc</string> <string>edn</string> <string>go</string>
+                <string>mod</string> <string>sum</string> <string>zig</string>
+                <string>zon</string> <string>nim</string>
+                <string>nims</string> <string>nimble</string>
+                <string>d</string> <string>di</string> <string>odin</string>
+                <string>v</string> <string>vsh</string> <string>hare</string>
+                <string>cr</string> <string>gleam</string>
+                <string>swift</string> <string>dart</string>
+                <string>jl</string> <string>r</string> <string>rmd</string>
+                <string>qmd</string> <string>lua</string>
+                <string>luau</string> <string>fnl</string>
+                <string>tcl</string> <string>awk</string> <string>sed</string>
+                <string>pl</string> <string>pm</string> <string>raku</string>
+                <string>php</string> <string>phtml</string>
+                <string>py</string> <string>pyi</string> <string>pyw</string>
+                <string>pyx</string> <string>pxd</string> <string>rb</string>
+                <string>rbs</string> <string>rake</string>
+                <string>gemspec</string> <string>ru</string>
+                <string>erl</string> <string>hrl</string> <string>ex</string>
+                <string>exs</string> <string>eex</string>
+                <string>heex</string> <string>leex</string>
+                <string>hs</string> <string>lhs</string>
+                <string>cabal</string> <string>elm</string>
+                <string>purs</string> <string>ml</string> <string>mli</string>
+                <string>mll</string> <string>mly</string> <string>re</string>
+                <string>rei</string> <string>res</string>
+                <string>resi</string> <string>sml</string>
+                <string>lisp</string> <string>lsp</string> <string>el</string>
+                <string>scm</string> <string>ss</string> <string>rkt</string>
+                <string>hy</string> <string>janet</string>
+                <string>lean</string> <string>agda</string>
+                <string>idr</string> <string>pas</string> <string>pp</string>
+                <string>dpr</string> <string>lpr</string> <string>f</string>
+                <string>f90</string> <string>f95</string> <string>f03</string>
+                <string>for</string> <string>ada</string> <string>adb</string>
+                <string>ads</string> <string>cob</string> <string>cbl</string>
+                <string>asm</string> <string>s</string> <string>nasm</string>
+                <string>ll</string> <string>wat</string> <string>wast</string>
+                <string>sol</string> <string>move</string>
+                <string>vala</string> <string>vapi</string>
+                <string>hx</string> <string>as</string>
+                <string>coffee</string> <string>litcoffee</string>
+                <string>ahk</string> <string>vbs</string>
+                <string>applescript</string> <string>sh</string>
+                <string>bash</string> <string>zsh</string>
+                <string>fish</string> <string>ksh</string>
+                <string>csh</string> <string>tcsh</string> <string>nu</string>
+                <string>xsh</string> <string>ps1</string>
+                <string>psm1</string> <string>psd1</string>
+                <string>bat</string> <string>cmd</string>
+                <string>command</string> <string>js</string>
+                <string>mjs</string> <string>cjs</string> <string>jsx</string>
+                <string>ts</string> <string>mts</string> <string>cts</string>
+                <string>tsx</string> <string>vue</string>
+                <string>svelte</string> <string>astro</string>
+                <string>ejs</string> <string>hbs</string>
+                <string>handlebars</string> <string>mustache</string>
+                <string>jinja</string> <string>jinja2</string>
+                <string>j2</string> <string>njk</string>
+                <string>liquid</string> <string>twig</string>
+                <string>haml</string> <string>slim</string>
+                <string>pug</string> <string>jade</string>
+                <string>erb</string> <string>css</string>
+                <string>scss</string> <string>sass</string>
+                <string>less</string> <string>styl</string>
+                <string>pcss</string> <string>glsl</string>
+                <string>vert</string> <string>frag</string>
+                <string>geom</string> <string>comp</string>
+                <string>tesc</string> <string>tese</string>
+                <string>hlsl</string> <string>wgsl</string>
+                <string>metal</string> <string>shader</string>
+                <string>gdshader</string> <string>gd</string>
+                <string>tscn</string> <string>tres</string>
+                <string>sv</string> <string>svh</string> <string>vh</string>
+                <string>vhd</string> <string>vhdl</string>
+                <string>cmake</string> <string>mk</string>
+                <string>mak</string> <string>make</string>
+                <string>ninja</string> <string>gn</string>
+                <string>gni</string> <string>bzl</string>
+                <string>bazel</string> <string>star</string>
+                <string>build</string> <string>just</string>
+                <string>pro</string> <string>pri</string> <string>prf</string>
+                <string>qbs</string> <string>qrc</string> <string>qml</string>
+                <string>ui</string> <string>iss</string> <string>nsi</string>
+                <string>nsh</string> <string>wxs</string>
+                <string>spec</string> <string>ebuild</string>
+                <string>dockerfile</string> <string>containerfile</string>
+                <string>vim</string>
             </array>
         </dict>
     </array>

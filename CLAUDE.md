@@ -654,11 +654,21 @@ the scratchpad (see Scratchpad).
   writes "Ctrl+," and "Ctrl+Q" as plain strings, because `Preferences` and
   `Quit` have no Ctrl binding on Windows. "Ctrl+0" has no `StandardKey`. In
   strings, Qt maps Ctrl to Cmd on macOS.
-- **Open With**: Koil offers to open text files but is never their default
-  app. On macOS, `Info.plist` claims `public.text` (which source code
-  conforms to) at the `Alternate` rank. Files of undeclared types
-  (`dyn.*`) can't be offered: Launch Services ignores an `Alternate` claim
-  on `public.data`, and a `Default` one makes the app their default. Finder
+- **Open With**: Koil offers to open text files but isn't made the default
+  app of a type another app opens. On macOS, `Info.plist` claims, at the
+  `Alternate` rank (`None` isn't in Open With at all), `public.text`
+  (which source code macOS knows conforms to) and `public.data`, which
+  matches only a file of that type itself: one with no extension (empty
+  too) or a dotfile (`.envrc`), not a picture or an archive. A file
+  whose extension macOS doesn't know (`.toml`) has a `dyn.*` type, which
+  no claim on a type it conforms to matches (not `public.data`,
+  `public.item`, nor a `*` extension), so a second document type claims a
+  list of text and source code extensions by name
+  (`CFBundleTypeExtensions`, as VS Code and Zed do; a dict with
+  `LSItemContentTypes` ignores them), the same as Windows' `Exts`. Koil is
+  the default of one only if no other app claims it. Launch Services
+  ignores a bundle in `/tmp`, so trying claims out takes one elsewhere
+  (`lsregister -f`, then `-u`), with a Mach-O executable. Finder
   gives the file as a `QFileOpenEvent`, not on the command line (also to
   Koil already running): `Document.watchFileOpens` has native.cpp's filter
   call `document::file_opened` (C++ can't emit a cxx-qt signal, and the
@@ -669,8 +679,10 @@ the scratchpad (see Scratchpad).
   `OpenWithProgids` of a list of text and source code extensions (`Exts` in
   `installer.iss`; what the Open With menu shows), and those extensions as
   `Applications\koil.exe`'s `SupportedTypes` (so "Choose another app" offers
-  it only for them). Both give it the path on the command line, without
-  taking any extension.
+  it only for them). Its first is `.`, the key Windows looks up for a file
+  with no extension (untried: the docs for it are old); a dotfile's name
+  (`.gitignore`) is its extension there. Both give it the path on the
+  command line, without taking any extension.
 - **App icon**: macOS draws icons as they are, so `Koil.icns` shrinks
   `icon.png`'s rounded square to Apple's grid (824 of 1024 pixels). It's
   Apple's shape too, with continuous corners: macOS 26 puts an icon that

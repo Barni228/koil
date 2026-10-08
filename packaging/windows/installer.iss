@@ -42,24 +42,63 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 ; each extension's OpenWithProgids (which the Open With menu shows), and the
 ; same extensions as the app's SupportedTypes (so "Choose another app" offers
 ; it only for those). It opens any UTF-8 text, but no extension says a file is
-; that, so these are the usual text and source code ones. No extension's
-; default is set, so Koil is never the default app. HKA is the current user's
-; keys, or the machine's in an all-users install. A `\` ends a line that goes
-; on.
-#dim Exts[107] { \
-  ".txt", ".text", ".md", ".markdown", ".rst", ".adoc", ".org", ".tex", \
-  ".log", ".csv", ".tsv", ".json", ".jsonc", ".json5", ".toml", ".yaml", \
-  ".yml", ".xml", ".ini", ".cfg", ".conf", ".config", ".env", ".properties", \
-  ".editorconfig", ".gitignore", ".gitattributes", ".rs", ".c", ".h", ".cc", \
-  ".cpp", ".cxx", ".hpp", ".hh", ".hxx", ".cs", ".fs", ".java", ".kt", \
-  ".kts", ".scala", ".go", ".swift", ".m", ".mm", ".zig", ".nim", ".d", \
-  ".py", ".pyi", ".rb", ".pl", ".pm", ".php", ".lua", ".r", ".jl", ".dart", \
-  ".ex", ".exs", ".erl", ".hs", ".ml", ".mli", ".clj", ".lisp", ".el", \
-  ".vim", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx", \
-  ".vue", ".svelte", ".html", ".htm", ".css", ".scss", ".sass", ".less", \
-  ".sh", ".bash", ".zsh", ".fish", ".ps1", ".psm1", ".psd1", ".bat", ".cmd", \
-  ".sql", ".graphql", ".proto", ".cmake", ".mk", ".gradle", ".qml", ".qrc", \
-  ".ui", ".iss", ".nsi", ".diff", ".patch" \
+; that, so these are the usual text and source code ones (the same as
+; packaging/macos/Info.plist's), and "." for a file with no extension (like
+; Makefile, LICENSE or an empty file), which Windows looks up under the
+; key ".". A dotfile's name (.gitignore) is its extension here. No
+; extension's default is set, so Koil is never the default app. HKA is the
+; current user's keys, or the machine's in an all-users install. A `\` ends
+; a line that goes on.
+#dim Exts[378] { \
+  ".", ".txt", ".text", ".md", ".markdown", ".mdown", ".mkd", ".mdx", \
+  ".rst", ".adoc", ".asciidoc", ".org", ".tex", ".ltx", ".sty", ".cls", \
+  ".bib", ".typ", ".log", ".nfo", ".srt", ".vtt", ".ics", ".vcf", ".po", \
+  ".pot", ".diff", ".patch", ".rej", ".ipynb", ".http", ".pem", ".json", \
+  ".jsonc", ".json5", ".jsonl", ".ndjson", ".geojson", ".webmanifest", \
+  ".toml", ".yaml", ".yml", ".xml", ".ini", ".cfg", ".conf", ".config", \
+  ".cnf", ".env", ".properties", ".lock", ".ron", ".kdl", ".hcl", ".tf", \
+  ".tfvars", ".nix", ".csv", ".tsv", ".sql", ".graphql", ".gql", ".proto", \
+  ".thrift", ".avsc", ".prisma", ".puml", ".plantuml", ".mmd", ".mermaid", \
+  ".gv", ".html", ".htm", ".xhtml", ".xsd", ".xsl", ".xslt", ".dtd", ".rss", \
+  ".atom", ".svg", ".xaml", ".resx", ".xlf", ".xliff", ".nuspec", \
+  ".manifest", ".sln", ".csproj", ".vcxproj", ".fsproj", ".vbproj", \
+  ".props", ".targets", ".filters", ".reg", ".inf", ".rc", ".gitignore", \
+  ".gitattributes", ".gitmodules", ".gitconfig", ".gitkeep", ".mailmap", \
+  ".editorconfig", ".envrc", ".bashrc", ".bash_profile", ".bash_logout", \
+  ".zshrc", ".zprofile", ".zshenv", ".profile", ".inputrc", ".vimrc", \
+  ".npmrc", ".nvmrc", ".yarnrc", ".prettierrc", ".eslintrc", ".babelrc", \
+  ".dockerignore", ".npmignore", ".prettierignore", ".eslintignore", \
+  ".clang-format", ".clang-tidy", ".clangd", ".tool-versions", ".htaccess", \
+  ".flake8", ".pylintrc", ".coveragerc", ".desktop", ".service", \
+  ".xcconfig", ".pbxproj", ".rs", ".c", ".h", ".cc", ".cpp", ".cxx", ".c++", \
+  ".hpp", ".hh", ".hxx", ".h++", ".inl", ".ipp", ".tpp", ".ixx", ".cppm", \
+  ".cu", ".cuh", ".m", ".mm", ".def", ".cs", ".csx", ".vb", ".fs", ".fsi", \
+  ".fsx", ".java", ".kt", ".kts", ".scala", ".sc", ".sbt", ".groovy", \
+  ".gvy", ".gradle", ".clj", ".cljs", ".cljc", ".edn", ".go", ".mod", \
+  ".sum", ".zig", ".zon", ".nim", ".nims", ".nimble", ".d", ".di", ".odin", \
+  ".v", ".vsh", ".hare", ".cr", ".gleam", ".swift", ".dart", ".jl", ".r", \
+  ".rmd", ".qmd", ".lua", ".luau", ".fnl", ".tcl", ".awk", ".sed", ".pl", \
+  ".pm", ".raku", ".php", ".phtml", ".py", ".pyi", ".pyw", ".pyx", ".pxd", \
+  ".rb", ".rbs", ".rake", ".gemspec", ".ru", ".erl", ".hrl", ".ex", ".exs", \
+  ".eex", ".heex", ".leex", ".hs", ".lhs", ".cabal", ".elm", ".purs", ".ml", \
+  ".mli", ".mll", ".mly", ".re", ".rei", ".res", ".resi", ".sml", ".lisp", \
+  ".lsp", ".el", ".scm", ".ss", ".rkt", ".hy", ".janet", ".lean", ".agda", \
+  ".idr", ".pas", ".pp", ".dpr", ".lpr", ".f", ".f90", ".f95", ".f03", \
+  ".for", ".ada", ".adb", ".ads", ".cob", ".cbl", ".asm", ".s", ".nasm", \
+  ".ll", ".wat", ".wast", ".sol", ".move", ".vala", ".vapi", ".hx", ".as", \
+  ".coffee", ".litcoffee", ".ahk", ".vbs", ".applescript", ".sh", ".bash", \
+  ".zsh", ".fish", ".ksh", ".csh", ".tcsh", ".nu", ".xsh", ".ps1", ".psm1", \
+  ".psd1", ".bat", ".cmd", ".command", ".js", ".mjs", ".cjs", ".jsx", ".ts", \
+  ".mts", ".cts", ".tsx", ".vue", ".svelte", ".astro", ".ejs", ".hbs", \
+  ".handlebars", ".mustache", ".jinja", ".jinja2", ".j2", ".njk", ".liquid", \
+  ".twig", ".haml", ".slim", ".pug", ".jade", ".erb", ".css", ".scss", \
+  ".sass", ".less", ".styl", ".pcss", ".glsl", ".vert", ".frag", ".geom", \
+  ".comp", ".tesc", ".tese", ".hlsl", ".wgsl", ".metal", ".shader", \
+  ".gdshader", ".gd", ".tscn", ".tres", ".sv", ".svh", ".vh", ".vhd", \
+  ".vhdl", ".cmake", ".mk", ".mak", ".make", ".ninja", ".gn", ".gni", \
+  ".bzl", ".bazel", ".star", ".build", ".just", ".pro", ".pri", ".prf", \
+  ".qbs", ".qrc", ".qml", ".ui", ".iss", ".nsi", ".nsh", ".wxs", ".spec", \
+  ".ebuild", ".dockerfile", ".containerfile", ".vim" \
 }
 #define I
 #sub ExtEntries
