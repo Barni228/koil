@@ -2,9 +2,9 @@
 //! lasts across sessions, and shared by every Koil running at once.
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use std::{fs, io};
 
 use koil_core::{Applied, Koil};
 
@@ -41,7 +41,9 @@ impl History {
         let Some(path) = &self.path else {
             return;
         };
-        let saved = read(path);
+        // One that can't be read is as it was at the last merge: taken for empty, every
+        // apply in it would be one another Koil undid, and go.
+        let saved = read(path).unwrap_or_else(|| self.last.clone());
         let merged = merge(&saved, koil.history(), &self.last);
         if merged != koil.history() {
             koil.set_history(merged.clone());
@@ -92,19 +94,23 @@ pub fn merge(saved: &[Applied], ours: &[Applied], last: &[Applied]) -> Vec<Appli
     merged
 }
 
-/// What `path` has, nothing if it can't be read.
-fn read(path: &Path) -> Vec<Applied> {
-    let text = fs::read_to_string(path).unwrap_or_default();
-    serde_json::from_str(&text).unwrap_or_default()
+/// What `path` has: nothing if it isn't there, None if it can't be read.
+fn read(path: &Path) -> Option<Vec<Applied>> {
+    match fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).ok(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Some(Vec::new()),
+        Err(_) => None,
+    }
 }
 
-/// Writes `history` to `path` all at once (through a file next to it), so
-/// another Koil never reads it half written.
-fn write(path: &Path, history: &[Applied]) -> std::io::Result<()> {
+/// Writes `history` to `path` all at once (through a file next to it, this
+/// Koil's own, as two writing one could put the other's half written in
+/// place), so another Koil never reads it half written.
+fn write(path: &Path, history: &[Applied]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let temp = path.with_extension("json.new");
+    let temp = path.with_extension(format!("json.{}.new", std::process::id()));
     fs::write(&temp, serde_json::to_string(history)?)?;
     fs::rename(&temp, path)
 }

@@ -87,3 +87,24 @@ fn test_two_koils_share_a_file() {
     History::at(Some(temp.path().join("data/history.json"))).merge(&mut koil);
     assert_eq!([b], koil.history());
 }
+
+#[test]
+fn test_file_that_cant_be_read() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("history.json");
+    let mut history = History::at(Some(path.clone()));
+    let mut koil = Koil::default();
+    let a = applied(1, "/a");
+    koil.set_history(vec![a.clone()]);
+    history.merge(&mut koil);
+
+    // half written by something else: not a history whose applies were undone
+    fs::write(&path, "[{\"time\":").unwrap();
+    history.merge(&mut koil);
+    assert_eq!(std::slice::from_ref(&a), koil.history());
+    // and once there's more to keep, it's written whole again
+    let b = applied(2, "/b");
+    koil.set_history(vec![a.clone(), b.clone()]);
+    history.merge(&mut koil);
+    assert_eq!(Some(vec![a, b]), read(&path));
+}

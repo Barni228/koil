@@ -358,6 +358,10 @@ the scratchpad (see Scratchpad).
   rename, `merge_changed`), and before the history is shown or undone.
   Applies are told apart by their time, and what both had at the last
   merge (`last`) tells one the other Koil added from one this one undid.
+  A file that can't be read (half written) is as it was at the last
+  merge, not empty, which would make every apply one the other undid, and
+  each Koil writes it through a temp file of its own
+  (`history.json.<pid>.new`).
 - **Sorting** (koil-core's `Settings::sort`; read its CLAUDE.md): `gs`
   shows the sort menu (`SortMenu`, under the sort button beside the
   options, visible while vim's `pendingKeys` end in `gs`), and a key picks
