@@ -25,10 +25,14 @@ import QtQuick.Layouts
 // between each and the next, so they're told apart. The current line is
 // highlighted only once one of those is used: the first j or k shows it
 // where it is, on the first line.
+// The word that starts a line of the list (after its box) can be colored
+// by what it stands for, like CREATE in green (see ask).
 Popup {
     id: dialog
 
     required property Theme theme
+    // Colors the list's keywords (see `keywords`); none in the tests.
+    property var system: null
 
     readonly property real zoom: theme.zoom
     // The question, or a function of how many lines are picked (and which)
@@ -36,6 +40,12 @@ Popup {
     property var question: ""
     readonly property string text: typeof question === "function" ? question(pickedCount, picked) : question
     property string details
+    // The kind of change (see theme.changeColor) each word that can
+    // start a line of the list stands for, like `{ MOVE: "rename" }`, and
+    // the colors that gives (see ask).
+    property var keywords: ({})
+    readonly property var keywordColors: Object.keys(keywords)
+        .reduce((list, word) => list.concat([word, theme.changeColor(keywords[word])]), [])
     // The lines to pick from (see ask), their text as shown (lined up after
     // the box), what goes between them (an empty line too, if one takes
     // several), which of them are picked, which need each one (`needs` the
@@ -83,7 +93,10 @@ Popup {
     // (it can't be picked; nor then can a line that needs it): then
     // `question` can be a function of how many are picked (and the list of
     // whether each is), and `yes` gets the indexes of the picked ones.
-    function ask(question, details, yes, no, after) {
+    // `keywords` colors the word a line of the list starts with by the kind
+    // of change it stands for (see `keywords`), if it's one of them.
+    function ask(question, details, yes, no, after, keywords) {
+        dialog.keywords = keywords || {};
         const pick = Array.isArray(details);
         rows = pick ? details.map(item => item.text.replace(/\n/g, "\n" + pad)) : [];
         gap = rows.some(row => row.includes("\n")) ? "\n\n" : "\n";
@@ -197,6 +210,7 @@ Popup {
         scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, y));
     }
 
+    onKeywordColorsChanged: system?.setKeywordColors(label.textDocument, keywordColors)
     onRowChanged: Qt.callLater(showRow)
     onRowShownChanged: Qt.callLater(showRow)
 

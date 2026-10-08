@@ -100,6 +100,16 @@ pub mod qobject {
             directory_color: &QString,
             spans: &QStringList,
         );
+
+        /// Colors the first word of each line of `textDocument` (after the box
+        /// of a line to pick from) if it's a keyword: `keyword_colors`
+        /// alternates keywords and their colors. None takes the colors away.
+        #[qinvokable]
+        unsafe fn set_keyword_colors(
+            self: &System,
+            text_document: *mut QObject,
+            keyword_colors: &QStringList,
+        );
     }
 }
 
@@ -203,5 +213,16 @@ impl qobject::System {
         spans: &QStringList,
     ) {
         unsafe { ffi::set_path_colors(text_document.cast(), directory_color, spans) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn set_keyword_colors(
+        &self,
+        text_document: *mut qobject::QObject,
+        keyword_colors: &QStringList,
+    ) {
+        unsafe { ffi::set_keyword_colors(text_document.cast(), keyword_colors) };
     }
 }

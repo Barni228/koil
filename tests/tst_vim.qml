@@ -2067,4 +2067,15 @@ TestCase {
         compare(chosen, [0, 2]);
         verify(!confirm.opened);
     }
+
+    // The words lines start with get the color of the change they stand
+    // for, only in the questions that say so.
+    function test_confirmKeywords() {
+        confirm.ask("Apply?", "MOVE   a -> b", () => {}, null, null, { MOVE: "rename", TRASH: "delete" });
+        compare(confirm.keywordColors, ["MOVE", theme.changeColor("rename"), "TRASH", theme.changeColor("delete")]);
+        confirm.answer("cancel");
+        confirm.ask("Delete it anyway?", "MOVE -> b", () => {});
+        compare(confirm.keywordColors, []);
+        confirm.answer("cancel");
+    }
 }

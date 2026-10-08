@@ -72,6 +72,17 @@ ApplicationWindow {
         }
         return keys;
     }
+    // The words the lines of what applying or undoing does start with
+    // (listing::action_text and undo_text), and the kind of change each is,
+    // which colors it (see ConfirmDialog.keywords).
+    readonly property var changeKeywords: ({
+        CREATE: "create",
+        RESTORE: "create",
+        DELETE: "delete",
+        TRASH: "delete",
+        MOVE: "rename",
+        COPY: "copy"
+    })
     // The parts of the regex in the path field (see Editor.pathSyntax), and
     // the path they're for.
     property var pathSyntax: []
@@ -612,7 +623,8 @@ ApplicationWindow {
         }
         // Only the new dirs need saying.
         const details = r.steps.length > 1 ? r.steps.join("\n") : "";
-        confirmDialog.ask("“" + target.name + "” doesn't exist yet. Create it?", details, create);
+        confirmDialog.ask("“" + target.name + "” doesn't exist yet. Create it?", details, create, null, null,
+            changeKeywords);
     }
 
     // Whether changing files asks first, as the confirmChanges setting
@@ -686,7 +698,7 @@ ApplicationWindow {
         const what = picked => !picked ? "Discard " + these : picked === total ? "Apply " + these
             : "Apply " + picked + " of " + these;
         confirmDialog.ask(picked => what(picked) + (orQuit ? " before quitting?" : "?"), actions, apply,
-            orQuit ? () => Qt.quit() : null);
+            orQuit ? () => Qt.quit() : null, null, changeKeywords);
     }
 
     // Space u, or u with no change left to undo: lists the applies Koil can
@@ -725,7 +737,7 @@ ApplicationWindow {
             const u = JSON.parse(koil.undo(JSON.stringify(picked)));
             showListing(true, "", spot);
             report(u);
-        });
+        }, null, null, changeKeywords);
     }
 
     // Where the cursor is in the listing (its line and column) and how far
@@ -1292,6 +1304,7 @@ ApplicationWindow {
         id: confirmDialog
 
         theme: theme
+        system: system
         onClosed: root.activeView.textArea.forceActiveFocus()
     }
 

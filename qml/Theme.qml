@@ -88,6 +88,21 @@ QtObject {
         anchor: "#267f99"
     }
 
+    // The color of a kind of change in the confirmations (see
+    // ConfirmDialog's keywords): "create", "delete", "rename" (or move) or
+    // "copy". A function, as an object of constant colors in a binding
+    // (`dark ? { create: "#73c991", … } : { … }`) came out undefined in the
+    // compiled app, though qmltestrunner had it.
+    function changeColor(kind) {
+        if (kind === "create")
+            return dark ? "#73c991" : "#388a34";
+        if (kind === "delete")
+            return dark ? "#f14c4c" : "#e51400";
+        if (kind === "rename")
+            return dark ? "#e2c08d" : "#895503";
+        return dark ? "#4fc1ff" : "#0070c1";
+    }
+
     // The color of a warning's or an error's squiggle, message and icon.
     function severityColor(severity) {
         if (severity === "error")

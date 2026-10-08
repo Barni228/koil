@@ -84,6 +84,14 @@ void setPendingLines(QObject* textDocument, const QStringList& lines);
 // start, a length and a color for each part, in that order.
 void setPathColors(QObject* textDocument, const QString& directoryColor, const QStringList& spans);
 
+// Colors the first word of each line of a TextEdit's document (a
+// QQuickTextDocument), after the box before a line to pick from (a Private
+// Use Area character) if there is one, if it's one of the keywords
+// (`keywordColors` alternates keywords and colors), like the CREATE that
+// starts a line of the changes to apply. It follows edits. None takes the
+// colors away.
+void setKeywordColors(QObject* textDocument, const QStringList& keywordColors);
+
 // The installed font families whose text characters are all the same width,
 // in alphabetical order: the fonts the editor offers. It loads every font,
 // which takes a moment (a few hundred ms for a few hundred families).

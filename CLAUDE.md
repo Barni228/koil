@@ -38,8 +38,8 @@ the scratchpad (see Scratchpad).
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
-  `setText`, the listing's and path field's `QSyntaxHighlighter`,
-  `redrawText`).
+  `setText`, the listing's and path field's `QSyntaxHighlighter`, and the
+  confirmations' (`setKeywordColors`), `redrawText`).
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
   path field and its option buttons, and Koil's listing (`showListing`,
   `updateListing`, `applyChanges`, `undoApply`), a file (`loadFile`) or
@@ -306,7 +306,13 @@ the scratchpad (see Scratchpad).
   what it needs (`needs`: a swap's other half, the new dir a file goes
   in): picking one picks those, leaving one out leaves out what needs it.
   The boxes are text in the one `TextEdit`, so the list still selects and
-  copies as it is. The question counts what's picked. Yes applies the
+  copies as it is. The question counts what's picked, and stays over the
+  list as it scrolls. The word a line starts with (after its box) is
+  colored by the change it stands for (`root.changeKeywords`, passed to
+  `ask` by the apply, undo and create questions only, as a conflict's
+  lines are paths; `theme.changeColor`): CREATE and RESTORE green, DELETE
+  and TRASH red, MOVE yellow, COPY blue, by a `QSyntaxHighlighter`
+  (`setKeywordColors`), so the text stays plain. Yes applies the
   picked lines (`Koil.apply(picked)`, indexes into the `shown` actions
   `actions()` kept, given to `Koil::apply_only`, so only what the user saw
   is applied) and forgets the rest; with none picked, it discards them all
@@ -1021,7 +1027,11 @@ the scratchpad (see Scratchpad).
 - **QML's JavaScript**: don't make a binding depend on something by reading it
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The
-  engine has no `Array.prototype.flatMap`; `?.` and `??` work.
+  engine has no `Array.prototype.flatMap`; `?.` and `??` work. A `var`
+  property bound to objects of constants (`dark ? { create: "#73c991" } :
+  { … }`) came out undefined in the compiled app, though qmltestrunner had
+  it (`regexColors`, with a `String(text)` in it, works), so
+  `theme.changeColor` is a function.
 
 ## CI and releases
 

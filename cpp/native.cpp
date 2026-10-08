@@ -178,6 +178,44 @@ colored(const QString& color)
   return format;
 }
 
+const QString keywordHighlighterName = QStringLiteral("koilKeywordHighlighter");
+
+// See setKeywordColors.
+class KeywordHighlighter : public QSyntaxHighlighter
+{
+public:
+  using QSyntaxHighlighter::QSyntaxHighlighter;
+
+  QHash<QString, QTextCharFormat> keywords;
+
+protected:
+  void highlightBlock(const QString& text) override
+  {
+    qsizetype start = 0;
+    const auto skipSpaces = [&] {
+      while (start < text.size() && text.at(start).isSpace())
+        ++start;
+    };
+    skipSpaces();
+    if (start == text.size())
+      return;
+    // The box before a line to pick from, a Nerd Font icon.
+    const bool pair = text.at(start).isHighSurrogate() && start + 1 < text.size();
+    const char32_t first =
+      pair ? QChar::surrogateToUcs4(text.at(start), text.at(start + 1)) : text.at(start).unicode();
+    if (QChar::category(first) == QChar::Other_PrivateUse) {
+      start += pair ? 2 : 1;
+      skipSpaces();
+    }
+    qsizetype end = start;
+    while (end < text.size() && !text.at(end).isSpace())
+      ++end;
+    const auto keyword = keywords.constFind(text.mid(start, end - start));
+    if (keyword != keywords.cend())
+      setFormat(start, end - start, *keyword);
+  }
+};
+
 // Colors the document's lines again: the ones in `lines` (numbers, from
 // 0), or all of them. It's one edit, so the text's change signals (and what
 // QML does on them) come once, not once a line. QSyntaxHighlighter also
@@ -429,6 +467,33 @@ setPathColors(QObject* textDocument, const QString& directoryColor, const QStrin
   highlighter->spans.clear();
   for (qsizetype i = 0; i + 2 < spans.size(); i += 3)
     highlighter->spans.append({ spans.at(i).toInt(), spans.at(i + 1).toInt(), colored(spans.at(i + 2)) });
+  recolor(highlighter);
+}
+
+void
+setKeywordColors(QObject* textDocument, const QStringList& keywordColors)
+{
+  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
+  if (!quickDocument)
+    return;
+  auto* document = quickDocument->textDocument();
+  // No Q_OBJECT (so no moc), so it's found by name rather than by type.
+  auto* highlighter = static_cast<KeywordHighlighter*>(
+    document->findChild<QSyntaxHighlighter*>(keywordHighlighterName, Qt::FindDirectChildrenOnly));
+  if (keywordColors.isEmpty()) {
+    delete highlighter; // which takes its colors away
+    return;
+  }
+  if (!highlighter) {
+    highlighter = new KeywordHighlighter(document);
+    highlighter->setObjectName(keywordHighlighterName);
+  }
+  QHash<QString, QTextCharFormat> keywords;
+  for (qsizetype i = 0; i + 1 < keywordColors.size(); i += 2)
+    keywords.insert(keywordColors.at(i), colored(keywordColors.at(i + 1)));
+  if (keywords == highlighter->keywords)
+    return;
+  highlighter->keywords = keywords;
   recolor(highlighter);
 }
 
