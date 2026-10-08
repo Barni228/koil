@@ -852,21 +852,26 @@ fn region(
     new: Vec<Line>,
 ) -> TextEdit {
     let n = starts.len() - 1;
+    let empty = new.is_empty();
     let mut joined = String::new();
     let mut hidden = Vec::new();
-    for (k, line) in new.iter().enumerate() {
+    // `joined`'s length, kept rather than counted for each line (thousands of files can
+    // appear at once)
+    let mut at = 0;
+    for (k, line) in new.into_iter().enumerate() {
         if k > 0 {
             joined.push('\n');
+            at += 1;
         }
-        let at = utf16_len(&joined);
-        hidden.extend(line.hidden.clone().map(|h| Hidden { at, ..h }));
+        hidden.extend(line.hidden.map(|h| Hidden { at, ..h }));
         joined.push_str(&line.text);
+        at += utf16_len(&line.text);
     }
     // The text's end, without the line break `starts` counts after it.
     let end = (starts[n].0 - 1, starts[n].1 - 1);
     let (start, stop, new_text) = if last < n {
         // Each line with its line break.
-        let with_breaks = match new.is_empty() {
+        let with_breaks = match empty {
             true => String::new(),
             false => joined + "\n",
         };
@@ -875,7 +880,7 @@ fn region(
         ((0, 0), (0, 0), joined)
     } else if first == n {
         (end, end, format!("\n{joined}"))
-    } else if !new.is_empty() || first == 0 {
+    } else if !empty || first == 0 {
         (starts[first], end, joined)
     } else {
         // The last lines go, with the line break before them.

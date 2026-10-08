@@ -226,9 +226,11 @@ Item {
     }
 
     // The entry of the icon at p that hides text, or null (see Hidden text
-    // in Vim.qml).
+    // in Vim.qml). By binary search, as the hover asks at every move of the
+    // pointer, and a listing has one a line.
     function hiddenAt(p) {
-        return hidden.find(h => h.at === p) || null;
+        const list = hidden, i = vim.firstAt(list, p);
+        return i < list.length && list[i].at === p ? list[i] : null;
     }
 
     // The lines in view, even partly, as { top, bottom } counted from 0
