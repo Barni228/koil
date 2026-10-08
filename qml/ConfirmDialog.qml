@@ -6,34 +6,43 @@ import QtQuick.Layouts
 
 // A question with vim's :confirm choices, [Y]es, (N)o and (C)ancel, in a box
 // over the editor like :help's, with an optional list under it (what
-// applying would do, say), which scrolls if it's long. y answers yes, n no,
+// applying would do, say), which scrolls if it's long, while the question
+// stays where it is, over it. y answers yes, n no,
 // and c or Esc cancels; Left and Right (or h and l, Tab and Shift+Tab) move
 // the highlight, which starts on Yes, Enter answers the highlighted choice,
 // and j and k (or Up and Down) scroll. Its text is in the editor's font and
 // can be selected and copied.
-// The list can be one to pick from (what to apply), each line with a
-// checked box (picked) or an empty one before it, all picked at first.
-// Then j and k move the current line instead, Space or x (or a click on
-// its box) picks it or leaves it out, along with the lines it needs or
-// that need it, and a picks all of them, or none if all are. Yes with none
-// picked applies nothing, which forgets them all (see applyChanges in
-// main.qml). The current line is highlighted only once one of those is
-// used: the first j or k shows it where it is, on the first line.
+// The list can be one to pick from (what to apply, or to undo), each line
+// with a checked box (picked) or an empty one before it, all picked at
+// first unless a line says otherwise. Then j and k move the current line
+// instead, Space or x (or a click on its box) picks it or leaves it out,
+// along with the lines it needs or that need it, and a picks all of them,
+// or none if all are. A line can be one that can't be picked (an apply
+// that can't be undone), with a crossed out box. What Yes does with none
+// picked is up to the question (applying none forgets them all: see
+// applyChanges in main.qml). A line to pick can take several lines of
+// text, the rest lined up after its box, and then an empty line goes
+// between each and the next, so they're told apart. The current line is
+// highlighted only once one of those is used: the first j or k shows it
+// where it is, on the first line.
 Popup {
     id: dialog
 
     required property Theme theme
 
     readonly property real zoom: theme.zoom
-    // The question, or a function of how many lines are picked that gives
-    // it (see ask).
+    // The question, or a function of how many lines are picked (and which)
+    // that gives it (see ask).
     property var question: ""
-    readonly property string text: typeof question === "function" ? question(pickedCount) : question
+    readonly property string text: typeof question === "function" ? question(pickedCount, picked) : question
     property string details
-    // The lines to pick from (see ask), which of them are picked, which need
-    // each one (`needs` the other way round), and where each starts in
-    // `list`.
+    // The lines to pick from (see ask), their text as shown (lined up after
+    // the box), what goes between them (an empty line too, if one takes
+    // several), which of them are picked, which need each one (`needs` the
+    // other way round), and where each starts in `list`.
     property var items: []
+    property var rows: []
+    property string gap: "\n"
     property var picked: []
     property var neededBy: []
     property var starts: []
@@ -42,16 +51,16 @@ Popup {
     // it's highlighted (see moveRow).
     property int row: 0
     property bool rowShown: false
-    // Where the first line to pick from is in the text, for the boxes'
-    // clicks.
-    property real listTop: 0
-    // What goes before a line to pick from, left out and picked: the Nerd
-    // Font's nf-md-checkbox_blank_outline and nf-md-checkbox_marked, and
-    // two spaces, as it draws them wider than a column (as the listing's
-    // icons). Both are as long.
-    readonly property var boxes: ["󰄱  ", "󰄲  "]
-    readonly property string list: items.length ? items.map((item, i) => boxes[picked[i] ? 1 : 0] + item.text).join("\n")
-        : details
+    // What goes before a line to pick from, left out, picked and one that
+    // can't be: the Nerd Font's nf-md-checkbox_blank_outline,
+    // nf-md-checkbox_marked and nf-md-checkbox_blank_off_outline, and two
+    // spaces, as it draws them wider than a column (as the listing's icons).
+    // All are as long. Each takes three columns, which `pad` fills on the
+    // lines of text after a line's first.
+    readonly property var boxes: ["󰄱  ", "󰄲  ", "󱋭  "]
+    readonly property string pad: "   "
+    readonly property string list: items.length ? items.map((item, i) => boxes[item.blocked ? 2 : picked[i] ? 1 : 0] + rows[i])
+        .join(gap) : details
     // What the answers do, and what's done after any of them (see ask).
     property var yesAction: null
     property var noAction: null
@@ -69,21 +78,25 @@ Popup {
     // what Yes does, and `no` what No does, if anything. `after` runs after
     // either, or if it's closed some other way (the next question, say).
     // `details` can also be lines to pick from, `{ text, needs }`, where
-    // `needs` are the indexes of the lines it can't go without: then
-    // `question` can be a function of how many are picked, and `yes` gets the
-    // indexes of the picked ones.
+    // `needs` are the indexes of the lines it can't go without, and a line
+    // can also have `picked: false` (left out at first) and `blocked: true`
+    // (it can't be picked; nor then can a line that needs it): then
+    // `question` can be a function of how many are picked (and the list of
+    // whether each is), and `yes` gets the indexes of the picked ones.
     function ask(question, details, yes, no, after) {
         const pick = Array.isArray(details);
+        rows = pick ? details.map(item => item.text.replace(/\n/g, "\n" + pad)) : [];
+        gap = rows.some(row => row.includes("\n")) ? "\n\n" : "\n";
         items = pick ? details : [];
         dialog.details = pick ? "" : details || "";
-        picked = items.map(() => true);
+        picked = items.map(item => !item.blocked && item.picked !== false);
         const by = items.map(() => []);
         let start = 0;
         starts = items.map((item, i) => {
             for (const j of item.needs)
                 by[j].push(i);
             const at = start;
-            start += boxes[0].length + item.text.length + 1;
+            start += boxes[0].length + rows[i].length + gap.length;
             return at;
         });
         neededBy = by;
@@ -115,8 +128,10 @@ Popup {
     }
 
     // Picks line `i`, with the lines it needs, or leaves it out, with the
-    // lines that need it.
+    // lines that need it. One that can't be picked stays as it is.
     function toggle(i) {
+        if (items[i].blocked)
+            return;
         const on = !picked[i], p = picked.slice(), todo = [i];
         while (todo.length) {
             const j = todo.pop();
@@ -137,41 +152,38 @@ Popup {
         rowShown = true;
     }
 
+    // Those that can be picked.
     function pickAll() {
-        const all = pickedCount < items.length;
-        picked = items.map(() => all);
+        const all = pickedCount < items.filter(item => !item.blocked).length;
+        picked = items.map(item => all && !item.blocked);
     }
 
-    // The line to pick from at `position` in the text, or -1.
+    // The line to pick from at `position` in the list, or -1 (also on the
+    // empty line after one).
     function itemAt(position) {
-        const offset = position - text.length - 2;
-        if (!items.length || offset < 0)
+        if (!items.length)
             return -1;
         let low = 0, high = starts.length - 1;
         while (low < high) {
             const mid = (low + high + 1) >> 1;
-            if (starts[mid] <= offset)
+            if (starts[mid] <= position)
                 low = mid;
             else
                 high = mid - 1;
         }
-        return low;
+        return position <= starts[low] + boxes[0].length + rows[low].length ? low : -1;
     }
 
-    // Puts the highlight on the current line, and scrolls to it (to the top
-    // for the first, so the question shows).
+    // Puts the highlight on the current line, and scrolls to it.
     function showRow() {
         if (!items.length)
             return;
-        const start = text.length + 2 + starts[row];
+        const start = starts[row];
         const top = label.positionToRectangle(start);
-        const bottom = label.positionToRectangle(start + boxes[0].length + items[row].text.length);
-        listTop = label.positionToRectangle(text.length + 2).y;
+        const bottom = label.positionToRectangle(start + boxes[0].length + rows[row].length);
         rowHighlight.y = top.y;
         rowHighlight.height = bottom.y + bottom.height - top.y;
-        if (row === 0)
-            scrollTo(0);
-        else if (top.y < scroller.contentY)
+        if (top.y < scroller.contentY)
             scrollTo(top.y);
         else if (bottom.y + bottom.height > scroller.contentY + scroller.height)
             scrollTo(bottom.y + bottom.height - scroller.height);
@@ -191,12 +203,13 @@ Popup {
     parent: Overlay.overlay
     anchors.centerIn: parent
     width: Math.min(parent ? parent.width - 48 * zoom : 500,
-        Math.max(label.implicitWidth + scrollBar.width, buttons.implicitWidth) + 2 * padding)
+        Math.max(questionText.implicitWidth, label.implicitWidth + scrollBar.width, buttons.implicitWidth) + 2 * padding)
     padding: 16 * zoom
     modal: true
     focus: true
     closePolicy: Popup.CloseOnPressOutside
     onClosed: {
+        questionText.deselect();
         label.deselect();
         // Closed by a click outside it.
         const after = afterAction;
@@ -245,6 +258,32 @@ Popup {
         }
     }
 
+    // The question's and the list's text, which can be selected (one at a
+    // time) and copied.
+    component Selectable: TextEdit {
+        id: selectable
+
+        font: dialog.theme.font
+        color: dialog.theme.text
+        textFormat: TextEdit.PlainText
+        wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
+        readOnly: true
+        selectByMouse: true
+        // Keys stay with the dialog, which forwards Copy.
+        activeFocusOnPress: false
+        persistentSelection: true
+        selectionColor: dialog.theme.highlight
+        selectedTextColor: dialog.theme.highlightedText
+        onSelectedTextChanged: {
+            if (selectedText)
+                (selectable === label ? questionText : label).deselect();
+        }
+
+        HoverHandler {
+            cursorShape: Qt.IBeamCursor
+        }
+    }
+
     contentItem: ColumnLayout {
         spacing: 16 * dialog.zoom
         focus: true
@@ -252,7 +291,7 @@ Popup {
         Keys.onPressed: event => {
             const step = label.implicitHeight / Math.max(1, label.lineCount);
             if (event.matches(StandardKey.Copy))
-                label.copy();
+                (questionText.selectedText ? questionText : label).copy();
             else if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
                 return;
             else if (event.key === Qt.Key_Left || event.key === Qt.Key_H || event.key === Qt.Key_Backtab)
@@ -286,14 +325,24 @@ Popup {
             event.accepted = true;
         }
 
+        // Over the list, so it stays in view as the list scrolls.
+        Selectable {
+            id: questionText
+
+            Layout.fillWidth: true
+            text: dialog.text
+        }
+
         // Not interactive, since a drag selects text; the wheel scrolls it.
         Flickable {
             id: scroller
 
             Layout.fillWidth: true
-            // As tall as the text, but no taller than the window has room for.
+            // As tall as the list, but no taller than the window has room for.
             Layout.preferredHeight: Math.min(label.implicitHeight, (dialog.parent ? dialog.parent.height : 500)
-                - 48 * dialog.zoom - 2 * dialog.padding - buttons.implicitHeight - parent.spacing)
+                - 48 * dialog.zoom - 2 * dialog.padding - questionText.height - buttons.implicitHeight
+                - 2 * parent.spacing)
+            visible: dialog.list !== ""
             contentWidth: width
             contentHeight: label.implicitHeight
             interactive: false
@@ -309,30 +358,15 @@ Popup {
                 onWheel: event => dialog.scrollBy(-(event.pixelDelta.y || event.angleDelta.y / 120 * 60 * dialog.zoom))
             }
 
-            TextEdit {
+            Selectable {
                 id: label
 
                 // Room for the scroll bar, which the width can't depend on
                 // needing: that depends on the height, which depends on it.
                 width: scroller.width - scrollBar.width
-                text: dialog.list ? dialog.text + "\n\n" + dialog.list : dialog.text
-                font: dialog.theme.font
-                color: dialog.theme.text
-                textFormat: TextEdit.PlainText
-                wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-                readOnly: true
-                selectByMouse: true
-                // Keys stay with the dialog, which forwards Copy.
-                activeFocusOnPress: false
-                persistentSelection: true
-                selectionColor: dialog.theme.highlight
-                selectedTextColor: dialog.theme.highlightedText
+                text: dialog.list
                 onTextChanged: Qt.callLater(dialog.showRow)
                 onContentHeightChanged: Qt.callLater(dialog.showRow)
-
-                HoverHandler {
-                    cursorShape: Qt.IBeamCursor
-                }
 
                 // The current line to pick from, under the text.
                 Rectangle {
@@ -354,13 +388,12 @@ Popup {
 
                 // The boxes: a click on one picks its line or leaves it out.
                 MouseArea {
-                    y: dialog.listTop
                     width: box.advanceWidth
-                    height: label.height - y
+                    height: label.height
                     visible: dialog.items.length > 0
                     cursorShape: Qt.PointingHandCursor
                     onClicked: mouse => {
-                        const i = dialog.itemAt(label.positionAt(mouse.x, mouse.y + y));
+                        const i = dialog.itemAt(label.positionAt(mouse.x, mouse.y));
                         if (i < 0)
                             return;
                         dialog.row = i;

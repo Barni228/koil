@@ -14,11 +14,14 @@ the scratchpad (see Scratchpad).
   `qml/main.qml`.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
-  lines (`actions`, `undo_steps`), the path field's regex parts
+  lines (`actions`, `history`), the path field's regex parts
   (`path_syntax`), what Tab completes in it (`complete`), what's shown after
   each line when sorted by size or a date (`notes`), and what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`).
   Its tests (`src/listing/tests.rs`) use a temp dir.
+- `src/history.rs`: `History`, the undo history kept in a file across
+  sessions (see Undo history). Its tests (`src/history/tests.rs`) use a
+  temp dir.
 - `src/sizes.rs`: `Sizes`, which counts the sizes of dirs on its own
   threads and keeps them (see Kept sizes). Its tests
   (`src/sizes/tests.rs`) use a temp dir.
@@ -67,8 +70,8 @@ the scratchpad (see Scratchpad).
   `:reg` shows the registers in it (`showList`). `/` and `?` search it (see
   Help).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
-  the question: `:confirm q`, applying (a list to pick from), undoing an
-  apply, and what changed on disk against the user's edits.
+  the question: `:confirm q`, applying and undoing (lists to pick from),
+  and what changed on disk against the user's edits.
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
   look the app's own controls share (see Theme).
@@ -245,8 +248,8 @@ the scratchpad (see Scratchpad).
   its text, so `.` and counts repeat it.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` applies (`Space a` too, but
-  always asking first, whatever the setting: see Apply), `Space u` undoes
-  the last apply (see Apply and undo), `-` opens `..`
+  always asking first, whatever the setting: see Apply), `Space u` lists
+  the applies to undo (see Undo history), `-` opens `..`
   (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
@@ -310,17 +313,40 @@ the scratchpad (see Scratchpad).
   ("Discard these 3 changes?", "3 changes discarded"). Then vim starts
   over (koil refreshed: new IDs for renamed paths), with the cursor where it was (`listingSpot`: the
   same line; the listing's cursor even while vim is in the path field) and
-  the view as it was; so does undoing an apply. `u` or Cmd+Z with nothing left to undo in vim emits
-  `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
-  buffer back past an update) and asks to run koil's undo, listing its
-  steps; koil refuses while changes are pending. Not from the path field,
-  whose undo history is its own; `Space u` asks at once, from either. The "Ask before applying" setting
+  the view as it was; so does undoing an apply. The "Ask before applying" setting
   (`confirmChanges`: always, when deleting, never; `asksFirst`) can skip
   the confirmation (but not `Space a`'s or File > Apply Changes…'s: `ask`),
   applying every line (`deletes` says which delete), and Enter's create's
-  too. Undoing an apply always asks (a `u` too many mustn't change files
-  unasked), and so do `:confirm q` and `ZZ`, whose question is whether to
+  too. `:confirm q` and `ZZ` always ask, and their question is whether to
   quit without the changes.
+- **Undo history** (`undoApply`, koil-core's `Koil::undoable` and
+  `Koil::undo_only`): `u` or Cmd+Z with nothing left to undo in vim emits
+  `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
+  buffer back past an update) and lists the applies (and Enter's
+  creates) koil can undo, newest first, in `ConfirmDialog`
+  (`listing::history`: each one's time, its dir if it isn't the open one,
+  and what undoing it does, up to `SHOWN_STEPS` steps, relative to its
+  dir); koil refuses while changes are pending. Not from the path field,
+  whose undo history is its own; `Space u` asks at once, from either.
+  Only the last apply is picked at first, so Enter undoes what `u` did
+  before there was a history. An apply needs the newer ones that changed
+  a path it changed, or one in it or that it's in (koil-core's
+  `Undoable::needs`), which picking it picks. One that can't be undone
+  now (koil-core checks every step against the disk, with what it needs:
+  something gone, or taken, or emptied from the trash) says why, has a
+  crossed out box (`blocked`) and can't be picked. Yes undoes the picked
+  ones, newest first (`Koil.undo(picked)`, indexes into the
+  `shown_history` that `history()` kept); a step koil can see won't run
+  undoes nothing. Undoing always asks (a `u` too many mustn't change files
+  unasked). The history lasts across sessions (`History` in history.rs):
+  it's in `history.json` in Koil's data dir (`~/Library/Application
+  Support/Koil` on macOS, `%APPDATA%\Koil` on Windows), the newest
+  `KEPT` (100), and every Koil running shares it: `History::merge`
+  reads the file and merges both ways after anything that changes
+  koil's (an apply, a create, an undo, and a sync whose steps followed a
+  rename, `merge_changed`), and before the history is shown or undone.
+  Applies are told apart by their time, and what both had at the last
+  merge (`last`) tells one the other Koil added from one this one undid.
 - **Sorting** (koil-core's `Settings::sort`; read its CLAUDE.md): `gs`
   shows the sort menu (`SortMenu`, under the sort button beside the
   options, visible while vim's `pendingKeys` end in `gs`), and a key picks

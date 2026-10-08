@@ -250,6 +250,12 @@ TestCase {
         theme: theme
     }
 
+    ConfirmDialog {
+        id: confirm
+
+        theme: theme
+    }
+
     property int defaultChunkTime
     property real defaultCharWidth
     property real defaultLineHeight
@@ -2017,5 +2023,48 @@ TestCase {
         compare(help.matchMarks["0/1k"], "0,11,1");
         keys("<Esc><Esc>");
         tryCompare(help, "opened", false);
+    }
+
+    // ---- Confirmations -------------------------------------------------------
+
+    // Lines to pick from as the undo history gives them: some start left
+    // out, some can't be picked, and one takes two lines of text.
+    function test_confirmPicks() {
+        let chosen = null;
+        confirm.ask((count, picked) => count + ":" + picked.join(","), [
+            { text: "A\nstep", needs: [], picked: true },
+            { text: "B", needs: [], picked: false, blocked: true },
+            { text: "C", needs: [0], picked: false },
+            { text: "D", needs: [2], picked: false }
+        ], picked => chosen = picked);
+        tryCompare(confirm, "opened", true);
+        compare(confirm.text, "1:true,false,false,false");
+        const [off, on, blocked] = confirm.boxes;
+        // With an empty line between them, as one takes two lines.
+        compare(confirm.list, on + "A\n" + confirm.pad + "step\n\n" + blocked + "B\n\n" + off + "C\n\n" + off + "D");
+        // The second line of text is the first line's, and the empty one
+        // after it no line's.
+        const at = part => confirm.itemAt(confirm.list.indexOf(part));
+        compare(at("step"), 0);
+        compare(confirm.itemAt(confirm.list.indexOf("step") + 5), -1);
+        compare(at("C"), 2);
+
+        // Picking one picks what it needs, and leaving one out leaves out
+        // what needs it; one that can't be picked stays out.
+        confirm.toggle(1);
+        compare(confirm.picked, [true, false, false, false]);
+        confirm.toggle(3);
+        compare(confirm.picked, [true, false, true, true]);
+        confirm.toggle(0);
+        compare(confirm.picked, [false, false, false, false]);
+        confirm.pickAll();
+        compare(confirm.picked, [true, false, true, true]);
+        confirm.pickAll();
+        compare(confirm.picked, [false, false, false, false]);
+
+        confirm.toggle(2);
+        confirm.answer("yes");
+        compare(chosen, [0, 2]);
+        verify(!confirm.opened);
     }
 }

@@ -1362,3 +1362,66 @@ fn test_create_now() {
         Err("`file.rs` can't be created before the other changes are applied (Space Space)".into())
     );
 }
+
+/// Renames `from` (in the open dir) to `to`, and applies it.
+fn apply_rename(koil: &mut Koil, from: &str, to: &str) {
+    let entries: Vec<Entry> = (koil.listing().into_iter())
+        .map(|entry| match entry.name == Path::new(from) {
+            true => Entry {
+                name: to.into(),
+                ..entry
+            },
+            false => entry,
+        })
+        .collect();
+    koil.update(&entries).unwrap();
+    koil.apply().unwrap();
+}
+
+#[test]
+fn test_history() {
+    let (temp, mut koil) = koil();
+    apply_rename(&mut koil, "notes", "notes2");
+    apply_rename(&mut koil, "notes2", "notes3");
+    apply_rename(&mut koil, "file.rs", "main.rs");
+    let lines = history(&koil).unwrap();
+    // newest first, each with when it was applied and what undoing it does
+    let texts: Vec<Vec<&str>> = (lines.iter())
+        .map(|line| line.text.lines().skip(1).collect())
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            ["MOVE    main.rs -> file.rs"],
+            ["MOVE    notes3 -> notes2"],
+            ["MOVE    notes2 -> notes"]
+        ]
+    );
+    let time = |line: &HistoryLine| show_time(line.applied.time);
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.text.starts_with(&(time(line) + "\n")))
+    );
+    // the first rename can't be undone without the second one
+    let needs: Vec<&[usize]> = lines.iter().map(|line| line.needs.as_slice()).collect();
+    assert_eq!(needs, [&[][..], &[], &[1]]);
+    assert!(lines.iter().all(|line| !line.blocked));
+
+    // what's gone on disk can't be put back
+    fs::remove_file(temp.path().join("main.rs")).unwrap();
+    let lines = history(&koil).unwrap();
+    assert!(lines[0].blocked);
+    assert_eq!(
+        lines[0].text.lines().last(),
+        Some("Can't be undone: `main.rs` is gone")
+    );
+    assert!(!lines[1].blocked);
+
+    // and where it was applied, from another dir
+    let dir = show_path(koil.current_dir());
+    koil.open(temp.path().join("dir")).unwrap();
+    let lines = history(&koil).unwrap();
+    let header = format!("{}  {dir}", time(&lines[1]));
+    assert_eq!(lines[1].text.lines().next(), Some(header.as_str()));
+}

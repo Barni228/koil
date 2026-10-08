@@ -689,28 +689,40 @@ ApplicationWindow {
             orQuit ? () => Qt.quit() : null);
     }
 
-    // Space u, or u with no change left to undo: undoes Koil's last apply,
-    // once the user confirms it. With `say` (Space u), it says so when
-    // there's none (u has already).
+    // Space u, or u with no change left to undo: lists the applies Koil can
+    // undo, of every session (see history.rs), newest first, to pick from
+    // (with the newer ones each needs, see Koil::undoable), the last one
+    // picked; Yes undoes the picked ones. Those that can't be undone now say
+    // why, and can't be picked. With `say` (Space u), it says so when
+    // there's nothing to undo (u has already).
     function undoApply(say) {
         // Undo may have taken the listing back to before an update, which
         // Koil must see before anything can be undone.
         if (!updateListing())
             return;
-        const r = JSON.parse(koil.undoSteps());
+        const r = JSON.parse(koil.history());
         if (r.message) {
             vim.showError(r.message);
             return;
         }
-        if (!r.steps.length) {
+        if (!r.applies.length) {
             if (say)
                 vim.showMessage("Nothing to undo");
             return;
         }
         vim.showMessage("");
-        confirmDialog.ask("Undo the last apply?", r.steps.join("\n"), () => {
+        // The last apply picked, as u and Space u undo that.
+        const applies = r.applies.map((a, i) => Object.assign({ picked: i === 0 }, a));
+        const any = applies.some(a => !a.blocked);
+        const question = (count, picked) => !any ? "Nothing can be undone now"
+            : !count ? "Pick what to undo (Space)"
+            : count === 1 && picked[0] ? "Undo the last apply?"
+            : "Undo " + count + (count === 1 ? " apply?" : " applies?");
+        confirmDialog.ask(question, applies, picked => {
+            if (!picked.length)
+                return;
             const spot = listingSpot();
-            const u = JSON.parse(koil.undo());
+            const u = JSON.parse(koil.undo(JSON.stringify(picked)));
             showListing(true, "", spot);
             report(u);
         });

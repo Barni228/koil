@@ -3,6 +3,7 @@
 
 mod document;
 mod ffi;
+mod history;
 mod koil;
 mod listing;
 mod sizes;

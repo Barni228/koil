@@ -1,18 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
-use koil_core::apply::Undo;
-use koil_core::{Action, Conflict, Id, Report, Settings, Sort, Watched};
+use koil_core::{Action, Applied, Conflict, Id, KoilError, Report, Settings, Sort, Watched};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::json;
 
+use crate::history::History;
 use crate::listing::{self, Hidden, Notes};
 use crate::sizes::{Measure, Sizes};
 
@@ -158,16 +158,19 @@ pub mod qobject {
         #[qinvokable]
         fn create(self: Pin<&mut Koil>, path: &QString) -> QString;
 
-        /// What undoing the last apply would do: `{ steps, message }`, where
-        /// `steps` is empty if there's nothing to undo, and `message` says why
-        /// it can't be undone now.
+        /// The applies that can be undone, newest first, as a list of
+        /// `listing::HistoryLine`s (`{ text, needs, blocked }`), which `undo`
+        /// picks from: `{ applies, message }`, where `message` says why
+        /// nothing can be undone now. They're those of every session (see
+        /// history.rs).
         #[qinvokable]
-        fn undo_steps(self: &Koil) -> QString;
+        fn history(self: Pin<&mut Koil>) -> QString;
 
-        /// Undoes the last apply, then reads the open dir again. Returns
+        /// Undoes the applies `picked` (a list of indexes into what `history`
+        /// gave last), newest first, then reads the open dir again. Returns
         /// `{ ok, message }`.
         #[qinvokable]
-        fn undo(self: Pin<&mut Koil>) -> QString;
+        fn undo(self: Pin<&mut Koil>, picked: &QString) -> QString;
     }
 
     impl cxx_qt::Threading for Koil {}
@@ -186,6 +189,10 @@ pub struct KoilRust {
     /// What `actions` showed, which `apply` picks from: what the user saw,
     /// so a change they didn't see is never applied.
     shown: Vec<Action>,
+    /// The undo history kept across sessions, and what `history` showed of
+    /// it, which `undo` picks from.
+    history: History,
+    shown_history: Vec<Applied>,
     /// Made on the first `watch`, None if it can't be.
     watcher: Option<DiskWatcher>,
     /// Counts the sizes of the dirs listed, when it's sorted by size, and
@@ -313,20 +320,11 @@ fn size_watches(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     #[cfg(windows)]
     {
         let roots = dirs.iter().filter_map(|dir| dir.ancestors().last());
-        let roots: BTreeSet<PathBuf> = roots.map(Path::to_path_buf).collect();
+        let roots: BTreeSet<PathBuf> = roots.map(|root| root.to_path_buf()).collect();
         roots.into_iter().collect()
     }
     #[cfg(not(windows))]
     dirs
-}
-
-/// The paths undoing `step` changes on disk.
-fn undo_paths(step: &Undo) -> Vec<&Path> {
-    match step {
-        Undo::Trash(path) => vec![path],
-        Undo::Restore(trashed) => vec![&trashed.original],
-        Undo::Rename(from, to) => vec![from, to],
-    }
 }
 
 /// Whether an event of `kind` can change a listing: not reading a file, nor
@@ -427,6 +425,8 @@ impl qobject::Koil {
         if !synced.failed && !synced.moved {
             rust.count_sizes(&mut synced.notes);
         }
+        // The undo steps follow what was renamed on disk.
+        rust.history.merge_changed(&mut rust.koil);
         to_json(&synced)
     }
 
@@ -567,6 +567,7 @@ impl qobject::Koil {
     fn apply(self: Pin<&mut Self>, picked: &QString) -> QString {
         let picked: Vec<usize> = serde_json::from_str(&picked.to_string()).unwrap_or_default();
         let mut this = self.rust_mut();
+        let this = &mut *this;
         let actions: Vec<Action> = (picked.iter())
             .filter_map(|&i| this.shown.get(i).cloned())
             .collect();
@@ -606,6 +607,7 @@ impl qobject::Koil {
                 this.sizes.changed(path);
             }
         }
+        this.history.merge(&mut this.koil);
         to_json(&outcome)
     }
 
@@ -621,42 +623,65 @@ impl qobject::Koil {
     fn create(self: Pin<&mut Self>, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
         let mut rust = self.rust_mut();
+        let rust = &mut *rust;
         let outcome = match listing::create_now(&mut rust.koil, &path) {
             Ok(message) => Outcome { ok: true, message },
             Err(message) => Outcome { ok: false, message },
         };
         // With the new dirs it's in.
         rust.sizes.changed(&path);
+        rust.history.merge(&mut rust.koil);
         to_json(&outcome)
     }
 
-    fn undo_steps(&self) -> QString {
-        let value = match listing::undo_steps(&self.koil) {
-            Ok(steps) => json!({ "steps": steps, "message": "" }),
-            Err(message) => json!({ "steps": [], "message": message }),
+    fn history(self: Pin<&mut Self>) -> QString {
+        let mut rust = self.rust_mut();
+        let rust = &mut *rust;
+        // With what other Koils applied or undid.
+        rust.history.merge(&mut rust.koil);
+        let value = match listing::history(&rust.koil) {
+            Ok(lines) => {
+                rust.shown_history = lines.iter().map(|l| l.applied.clone()).collect();
+                json!({ "applies": lines, "message": "" })
+            }
+            Err(message) => json!({ "applies": [], "message": message }),
         };
         to_json(&value)
     }
 
-    fn undo(self: Pin<&mut Self>) -> QString {
+    fn undo(self: Pin<&mut Self>, picked: &QString) -> QString {
+        let picked: Vec<usize> = serde_json::from_str(&picked.to_string()).unwrap_or_default();
         let mut rust = self.rust_mut();
-        let steps = rust.koil.undo_steps().ok().flatten().unwrap_or_default();
-        let paths: Vec<PathBuf> = (steps.iter().flat_map(undo_paths))
-            .map(Path::to_path_buf)
+        let rust = &mut *rust;
+        let applies: Vec<Applied> = (picked.iter())
+            .filter_map(|&i| rust.shown_history.get(i).cloned())
             .collect();
-        let outcome = match rust.koil.undo() {
+        // Those another Koil undid since aren't undone again.
+        rust.history.merge(&mut rust.koil);
+        let outcome = match rust.koil.undo_only(&applies) {
             Ok(report) => Outcome {
                 ok: true,
                 message: report_message(report, "undone"),
+            },
+            Err(KoilError::UndoBlocked { blocked, .. }) => Outcome {
+                ok: false,
+                message: format!(
+                    "Can't undo: {}",
+                    listing::describe_blocked(rust.koil.current_dir(), &blocked)
+                ),
             },
             Err(error) => Outcome {
                 ok: false,
                 message: listing::describe(&error),
             },
         };
-        for path in &paths {
-            rust.sizes.changed(path);
+        // The sizes kept that it changed, before the watcher tells.
+        for step in applies.iter().flat_map(|applied| &applied.steps) {
+            for path in step.paths() {
+                rust.sizes.changed(path);
+            }
         }
+        rust.history.merge(&mut rust.koil);
         to_json(&outcome)
     }
 }

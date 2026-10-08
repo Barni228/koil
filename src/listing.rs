@@ -13,11 +13,11 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use devicons::Theme;
-use koil_core::apply::Undo;
+use koil_core::apply::{Blocked, Undo};
 use koil_core::{
-    Action, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil, KoilError,
-    Metadata, OpenError, Pattern, Settings, SortBy, UpdateError, UpdateOpenError, Warning,
-    with_slashes,
+    Action, Applied, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil,
+    KoilError, Metadata, OpenError, Pattern, Settings, SortBy, UpdateError, UpdateOpenError,
+    Warning, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1207,18 +1207,90 @@ pub fn describe_create(koil: &Koil, error: &KoilError) -> String {
     }
 }
 
-/// What `Koil::undo` would do, as the user sees it, like `TRASH a`: empty if
-/// there's nothing to undo. Fails if there are changes that aren't applied.
-pub fn undo_steps(koil: &Koil) -> Result<Vec<String>, String> {
-    let path = |p: &Path| relative(koil, p);
-    let dir = |p: &Path| format!("{}{}", path(p), if p.is_dir() { "/" } else { "" });
-    let step = |step: &Undo| match step {
-        Undo::Trash(p) => format!("TRASH   {}", dir(p)),
+/// How many of an apply's steps the undo history shows; the rest are
+/// counted.
+const SHOWN_STEPS: usize = 10;
+
+/// An apply of the undo history, as the confirmation shows it to pick from
+/// (see [`history`]).
+#[derive(Debug, Serialize)]
+pub struct HistoryLine {
+    /// When it was applied, and where, if not in the open dir, then what
+    /// undoing it does, a step a line (like `TRASH   a`, relative to where
+    /// it was applied), and why it can't be undone now, if it can't.
+    pub text: String,
+    /// The lines (in the list) it can't be undone without: newer applies
+    /// that changed the same paths.
+    pub needs: Vec<usize>,
+    /// Whether it can't be undone now (see `Undoable::blocked`).
+    pub blocked: bool,
+    #[serde(skip)]
+    pub applied: Applied,
+}
+
+/// Koil's undo history (`Koil::undoable`), newest first, as lines to pick
+/// from. Fails if there are changes that aren't applied.
+pub fn history(koil: &Koil) -> Result<Vec<HistoryLine>, String> {
+    let undoable = koil.undoable().map_err(|e| describe(&e))?;
+    let newest = undoable.len().saturating_sub(1);
+    let lines = undoable.into_iter().rev().map(|undoable| {
+        let dir = &undoable.applied.dir;
+        let time = show_time(undoable.applied.time);
+        // Where, if it's not the open dir.
+        let mut text = match dir.as_os_str().is_empty() || dir == koil.current_dir() {
+            true => time,
+            false => format!("{time}  {}", show_path(dir)),
+        };
+        let steps = &undoable.applied.steps;
+        for step in steps.iter().take(SHOWN_STEPS) {
+            text += &format!("\n{}", undo_text(dir, step));
+        }
+        if steps.len() > SHOWN_STEPS {
+            text += &format!("\n… {} more", steps.len() - SHOWN_STEPS);
+        }
+        if let Some((_, blocked)) = &undoable.blocked {
+            text += &format!("\nCan't be undone: {}", describe_blocked(dir, blocked));
+        }
+        HistoryLine {
+            text,
+            needs: undoable.needs.iter().map(|j| newest - j).collect(),
+            blocked: undoable.blocked.is_some(),
+            applied: undoable.applied,
+        }
+    });
+    Ok(lines.collect())
+}
+
+/// What undo `step` of an apply in `dir` does, as the user sees it, like
+/// `TRASH   a`.
+fn undo_text(dir: &Path, step: &Undo) -> String {
+    let path = |p: &Path| shown_in(dir, p);
+    let dir_path = |p: &Path| format!("{}{}", path(p), if p.is_dir() { "/" } else { "" });
+    match step {
+        Undo::Trash(p) => format!("TRASH   {}", dir_path(p)),
         Undo::Restore(t) => format!("RESTORE {}", path(&t.original)),
-        Undo::Rename(s, d) => format!("MOVE    {} -> {}", dir(s), path(d)),
-    };
-    let steps = koil.undo_steps().map_err(|e| describe(&e))?;
-    Ok(steps.unwrap_or_default().iter().map(step).collect())
+        Undo::Rename(s, d) => format!("MOVE    {} -> {}", dir_path(s), path(d)),
+    }
+}
+
+/// Why an undo step can't run, with its path relative to `dir` (an apply's,
+/// or the open dir).
+pub fn describe_blocked(dir: &Path, blocked: &Blocked) -> String {
+    match blocked {
+        Blocked::Missing(p) => format!("`{}` is gone", shown_in(dir, p)),
+        Blocked::Taken(p) => format!("`{}` already exists", shown_in(dir, p)),
+        Blocked::NotInTrash(p) => format!("`{}` is no longer in the trash", shown_in(dir, p)),
+    }
+}
+
+/// `path` relative to `dir` if it's in it, else as [`show_path`] does.
+fn shown_in(dir: &Path, path: &Path) -> String {
+    match path.strip_prefix(dir) {
+        Ok(rest) if !dir.as_os_str().is_empty() && !rest.as_os_str().is_empty() => {
+            with_slashes(rest).to_string_lossy().into_owned()
+        }
+        _ => show_path(path),
+    }
 }
 
 /// What Tab completes in the path field (see [`complete`]).
