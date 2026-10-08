@@ -1,37 +1,25 @@
 #!/usr/bin/env bash
 # Makes the app's icons from packaging/icon.png (run it after changing that;
-# its output is committed, so building doesn't need ImageMagick):
-#   packaging/macos/Koil.icns    the bundle's icon
-#   packaging/windows/koil.ico   the exe's icon (koil.rc) and the installer's
-#   packaging/window-icon.png    the window's, where neither is used (Linux,
-#                                and `cargo run` on macOS)
+# its output is committed, so building doesn't need ImageMagick). icon.png
+# is the macOS icon as it's drawn: 1024 pixels, with Apple's rounded square
+# (824 of them) in the middle (see App icon in CLAUDE.md).
 # Needs ImageMagick (`magick`) and macOS's `iconutil`.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
-src="$root/packaging/icon.png"
+cd "$(dirname "$0")/../packaging"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-# macOS draws icons as they are, so the rounded square must be the size of
-# other apps': 824 of 1024 pixels (Apple's grid). It's 1128 of icon.png's
-# 1254, so the whole image goes to 1254 * 824 / 1128 = 916 of 1024. It must
-# also be Apple's shape, with continuous corners (radius 185.4 of 824, as
-# in Apple's templates): macOS 26 puts one that isn't in a gray one.
-magick "$src" -resize 916x916 -background none -gravity center -extent 1024x1024 \
-    "$work/mac.png"
-
-iconset="$work/Koil.iconset"
-mkdir "$iconset"
+mkdir "$work/Koil.iconset"
 for size in 16 32 128 256 512; do
-    magick "$work/mac.png" -resize "${size}x${size}" "$iconset/icon_${size}x${size}.png"
-    magick "$work/mac.png" -resize "$((size * 2))x$((size * 2))" \
-        "$iconset/icon_${size}x${size}@2x.png"
+    magick icon.png -resize "${size}x${size}" "$work/Koil.iconset/icon_${size}x${size}.png"
+    magick icon.png -resize "$((size * 2))x$((size * 2))" \
+        "$work/Koil.iconset/icon_${size}x${size}@2x.png"
 done
-iconutil -c icns "$iconset" -o "$root/packaging/macos/Koil.icns"
+iconutil -c icns "$work/Koil.iconset" -o macos/Koil.icns
 
-magick "$work/mac.png" -resize 512x512 "$root/packaging/window-icon.png"
+magick icon.png -resize 512x512 window-icon.png
 
-# Windows icons fill their square.
-magick "$src" -define icon:auto-resize=256,64,48,40,32,24,20,16 \
-    "$root/packaging/windows/koil.ico"
+# Windows icons nearly fill their square: it's 90% of them.
+magick icon.png -gravity center -crop 916x916+0+0 +repage \
+    -define icon:auto-resize=256,64,48,40,32,24,20,16 windows/koil.ico

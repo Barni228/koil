@@ -88,11 +88,11 @@ the scratchpad (see Scratchpad).
 - `scripts/`: `bundle-macos.sh` (makes the `.app`), `package-macos.sh` (the
   `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup
   installer), `make-icons.sh` (the icons, from `packaging/icon.png`).
-- `packaging/`: `icon.png` (the app's icon) and the icons made from it
-  (committed, so building needs no ImageMagick): `macos/Koil.icns`,
-  `windows/koil.ico` (in the exe through `koil.rc`, which `build.rs`
-  compiles with `embed-resource`) and `window-icon.png` (see App icon);
-  `macos/Info.plist` (with a `@VERSION@` placeholder) and
+- `packaging/`: `icon.png` (the app's icon, as macOS draws it) and the
+  icons made from it (committed, so building needs no ImageMagick):
+  `macos/Koil.icns`, `windows/koil.ico` (in the exe through `koil.rc`,
+  which `build.rs` compiles with `embed-resource`) and `window-icon.png`
+  (see App icon); `macos/Info.plist` (with a `@VERSION@` placeholder) and
   `windows/installer.iss`.
 - `fonts/`: the Nerd Font Koil ships (see Icon font) and its license.
 
@@ -788,11 +788,13 @@ the scratchpad (see Scratchpad).
   with no extension (untried: the docs for it are old); a dotfile's name
   (`.gitignore`) is its extension there. Both give it the path on the
   command line, without taking any extension.
-- **App icon**: macOS draws icons as they are, so `Koil.icns` shrinks
-  `icon.png`'s rounded square to Apple's grid (824 of 1024 pixels). It's
-  Apple's shape too, with continuous corners: macOS 26 puts an icon that
-  isn't in a gray one (in Finder, Launchpad, the Dock). Windows' fills its
-  square. Qt gives windows
+- **App icon**: macOS draws icons as they are, so `icon.png` is on
+  Apple's grid: 1024 pixels, with the rounded square in the middle 824.
+  It's Apple's shape too, with continuous corners (UIBezierPath's, radius
+  185.4, as in Apple's templates): macOS 26 puts an icon that isn't in a
+  gray one (in Finder, Launchpad, the Dock). A new picture must be put on
+  the grid first, as `make-icons.sh` only scales it, and crops it for
+  Windows, whose icons nearly fill their square (90%). Qt gives windows
   the exe's `IDI_ICON1` on Windows; elsewhere `main.rs` sets
   `window-icon.png` (the macOS one) as the window icon, for Linux and
   `cargo run` on macOS (its Dock icon), but not in the bundle
