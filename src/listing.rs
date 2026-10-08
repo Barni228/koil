@@ -1242,7 +1242,7 @@ pub fn history(koil: &Koil) -> Result<Vec<HistoryLine>, String> {
         let dir = &undoable.applied.dir;
         let time = show_time(undoable.applied.time);
         // Where, if it's not the open dir.
-        let mut text = match dir.as_os_str().is_empty() || dir == koil.current_dir() {
+        let mut text = match dir == koil.current_dir() {
             true => time,
             false => format!("{time}  {}", show_path(dir)),
         };
@@ -1291,7 +1291,7 @@ pub fn describe_blocked(dir: &Path, blocked: &Blocked) -> String {
 /// `path` relative to `dir` if it's in it, else as [`show_path`] does.
 fn shown_in(dir: &Path, path: &Path) -> String {
     match path.strip_prefix(dir) {
-        Ok(rest) if !dir.as_os_str().is_empty() && !rest.as_os_str().is_empty() => {
+        Ok(rest) if !rest.as_os_str().is_empty() => {
             with_slashes(rest).to_string_lossy().into_owned()
         }
         _ => show_path(path),
