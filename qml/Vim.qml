@@ -101,6 +101,8 @@ QtObject {
     // What a new line starts with, and a line break that starts one.
     readonly property string blankPrefix: linePrefixes ? "   " : ""
     readonly property string lineBreak: "\n" + blankPrefix
+    // The text searched last, without its prefixes (see withoutPrefixes).
+    property var unprefixed: null
 
     readonly property bool isVisual: mode === "visual" || mode === "visualLine" || mode === "visualBlock"
     // Insert or replace mode: typing edits the text, at the editor's cursor.
@@ -3363,6 +3365,87 @@ QtObject {
         return outOfPrefix(t, p) !== p;
     }
 
+    // t with its lines' prefixes taken out, for a search (vim's, the find
+    // bar's) to see each line start at its name, as the cursor does: `^a`
+    // finds the names that start with a. { text, starts, ats, cuts }: for
+    // each line with a prefix, where it starts in t, where its name starts
+    // in text, and its prefix's length. The last one is kept (`unprefixed`)
+    // while t and the hidden text stay the same.
+    function withoutPrefixes(t) {
+        if (!linePrefixes)
+            return { text: t, starts: [], ats: [], cuts: [] };
+        const u = unprefixed;
+        if (u && u.hidden === hidden && u.from === t)
+            return u;
+        const pieces = [], starts = [], ats = [], cuts = [];
+        let i = 0, cut = 0; // where what's left of t starts; the prefixes so far
+        for (let ls = 0;;) {
+            const n = prefixLength(t, ls, hiddenAt);
+            if (n) {
+                pieces.push(t.slice(i, ls));
+                starts.push(ls);
+                ats.push(ls - cut);
+                cuts.push(n);
+                cut += n;
+                i = ls + n;
+            }
+            const nl = t.indexOf("\n", ls);
+            if (nl < 0)
+                break;
+            ls = nl + 1;
+        }
+        pieces.push(t.slice(i));
+        unprefixed = { from: t, hidden: hidden, text: pieces.join(""), starts: starts, ats: ats, cuts: cuts };
+        return unprefixed;
+    }
+
+    // The index of the last number in the sorted `list` that's at most v,
+    // -1 if none is.
+    function lastAtMost(list, v) {
+        let lo = 0, hi = list.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (list[mid] <= v)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo - 1;
+    }
+
+    // Where p of t is in u's text (u from withoutPrefixes(t)), at the name
+    // if p is in a prefix.
+    function unprefixedAt(u, p) {
+        const k = lastAtMost(u.starts, p);
+        return k < 0 ? p : u.ats[k] + Math.max(0, p - u.starts[k] - u.cuts[k]);
+    }
+
+    // Where q of u's text is in t.
+    function prefixedAt(u, q) {
+        const k = lastAtMost(u.ats, q);
+        return k < 0 ? q : u.starts[k] + u.cuts[k] + q - u.ats[k];
+    }
+
+    // [start, end) of u's text (a match) in t, as { start, end }. One that
+    // goes on to the next lines covers their prefixes, but one that ends
+    // with a line break doesn't cover the next line's.
+    function prefixedSpan(u, start, end) {
+        const s = prefixedAt(u, start);
+        return { start: s, end: end > start ? prefixedAt(u, end - 1) + 1 : s };
+    }
+
+    // Txt.addHighlight, leaving out the prefixes of the lines a match goes
+    // on to.
+    function addHighlight(t, spans, start, end, current) {
+        const added = [];
+        Txt.addHighlight(t, added, start, end, current);
+        for (const s of added) {
+            s.start = outOfPrefix(t, s.start);
+            if (s.end > s.start)
+                spans.push(s);
+        }
+    }
+
     // Normal mode keeps the cursor on a character (see Txt.clampNormal),
     // after the prefix.
     function clampNormal(t, p) {
@@ -3965,43 +4048,41 @@ QtObject {
         return p;
     }
 
+    // Searches go through the text without its prefixes (see Prefixes), so
+    // a line starts at its name.
     function searchForward(re, t, p, quiet) {
-        let m = matchFrom(re, t, p + 1);
+        const u = withoutPrefixes(t);
+        let m = matchFrom(re, u.text, unprefixedAt(u, p) + 1);
         if (!m) {
-            m = matchFrom(re, t, 0);
+            m = matchFrom(re, u.text, 0);
             if (m && !quiet)
                 showMessage("search hit BOTTOM, continuing at TOP");
         }
-        return m ? m.index : -1;
+        return m ? prefixedAt(u, m.index) : -1;
     }
 
-    // The first match of `re` in t from `from` on, or null. One that starts
-    // in a prefix (see Prefixes) doesn't count.
+    // The first match of `re` in t from `from` on, or null.
     function matchFrom(re, t, from) {
         if (from > t.length)
             return null;
         re.lastIndex = from;
-        let m;
-        while ((m = re.exec(t)) !== null && inPrefix(t, m.index))
-            re.lastIndex = m.index + 1;
-        return m;
+        return re.exec(t);
     }
 
     function searchBackward(re, t, p, quiet) {
+        const u = withoutPrefixes(t), at = unprefixedAt(u, p);
         let before = -1, last = -1, m;
         re.lastIndex = 0;
-        while ((m = re.exec(t)) !== null) {
-            if (!inPrefix(t, m.index)) {
-                if (m.index < p)
-                    before = m.index;
-                last = m.index;
-            }
+        while ((m = re.exec(u.text)) !== null) {
+            if (m.index < at)
+                before = m.index;
+            last = m.index;
             if (m[0] === "")
                 re.lastIndex++;
         }
         if (before < 0 && last >= 0 && !quiet)
             showMessage("search hit TOP, continuing at BOTTOM");
-        return before >= 0 ? before : last;
+        return before >= 0 ? prefixedAt(u, before) : last >= 0 ? prefixedAt(u, last) : -1;
     }
 
     // ---- Search preview ----------------------------------------------------
@@ -4059,20 +4140,19 @@ QtObject {
         const pattern = typed !== null ? typed : highlightPattern;
         if (!pattern)
             return [];
-        const t = bufferText();
-        const v = visibleRange(t);
+        const t = bufferText(), u = withoutPrefixes(t);
+        const v = visibleRange(t), to = unprefixedAt(u, v.to);
         const re = Txt.searchRegExp(pattern);
         const spans = [];
-        re.lastIndex = v.from;
+        re.lastIndex = unprefixedAt(u, v.from);
         let m;
-        while ((m = re.exec(t)) !== null && m.index <= v.to && spans.length < 5000) {
+        while ((m = re.exec(u.text)) !== null && m.index <= to && spans.length < 5000) {
             if (m[0] === "") {
                 re.lastIndex++;
                 continue;
             }
-            if (inPrefix(t, m.index))
-                continue;
-            Txt.addHighlight(t, spans, m.index, m.index + m[0].length, m.index === highlightTarget);
+            const r = prefixedSpan(u, m.index, m.index + m[0].length);
+            addHighlight(t, spans, r.start, r.end, r.start === highlightTarget);
         }
         return spans;
     }

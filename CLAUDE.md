@@ -173,7 +173,11 @@ the scratchpad (see Scratchpad).
   prefixes, `cc` keeps its line's (a rename), `>>` indents after it, and
   text that starts with an icon and two spaces pastes as lines
   (`pastesLines`; above the cursor's line in insert mode). Search and the
-  find bar skip matches that start in a prefix. The status line's columns
+  find bar go through the text without its prefixes (`withoutPrefixes`,
+  kept while the text and hidden text stay), so a line starts at its name
+  (`^a`), and a match on to the next line covers its prefix (one ending
+  with the line break doesn't); a replacement's new lines get one
+  (`prefixLines`). The status line's columns
   (and `|`) count from its end. A line without one (that doesn't start
   with an icon or a space, then two spaces) is plain.
 - **Problems**: `Koil::check` runs 200 ms after the last edit

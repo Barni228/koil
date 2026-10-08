@@ -1868,6 +1868,41 @@ TestCase {
         findBar.close();
     }
 
+    // A search sees a line start at its name, so ^ is there, and a match
+    // that goes on to the next line goes over its prefix.
+    function test_prefixSearchLineStart() {
+        loadListing("M  ab\nC  ba\n   b\nplain");
+        keys("/^b<CR>");
+        compare(vim.positionLabel(), "2:1");
+        keys("n");
+        compare(vim.positionLabel(), "3:1");
+        keys("?^a<CR>");
+        compare(vim.positionLabel(), "1:1");
+        keys("/b\\nb<CR>");
+        compare(vim.positionLabel(), "1:2");
+        keys("/^p<CR>");
+        compare(vim.positionLabel(), "4:1");
+        findBar.open(true);
+        findBar.useRegex = true;
+        findBar.query = "^b";
+        compare(findBar.matches.map(m => editor.text.slice(m.start, m.end)), ["b", "b"]);
+        findBar.query = "b\\nb";
+        compare(findBar.matches.map(m => editor.text.slice(m.start, m.end)), ["b\n" + chair + "  b"]);
+        compare(findBar.highlightSpans().map(s => editor.text.slice(s.start, s.end)), ["b", "b"]);
+        findBar.query = "^b";
+        findBar.replacement = "x";
+        findBar.replaceAll();
+        compare(render(), "<M:h1>  ab\n<C:h2>  xa\n   x\nplain");
+        // A match that ends with a line break leaves the next prefix, and
+        // a line the replacement starts gets one.
+        findBar.query = "a\\n";
+        findBar.replacement = "a\\ny\\n";
+        findBar.replaceAll();
+        compare(render(), "<M:h1>  ab\n<C:h2>  xa\n   y\n   x\nplain");
+        findBar.useRegex = false;
+        findBar.close();
+    }
+
     // ---- Find bar ------------------------------------------------------------
 
     function test_replaceAllKeepsHidden() {

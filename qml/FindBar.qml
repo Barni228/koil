@@ -126,20 +126,25 @@ FocusScope {
             && (e === t.length || isSeparator(t[e]) || e > s && isSeparator(t[e - 1]));
     }
 
-    // The matches in t, as the regular expression's results. One that
-    // starts in a line's prefix (see Prefixes in Vim.qml) doesn't count.
+    // The matches in t, as { start, end, match }: where each is in t, and
+    // the regular expression's result. In the listing it searches the text
+    // without the lines' prefixes (see Prefixes in Vim.qml), so `^` is
+    // where a name starts.
     function scan(t) {
         const re = regExp();
         const found = [];
         if (!re)
             return found;
+        const u = vim.withoutPrefixes(t), s = u.text;
         let m;
-        while (found.length < maxMatches && (m = re.exec(t)) !== null) {
+        while (found.length < maxMatches && (m = re.exec(s)) !== null) {
             const e = m.index + m[0].length;
             if (m[0] === "") // step over a whole code point
-                re.lastIndex = m.index + (Txt.isLowSurrogate(t, m.index + 1) ? 2 : 1);
-            if ((!wholeWord || isWholeWord(t, m.index, e)) && !vim.inPrefix(t, m.index))
-                found.push(m);
+                re.lastIndex = m.index + (Txt.isLowSurrogate(s, m.index + 1) ? 2 : 1);
+            if (!wholeWord || isWholeWord(s, m.index, e)) {
+                const r = vim.prefixedSpan(u, m.index, e);
+                found.push({ start: r.start, end: r.end, match: m });
+            }
         }
         return found;
     }
@@ -148,7 +153,7 @@ FocusScope {
     function refresh() {
         if (!active)
             return;
-        matches = scan(editor.text).map(m => ({ start: m.index, end: m.index + m[0].length }));
+        matches = scan(editor.text).map(m => ({ start: m.start, end: m.end }));
         current = currentStart < 0 ? -1 : matches.findIndex(m => m.start === currentStart);
     }
 
@@ -271,6 +276,12 @@ FocusScope {
         return out;
     }
 
+    // What replaces m, one of scan's: its replacement, with a prefix
+    // (see Prefixes in Vim.qml) on each line it starts that has none.
+    function newText(m) {
+        return vim.prefixLines(m.start, m.end, replacementFor(m.match), []).text;
+    }
+
     // Replaces the match at the cursor and moves to the next one. When the
     // cursor isn't at a match, only moves to the next one, as in VS Code.
     function replaceOne() {
@@ -281,13 +292,13 @@ FocusScope {
             next();
             return;
         }
-        const t = editor.text, start = matches[current].start;
-        const m = scan(t).find(m => m.index === start);
+        const start = matches[current].start;
+        const m = scan(editor.text).find(m => m.start === start);
         if (!m) {
             next();
             return;
         }
-        const text = replacementFor(m), end = start + m[0].length;
+        const end = m.end, text = newText(m);
         moving = true;
         vim.jumpTo(start);
         vim.externalEdit(() => vim.replaceRange(start, end, text));
@@ -314,14 +325,14 @@ FocusScope {
         const t = editor.text, found = scan(t);
         if (!found.length)
             return;
-        const first = found[0].index;
+        const first = found[0].start;
         let text = "", i = first;
         const entries = [];
         for (const m of found) {
-            for (const h of vim.shifted(vim.hiddenIn(vim.hidden, i, m.index), text.length))
+            for (const h of vim.shifted(vim.hiddenIn(vim.hidden, i, m.start), text.length))
                 entries.push(h);
-            text += t.slice(i, m.index) + replacementFor(m);
-            i = m.index + m[0].length;
+            text += t.slice(i, m.start) + newText(m);
+            i = m.end;
         }
         const cursor = Math.min(vim.cursor, first);
         moving = true;
@@ -350,7 +361,7 @@ FocusScope {
         }
         const spans = [];
         for (let i = lo; i < matches.length && matches[i].start <= v.to && spans.length < 5000; i++)
-            Txt.addHighlight(t, spans, matches[i].start, matches[i].end, i === current);
+            vim.addHighlight(t, spans, matches[i].start, matches[i].end, i === current);
         return spans;
     }
 
