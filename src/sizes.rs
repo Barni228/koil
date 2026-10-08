@@ -4,9 +4,13 @@
 //! counted, its size is kept, and so are those of the dirs in it (but small
 //! ones, see `SMALL`), until something changes in it on disk (see
 //! `Sizes::changed`), so it isn't counted again when it's listed again, nor
-//! are the dirs in it when they're listed.
+//! are the dirs in it when they're listed, nor the dirs in a dir counted
+//! (`-`). Nor is what's read of a dir that isn't done: counting the dir it's
+//! in waits for its count (`-` while the dirs listed are counted), and a dir
+//! counted in another goes on from there (Enter).
 
 use std::cell::RefCell;
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::ops::Bound;
@@ -108,11 +112,20 @@ struct State {
     /// The dirs counted, whose sizes are kept with those of the dirs in
     /// them, or which are asked for, which `watches` watches.
     roots: BTreeSet<PathBuf>,
-    /// The dirs being counted, by a number of their own, in the order they
-    /// started, so that a read for one that was dropped isn't added to a
-    /// new count of it.
-    counts: BTreeMap<u64, Count>,
+    /// The dirs being counted, by a number of their own, never given again,
+    /// so that a read for one that was dropped isn't added to another: the
+    /// dirs asked for, and the dirs in them found and not done yet. Each is
+    /// in a tree of them (see `Dir::parent`) and is read for a `Count`, its
+    /// own or that of a dir it's in.
+    dirs: HashMap<u64, Dir>,
+    /// Their numbers, by their paths (one each).
+    paths: BTreeMap<PathBuf, u64>,
     next: u64,
+    /// The dirs counted on their own, by their numbers, so in the order
+    /// they started: those asked for, and those that aren't any more but
+    /// are in a dir that's counted, which waits for them once it finds them
+    /// (see `add`).
+    counts: BTreeMap<u64, Count>,
     /// The counts with dirs to read, which take turns, so they all go on
     /// at once, and small ones are done soon.
     turns: VecDeque<u64>,
@@ -124,7 +137,7 @@ struct State {
 /// A dir asked for.
 struct Wanted {
     size: DirSize,
-    /// Its count, while it's counted.
+    /// Its dir in `State::dirs`, while it's counted.
     count: Option<u64>,
     /// Whether something changed in it on disk since it was counted (or
     /// while), so it's counted again when it's asked for again.
@@ -132,43 +145,43 @@ struct Wanted {
 }
 
 /// A dir's size, kept.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 struct Kept {
     bytes: u64,
-    /// Whether files with other hard links are in it, which a count counts
-    /// once (see `hard_link`): it can't be added to another count, which
-    /// may have one of them elsewhere.
-    links: bool,
+    /// The files in it with hard links outside it (see `Link`), which a
+    /// count it's added to may find there too.
+    links: Option<Box<Links>>,
     /// Whether something changed in it on disk since it was counted: then
     /// it's only shown until it's counted again (see `DirSize::Stale`), and
     /// it can't be added to another count.
     stale: bool,
 }
 
-/// A dir being counted.
+/// A file with other hard links (see `hard_link`), which a count counts
+/// once: its size, and how many of its links were found, and it has. Once
+/// they all are, nothing else in the count can be it, and it's forgotten
+/// (Cargo links its builds in `target/debug`, which has both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Link {
+    size: u64,
+    found: u64,
+    links: u64,
+}
+
+/// The files with other hard links found in a dir, and not all their
+/// links, by their device and inode.
+type Links = HashMap<(u64, u64), Link>;
+
+/// A dir counted on its own (see `State::counts`), with the dirs in it that
+/// aren't.
 struct Count {
-    root: PathBuf,
     /// Whether nothing is known of its size until it's counted (it was
     /// never kept), so `want` waits for it, and it's read first.
     unknown: bool,
-    /// The bytes counted so far.
-    bytes: u64,
-    /// The dirs in it being counted (and itself), by a number of their own.
-    dirs: HashMap<usize, Dir>,
-    next: usize,
     /// The dirs in it found and not read yet, the dir itself first.
-    unread: Vec<usize>,
-    /// How many dirs are being read.
-    reading: usize,
+    unread: Vec<u64>,
     /// The device the dir is on, once it was read.
     device: Option<u64>,
-    /// The dirs in it something changed in on disk while it was counted
-    /// (see `Sizes::changed`), and those changes in which were missed: what
-    /// was read of them (and of the dirs in those) may be from before, so
-    /// they're kept stale. Nothing in those gone is kept.
-    changed: HashSet<PathBuf>,
-    missed: HashSet<PathBuf>,
-    gone: HashSet<PathBuf>,
 }
 
 /// What changed at a path on disk (see `State::changed`).
@@ -182,48 +195,57 @@ enum Change {
     Missed,
 }
 
-/// A dir in a count.
+/// A dir being counted.
 struct Dir {
     path: PathBuf,
-    /// The dir it's in, None for the dir counted.
-    parent: Option<usize>,
-    /// What's counted of it so far, its own size too.
+    /// The dir it's in, which waits for it, None for one counted on its own
+    /// that isn't in a dir counted.
+    parent: Option<u64>,
+    /// What's counted of it so far: the files in it, the dirs in it as far
+    /// as they're counted, and its own size, once it's known.
     bytes: u64,
+    /// Whether its own size is in `bytes`: for a dir counted on its own,
+    /// once it's read; for the others, from when they're found.
+    own: bool,
     /// How many dirs in it aren't counted yet, and one more until it's
     /// read.
     left: usize,
-    /// The files in it with other hard links (see `hard_link`), counted
-    /// once, with their sizes.
-    links: HashMap<(u64, u64), u64>,
-    /// Whether its size is kept: not if it can't be read (it counts as
-    /// empty), nor if it's small (see `SMALL`).
+    /// The files in it with other hard links (see `Link`).
+    links: Links,
+    /// Whether its size is kept: not if it can't be read, nor if it's small
+    /// (see `SMALL`), nor if it's gone (see `State::changed`).
     keep: bool,
+    /// Whether it can't be read: it counts as empty.
+    unreadable: bool,
+    /// Whether something changed in it on disk while it was counted (see
+    /// `Sizes::changed`), or changes in it were missed: what was read of it
+    /// may be from before, so it's kept stale.
+    stale: bool,
 }
 
-/// A dir to read for a count: which one, whether it's the dir counted, the
-/// device that dir is on, and what's counted.
+/// A dir to read: which one, whether to read its own size (see
+/// `Dir::own`), the device the dir counted is on, and what's counted.
 struct Job {
-    count: u64,
-    dir: usize,
+    dir: u64,
     path: PathBuf,
-    root: bool,
+    own: bool,
     device: Option<u64>,
     measure: Measure,
 }
 
-/// What reading a dir found: the size of what's in it (and its own, for
-/// the dir counted), but the files with other hard links, which are
-/// counted once (see `hard_link`, with their sizes), the dirs in it to read
-/// next, with their own sizes, how many entries it has, and the device
-/// it's on.
+/// What reading a dir found: its own size (if the job asked for it), the
+/// size of what's in it, but the files with other hard links, which are
+/// counted once (see `Link`), the dirs in it to read next, with their own
+/// sizes, how many entries it has, and the device it's on.
 #[derive(Default)]
 struct Read {
+    own: Option<u64>,
     bytes: u64,
-    links: Vec<((u64, u64), u64)>,
+    links: Vec<((u64, u64), Link)>,
     dirs: Vec<(PathBuf, u64)>,
     entries: usize,
     device: Option<u64>,
-    /// It can't be read (a dir in the dir counted).
+    /// It can't be read.
     unreadable: bool,
 }
 
@@ -261,14 +283,17 @@ impl Sizes {
 
     /// Counts `dirs` by `measure`, those whose sizes aren't known or kept,
     /// and stops counting every other one (keeping the sizes of the dirs in
-    /// it counted so far). Waits a moment (see `WAIT`) for those it starts
-    /// that nothing was known of (those stale show what they were). True if
-    /// it starts any.
+    /// it counted so far), but those in a dir it counts, which that count
+    /// waits for. One that's counted in the count of a dir it's in goes on
+    /// from there. Waits a moment (see `WAIT`) for those it starts that
+    /// nothing was known of (those stale show what they were). True if it
+    /// starts any.
     pub fn want(&self, dirs: impl IntoIterator<Item = PathBuf>, measure: Measure) -> bool {
         let mut state = self.lock();
-        let first = state.next;
         let started = state.want(dirs, measure);
-        let waits = |state: &State| state.counts.range(first..).any(|(_, c)| c.unknown);
+        let waits = |state: &State| {
+            (started.iter()).any(|n| state.counts.get(n).is_some_and(|c| c.unknown))
+        };
         // Reading is mostly waiting for the disk, which takes more than one
         // read at a time.
         let max = thread::available_parallelism().map_or(4, |n| n.get().clamp(2, 8));
@@ -292,7 +317,7 @@ impl Sizes {
                 break;
             }
         }
-        started
+        !started.is_empty()
     }
 
     /// Takes in that something was created, removed, renamed or written at
@@ -340,52 +365,60 @@ impl Sizes {
 }
 
 impl State {
-    /// See `Sizes::want`, which starts the threads.
-    fn want(&mut self, dirs: impl IntoIterator<Item = PathBuf>, measure: Measure) -> bool {
+    /// See `Sizes::want`, which starts the threads. Returns the dirs it
+    /// starts counting, or that go on from the count they were in.
+    fn want(&mut self, dirs: impl IntoIterator<Item = PathBuf>, measure: Measure) -> Vec<u64> {
         if measure != self.measure {
             self.measure = measure;
             self.wanted.clear();
+            self.dirs.clear();
+            self.paths.clear();
             self.counts.clear();
         }
         let mut old = std::mem::take(&mut self.wanted);
-        let mut started = false;
+        let mut started = Vec::new();
         for dir in dirs {
             if self.wanted.contains_key(&dir) {
                 continue;
             }
             let was = old.remove(&dir);
-            let kept = self.kept[measure.index()].get(&dir).copied();
-            let wanted = match (was, kept) {
+            let kept = self.kept[measure.index()].get(&dir);
+            let wanted = match (was, kept.map(|kept| (kept.bytes, kept.stale))) {
                 // Known, or being counted, even if it changed since it
                 // started: it's counted again once it's done.
                 (Some(was), _) if !was.changed || was.count.is_some() => was,
-                (_, Some(kept)) if !kept.stale => Wanted {
-                    size: DirSize::Counted(kept.bytes),
+                (_, Some((bytes, false))) => Wanted {
+                    size: DirSize::Counted(bytes),
                     count: None,
                     changed: false,
                 },
                 (was, kept) => {
-                    started = true;
                     // Shown until it's counted again, so it stays where it
                     // was sorted.
                     let before = match was.map(|w| w.size) {
                         Some(DirSize::Counted(bytes) | DirSize::Stale(bytes)) => Some(bytes),
-                        _ => kept.map(|kept| kept.bytes),
+                        _ => kept.map(|(bytes, _)| bytes),
                     };
+                    // Still counted from before (in a dir that was asked
+                    // for, or on its own in one), it goes on.
+                    let n = match self.paths.get(&dir) {
+                        Some(&n) => {
+                            self.roots.insert(dir.clone());
+                            n
+                        }
+                        None => self.start(dir.clone(), before.is_none()),
+                    };
+                    started.push(n);
                     Wanted {
                         size: before.map_or(DirSize::Counting(0), DirSize::Stale),
-                        count: Some(self.start(dir.clone(), before.is_none())),
-                        changed: false,
+                        count: Some(n),
+                        changed: self.dirs[&n].stale,
                     }
                 }
             };
             self.wanted.insert(dir, wanted);
         }
-        for wanted in old.values() {
-            if let Some(n) = wanted.count {
-                self.counts.remove(&n);
-            }
-        }
+        self.stop();
         // Those unknown first, so small ones are done in the moment `want`
         // waits.
         let turns = std::mem::take(&mut self.turns).into_iter();
@@ -395,42 +428,137 @@ impl State {
         started
     }
 
-    /// Starts counting `dir` (`unknown`, see `Count::unknown`), returning
-    /// its count's number.
+    /// Stops the counts of the dirs that aren't asked for (see `want`), and
+    /// that aren't in a dir counted, but those in a dir that's counted,
+    /// which waits for them once it finds them (see `add`). The dirs asked
+    /// for in the others go on as counts of their own, and the rest of them
+    /// is dropped.
+    fn stop(&mut self) {
+        let counted = |dir: &Path| self.wanted.get(dir).is_some_and(|w| w.count.is_some());
+        let stopped: HashSet<u64> = (self.counts.keys().copied())
+            .filter(|n| {
+                let dir = &self.dirs[n];
+                let path = &dir.path;
+                dir.parent.is_none()
+                    && !self.wanted.contains_key(path)
+                    && !path.ancestors().skip(1).any(counted)
+            })
+            .collect();
+        if stopped.is_empty() {
+            return;
+        }
+        // The dirs asked for in them, but those in another one asked for,
+        // and the counts they're in.
+        let mut apart = BTreeMap::new();
+        for wanted in self.wanted.values() {
+            let Some(n) = wanted.count else {
+                continue;
+            };
+            let (mut top, mut at) = (n, n);
+            while let Some(parent) = self.dirs[&at].parent {
+                at = parent;
+                if counted(&self.dirs[&at].path) {
+                    top = at;
+                }
+            }
+            if stopped.contains(&at) {
+                apart.insert(top, at);
+            }
+        }
+        for n in apart.into_keys() {
+            let dir = &self.dirs[&n];
+            if !self.counts.contains_key(&n) {
+                let from = self.count_of(dir.parent.unwrap());
+                let from = self.counts.get_mut(&from).unwrap();
+                let (unread, rest): (Vec<u64>, Vec<u64>) = std::mem::take(&mut from.unread)
+                    .into_iter()
+                    .partition(|u| self.dirs[u].path.starts_with(&dir.path));
+                from.unread = rest;
+                let count = Count {
+                    unknown: matches!(self.wanted[&dir.path].size, DirSize::Counting(_)),
+                    unread,
+                    device: from.device,
+                };
+                if !count.unread.is_empty() {
+                    self.turns.push_back(n);
+                }
+                self.counts.insert(n, count);
+            }
+            self.dirs.get_mut(&n).unwrap().parent = None;
+        }
+        let dropped: Vec<u64> = (self.dirs.keys().copied())
+            .filter(|&n| stopped.contains(&self.root_of(n)))
+            .collect();
+        for n in dropped {
+            let dir = self.dirs.remove(&n).unwrap();
+            self.paths.remove(&dir.path);
+        }
+        self.counts.retain(|n, _| self.dirs.contains_key(n));
+    }
+
+    /// Starts counting `dir` on its own (`unknown`, see `Count::unknown`),
+    /// returning its number.
     fn start(&mut self, dir: PathBuf, unknown: bool) -> u64 {
         self.roots.insert(dir.clone());
-        let root = Dir {
-            path: dir.clone(),
-            parent: None,
-            bytes: 0,
-            left: 1,
-            links: HashMap::new(),
-            keep: true,
-        };
+        let n = self.found(dir, None, None);
         let count = Count {
-            root: dir,
             unknown,
-            bytes: 0,
-            dirs: HashMap::from([(0, root)]),
-            next: 1,
-            unread: vec![0],
-            reading: 0,
+            unread: vec![n],
             device: None,
-            changed: HashSet::new(),
-            missed: HashSet::new(),
-            gone: HashSet::new(),
         };
-        let n = self.next;
-        self.next += 1;
         self.counts.insert(n, count);
         self.turns.push_back(n);
+        n
+    }
+
+    /// Adds the dir at `path` in `parent` to those being counted, with its
+    /// own size, if it's known, returning its number.
+    fn found(&mut self, path: PathBuf, parent: Option<u64>, own: Option<u64>) -> u64 {
+        let n = self.next;
+        self.next += 1;
+        self.paths.insert(path.clone(), n);
+        let dir = Dir {
+            path,
+            parent,
+            bytes: own.unwrap_or(0),
+            own: own.is_some(),
+            left: 1,
+            links: Links::new(),
+            keep: true,
+            unreadable: false,
+            stale: false,
+        };
+        self.dirs.insert(n, dir);
+        n
+    }
+
+    /// The dir at the top of the tree the dir `n` is in (see `Dir::parent`).
+    fn root_of(&self, mut n: u64) -> u64 {
+        while let Some(parent) = self.dirs[&n].parent {
+            n = parent;
+        }
+        n
+    }
+
+    /// The dir counted on its own that the dir `n` is read for: it, or the
+    /// closest one it's in.
+    fn count_of(&self, mut n: u64) -> u64 {
+        while !self.counts.contains_key(&n) {
+            n = self.dirs[&n].parent.unwrap();
+        }
         n
     }
 
     /// What's known of the size of `dir` by `measure` (see `Sizes::known`).
     fn size_of(&self, dir: &Path, measure: Measure) -> Option<DirSize> {
         match self.wanted.get(dir) {
-            Some(wanted) if measure == self.measure => Some(wanted.size),
+            Some(wanted) if measure == self.measure => match (wanted.size, wanted.count) {
+                (DirSize::Counting(_), Some(n)) => {
+                    let bytes = self.dirs.get(&n).map_or(0, |dir| dir.bytes);
+                    Some(DirSize::Counting(bytes))
+                }
+                (size, _) => Some(size),
+            },
             _ => (self.kept[measure.index()].get(dir)).map(|kept| match kept.stale {
                 true => DirSize::Stale(kept.bytes),
                 false => DirSize::Counted(kept.bytes),
@@ -442,7 +570,7 @@ impl State {
     /// dirs it's in are stale, and so are those of the dirs in it if changes
     /// there were missed, or they're forgotten if it's gone. The dirs asked
     /// for among them are counted again when they're asked for again, and
-    /// their counts keep them stale, or not at all.
+    /// those being counted are kept stale, or not at all.
     fn changed(&mut self, path: &Path, change: Change) {
         if change == Change::Gone {
             self.forget_in(path);
@@ -464,20 +592,24 @@ impl State {
             dirs.extend(inside(&self.wanted, path).map(|(d, _)| d.clone()));
         }
         for dir in dirs {
-            let Some(wanted) = self.wanted.get_mut(&dir) else {
-                continue;
-            };
-            wanted.changed = true;
-            let Some(count) = wanted.count.and_then(|n| self.counts.get_mut(&n)) else {
-                continue;
-            };
-            let root = &count.root;
-            let changed = path.ancestors().take_while(|dir| dir.starts_with(root));
-            count.changed.extend(changed.map(Path::to_path_buf));
-            match change {
-                Change::Itself => {}
-                Change::Gone => _ = count.gone.insert(path.to_path_buf()),
-                Change::Missed => _ = count.missed.insert(path.to_path_buf()),
+            if let Some(wanted) = self.wanted.get_mut(&dir) {
+                wanted.changed = true;
+            }
+        }
+        for dir in path.ancestors() {
+            if let Some(n) = self.paths.get(dir) {
+                self.dirs.get_mut(n).unwrap().stale = true;
+            }
+        }
+        if change != Change::Itself {
+            let from = (Bound::Included(path), Bound::Unbounded);
+            let at = self.paths.range::<Path, _>(from);
+            for (_, n) in at.take_while(|(d, _)| d.starts_with(path)) {
+                let dir = self.dirs.get_mut(n).unwrap();
+                match change {
+                    Change::Gone => dir.keep = false,
+                    _ => dir.stale = true,
+                }
             }
         }
     }
@@ -490,8 +622,8 @@ impl State {
         for wanted in self.wanted.values_mut() {
             wanted.changed = true;
         }
-        for count in self.counts.values_mut() {
-            count.missed.insert(count.root.clone());
+        for dir in self.dirs.values_mut() {
+            dir.stale = true;
         }
     }
 
@@ -544,14 +676,12 @@ impl State {
             if !count.unread.is_empty() {
                 self.turns.push_back(n);
             }
-            count.reading += 1;
             self.reading += 1;
-            let found = &count.dirs[&dir];
+            let found = &self.dirs[&dir];
             return Some(Job {
-                count: n,
                 dir,
                 path: found.path.clone(),
-                root: found.parent.is_none(),
+                own: !found.own,
                 device: count.device,
                 measure: self.measure,
             });
@@ -559,134 +689,152 @@ impl State {
         None
     }
 
-    /// Adds what reading the dir `dir` for the count `n` found (None: the
-    /// dir counted can't be read), taking the sizes kept of the dirs in it
-    /// that can be. True if there are more dirs to read now.
-    fn add(&mut self, n: u64, dir: usize, read: Option<Read>) -> bool {
+    /// Adds what reading the dir `dir` found, taking the sizes kept of the
+    /// dirs in it that can be, and waiting for those counted on their own.
+    /// True if there are more dirs to read now.
+    fn add(&mut self, dir: u64, read: Read) -> bool {
         self.reading -= 1;
-        let State {
-            wanted,
-            kept,
-            counts,
-            turns,
-            measure,
-            ..
-        } = self;
-        let kept = &mut kept[measure.index()];
         // Dropped while it was read.
-        let Some(count) = counts.get_mut(&n) else {
+        let Some(read_dir) = self.dirs.get_mut(&dir) else {
             return false;
         };
-        count.reading -= 1;
-        let Some(read) = read else {
-            let count = counts.remove(&n).unwrap();
-            if let Some(wanted) = wanted.get_mut(&count.root) {
-                wanted.size = DirSize::Unreadable;
-                wanted.count = None;
-            }
-            return false;
-        };
-        count.device = count.device.or(read.device);
-        let mut found = Vec::new();
-        let read_dir = count.dirs.get_mut(&dir).unwrap();
         let small = read.dirs.is_empty() && read.entries < SMALL;
-        read_dir.keep = !read.unreadable && !small;
+        read_dir.keep &= !read.unreadable && !small;
+        read_dir.unreadable = read.unreadable;
         read_dir.left -= 1;
         let mut bytes = read.bytes;
-        for (file, size) in read.links {
-            if read_dir.links.insert(file, size).is_none() {
-                bytes += size;
-            }
+        // Unless the dir it's in found it meanwhile.
+        if let Some(own) = read.own.filter(|_| !read_dir.own) {
+            bytes += own;
+            read_dir.own = true;
         }
+        for (file, link) in read.links {
+            bytes += link.size;
+            bytes -= add_link(&mut read_dir.links, file, link);
+        }
+        let kept = &self.kept[self.measure.index()];
+        let (mut found, mut counted) = (Vec::new(), Vec::new());
         for (path, own) in read.dirs {
-            match kept.get(&path) {
-                // Counted before, with nothing in it this count can have
-                // elsewhere, and nothing changed in it since.
-                Some(k) if !k.links && !k.stale => bytes += k.bytes,
-                _ => {
-                    bytes += own;
-                    read_dir.left += 1;
-                    found.push(Dir {
-                        path,
-                        parent: Some(dir),
-                        bytes: own,
-                        left: 1,
-                        links: HashMap::new(),
-                        keep: true,
-                    });
+            match (kept.get(&path), self.paths.get(&path)) {
+                // Counted before, and nothing changed in it since: its files
+                // that this count can have elsewhere are counted once.
+                (Some(k), _) if !k.stale => {
+                    bytes += k.bytes;
+                    for (&file, &link) in k.links.iter().flat_map(|links| links.iter()) {
+                        bytes -= add_link(&mut read_dir.links, file, link);
+                    }
                 }
+                (_, Some(&n)) if self.counts.contains_key(&n) => counted.push((n, own)),
+                _ => found.push((path, own)),
             }
         }
-        read_dir.bytes += bytes;
-        count.bytes += bytes;
-        let more = !found.is_empty();
-        if more && count.unread.is_empty() {
-            turns.push_back(n);
+        read_dir.left += found.len() + counted.len();
+        let count = self.count_of(dir);
+        let device = self.counts[&count].device.or(read.device);
+        // Counted on their own (asked for, or in a dir that is), they go on,
+        // and this one waits for them.
+        for (n, own) in counted {
+            let other = self.dirs.get_mut(&n).unwrap();
+            other.parent = Some(dir);
+            if !other.own {
+                other.bytes += own;
+                other.own = true;
+            }
+            bytes += other.bytes;
+            let other = self.counts.get_mut(&n).unwrap();
+            other.device = other.device.or(device);
         }
-        for d in found {
-            count.dirs.insert(count.next, d);
-            count.unread.push(count.next);
-            count.next += 1;
+        let mut unread = Vec::new();
+        for (path, own) in found {
+            unread.push(self.found(path, Some(dir), Some(own)));
+            bytes += own;
         }
-        // The dirs it finished, from it up.
-        let mut at = dir;
-        while count.dirs[&at].left == 0 {
-            let done = count.dirs.remove(&at).unwrap();
-            let stale = count.stale(&done.path);
-            if let Some(stale) = stale.filter(|_| done.keep) {
-                let links = !done.links.is_empty();
+        adjust(&mut self.dirs, dir, |counted| counted + bytes);
+        let more = !unread.is_empty();
+        let read_for = self.counts.get_mut(&count).unwrap();
+        read_for.device = device;
+        if more && read_for.unread.is_empty() {
+            self.turns.push_back(count);
+        }
+        read_for.unread.extend(unread);
+        self.finish(dir);
+        more
+    }
+
+    /// Keeps the size of the dir `n` if every dir in it is counted, and
+    /// then of the dirs it's in that are.
+    fn finish(&mut self, mut n: u64) {
+        let kept = &mut self.kept[self.measure.index()];
+        while self.dirs[&n].left == 0 {
+            let done = self.dirs.remove(&n).unwrap();
+            self.paths.remove(&done.path);
+            self.counts.remove(&n);
+            if done.keep {
+                let links = (!done.links.is_empty()).then(|| Box::new(done.links.clone()));
                 let size = Kept {
                     bytes: done.bytes,
                     links,
-                    stale,
+                    stale: done.stale,
                 };
                 kept.insert(done.path.clone(), size);
             }
+            if let Some(wanted) = self.wanted.get_mut(&done.path) {
+                wanted.size = match done.unreadable {
+                    true => DirSize::Unreadable,
+                    false => DirSize::Counted(done.bytes),
+                };
+                wanted.count = None;
+            }
             let Some(p) = done.parent else {
-                counts.remove(&n);
-                if let Some(wanted) = wanted.get_mut(&done.path) {
-                    wanted.size = DirSize::Counted(done.bytes);
-                    wanted.count = None;
-                }
-                return more;
+                return;
             };
-            let parent = count.dirs.get_mut(&p).unwrap();
-            parent.bytes += done.bytes;
+            let parent = self.dirs.get_mut(&p).unwrap();
             parent.left -= 1;
             // A file in both was added twice.
             let (mut links, others) = match parent.links.len() >= done.links.len() {
                 true => (std::mem::take(&mut parent.links), done.links),
                 false => (done.links, std::mem::take(&mut parent.links)),
             };
-            for (file, size) in others {
-                if links.insert(file, size).is_some() {
-                    parent.bytes -= size;
-                    count.bytes -= size;
-                }
+            let mut twice = 0;
+            for (file, link) in others {
+                twice += add_link(&mut links, file, link);
             }
             parent.links = links;
-            at = p;
+            adjust(&mut self.dirs, p, |counted| counted - twice);
+            n = p;
         }
-        // Counted again, it shows what it was until it's done.
-        let size = wanted.get_mut(&count.root).map(|wanted| &mut wanted.size);
-        if let Some(size @ DirSize::Counting(_)) = size {
-            *size = DirSize::Counting(count.bytes);
-        }
-        more
     }
 }
 
-impl Count {
-    /// Whether the size of `dir` in it is kept stale, as something changed
-    /// in it on disk while it was counted (see `changed`), or None if it
-    /// isn't kept, as it's gone.
-    fn stale(&self, dir: &Path) -> Option<bool> {
-        let in_one =
-            |dirs: &HashSet<PathBuf>| !dirs.is_empty() && dir.ancestors().any(|d| dirs.contains(d));
-        match in_one(&self.gone) {
-            true => None,
-            false => Some(self.changed.contains(dir) || in_one(&self.missed)),
+/// Adds `link` of the file `file` to `links`, returning the bytes counted
+/// twice: its size, if it was in them. Once all its links are found, it's
+/// forgotten.
+fn add_link(links: &mut Links, file: (u64, u64), link: Link) -> u64 {
+    match links.entry(file) {
+        Entry::Vacant(entry) => {
+            if link.found < link.links {
+                entry.insert(link);
+            }
+            0
         }
+        Entry::Occupied(mut entry) => {
+            let had = entry.get_mut();
+            had.found += link.found;
+            if had.found >= had.links {
+                entry.remove();
+            }
+            link.size
+        }
+    }
+}
+
+/// Changes what's counted of the dir `n` in `dirs` with `change`, and of
+/// the dirs it's in.
+fn adjust(dirs: &mut HashMap<u64, Dir>, n: u64, change: impl Fn(u64) -> u64) {
+    let mut at = Some(n);
+    while let Some(dir) = at.and_then(|n| dirs.get_mut(&n)) {
+        dir.bytes = change(dir.bytes);
+        at = dir.parent;
     }
 }
 
@@ -739,7 +887,7 @@ fn count(shared: &Shared) {
         let read = read(&job);
         state = shared.state.lock().unwrap();
         let counting = state.counts.len();
-        if state.add(job.count, job.dir, read) || state.reading == 0 {
+        if state.add(job.dir, read) || state.reading == 0 {
             shared.wake.notify_all();
         }
         if state.counts.len() < counting {
@@ -748,30 +896,28 @@ fn count(shared: &Shared) {
     }
 }
 
-/// Reads the dir of `job`: the size of what's in it, and the dirs in it on
-/// the same device. None if it's the dir counted, and it can't be read; a
-/// dir in it that can't be read counts as empty.
-fn read(job: &Job) -> Option<Read> {
+/// Reads the dir of `job`: its own size (if the job asks for it), the size
+/// of what's in it, and the dirs in it on the same device.
+fn read(job: &Job) -> Read {
     let mut read = Read {
         device: job.device,
         ..Read::default()
     };
-    if job.root {
-        let meta = job.path.symlink_metadata().ok()?;
-        read.bytes = size(job.measure, || job.path.clone(), &meta);
+    if job.own {
+        let Ok(meta) = job.path.symlink_metadata() else {
+            read.unreadable = true;
+            return read;
+        };
+        read.own = Some(size(job.measure, || job.path.clone(), &meta));
         // A link to a dir: the link's size, as a file's.
         if !meta.is_dir() {
-            return Some(read);
+            return read;
         }
         read.device = device(&meta);
     }
-    let entries = match fs::read_dir(&job.path) {
-        Ok(entries) => entries,
-        Err(_) if job.root => return None,
-        Err(_) => {
-            read.unreadable = true;
-            return Some(read);
-        }
+    let Ok(entries) = fs::read_dir(&job.path) else {
+        read.unreadable = true;
+        return read;
     };
     for entry in entries.flatten() {
         read.entries += 1;
@@ -782,7 +928,14 @@ fn read(job: &Job) -> Option<Read> {
         if !meta.is_dir() {
             let bytes = size(job.measure, || entry.path(), &meta);
             match hard_link(&meta) {
-                Some(file) => read.links.push((file, bytes)),
+                Some((file, links)) => {
+                    let link = Link {
+                        size: bytes,
+                        found: 1,
+                        links,
+                    };
+                    read.links.push((file, link));
+                }
                 None => read.bytes += bytes,
             }
         } else if read.device.is_none() || device(&meta) == read.device {
@@ -791,7 +944,7 @@ fn read(job: &Job) -> Option<Read> {
             read.dirs.push((dir, own));
         }
     }
-    Some(read)
+    read
 }
 
 /// The size of a file as `measure` counts it (with `Measure::Disk`, a dir's
@@ -806,12 +959,12 @@ fn size(measure: Measure, path: impl FnOnce() -> PathBuf, meta: &fs::Metadata) -
 }
 
 /// The file `meta` is, if it has other hard links and that can be told:
-/// its device and inode.
-fn hard_link(meta: &fs::Metadata) -> Option<(u64, u64)> {
+/// its device and inode, and how many links it has.
+fn hard_link(meta: &fs::Metadata) -> Option<((u64, u64), u64)> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        (meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
+        (meta.nlink() > 1).then(|| ((meta.dev(), meta.ino()), meta.nlink()))
     }
     #[cfg(not(unix))]
     {

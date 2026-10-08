@@ -406,9 +406,20 @@ the scratchpad (see Scratchpad).
   apart, so a render never shows the other one's sizes. `render` and
   `sync` give the dirs they show sizes for (`Notes::dirs`, by the path
   their ID was read at), and `Koil` has `Sizes::want` them: those not
-  known or kept start, and every other count stops. The counts take
-  turns (`turns`), a dir each, so they all go on at once and small ones
-  are done soon, on up to 8 threads that each read a dir at a time
+  known or kept start, and every other count stops (`stop`), but what's
+  read of a dir isn't read again: one in a dir that's counted goes on,
+  and that count waits for it once it finds it (`add`: `-` while the
+  dirs listed are counted, or a pattern listing a dir and one in it),
+  and a dir asked for that's counted in another goes on from there as a
+  count of its own (Enter). So the dirs being counted (`State::dirs`, a
+  path once) are trees, each dir read for the closest `Count` of the
+  dir it's in or itself (`count_of`), and each has what's counted of it
+  so far, the dirs in it too (`Dir::bytes`), which its note shows. The
+  paths are the same whichever way a dir was opened (`~`, `..`): koil
+  canonicalizes them, and the threads join names to them. The counts
+  take turns
+  (`turns`), a dir each, so they all go on at once and small ones are
+  done soon, on up to 8 threads that each read a dir at a time
   (reading is mostly waiting for the disk), and stop once no dir is left
   to read and none is being read, which could find more. Counting, a dir's
   note is its size so far with `...` after it (`listing::COUNTING`), and
@@ -423,10 +434,9 @@ the scratchpad (see Scratchpad).
   would fail on errors or open a path typed in the field (the next update
   sorts it).
 - **Kept sizes** (sizes.rs): a count finds the size of every dir in the
-  dir counted on its way (`Count::dirs`, each done once the dirs in it
-  are, adding itself to the one it's in), and keeps them (`kept`, but
-  those that can't be read, and small ones), so a dir listed again, or
-  one in it (Enter, `-`), shows its size at once. A small dir (`SMALL`:
+  dir counted on its way (each done once the dirs in it are), and keeps
+  them (`kept`, but those that can't be read, and small ones), so a dir
+  listed again, or one in it (Enter, `-`), shows its size at once. A small dir (`SMALL`:
   no dirs in it, and under 100 entries) is counted again instead, which
   takes no time, and most dirs are: `render` asks for the dirs it shows
   (`listing::size_dirs`) before it's made, and `want` waits for those it
@@ -441,12 +451,19 @@ the scratchpad (see Scratchpad).
   they are. The listing looks sizes up as it's made (`SizeOf`;
   `Sizes::known` gives each dir's as it was first asked for, so sorting
   sees the same throughout). A count adds a dir kept instead of reading
-  it, unless it has files with hard links in it (`Kept::links`: one may
-  be elsewhere in the count too), or it's stale. Those count once in each
-  dir (`Dir::links`, merged into the dir it's in, a file in both taken
-  off once), so a dir's size is the same counted on its own or in
-  another. A home dir of 146,000 dirs keeps 40,000 (5 MB; all of them
+  it, unless it's stale. A file with hard links counts once in each dir
+  (`Link`, `Dir::links`, merged into the dir it's in, a file in both
+  taken off once), so a dir's size is the same counted on its own or in
+  another, and once all its links are found, it's forgotten. A dir kept
+  keeps the files whose other links are outside it (`Kept::links`), so a
+  count that adds it counts them once too: Cargo links each build file
+  in `deps/` and `incremental/`, which `target/debug` has both of, and
+  the home dir keeps 26,000 (1 MB). A dir kept with links used to be
+  read again, so `-` from a home dir counted took 1.6 s rather than
+  0.15. A home dir of 146,000 dirs keeps 40,000 (5 MB; all of them
   took 22 MB), and is counted in 10 s, as fast as before sizes were kept.
+  What a listing hides isn't counted, so `-` from one counted that hides
+  `.cargo` and such counts those (5 s in a home dir).
 - **Stale sizes** (sizes.rs): what's kept goes stale when something
   changes in it on disk. The watcher (see Changes on disk) also watches
   the dirs counted and those asked for, with everything in them
@@ -469,8 +486,8 @@ the scratchpad (see Scratchpad).
   shown keeps its size until it's asked for again (the next update or
   sync), and is counted again then (`Wanted::changed`), so a build
   writing in it doesn't have it counted over and over. A change during a
-  count makes the dirs it's in stale as they're done (`Count::changed`,
-  `missed`, `gone`: what was read of them may be from before), rather
+  count makes the dirs it's in stale as they're done (`Dir::stale`, or
+  not kept if it's gone: what was read of them may be from before), rather
   than dropping them, as they were before: going into a dir the first
   time showed `...` for those that changed while they were counted (and
   in `~/Library` some always do), which nothing was kept of. Its dir is

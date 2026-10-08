@@ -35,8 +35,26 @@ fn count_here(state: &mut State, reads: &mut Vec<PathBuf>, between: impl Fn(&mut
         let read = read(&job);
         reads.push(job.path.clone());
         between(state, &job.path);
-        state.add(job.count, job.dir, read);
+        state.add(job.dir, read);
     }
+}
+
+/// As `count_here`, until `dir` is read.
+fn count_until(state: &mut State, reads: &mut Vec<PathBuf>, dir: &Path) {
+    while let Some(job) = state.take() {
+        let read = read(&job);
+        reads.push(job.path.clone());
+        state.add(job.dir, read);
+        if job.path == dir {
+            return;
+        }
+    }
+}
+
+/// Whether no dir is in `reads` twice.
+fn once(reads: &[PathBuf]) -> bool {
+    let read: BTreeSet<&PathBuf> = reads.iter().collect();
+    read.len() == reads.len()
 }
 
 /// `a` with 100 bytes in it, `a/b/c` with 20 and `a/d` with 3 (and an
@@ -183,7 +201,7 @@ fn test_stale() {
     fs::write(b.join("c/deep"), "x".repeat(40)).unwrap();
     state.changed(&b.join("c/deep"), Change::Gone);
     // counted again, what it was until it's done
-    assert!(state.want([a.clone(), b.clone()], Measure::Size));
+    assert!(!state.want([a.clone(), b.clone()], Measure::Size).is_empty());
     assert_eq!(state.size_of(&a, Measure::Size), Some(DirSize::Stale(123)));
     assert_eq!(state.size_of(&b, Measure::Size), Some(DirSize::Stale(20)));
     count_here(&mut state, &mut Vec::new(), |_, _| {});
@@ -221,16 +239,73 @@ fn test_changed_while_counting() {
     }
     let kept = Kept {
         bytes: 3,
-        links: false,
+        links: None,
         stale: false,
     };
     assert_eq!(state.kept[0].get(&d), Some(&kept));
     // counted again, what was kept isn't read
-    assert!(state.want([a.clone()], Measure::Size));
+    assert!(!state.want([a.clone()], Measure::Size).is_empty());
     reads.clear();
     count_here(&mut state, &mut reads, |_, _| {});
     assert_eq!(reads, [a.clone(), b, c]);
     assert!(state.kept[0].contains_key(&a));
+}
+
+#[test]
+fn test_waits_for_counts_in_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    make_tree(root);
+    let mut state = State::default();
+    let a = root.join("a");
+    let (b, d) = (a.join("b"), a.join("d"));
+    state.want([b.clone(), d.clone()], Measure::Size);
+    let mut reads = Vec::new();
+    count_until(&mut state, &mut reads, &b);
+    // the dir they're in (`-`): what's read of them isn't read again
+    assert!(!state.want([a.clone()], Measure::Size).is_empty());
+    count_here(&mut state, &mut reads, |_, _| {});
+    assert!(once(&reads), "{reads:#?}");
+    assert_eq!(
+        state.size_of(&a, Measure::Size),
+        Some(DirSize::Counted(123))
+    );
+    assert_eq!(state.kept[0].get(&b).map(|k| k.bytes), Some(20));
+    assert!(state.dirs.is_empty() && state.counts.is_empty());
+
+    // not in a dir counted, they stop
+    state.forget();
+    state.want([b.clone()], Measure::Size);
+    reads.clear();
+    count_until(&mut state, &mut reads, &b);
+    state.want([d.clone()], Measure::Size);
+    count_here(&mut state, &mut reads, |_, _| {});
+    assert_eq!(reads, [b.clone(), d.clone(), d.join("e")]);
+    assert_eq!(state.size_of(&d, Measure::Size), Some(DirSize::Counted(3)));
+    assert!(state.dirs.is_empty() && state.paths.is_empty());
+}
+
+#[test]
+fn test_counts_in_count_go_on() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    make_tree(root);
+    let mut state = State::default();
+    let a = root.join("a");
+    let (b, d) = (a.join("b"), a.join("d"));
+    state.want([a.clone()], Measure::Size);
+    let mut reads = Vec::new();
+    count_until(&mut state, &mut reads, &b);
+    // the dirs in it (Enter): what's read of them isn't read again
+    assert!(!state.want([b.clone(), d.clone()], Measure::Size).is_empty());
+    assert_eq!(state.size_of(&b, Measure::Size), Some(DirSize::Counting(0)));
+    count_here(&mut state, &mut reads, |_, _| {});
+    assert!(once(&reads), "{reads:#?}");
+    assert_eq!(state.size_of(&b, Measure::Size), Some(DirSize::Counted(20)));
+    assert_eq!(state.size_of(&d, Measure::Size), Some(DirSize::Counted(3)));
+    // the rest of it stopped
+    assert_eq!(state.size_of(&a, Measure::Size), None);
+    assert!(state.dirs.is_empty() && state.counts.is_empty());
 }
 
 #[test]
@@ -316,6 +391,43 @@ fn test_hard_links_once() {
     for (d, bytes) in [("deps", 1000), ("x", 10), ("y", 10)] {
         assert_eq!(known(&sizes, &dir.join(d)), Some(DirSize::Counted(bytes)));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_adds_kept_with_hard_links() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let dir = root.join("dir");
+    let (x, y, z) = (dir.join("x"), dir.join("y"), dir.join("z"));
+    // not small
+    for d in [&x, &y, &z] {
+        fs::create_dir_all(d.join("in")).unwrap();
+    }
+    // in `x` and `y`, and in `x` and elsewhere, and twice in `z`
+    fs::write(x.join("both"), "x".repeat(10)).unwrap();
+    fs::hard_link(x.join("both"), y.join("both")).unwrap();
+    fs::write(x.join("out"), "x".repeat(100)).unwrap();
+    fs::hard_link(x.join("out"), root.join("out")).unwrap();
+    fs::write(z.join("twice"), "x".repeat(1000)).unwrap();
+    fs::hard_link(z.join("twice"), z.join("in/twice")).unwrap();
+    let mut state = State::default();
+    state.want([x.clone(), y.clone(), z.clone()], Measure::Size);
+    count_here(&mut state, &mut Vec::new(), |_, _| {});
+    // what `z` has both links of is forgotten
+    assert_eq!(state.kept[0][&z].links, None);
+    assert_eq!(state.kept[0][&x].links.as_ref().map(|l| l.len()), Some(2));
+    // they're added, not read again, each file once
+    let mut reads = Vec::new();
+    state.want([dir.clone()], Measure::Size);
+    count_here(&mut state, &mut reads, |_, _| {});
+    assert_eq!(reads, [dir.as_path()]);
+    assert_eq!(
+        state.size_of(&dir, Measure::Size),
+        Some(DirSize::Counted(1110))
+    );
+    let links = state.kept[0][&dir].links.as_ref().unwrap();
+    assert_eq!(links.values().map(|l| l.size).collect::<Vec<_>>(), [100]);
 }
 
 #[cfg(unix)]
