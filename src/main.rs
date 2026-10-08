@@ -1,9 +1,12 @@
 // Release builds on Windows are GUI apps (no console window).
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod cli;
 mod document;
 mod ffi;
 mod history;
+#[cfg(target_os = "macos")]
+mod install;
 mod koil;
 mod listing;
 mod sizes;
@@ -24,6 +27,15 @@ const NERD_FONT: &[u8] = include_bytes!("../fonts/JetBrainsMonoNLNerdFont-Regula
 const WINDOW_ICON: &[u8] = include_bytes!("../packaging/window-icon.png");
 
 fn main() {
+    // Before the app, so --help doesn't show it in the Dock, and a window
+    // doesn't open for a command line Koil can't read.
+    let mut args = cli::parse(std::env::args_os()).unwrap_or_else(|err| {
+        cli::attach_console();
+        err.exit()
+    });
+    cli::read_stdin(&mut args);
+    *cli::ARGS.lock().unwrap() = args;
+
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {
         app.as_mut().set_application_name(&QString::from("Koil"));

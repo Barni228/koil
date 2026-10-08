@@ -179,8 +179,13 @@ ApplicationWindow {
     // (whose edits Koil keeps), and _ or - goes back to where the cursor
     // was (see leaveFile).
     function openScratch() {
-        if (!updateListing())
-            return;
+        if (updateListing())
+            showScratch();
+    }
+
+    // The scratchpad, once Koil has the listing's edits (see openScratch;
+    // at startup, there are none yet).
+    function showScratch() {
         fileSpot = listingSpot();
         scratchFromPath = activeView === pathView;
         listing = false;
@@ -1722,36 +1727,87 @@ ApplicationWindow {
             root.menuBar = windowMenuBar.createObject(root);
 
         applyColorScheme();
-        // A file opens as a file; anything else (a dir, a pattern) Koil
-        // lists, and with nothing given, the dir the Settings window's
-        // "Start in" says (which, like the path field, can't be a file), else
-        // the home dir.
+        startUp();
+        // The editor sits in a ScrollView, which is its own focus scope, so
+        // `focus: true` alone doesn't give it the keyboard.
+        editorView.textArea.forceActiveFocus();
+    }
+
+    // Shows what the command line says (see cli.rs). A file opens as a
+    // file; anything else (a dir, a pattern) Koil lists, and with nothing
+    // given, the dir the Settings window's "Start in" says (which, like the
+    // path field, can't be a file), else the home dir. The scratchpad (-s,
+    // or text from stdin) opens over that listing (a file's dir, on its
+    // entry). +N puts the cursor on line N of what's shown.
+    function startUp() {
         const arg = doc.startupPath();
         const start = arg || doc.startDir(settings.startDir);
-        if (arg && doc.isFile(arg)) {
+        const scratch = doc.startupScratchpad();
+        const line = doc.startupLine();
+        const file = arg && doc.isFile(arg);
+        if (file && !scratch) {
             // Once the editor is done: before its own onCompleted, it doesn't
             // have the line numbers' padding, and adding it then had Qt lay
             // out all of a long file again (100,000 lines took a second).
             Qt.callLater(() => {
                 const error = doc.openFile(start);
-                if (!error)
+                if (!error) {
+                    goToLine(line);
                     return;
+                }
                 // One it can't read: its dir, on its entry, as `-` from it
                 // would show, and why.
-                const r = JSON.parse(koil.open(doc.dirOf(start)));
-                if (r.ok)
-                    showListing(true, start.split(/[\\/]/).pop());
+                showFileDir(start);
                 vim.showError(error);
             });
-        } else if (!openFolder(start || doc.homeDir()) && start && openFolder(doc.homeDir())) {
-            // One that isn't there: the home dir, with it in the path field
-            // and why it can't be opened, to fix like one written there.
-            showPath(doc.shownPath(start));
-            updatePathSyntax();
-            updateListing();
+            return;
         }
-        // The editor sits in a ScrollView, which is its own focus scope, so
-        // `focus: true` alone doesn't give it the keyboard.
-        editorView.textArea.forceActiveFocus();
+        let error = "";
+        if (file) {
+            showFileDir(start);
+        } else if (!openFolder(start || doc.homeDir()) && start) {
+            error = vim.message; // why, which openFolder showed
+            if (openFolder(doc.homeDir()) && !scratch) {
+                // One that isn't there: the home dir, with it in the path
+                // field and why it can't be opened, to fix like one written
+                // there.
+                showPath(doc.shownPath(start));
+                updatePathSyntax();
+                updateListing();
+            }
+        }
+        if (!scratch) {
+            goToLine(line);
+            return;
+        }
+        // Once the editor is done, as a file (a long text piped in). Back
+        // from it, the path field shows the listing's path, not one that
+        // can't be opened, so only the status line says why.
+        scratchState = {
+            text: doc.takeStartupText(),
+            buffer: null,
+            contentY: 0
+        };
+        Qt.callLater(() => {
+            showScratch();
+            if (error)
+                vim.showError(error);
+            goToLine(line);
+        });
+    }
+
+    // Lists the dir the file `path` is in, on its entry, as `-` from it
+    // would.
+    function showFileDir(path) {
+        const r = JSON.parse(koil.open(doc.dirOf(path)));
+        if (r.ok)
+            showListing(true, path.split(/[\\/]/).pop());
+    }
+
+    // +N on the command line: the cursor on line `line` (the last for 0,
+    // none for -1) in the middle of the view, as vim's.
+    function goToLine(line) {
+        if (line >= 0)
+            vim.startCommand((line ? String(line).split("") : []).concat(["G", "z", "z"]));
     }
 }

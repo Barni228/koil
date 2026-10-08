@@ -26,6 +26,8 @@ UninstallDisplayIcon={app}\{#AppExe}
 SetupIconFile=koil.ico
 ; Tells Explorer about the Open With entries below.
 ChangesAssociations=yes
+; Tells programs started after it about the PATH (see SetPath).
+ChangesEnvironment=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=Koil-{#AppVersion}-windows-x64-setup
 Compression=lzma2
@@ -35,6 +37,7 @@ WizardStyle=modern
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "openinkoil"; Description: "Add ""Open in Koil"" to folders' right-click menu"
+Name: "addtopath"; Description: "Add Koil to PATH, to open it with ""koil"" in a terminal"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -140,3 +143,84 @@ Name: "{autodesktop}\Koil"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,Koil}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// The addtopath task: Koil's folder last in the PATH, the current user's,
+// or the machine's in an all-users install (as HKA is). Last, as its Qt
+// DLLs are on the PATH then too, and must not come before another Qt's.
+// [Registry] could only append to the value, without seeing whether it's
+// there already or taking it out again, so this does that: when Koil is
+// uninstalled, or reinstalled without the task.
+
+function EnvironmentRoot: Integer;
+begin
+  if IsAdminInstallMode then
+    Result := HKEY_LOCAL_MACHINE
+  else
+    Result := HKEY_CURRENT_USER;
+end;
+
+function EnvironmentKey: String;
+begin
+  if IsAdminInstallMode then
+    Result := 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment'
+  else
+    Result := 'Environment';
+end;
+
+// Path, a list of folders split by ";", without Dir (in any case, with or
+// without a "\" after it); everything else stays as it is.
+function WithoutDir(Path, Dir: String): String;
+var
+  Rest, Part: String;
+  I: Integer;
+  First: Boolean;
+begin
+  Result := '';
+  First := True;
+  Rest := Path + ';';
+  while Rest <> '' do
+  begin
+    I := Pos(';', Rest);
+    Part := Copy(Rest, 1, I - 1);
+    Delete(Rest, 1, I);
+    if CompareText(RemoveBackslashUnlessRoot(Part), RemoveBackslashUnlessRoot(Dir)) <> 0 then
+    begin
+      if not First then
+        Result := Result + ';';
+      Result := Result + Part;
+      First := False;
+    end;
+  end;
+end;
+
+// Puts Koil's folder last in the PATH if Add, or else takes it out.
+procedure SetPath(Add: Boolean);
+var
+  Path, NewPath, Dir: String;
+begin
+  Dir := ExpandConstant('{app}');
+  if not RegQueryStringValue(EnvironmentRoot, EnvironmentKey, 'Path', Path) then
+    Path := '';
+  NewPath := WithoutDir(Path, Dir);
+  if Add then
+  begin
+    if (NewPath <> '') and (NewPath[Length(NewPath)] <> ';') then
+      NewPath := NewPath + ';';
+    NewPath := NewPath + Dir;
+  end;
+  if NewPath <> Path then
+    RegWriteExpandStringValue(EnvironmentRoot, EnvironmentKey, 'Path', NewPath);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SetPath(WizardIsTaskSelected('addtopath'));
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    SetPath(False);
+end;

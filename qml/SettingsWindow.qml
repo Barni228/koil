@@ -8,7 +8,8 @@ import QtQuick.Templates as T
 
 // The Settings window (Cmd+,): font, font size, line numbers, theme, when
 // applying asks first, and the dir Koil starts in; and on macOS, the
-// shortcut that opens Finder's folder, which System Settings changes. It
+// shortcut that opens Finder's folder, which System Settings changes, and
+// the `koil` command, which it installs. It
 // shows the saved settings, which Koil starts with; changes here are saved
 // and apply at once (app.changeSetting), but the dir only at the next start.
 // The zoom and :set change only the settings in use, so they don't show
@@ -57,6 +58,12 @@ Window {
     // Document.finderServiceShortcut), read again whenever this window is
     // active, as System Settings changes it.
     property string finderShortcut: ""
+    // What's where the `koil` command goes (Document.commandStatus), read
+    // again whenever this window is active, and once it's installed or
+    // removed (changingCommand until then); and why that failed, if it did.
+    property string commandStatus: ""
+    property bool changingCommand: false
+    property string commandError: ""
 
     readonly property bool customFontFamily: settings.fontFamily !== app.defaultFontFamily
     readonly property bool customFontSize: settings.fontSize !== app.defaultFontSize
@@ -71,6 +78,18 @@ Window {
     function setLineNumberMode(i) {
         app.changeSetting("number", lineNumberModes[i].number);
         app.changeSetting("relativeNumber", lineNumberModes[i].relative);
+    }
+    // What the Command line row says under its button.
+    function commandNote() {
+        if (commandError)
+            return commandError;
+        if (commandStatus === "installed")
+            return qsTr("Typed in a terminal, koil opens Koil (koil --help says how). It's in /usr/local/bin.");
+        if (commandStatus === "otherKoil")
+            return qsTr("/usr/local/bin/koil opens another copy of Koil, or one that was moved. Replacing it has koil open this one.");
+        if (commandStatus === "other")
+            return qsTr("/usr/local/bin/koil is another program. Replacing it has koil open Koil instead.");
+        return qsTr("Puts koil in /usr/local/bin, so that typed in a terminal, it opens Koil (koil --help says how). macOS asks for your password.");
     }
     function restoreDefaults() {
         app.changeSetting("fontFamily", app.defaultFontFamily);
@@ -102,8 +121,20 @@ Window {
     }
 
     onActiveChanged: {
-        if (active && app.isMac)
+        if (active && app.isMac) {
             finderShortcut = document.finderServiceShortcut();
+            commandStatus = document.commandStatus();
+        }
+    }
+
+    Connections {
+        target: win.document
+
+        function onCommandChanged(error) {
+            win.changingCommand = false;
+            win.commandError = error;
+            win.commandStatus = win.document.commandStatus();
+        }
     }
 
     title: qsTr("Settings")
@@ -687,6 +718,48 @@ Window {
                 font.pixelSize: Math.round(12 * win.zoom)
                 color: win.textColor
                 opacity: 0.6
+                wrapMode: Text.WordWrap
+            }
+            Item {
+                visible: win.app.isMac
+            }
+
+            SettingLabel {
+                visible: win.app.isMac
+                text: qsTr("Command line")
+            }
+            // The `koil` command (see install.rs), a script in
+            // /usr/local/bin that runs this Koil, which macOS asks an
+            // admin's password to put there or take away.
+            TextButton {
+                visible: win.app.isMac
+                enabled: !win.changingCommand
+                text: win.commandStatus === "installed" ? qsTr("Remove “koil” Command")
+                    : win.commandStatus === "missing" ? qsTr("Install “koil” Command") : qsTr("Replace “koil” Command")
+                onClicked: {
+                    win.changingCommand = true;
+                    win.commandError = "";
+                    win.document.changeCommand(win.commandStatus === "installed");
+                }
+            }
+            Item {
+                visible: win.app.isMac
+            }
+
+            Item {
+                visible: win.app.isMac
+            }
+            Text {
+                visible: win.app.isMac
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                Layout.topMargin: -4 * win.zoom
+                text: win.commandNote()
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+                font.pixelSize: Math.round(12 * win.zoom)
+                color: win.commandError ? win.theme.error : win.textColor
+                opacity: win.commandError ? 1 : 0.6
                 wrapMode: Text.WordWrap
             }
             Item {

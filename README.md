@@ -51,6 +51,27 @@ opens Keyboard Shortcuts.
 a drive, and choose _Open in Koil_ (on Windows 11, under _Show more
 options_). The installer adds it unless you untick that option.
 
+## Command line
+
+```sh
+koil                  # lists the Start in setting's directory, or your home
+koil ~/src            # a directory, a glob or regex of files ('*.rs'), or a file
+koil +42 notes.txt    # the file, with the cursor on line 42
+koil -s               # the scratchpad (_ in a listing), a text that's never saved
+git diff | koil       # what's piped in opens in the scratchpad
+koil --help           # all the options
+```
+
+To have `koil` in your terminal:
+
+**macOS**: choose _Koil → Settings… → Command line → Install “koil”
+Command_. It puts `koil` in `/usr/local/bin`, so macOS asks for your
+password. The same button removes it: do that before you delete Koil, as
+nothing else does (after, `sudo rm /usr/local/bin/koil`).
+
+**Windows**: the installer adds Koil to `PATH` unless you untick that
+option. Terminals opened after that have `koil`.
+
 ## Build
 
 Needs Rust and Qt 6 with `qmake` on `PATH` (macOS: `brew install qtbase qtdeclarative`).

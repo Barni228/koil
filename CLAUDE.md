@@ -9,9 +9,14 @@ the scratchpad (see Scratchpad).
 
 ## Layout
 
-- `src/main.rs`: creates the app, installs the "Settings…" translator, the
-  Nerd Font and the window icon, sets the Windows style, loads
-  `qml/main.qml`.
+- `src/main.rs`: reads the command line (cli.rs), creates the app,
+  installs the "Settings…" translator, the Nerd Font and the window icon,
+  sets the Windows style, loads `qml/main.qml`.
+- `src/cli.rs`: the command line, with clap's builder and `arg!`
+  (`command`, `parse`), the scratchpad's text from stdin (`read_stdin`),
+  and `ARGS`, which `Document` gives QML (see Command line).
+- `src/install.rs`: the `koil` command on macOS, which the Settings window
+  installs and removes (see The koil command). Its tests use a temp dir.
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `history`), the path field's regex parts
@@ -31,7 +36,7 @@ the scratchpad (see Scratchpad).
   It also watches the disk (`watch`, `changedOnDisk`; see Changes on disk),
   and counts dirs' sizes (`sizes`, `dirSizes`; see Sorting).
 - `src/document.rs`: `Document` (QML element): reading and writing files, the
-  path on the command line.
+  command line, and installing the `koil` command (on a thread).
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, the editor's
   text, line format and colors, and showing a path in Finder or Explorer
@@ -96,10 +101,12 @@ the scratchpad (see Scratchpad).
 - Local Qt comes from Homebrew (`qtbase`, `qtdeclarative`); `qmake` must be on
   `PATH`. `cargo build`, `cargo run` (lists the home dir, or the
   Start in setting's), `cargo run -- dir`
-  (or a pattern), `cargo run -- file` to open a file. Try applying in a
+  (or a pattern), `cargo run -- file` to open a file, `cargo run -- -s`
+  (or `ls | cargo run`) for the scratchpad, `cargo run -- --help` for the
+  rest. Try applying in a
   scratch dir: it really moves and trashes files.
-- `cargo test` runs listing.rs's tests; `cargo clippy --all-targets`,
-  `cargo fmt`.
+- `cargo test` runs the Rust tests (install.rs's run `osascript`, but
+  never as admin); `cargo clippy --all-targets`, `cargo fmt`.
 - koil-core comes from GitHub (CI checks out only this repo), locked in
   `Cargo.lock`; `cargo update -p koil-core` takes its latest commit. To try
   local changes to `../koil-core`, patch it in `.cargo/config.toml` (not
@@ -126,6 +133,10 @@ the scratchpad (see Scratchpad).
   `click at` doesn't reach Qt as a mouse press; post a `CGEvent` (a few
   lines of Swift) to click. A menu shortcut sent this way runs after the keys that
   follow it, and Cmd+= doesn't reach Zoom In at all (neither in vim-edit).
+  A Koil launched from here may not come to the front while the user
+  works in another app (macOS won't let it); then a temporary `Timer`
+  that logs the state with `console.log` and calls main.qml's functions
+  (`leaveFile`, `openScratch`) checks it without keys.
 
 ## Koil
 
@@ -580,7 +591,8 @@ the scratchpad (see Scratchpad).
   of view; one on the command line lists its dir instead, on its entry.
   A message too long for the status line loses its middle, not its end.
 - **Scratchpad** (`openScratch`): `_` in the listing (or the path field)
-  shows a text of the user's that's never saved, kept until Koil quits.
+  shows a text of the user's that's never saved, kept until Koil quits
+  (`koil -s` starts in it, and text piped in starts it: see Command line).
   It leaves the listing as a file does (updating it first, `fileSpot`),
   and `_` or `-` there goes back (`leaveFile`) to where the cursor was,
   in the path field if it was there (`scratchFromPath`). It's the
@@ -600,6 +612,63 @@ the scratchpad (see Scratchpad).
   last was), and opens that in its place as File > Open does, with the
   cursor and the view where they were; the scratchpad keeps its text, as
   it does when anything else is shown.
+- **Command line** (cli.rs, read in `main` before the app, so `--help`
+  doesn't show it in the Dock): `koil [OPTIONS] [PATH] [+N]`, parsed by
+  clap's builder (`arg!`, not derive), its help and errors clap's (exit
+  2), printed by `clap::Error::exit` once `attach_console` ran. The path
+  is as under Files (one: more is most likely a pattern the shell
+  expanded, which the error's tip says to quote). `-s` (`--scratchpad`,
+  aliases `-t`, `--temp`) starts in the scratchpad, over the listing of
+  the path (a file's dir, on its entry: `startUp` in main.qml). Text from
+  stdin goes in it too (`Document.takeStartupText`), read to its end
+  before the window opens, as vim's `-`: with `-` (from a terminal too,
+  until Ctrl-D), or else if stdin is a pipe or a file (`piped`: not
+  `/dev/null`, which an app launched from Finder or the Dock has, nor a
+  device that never ends, like `/dev/zero`) and has something in it.
+  Unlike a file, it's shown whatever it is, with what isn't text as `�`
+  (`document::decode_lossy`). `+N` puts the cursor on line N of what's
+  shown (`+` the last one), in the middle of the view, as vim's
+  (`goToLine` types `NGzz`). clap has no `+` options and fills
+  positionals in order, so `[PATH]`, `[+N]` and a hidden `more` only
+  collect them, and `parse` tells `-`, `+N` and the path apart by what
+  they are; after `--` they're all paths (`escaped`, a `last`
+  positional), as in vim. `-psn_…`, which older macOS passes, is taken
+  out before clap, which would read it as `-p -s -n`. Qt is given every
+  argument too (cxx-qt passes them all), so Koil's mustn't be options Qt
+  reads (`-platform`, `-style`, `-reverse`), which are errors here (Qt's
+  environment variables still work). The scratchpad opens once the
+  editor is done, as a file does (so a long text is laid out once); a
+  path that can't be opened lists the home dir under it, with why only
+  in the status line, since back from the scratchpad the field shows the
+  listing's path. A Windows release build is a GUI app, which has no
+  console, so `--help` (and an error) attaches to the one it was started
+  from (`attach_console`, untried).
+- **The koil command**: on macOS, the Settings window's Command line
+  button (`Document.changeCommand`) puts a script at `/usr/local/bin/koil`
+  (`install::COMMAND`: on the PATH every shell gets, from `/etc/paths`)
+  that `exec`s Koil's binary where it is (`install::script`), or takes it
+  away. Nothing else takes it away (macOS runs nothing for an app dragged
+  to the Trash), so if the binary isn't there any more, the script says
+  so and how to remove it (exit 127), rather than `exec`'s error. A script, not a link to the binary, so the binary runs from its
+  bundle as when it's opened: through a link, `current_exe` is the link,
+  so `in_bundle` would be false (a window icon over the bundle's). The
+  dir is root's, so it's written
+  as the user if they can (a Homebrew `/usr/local` on Intel), or else as
+  root through `osascript`'s `do shell script … with administrator
+  privileges` (`as_admin`), which shows macOS's password dialog: on a
+  thread, so the windows don't hang meanwhile, then `commandChanged`
+  with why it failed (nothing if the dialog was cancelled). It's
+  installed for the Koil that runs (`this_exe`), but not from the disk
+  image or a translocated copy, which go away. `commandStatus` says
+  what's there, which the window reads whenever it's active: this
+  Koil's script, another Koil's (by `MARK`, the line after `#!`: one
+  moved, or another copy; Replace makes it this one's), another program,
+  or nothing. On Windows, the installer's `addtopath` task puts Koil's
+  folder last in the PATH (the user's, or the machine's for all users),
+  in `[Code]` (`SetPath`), which takes it out when uninstalled or
+  reinstalled without the task; last, as Koil's Qt DLLs are on the PATH
+  with it, and mustn't come before another Qt's. Untried, but CI's ISCC
+  compiles the code.
 - **Open in Koil**: on macOS, a service (`NSServices` in Info.plist) in
   Finder's Services menu, only there (`NSRequiredContext`). macOS handles
   its shortcut, launching Koil if it isn't running, so Koil needn't run to

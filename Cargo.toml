@@ -13,6 +13,8 @@ koil-core = { git = "https://github.com/Barni228/koil-core" }
 # Third-party dependencies
 # the dates the listing shows when sorted by them, in the local time zone
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# the command line (`command!` takes the name and version from here)
+clap = { version = "4.6", features = ["cargo"] }
 cxx = "1"
 cxx-qt = "0.10"
 cxx-qt-lib = { version = "0.10", features = ["qt_full"] }
