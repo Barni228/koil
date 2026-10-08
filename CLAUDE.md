@@ -888,7 +888,8 @@ the scratchpad (see Scratchpad).
   quit once it's saved (also for `:wq`).
 - **Find bar**: moving to a match moves vim's cursor to its start
   (`vim.jumpTo`, which leaves visual mode and breaks an insert); it doesn't
-  select it. The current match is the one starting at the cursor
+  select it. Its regex option (`useRegex`) is on at first, so Find's seed
+  goes in escaped. The current match is the one starting at the cursor
   (`currentStart`), however the cursor got there. Its matches take over the
   search highlights while it's open; Esc in normal mode (`highlightsCleared`)
   closes it. Replace All is one `replaceRange` over the first to last match,

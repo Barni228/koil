@@ -24,7 +24,7 @@ FocusScope {
     property alias replacement: replaceField.text
     property bool matchCase: false
     property bool wholeWord: false
-    property bool useRegex: false
+    property bool useRegex: true
 
     // Every match, as { start, end }, and the index of the one at the
     // cursor (-1 if the cursor isn't at the start of one).
