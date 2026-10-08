@@ -40,6 +40,8 @@ the scratchpad (see Scratchpad).
   Nerd Font, the window icon, files macOS asks to open, line format,
   `setText`, the listing's and path field's `QSyntaxHighlighter`, and the
   confirmations' (`setKeywordColors`), `redrawText`).
+- `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
+  Koil), Objective-C++, which `build.rs` adds only there.
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
   path field and its option buttons, and Koil's listing (`showListing`,
   `updateListing`, `applyChanges`, `undoApply`), a file (`loadFile`) or
@@ -592,6 +594,34 @@ the scratchpad (see Scratchpad).
   last was), and opens that in its place as File > Open does, with the
   cursor and the view where they were; the scratchpad keeps its text, as
   it does when anything else is shown.
+- **Open in Koil**: on macOS, a service (`NSServices` in Info.plist) in
+  Finder's Services menu, only there (`NSRequiredContext`). macOS handles
+  its shortcut, launching Koil if it isn't running, so Koil needn't run to
+  listen. It's ⇧⌘J at first: `NSKeyEquivalent` can only be with Command
+  (and Shift), so not ⌥⌘K, and Finder doesn't use it (the README says why,
+  and how to change it). It takes nothing (Finder sends
+  only what's selected), so Koil asks Finder which folder its front window
+  shows (the desktop with none), through `osascript` (finder_mac.mm), only
+  once the service returns, as Finder waits for it until then; macOS asks
+  the user once to allow it (`NSAppleEventsUsageDescription`). Then Koil
+  comes to the front (macOS doesn't bring it for a service that gives it
+  nothing back) and opens the folder as a dropped one (`Document`'s
+  `folderRequested`, `openDropped`, so not while a dialog is open), or the
+  status line says why it can't (Recents, or not allowed). Its provider is
+  set from the Document's `onCompleted`, before the app runs, so the
+  request that launched Koil comes. The user changes the shortcut in
+  System Settings (Keyboard Shortcuts > Services > General), which keeps
+  it in `pbs`'s preferences (`NSServicesStatus`, by the bundle ID, menu
+  item and message); the Settings window shows it from there
+  (`finderServiceShortcut`), read whenever it's active, and its button
+  opens Keyboard Shortcuts (no link goes on to Services). It works only
+  from an app bundle Launch Services knows (`lsregister -f`, then
+  `pbs -update` to have macOS read its services), not `cargo run`. On
+  Windows, the installer adds "Open in Koil" to the right-click menu of
+  folders, a folder window's background and drives (a task, on at
+  first), which starts Koil with the folder; on Windows 11 it's under
+  "Show more options". A drive's root comes quoted, `"C:\"`, which reads
+  as `C:"` (`command_line_path`). Nothing on Linux.
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
   the editor's document colors each line's icon (colors from devicons,
   gathered from every listing shown, `iconColors`, dark or light by theme)

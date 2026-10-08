@@ -32,6 +32,25 @@ xattr -cr "/Applications/Koil.app"
 **Windows**: run the setup `.exe`. If SmartScreen blocks it, choose
 _More info → Run anyway_.
 
+## Open a folder from Finder or Explorer
+
+**macOS**: in Finder, press `⇧⌘J` (or choose _Finder → Services → Open in
+Koil_) to open the folder Finder's window shows in Koil. It works whether
+Koil is running or not, and only in Finder. The first time, macOS asks to
+let Koil control Finder, which is how Koil finds out which folder that is.
+
+The default is `⇧⌘J` because a shortcut an app gives its service can only
+be `⌘` plus a key, or `⇧⌘` plus a letter, and `⇧⌘J` is one Finder doesn't
+use (`⇧⌘K` is Finder's _Network_). To pick another one, like `⌥⌘K` or `⌃K`,
+open _System Settings → Keyboard → Keyboard Shortcuts… → Services →
+General_, double-click the shortcut next to _Open in Koil_ and press the new
+one. Koil's Settings window shows the shortcut in use, and has a button that
+opens Keyboard Shortcuts.
+
+**Windows**: right-click a folder, the background of a folder's window, or
+a drive, and choose _Open in Koil_ (on Windows 11, under _Show more
+options_). The installer adds it unless you untick that option.
+
 ## Build
 
 Needs Rust and Qt 6 with `qmake` on `PATH` (macOS: `brew install qtbase qtdeclarative`).

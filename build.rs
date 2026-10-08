@@ -27,7 +27,7 @@ fn main() {
             }
         })
     };
-    builder
+    let builder = builder
         .qt_module("Gui")
         .qt_module("Quick")
         .qt_module("QuickControls2")
@@ -38,8 +38,14 @@ fn main() {
             "src/system.rs",
         ])
         .cpp_file("cpp/native.cpp")
-        .include_dir("cpp")
-        .build();
+        .include_dir("cpp");
+    // The "Open in Koil" service on macOS (Objective-C++, for AppKit).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        builder.cpp_file("cpp/finder_mac.mm").build();
+        println!("cargo::rustc-link-lib=framework=AppKit");
+    } else {
+        builder.build();
+    }
 
     // The exe's icon on Windows (nothing elsewhere).
     println!("cargo::rerun-if-changed=packaging/windows/koil.ico");

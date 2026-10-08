@@ -290,6 +290,20 @@ watchFileOpens(QObject* document)
   qApp->installEventFilter(new FileOpenFilter(document));
 }
 
+#ifndef Q_OS_MACOS
+// macOS's are in finder_mac.mm.
+void
+watchFinderService(QObject*)
+{
+}
+
+QString
+finderServiceShortcut()
+{
+  return {};
+}
+#endif
+
 QString
 nerdFontFamily()
 {

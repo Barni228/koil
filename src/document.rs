@@ -34,6 +34,13 @@ pub mod qobject {
         #[qsignal]
         fn file_opened(self: Pin<&mut Document>, path: QString);
 
+        /// Emitted for each request of "Open in Koil", once
+        /// `watch_finder_service` was called: the macOS service, in Finder,
+        /// with the folder its front window shows, or else why it can't be
+        /// read.
+        #[qsignal]
+        fn folder_requested(self: Pin<&mut Document>, path: QString, error: QString);
+
         /// Emitted when writing fails, with why.
         #[qsignal]
         fn failed(self: Pin<&mut Document>, message: QString);
@@ -47,6 +54,17 @@ pub mod qobject {
         /// Has `file_opened` emitted from now on.
         #[qinvokable]
         fn watch_file_opens(self: Pin<&mut Document>);
+
+        /// Has `folder_requested` emitted from now on; call it before the
+        /// app runs, so the request that launched it comes. macOS only.
+        #[qinvokable]
+        fn watch_finder_service(self: Pin<&mut Document>);
+
+        /// The shortcut of "Open in Koil" (see `folder_requested`), as
+        /// macOS shows it (⇧⌘J). Empty if it has none or is off, outside an
+        /// app bundle, or not on macOS.
+        #[qinvokable]
+        fn finder_service_shortcut(self: &Document) -> QString;
 
         /// Writes `text` to the file `path`, stored as the file opened last
         /// was; or else emits `failed`.
@@ -121,6 +139,19 @@ impl qobject::Document {
         }
     }
 
+    fn watch_finder_service(self: Pin<&mut Self>) {
+        // SAFETY: the pointer is to this Document, a live QObject, which
+        // folderRequested is emitted on (it's in its meta-object).
+        unsafe {
+            let object: &mut cxx_qt::QObject = Pin::into_inner_unchecked(self.upcast_pin());
+            ffi::watch_finder_service(object);
+        }
+    }
+
+    fn finder_service_shortcut(&self) -> QString {
+        ffi::finder_service_shortcut()
+    }
+
     fn save_file(self: Pin<&mut Self>, path: &QString, text: &QString) -> bool {
         let encoding = self.encoding;
         self.write(path, text, encoding)
@@ -147,6 +178,7 @@ impl qobject::Document {
         std::env::args()
             .skip(1)
             .find(|arg| !arg.starts_with('-'))
+            .map(command_line_path)
             .and_then(|arg| Some(absolute(&std::env::current_dir().ok()?, arg)))
             .map(|path| QString::from(path.as_str()))
             .unwrap_or_default()
@@ -191,6 +223,20 @@ pub unsafe fn file_opened(document: *mut cxx_qt::QObject, path: &QString) {
     let document = unsafe { Pin::new_unchecked(&mut *document) };
     if let Some(document) = document.downcast_pin::<qobject::Document>() {
         document.file_opened(path.clone());
+    }
+}
+
+/// Emits `folder_requested(path, error)` on `document`, if it's a Document:
+/// what the macOS service (finder_mac.mm) calls.
+///
+/// # Safety
+///
+/// `document` must point to a live QObject.
+pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString, error: &QString) {
+    // SAFETY: the caller's.
+    let document = unsafe { Pin::new_unchecked(&mut *document) };
+    if let Some(document) = document.downcast_pin::<qobject::Document>() {
+        document.folder_requested(path.clone(), error.clone());
     }
 }
 
@@ -281,6 +327,16 @@ fn cannot(doing: &str, path: &str, err: &io::Error) -> String {
         _ => err.to_string(),
     };
     format!("Can't {doing} `{name}`: {why}")
+}
+
+/// The path `arg` from the command line stands for. On Windows, Explorer's
+/// "Open in Koil" quotes the folder (`"%V"`), and a drive's root, `"C:\"`,
+/// comes as `C:"` (`\"` is a quote); a path can't have a quote in it.
+fn command_line_path(arg: String) -> String {
+    match arg.strip_suffix('"') {
+        Some(path) if cfg!(windows) => format!("{path}\\"),
+        _ => arg,
+    }
 }
 
 /// See `Document::start_dir`.

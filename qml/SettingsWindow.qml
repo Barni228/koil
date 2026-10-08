@@ -7,7 +7,8 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 
 // The Settings window (Cmd+,): font, font size, line numbers, theme, when
-// applying asks first, and the dir Koil starts in. It
+// applying asks first, and the dir Koil starts in; and on macOS, the
+// shortcut that opens Finder's folder, which System Settings changes. It
 // shows the saved settings, which Koil starts with; changes here are saved
 // and apply at once (app.changeSetting), but the dir only at the next start.
 // The zoom and :set change only the settings in use, so they don't show
@@ -52,6 +53,11 @@ Window {
         { label: qsTr("Never"), value: "never" }
     ]
 
+    // The shortcut of "Open in Koil", the macOS service (see
+    // Document.finderServiceShortcut), read again whenever this window is
+    // active, as System Settings changes it.
+    property string finderShortcut: ""
+
     readonly property bool customFontFamily: settings.fontFamily !== app.defaultFontFamily
     readonly property bool customFontSize: settings.fontSize !== app.defaultFontSize
     readonly property bool customLineNumbers: lineNumberMode !== 0
@@ -93,6 +99,11 @@ Window {
         show();
         raise();
         requestActivate();
+    }
+
+    onActiveChanged: {
+        if (active && app.isMac)
+            finderShortcut = document.finderServiceShortcut();
     }
 
     title: qsTr("Settings")
@@ -190,6 +201,31 @@ Window {
                     }
                 }
             }
+        }
+    }
+
+    // A button with a label.
+    component TextButton: AbstractButton {
+        id: textButton
+
+        implicitWidth: implicitContentWidth + 24 * win.zoom
+        implicitHeight: 26 * win.zoom
+        opacity: enabled ? 1 : 0.4
+        focusPolicy: Qt.TabFocus
+        hoverEnabled: true
+        Accessible.name: text
+
+        background: Rectangle {
+            radius: 4 * win.zoom
+            color: textButton.hovered || textButton.pressed ? Qt.tint(win.theme.field, win.theme.hover) : win.theme.field
+            border.color: textButton.visualFocus ? win.accent : win.borderColor
+        }
+        contentItem: Text {
+            text: textButton.text
+            font.pixelSize: Math.round(13 * win.zoom)
+            color: win.textColor
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
     }
 
@@ -596,36 +632,74 @@ Window {
                 enabled: win.customStartDir
                 onClicked: win.settings.startDir = ""
             }
+
+            SettingLabel {
+                visible: win.app.isMac
+                text: qsTr("Open from Finder")
+            }
+            // "Open in Koil", the service in Finder's Services menu, whose
+            // shortcut macOS handles, launching Koil if it isn't running.
+            // System Settings changes it, as it can't be set from here; its
+            // link opens Keyboard Shortcuts, but can't go on to Services.
+            Row {
+                visible: win.app.isMac
+                spacing: 8 * win.zoom
+
+                Rectangle {
+                    width: Math.max(70 * win.zoom, finderShortcutText.implicitWidth + 20 * win.zoom)
+                    height: 26 * win.zoom
+                    radius: 4 * win.zoom
+                    color: win.theme.field
+                    border.color: win.borderColor
+
+                    Text {
+                        id: finderShortcutText
+
+                        anchors.centerIn: parent
+                        text: win.finderShortcut || qsTr("None")
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                        font.pixelSize: Math.round(13 * win.zoom)
+                        color: win.textColor
+                        opacity: win.finderShortcut ? 1 : 0.5
+                    }
+                }
+                TextButton {
+                    text: qsTr("Change in System Settings…")
+                    onClicked: Qt.openUrlExternally("x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Shortcuts")
+                }
+            }
+            Item {
+                visible: win.app.isMac
+            }
+
+            Item {
+                visible: win.app.isMac
+            }
+            Text {
+                visible: win.app.isMac
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                Layout.topMargin: -4 * win.zoom
+                text: qsTr("Pressed in Finder, opens the folder it shows here, even if Koil isn't open. In Keyboard Shortcuts, it's under Services > General.")
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+                font.pixelSize: Math.round(12 * win.zoom)
+                color: win.textColor
+                opacity: 0.6
+                wrapMode: Text.WordWrap
+            }
+            Item {
+                visible: win.app.isMac
+            }
         }
 
-        AbstractButton {
-            id: restore
-
+        TextButton {
             Layout.alignment: Qt.AlignRight
-            implicitWidth: restoreText.implicitWidth + 24 * win.zoom
-            implicitHeight: 26 * win.zoom
+            text: qsTr("Restore Defaults")
             enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme
                 || win.customConfirm || win.customStartDir
-            opacity: enabled ? 1 : 0.4
-            focusPolicy: Qt.TabFocus
-            hoverEnabled: true
-            Accessible.name: restoreText.text
             onClicked: win.restoreDefaults()
-
-            background: Rectangle {
-                radius: 4 * win.zoom
-                color: restore.hovered || restore.pressed ? Qt.tint(win.theme.field, win.theme.hover) : win.theme.field
-                border.color: restore.visualFocus ? win.accent : win.borderColor
-            }
-            contentItem: Text {
-                id: restoreText
-
-                text: qsTr("Restore Defaults")
-                font.pixelSize: Math.round(13 * win.zoom)
-                color: win.textColor
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
         }
     }
 }

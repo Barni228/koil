@@ -2,7 +2,7 @@
 
 pub use bridge::*;
 
-use crate::document::file_opened;
+use crate::document::{file_opened, folder_requested};
 
 #[cxx_qt::bridge]
 mod bridge {
@@ -11,6 +11,11 @@ mod bridge {
         /// `watch_file_opens`).
         #[cxx_name = "fileOpened"]
         unsafe fn file_opened(document: *mut QObject, path: &QString);
+
+        /// Emits `folderRequested(path, error)` on `document`, a Document
+        /// (see `watch_finder_service`).
+        #[cxx_name = "folderRequested"]
+        unsafe fn folder_requested(document: *mut QObject, path: &QString, error: &QString);
     }
 
     unsafe extern "C++" {
@@ -43,6 +48,16 @@ mod bridge {
         /// the system asks the app to open (macOS's Open With; see native.h).
         #[cxx_name = "watchFileOpens"]
         unsafe fn watch_file_opens(document: *mut QObject);
+
+        /// Has `document`, a Document, emit `folderRequested` for each
+        /// request of the macOS service "Open in Koil" (see native.h).
+        #[cxx_name = "watchFinderService"]
+        unsafe fn watch_finder_service(document: *mut QObject);
+
+        /// The macOS service's shortcut as macOS shows it, or empty (see
+        /// native.h).
+        #[cxx_name = "finderServiceShortcut"]
+        fn finder_service_shortcut() -> QString;
 
         /// The family of the font `use_nerd_font` added.
         #[cxx_name = "nerdFontFamily"]

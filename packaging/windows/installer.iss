@@ -34,6 +34,7 @@ WizardStyle=modern
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "openinkoil"; Description: "Add ""Open in Koil"" to folders' right-click menu"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -114,6 +115,24 @@ Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string;
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"
 Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
 #for {I = 0; I < DimOf(Exts); I++} ExtEntries
+; "Open in Koil" on a folder's right-click menu, a folder window's
+; background's (the folder it shows) and a drive's, which lists it. On
+; Windows 11 it's under "Show more options": its own menu takes only
+; packaged apps' commands. Koil reads a drive's root, "C:\" quoted, which
+; comes as C:" (see command_line_path in src/document.rs). Reinstalling
+; without the task takes it away.
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Koil"; ValueType: string; ValueData: "Open in Koil"; Flags: uninsdeletekey; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Koil"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Koil\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Koil"; ValueType: string; ValueData: "Open in Koil"; Flags: uninsdeletekey; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Koil"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Koil\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%V"""; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Drive\shell\Koil"; ValueType: string; ValueData: "Open in Koil"; Flags: uninsdeletekey; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Drive\shell\Koil"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Drive\shell\Koil\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: openinkoil
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Koil"; ValueType: none; Flags: deletekey; Tasks: not openinkoil
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Koil"; ValueType: none; Flags: deletekey; Tasks: not openinkoil
+Root: HKA; Subkey: "Software\Classes\Drive\shell\Koil"; ValueType: none; Flags: deletekey; Tasks: not openinkoil
 
 [Icons]
 Name: "{autoprograms}\Koil"; Filename: "{app}\{#AppExe}"

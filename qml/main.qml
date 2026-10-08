@@ -951,7 +951,23 @@ ApplicationWindow {
             if (dropArea.enabled)
                 Qt.callLater(root.openDropped, path);
         }
-        Component.onCompleted: watchFileOpens()
+        // "Open in Koil" in Finder (see watchFinderService): Koil comes to
+        // the front (macOS has launched it if it wasn't running), and opens
+        // the folder as if it was dropped, unless a dialog is open.
+        onFolderRequested: (path, error) => {
+            if (root.visibility === Window.Minimized)
+                root.showNormal();
+            root.raise();
+            root.requestActivate();
+            if (error)
+                vim.showError(error);
+            else if (dropArea.enabled)
+                Qt.callLater(root.openDropped, path);
+        }
+        Component.onCompleted: {
+            watchFileOpens();
+            watchFinderService();
+        }
     }
 
     Koil {
