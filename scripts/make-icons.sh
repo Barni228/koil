@@ -15,7 +15,9 @@ trap 'rm -rf "$work"' EXIT
 
 # macOS draws icons as they are, so the rounded square must be the size of
 # other apps': 824 of 1024 pixels (Apple's grid). It's 1128 of icon.png's
-# 1254, so the whole image goes to 1254 * 824 / 1128 = 916 of 1024.
+# 1254, so the whole image goes to 1254 * 824 / 1128 = 916 of 1024. It must
+# also be Apple's shape, with continuous corners (radius 185.4 of 824, as
+# in Apple's templates): macOS 26 puts one that isn't in a gray one.
 magick "$src" -resize 916x916 -background none -gravity center -extent 1024x1024 \
     "$work/mac.png"
 

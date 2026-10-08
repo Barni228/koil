@@ -647,11 +647,15 @@ the scratchpad (see Scratchpad).
   it only for them). Both give it the path on the command line, without
   taking any extension.
 - **App icon**: macOS draws icons as they are, so `Koil.icns` shrinks
-  `icon.png`'s rounded square to Apple's grid (824 of 1024 pixels);
-  Windows' fills its square. Qt gives windows the exe's `IDI_ICON1` on
-  Windows; elsewhere `main.rs` sets `window-icon.png` (the macOS-sized one)
-  as the window icon, for Linux and `cargo run` on macOS (its Dock icon;
-  the bundle's is the same).
+  `icon.png`'s rounded square to Apple's grid (824 of 1024 pixels). It's
+  Apple's shape too, with continuous corners: macOS 26 puts an icon that
+  isn't in a gray one (in Finder, Launchpad, the Dock). Windows' fills its
+  square. Qt gives windows
+  the exe's `IDI_ICON1` on Windows; elsewhere `main.rs` sets
+  `window-icon.png` (the macOS one) as the window icon, for Linux and
+  `cargo run` on macOS (its Dock icon), but not in the bundle
+  (`in_bundle`), as on macOS it's the Dock's icon too, which then
+  wouldn't be the one macOS draws from the bundle's, as Finder does.
 - **cxx-qt**: bridges containing a `#[qobject]` declare `QObject` implicitly
   (declaring it again fails); plain bridges like `ffi.rs` must declare it
   themselves. `#[auto_cxx_name]` turns snake_case into camelCase for QML.

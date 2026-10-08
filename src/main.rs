@@ -31,8 +31,12 @@ fn main() {
     }
     ffi::use_settings_menu_title();
     ffi::use_nerd_font(&QByteArray::from(NERD_FONT));
+    // In a bundle, macOS draws the Dock's icon from the bundle's, as Finder
+    // does; a window icon would replace it.
     #[cfg(not(windows))]
-    ffi::use_window_icon(&QByteArray::from(WINDOW_ICON));
+    if !in_bundle() {
+        ffi::use_window_icon(&QByteArray::from(WINDOW_ICON));
+    }
 
     // Qt Quick's default Windows style has no dark theme. Fusion follows the
     // system's light or dark mode, title bar and menus included (FluentWinUI3
@@ -51,4 +55,13 @@ fn main() {
     if let Some(app) = app.as_mut() {
         app.exec();
     }
+}
+
+/// Whether Koil runs from a macOS app bundle (`Koil.app/Contents/MacOS`).
+#[cfg(not(windows))]
+fn in_bundle() -> bool {
+    std::env::current_exe().is_ok_and(|exe| {
+        exe.parent()
+            .is_some_and(|dir| dir.ends_with("Contents/MacOS"))
+    })
 }
