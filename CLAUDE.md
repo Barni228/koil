@@ -780,10 +780,16 @@ the scratchpad (see Scratchpad).
   `public.item`, nor a `*` extension), so a second document type claims a
   list of text and source code extensions by name
   (`CFBundleTypeExtensions`, as VS Code and Zed do; a dict with
-  `LSItemContentTypes` ignores them), the same as Windows' `Exts`. Koil is
-  the default of one only if no other app claims it. Launch Services
-  ignores a bundle in `/tmp`, so trying claims out takes one elsewhere
-  (`lsregister -f`, then `-u`), with a Mach-O executable. Finder
+  `LSItemContentTypes` ignores them), the same as Windows' `Exts`. It
+  has their `'****'` OS type too (`CFBundleTypeOSTypes`,
+  `legacy-wildcard` in `lsregister -dump`), which adds no other files:
+  Launch Services puts a claim with it after every claim without it,
+  whatever their ranks, so without it Koil was the default of `.rs` and
+  `.toml` over their `Default` claims. Koil is the default of one only if
+  no other app claims it. Launch Services ignores a bundle in `/tmp`, so
+  trying claims out takes one elsewhere (`lsregister -f`, then `-u`),
+  with a Mach-O executable, launched once (`open -g -j`): before, Koil
+  wasn't the default of anything another app claims. Finder
   gives the file as a `QFileOpenEvent`, not on the command line (also to
   Koil already running): `Document.watchFileOpens` has native.cpp's filter
   call `document::file_opened` (C++ can't emit a cxx-qt signal, and the

@@ -79,8 +79,8 @@
          whose extension macOS doesn't know (.toml) has a dyn.* type that
          no claim on a type it conforms to matches (public.data,
          public.item), so those extensions are claimed one by one, as VS
-         Code and Zed do; Koil is then the default of one only if no other
-         app claims it. -->
+         Code and Zed do (with '****', see below); Koil is then the default
+         of one only if no other app claims it. -->
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
@@ -98,7 +98,11 @@
         </dict>
         <!-- Apart from the types: a dict with LSItemContentTypes ignores
              its CFBundleTypeExtensions. Keep in sync with Exts in
-             packaging/windows/installer.iss. -->
+             packaging/windows/installer.iss. The '****' OS type is VS
+             Code's and Zed's too: Launch Services puts a claim with it
+             after every claim without it, whatever their ranks, so without
+             it Koil (once launched) was the default of .rs and .toml over
+             their Default claims. It doesn't add other files. -->
         <dict>
             <key>CFBundleTypeName</key>
             <string>Text document</string>
@@ -106,6 +110,10 @@
             <string>Editor</string>
             <key>LSHandlerRank</key>
             <string>Alternate</string>
+            <key>CFBundleTypeOSTypes</key>
+            <array>
+                <string>****</string>
+            </array>
             <key>CFBundleTypeExtensions</key>
             <array>
                 <string>txt</string> <string>text</string> <string>md</string>
