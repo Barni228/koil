@@ -529,12 +529,15 @@ ApplicationWindow {
             activate(editorView);
     }
 
-    // Koil's keys in the listing and the path field (see Vim.commandKeys).
+    // Koil's keys in the listing and the path field, and the few in a file
+    // (see Vim.commandKeys).
     function runKeyCommand(name, count) {
         if (name === "update")
             updateListing();
         else if (name === "apply")
             applyChanges(false, false);
+        else if (name === "save")
+            save(false);
         else if (name === "applyAsking")
             applyChanges(false, false, true);
         else if (name === "undoApply")
@@ -1075,12 +1078,14 @@ ApplicationWindow {
             "_": "scratch"
         }, root.sortKeys, root.activeView === pathView ? {
             "<S-CR>": "update"
-        } : {}) : root.filePath ? ({
-                "-": "back"
-            }) : root.scratchpad ? ({
-                "-": "back",
-                "_": "back"
-            }) : ({})
+        } : {}) : Object.assign({
+            "  ": "save"
+        }, root.filePath ? {
+            "-": "back"
+        } : root.scratchpad ? {
+            "-": "back",
+            "_": "back"
+        } : {})
 
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: (quit, confirm) => root.save(quit, confirm)

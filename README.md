@@ -10,7 +10,7 @@ until you apply, and your edits stay while you go through other dirs.
 | Key            | Does                                                                          |
 | -------------- | ----------------------------------------------------------------------------- |
 | `Cmd+S`        | Update: read your edits and show the listing again (doesn't change anything)  |
-| `Space Space`  | Apply, Deletes go to the trash                                                |
+| `Space Space`  | Apply, Deletes go to the trash. In a file, save                               |
 | `u`            | Undo                                                                          |
 | `Enter`        | Open the dir or file on the line                                              |
 | `-`            | The dir above (`3-`: three up). In a file, back to the listing                |

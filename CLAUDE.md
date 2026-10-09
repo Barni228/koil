@@ -286,8 +286,9 @@ the scratchpad (see Scratchpad).
   Enter in the
   path field (`openPath`, also from insert mode: see `singleLine`) updates
   and goes to the listing, unless the update fails; Shift+Enter there only
-  updates, so vim stays in the field. In a file with a path,
-  `-` is Koil's too (`leaveFile`): back to the listing, on the file's line.
+  updates, so vim stays in the field. In a file, `Space Space` saves (as
+  `:w`: `save`), and with a path, `-` is Koil's too (`leaveFile`): back
+  to the listing, on the file's line.
   They're only matched at the start of a normal-mode command (so `d-` and
   visual `-` are vim's), with a count; keys that start one and go on
   differently are a bad command (Space l), unless they go on as a name of
@@ -554,8 +555,8 @@ the scratchpad (see Scratchpad).
   quits; it only fails then, as a write that fails does in vim.
 - **Files**: Enter on a file, File > Open (and a file on the command line)
   leave the listing (updating it first, so its edits stay in koil) for a
-  plain editor: no colors or problems, only `-` of `commandKeys`, and `:w`
-  saves. `-` goes back to what's still open in koil, on `openedFrom` (the
+  plain editor: no colors or problems, only `-` and `Space Space` (a
+  save) of `commandKeys`, and `:w` saves. `-` goes back to what's still open in koil, on `openedFrom` (the
   entry Enter was on), with the column and view it had (`fileSpot`), or
   for a file opened otherwise, opens its dir. Enter
   on a new file (`createFile`) updates, then asks to create it, listing the
@@ -604,8 +605,8 @@ the scratchpad (see Scratchpad).
   a register, so they can be put aside and pasted back into a listing,
   and `gh` shows their paths. An ID means the same path all session, so
   one pasted back after its file is gone is an error (`NotOnDisk` in
-  koil-core), not another file. Edits don't make it modified, `:w` and
-  Cmd+S only say it isn't saved, `:wq` and `ZZ` quit as `:q` does
+  koil-core), not another file. Edits don't make it modified, `:w`,
+  `Space Space` and Cmd+S only say it isn't saved, `:wq` and `ZZ` quit as `:q` does
   (`quitApp`: back to the listing while it has changes). Save As
   (`saveScratch`) writes its text to a file, as UTF-8
   (`Document.saveNewFile`: `saveFile` would store it as the file opened

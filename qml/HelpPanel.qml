@@ -50,7 +50,7 @@ Popup {
             rows: [
                 ["`" + cmdKey + "S`", "Update: read the edits and show the listing again."],
                 ["`Space Space`  `:w`", "Apply the changes, listing them first (Settings can skip that). `:wq` "
-                    + "then quits."],
+                    + "then quits. In a file: save."],
                 ["`Space a`", "Apply, always listing the changes first (so does File > Apply Changes…)."],
                 ["󰄲", "In that list: `j` and `k` move, `Space`, `x` or a click picks or leaves out a change "
                     + "(with what it needs), and `a` picks all or none. What's left out is discarded."],
