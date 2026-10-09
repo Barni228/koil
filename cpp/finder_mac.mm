@@ -1,7 +1,7 @@
 // "Open in Koil", the service packaging/macos/Info.plist declares (see
-// watchFinderService in native.h). macOS shows it in Finder for the folders
-// selected, in their right-click menu and the Services menu, and handles its
-// shortcut, launching Koil if it isn't running; the folders come on the
+// watchFinderService in native.h). macOS shows it in Finder for what's
+// selected, in its right-click menu and the Services menu, and handles its
+// shortcut, launching Koil if it isn't running; the files come on the
 // pasteboard.
 
 #include "native.h"
@@ -61,19 +61,28 @@ shortcutLabel(NSString* keyEquivalent)
 
 @implementation KoilServiceProvider
 // Brings Koil to the front, as macOS doesn't for a service that gives
-// nothing back, and has the Document open the first folder, as a drop of
-// several opens the first.
+// nothing back, and has the Document open the first file, as a drop of
+// several opens the first: a folder, or else the folder it's in. An app
+// (or another package) is a folder, but Finder shows it as a file, and
+// opens it rather than going into it.
 - (void)openFolder:(NSPasteboard*)pasteboard userData:(NSString*)userData error:(NSString**)error
 {
   NSArray<NSURL*>* urls = [pasteboard readObjectsForClasses:@[ NSURL.class ]
                                                     options:@{ NSPasteboardURLReadingFileURLsOnlyKey : @YES }];
-  NSString* path = urls.firstObject.filePathURL.path;
-  if (!path) {
-    *error = @"Open in Koil got no folder";
+  NSURL* url = urls.firstObject.filePathURL;
+  if (!url.path) {
+    *error = @"Open in Koil got nothing to open";
     return;
   }
   if (!document)
     return;
+  // A link to a folder is one, as the listing shows it.
+  NSURL* target = url.URLByResolvingSymlinksInPath;
+  NSNumber* isDir = nil;
+  NSNumber* isPackage = nil;
+  [target getResourceValue:&isDir forKey:NSURLIsDirectoryKey error:nil];
+  [target getResourceValue:&isPackage forKey:NSURLIsPackageKey error:nil];
+  const bool file = !isDir.boolValue || isPackage.boolValue;
   if (@available(macOS 14, *)) {
     [NSApp activate];
   } else {
@@ -82,7 +91,7 @@ shortcutLabel(NSString* keyEquivalent)
     [NSApp activateIgnoringOtherApps:YES];
 #pragma clang diagnostic pop
   }
-  folderRequested(document, QString::fromNSString(path));
+  folderRequested(document, QString::fromNSString(url.path), file);
 }
 @end
 

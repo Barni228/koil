@@ -676,10 +676,12 @@ the scratchpad (see Scratchpad).
   with it, and mustn't come before another Qt's. Untried, but CI's ISCC
   compiles the code.
 - **Open in Koil**: on macOS, a service (`NSServices` in Info.plist) on
-  the folders selected in Finder, only there (`NSRequiredContext`, without
-  which macOS also has a service off at first): in a folder's right-click
-  menu (Services) and the Services menu. It takes folders
-  (`NSSendFileTypes`), which is what puts it in right-click menus and
+  what's selected in Finder, only there (`NSRequiredContext`, without
+  which macOS also has a service off at first): in its right-click menu
+  (Services) and the Services menu. It takes anything (`public.item` in
+  `NSSendFileTypes`; it took only folders, `public.folder`, at first,
+  and its message is still `openFolder`, as the shortcut the user set is
+  kept by it), which is what puts it in right-click menus and
   under Files and Folders in System Settings; one that takes nothing (as
   it did, asking Finder through `osascript` which folder its front window
   showed) is under General, and macOS ignores `NSServiceCategory` (tried
@@ -692,11 +694,14 @@ the scratchpad (see Scratchpad).
   take first, as in Finder's rename field), but Keka's "Send to Keka" does
   (the README says how to change it). `NSKeyEquivalent` is a letter, with Command (and Shift if it's
   uppercase), or modifiers and a key as pbs keeps them (`^$K` is ⌃⇧K, as
-  Keka's are; `_NSCopyServiceActions` shows the shortcut macOS takes). The folders come on the pasteboard (finder_mac.mm), and
+  Keka's are; `_NSCopyServiceActions` shows the shortcut macOS takes). The files come on the pasteboard (finder_mac.mm), and
   Koil comes to the front (macOS doesn't bring it for a service that
-  gives it nothing back) and opens the first as a dropped one
-  (`Document`'s `folderRequested`, `openDropped`, so not while a dialog
-  is open). Its provider is set from the Document's `onCompleted`, before
+  gives it nothing back) and opens the first (`Document`'s
+  `folderRequested`, not while a dialog is open): a folder as a dropped
+  one (`openDropped`), anything else (a file, or an app or another
+  package, which Finder shows as a file: `file`) as the dir it's in, on
+  its entry (`showFileDir`, through `openFolder`, so the listing's edits
+  stay). Its provider is set from the Document's `onCompleted`, before
   the app runs, so the request that launched Koil comes. The user changes
   the shortcut in System Settings (Keyboard Shortcuts > Services > Files
   and Folders), which keeps it in `pbs`'s preferences (`NSServicesStatus`,

@@ -668,12 +668,12 @@ Window {
                 visible: win.app.isMac
                 text: qsTr("Open from Finder")
             }
-            // "Open in Koil", the service on the folders selected in
-            // Finder, whose shortcut macOS handles, launching Koil if it
-            // isn't running. System Settings changes it, as it can't be set
-            // from here. No link goes to Keyboard Shortcuts' Services:
-            // Spotlight is the row under it (?Shortcuts lands on Modifier
-            // Keys, the last row, and ?Services opens nothing).
+            // "Open in Koil", the service on what's selected in Finder (a
+            // folder, or a file's), whose shortcut macOS handles, launching
+            // Koil if it isn't running. System Settings changes it, as it
+            // can't be set from here. No link goes to Keyboard Shortcuts'
+            // Services: Spotlight is the row under it (?Shortcuts lands on
+            // Modifier Keys, the last row, and ?Services opens nothing).
             Row {
                 visible: win.app.isMac
                 spacing: 8 * win.zoom

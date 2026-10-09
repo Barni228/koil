@@ -70,7 +70,8 @@ _More info → Run anyway_.
 ## Open a folder from Finder or Explorer
 
 **macOS**: in Finder, right-click a folder and choose _Services → Open in
-Koil_, or select it and press `⌃⇧K`. To change the shortcut,
+Koil_, or select it and press `⌃⇧K`. On a file, it opens the folder the
+file is in, with the cursor on it. To change the shortcut,
 open _System Settings → Keyboard → Keyboard Shortcuts... → Services →
 Files and Folders_ (Koil's Settings window has a button for it),
 double-click the one next to _Open in Koil_ and press the

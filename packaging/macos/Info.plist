@@ -24,23 +24,26 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
-    <!-- "Open in Koil" on the folders selected in Finder (only there:
+    <!-- "Open in Koil" on what's selected in Finder (only there:
          NSRequiredContext, without which macOS also has it off at first),
-         in their right-click menu's Services and the Services menu
-         (cpp/finder_mac.mm). Taking folders puts it under Files and
-         Folders in System Settings; one that takes nothing is under
-         General (NSServiceCategory doesn't change that), and isn't in
-         right-click menus. With nothing selected, macOS turns it off.
-         macOS handles its shortcut, launching Koil if it isn't running.
-         NSKeyEquivalent is a letter, with Command (and Shift if it's
-         uppercase), or modifiers and a key as pbs keeps them (^ Control,
-         ~ Option, $ Shift, @ Command: Keka's ^$K is ⌃⇧K). It's ⌃⇧K, which
-         Finder doesn't use (⌘K and ⇧⌘K are its), nor do text fields (⌃K
-         deletes to the line's end in them, and a service's shortcut comes
-         first; Finder's rename field may offer the folder). Keka's "Send to
-         Keka" is ⌃⇧K too. The user changes it in System Settings (see the
-         README), which keeps it in pbs's preferences (by the bundle ID,
-         NSMenuItem and NSMessage, which Koil's Settings reads it by). -->
+         in its right-click menu's Services and the Services menu
+         (cpp/finder_mac.mm): a folder, or the folder a file (or an app) is
+         in. public.item is anything Finder shows. Taking files puts it
+         under Files and Folders in System Settings; one that takes nothing
+         is under General (NSServiceCategory doesn't change that), and
+         isn't in right-click menus. With nothing selected, macOS turns it
+         off. macOS handles its shortcut, launching Koil if it isn't
+         running. NSKeyEquivalent is a letter, with Command (and Shift if
+         it's uppercase), or modifiers and a key as pbs keeps them (^
+         Control, ~ Option, $ Shift, @ Command: Keka's ^$K is ⌃⇧K). It's
+         ⌃⇧K, which Finder doesn't use (⌘K and ⇧⌘K are its), nor do text
+         fields (⌃K deletes to the line's end in them, and a service's
+         shortcut comes first; Finder's rename field may offer the folder).
+         Keka's "Send to Keka" is ⌃⇧K too. The user changes it in System
+         Settings (see the README), which keeps it in pbs's preferences (by
+         the bundle ID, NSMenuItem and NSMessage, which Koil's Settings
+         reads it by, so renaming either loses it: openFolder took only
+         folders once). -->
     <key>NSServices</key>
     <array>
         <dict>
@@ -55,7 +58,7 @@
             <string>Koil</string>
             <key>NSSendFileTypes</key>
             <array>
-                <string>public.folder</string>
+                <string>public.item</string>
             </array>
             <key>NSKeyEquivalent</key>
             <dict>

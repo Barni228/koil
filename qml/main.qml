@@ -225,16 +225,17 @@ ApplicationWindow {
     }
 
     // Lists the dir (or pattern) `path`: File > Open Folder, and at startup.
-    // False if it can't be opened (the status line says why).
-    function openFolder(path) {
+    // The cursor goes to the entry `from`, if given. False if it can't be
+    // opened (the status line says why).
+    function openFolder(path, from) {
         if (listing)
-            return updateListing(path);
+            return updateListing(path, from);
         const r = JSON.parse(koil.open(path));
         if (!r.ok) {
             vim.showError(r.message);
             return false;
         }
-        showListing(true, "");
+        showListing(true, from || "");
         return true;
     }
 
@@ -315,9 +316,10 @@ ApplicationWindow {
 
     // Reads the edited listing into Koil, then opens `open` (a dir, relative
     // to the open one) if given, else the path in the path field if it
-    // changed, and shows the listing again. False if it can't (the problems
-    // and the status line say why).
-    function updateListing(open) {
+    // changed, and shows the listing again, with the cursor on the entry
+    // `from` if given. False if it can't (the problems and the status line
+    // say why).
+    function updateListing(open, from) {
         const r = JSON.parse(koil.update(pathView.textArea.text, editorView.textArea.text, JSON.stringify(editorView.hidden), open || ""));
         if (!r.ok) {
             if (r.problems.length)
@@ -327,7 +329,7 @@ ApplicationWindow {
             vim.showError(r.message);
             return false;
         }
-        showListing(r.moved, r.from);
+        showListing(r.moved, from || r.from);
         if (r.message)
             vim.showMessage(r.message);
         return true;
@@ -1000,13 +1002,18 @@ ApplicationWindow {
         }
         // "Open in Koil" in Finder (see watchFinderService): Koil comes to
         // the front (macOS has launched it if it wasn't running), and opens
-        // the folder as if it was dropped, unless a dialog is open.
-        onFolderRequested: path => {
+        // the folder as if it was dropped, or a file's, on its entry, unless
+        // a dialog is open.
+        onFolderRequested: (path, file) => {
             if (root.visibility === Window.Minimized)
                 root.showNormal();
             root.raise();
             root.requestActivate();
-            if (dropArea.enabled)
+            if (!dropArea.enabled)
+                return;
+            if (file)
+                Qt.callLater(() => root.askToSave(() => root.showFileDir(path)));
+            else
                 Qt.callLater(root.openDropped, path);
         }
         Component.onCompleted: {
@@ -1824,11 +1831,11 @@ ApplicationWindow {
     }
 
     // Lists the dir the file `path` is in, on its entry, as `-` from it
-    // would.
+    // would: at startup, and "Open in Koil" on a file (or an app, which
+    // Finder shows as one, so it's a dir's).
     function showFileDir(path) {
-        const r = JSON.parse(koil.open(doc.dirOf(path)));
-        if (r.ok)
-            showListing(true, path.split(/[\\/]/).pop());
+        const name = path.split(/[\\/]/).pop();
+        openFolder(doc.dirOf(path), doc.isDir(path) ? name + "/" : name);
     }
 
     // +N on the command line: the cursor on line `line` (the last for 0,

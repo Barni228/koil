@@ -37,10 +37,12 @@ pub mod qobject {
         fn file_opened(self: Pin<&mut Document>, path: QString);
 
         /// Emitted for each request of "Open in Koil", once
-        /// `watch_finder_service` was called: the macOS service, with the
-        /// folder selected in Finder (the first, if there are several).
+        /// `watch_finder_service` was called: the macOS service, with what's
+        /// selected in Finder (the first, if there are several), and with
+        /// `file` if it isn't a folder (or is an app, which Finder shows as
+        /// a file), whose folder then opens.
         #[qsignal]
-        fn folder_requested(self: Pin<&mut Document>, path: QString);
+        fn folder_requested(self: Pin<&mut Document>, path: QString, file: bool);
 
         /// Emitted when writing fails, with why.
         #[qsignal]
@@ -130,6 +132,11 @@ pub mod qobject {
         /// nothing.
         #[qinvokable]
         fn is_file(self: &Document, path: &QString) -> bool;
+
+        /// Whether `path` is a dir (or a link to one), which the listing
+        /// shows with a `/` after its name.
+        #[qinvokable]
+        fn is_dir(self: &Document, path: &QString) -> bool;
 
         /// The dir `path` is in, as an absolute path.
         #[qinvokable]
@@ -264,6 +271,10 @@ impl qobject::Document {
         std::path::Path::new(&path.to_string()).is_file()
     }
 
+    fn is_dir(&self, path: &QString) -> bool {
+        std::path::Path::new(&path.to_string()).is_dir()
+    }
+
     fn dir_of(&self, path: &QString) -> QString {
         let path = std::path::absolute(path.to_string()).unwrap_or_default();
         let dir = path.parent().unwrap_or(&path);
@@ -325,17 +336,17 @@ pub unsafe fn file_opened(document: *mut cxx_qt::QObject, path: &QString) {
     }
 }
 
-/// Emits `folder_requested(path)` on `document`, if it's a Document: what
-/// the macOS service (finder_mac.mm) calls.
+/// Emits `folder_requested(path, file)` on `document`, if it's a Document:
+/// what the macOS service (finder_mac.mm) calls.
 ///
 /// # Safety
 ///
 /// `document` must point to a live QObject.
-pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString) {
+pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString, file: bool) {
     // SAFETY: the caller's.
     let document = unsafe { Pin::new_unchecked(&mut *document) };
     if let Some(document) = document.downcast_pin::<qobject::Document>() {
-        document.folder_requested(path.clone());
+        document.folder_requested(path.clone(), file);
     }
 }
 
