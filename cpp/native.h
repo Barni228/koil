@@ -26,16 +26,16 @@ void useWindowIcon(const QByteArray& png);
 // than giving the path on the command line (also to an app already running).
 void watchFileOpens(QObject* document);
 
-// Has `document` (a Document) emit folderRequested(path, error) for each
-// request of "Open in Koil", the macOS service Info.plist declares, which
-// macOS shows in Finder's Services menu, and whose shortcut it handles
-// (launching Koil first if it isn't running): with the folder Finder's
-// front window shows, or else why it can't be read. Call it before the
-// app runs, so the request that launched it comes. Nothing elsewhere. In
-// finder_mac.mm.
+// Has `document` (a Document) emit folderRequested(path) for each request
+// of "Open in Koil", the macOS service Info.plist declares, which macOS
+// shows in Finder for the folders selected (their right-click menu's
+// Services, and the Services menu), and whose shortcut it handles
+// (launching Koil first if it isn't running): with the first folder. Call
+// it before the app runs, so the request that launched it comes. Nothing
+// elsewhere. In finder_mac.mm.
 void watchFinderService(QObject* document);
 
-// The service's shortcut as macOS shows it (⇧⌘J): Info.plist's, unless it
+// The service's shortcut as macOS shows it (⌃⇧K): Info.plist's, unless it
 // was changed in System Settings. Empty if it has none or is off, or
 // outside an app bundle (`cargo run`), or not on macOS.
 QString finderServiceShortcut();

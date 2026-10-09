@@ -8,8 +8,8 @@ import QtQuick.Templates as T
 
 // The Settings window (Cmd+,): font, font size, line numbers, theme, when
 // applying asks first, and the dir Koil starts in; and on macOS, the
-// shortcut that opens Finder's folder, which System Settings changes, and
-// the `koil` command, which it installs. It
+// shortcut that opens the folder selected in Finder, which System Settings
+// changes, and the `koil` command, which it installs. It
 // shows the saved settings, which Koil starts with; changes here are saved
 // and apply at once (app.changeSetting), but the dir only at the next start.
 // The zoom and :set change only the settings in use, so they don't show
@@ -668,10 +668,12 @@ Window {
                 visible: win.app.isMac
                 text: qsTr("Open from Finder")
             }
-            // "Open in Koil", the service in Finder's Services menu, whose
-            // shortcut macOS handles, launching Koil if it isn't running.
-            // System Settings changes it, as it can't be set from here; its
-            // link opens Keyboard Shortcuts, but can't go on to Services.
+            // "Open in Koil", the service on the folders selected in
+            // Finder, whose shortcut macOS handles, launching Koil if it
+            // isn't running. System Settings changes it, as it can't be set
+            // from here. No link goes to Keyboard Shortcuts' Services:
+            // Spotlight is the row under it (?Shortcuts lands on Modifier
+            // Keys, the last row, and ?Services opens nothing).
             Row {
                 visible: win.app.isMac
                 spacing: 8 * win.zoom
@@ -697,7 +699,7 @@ Window {
                 }
                 TextButton {
                     text: qsTr("Change in System Settings…")
-                    onClicked: Qt.openUrlExternally("x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Shortcuts")
+                    onClicked: Qt.openUrlExternally("x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Spotlight")
                 }
             }
             Item {
@@ -712,7 +714,7 @@ Window {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
                 Layout.topMargin: -4 * win.zoom
-                text: qsTr("Pressed in Finder, opens the folder it shows here, even if Koil isn't open. In Keyboard Shortcuts, it's under Services > General.")
+                text: qsTr("Opens the folder selected in Finder here, even if Koil isn't open; it's also in a folder's right-click menu, under Services. In Keyboard Shortcuts, it's under Services > Files and Folders.")
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
                 font.pixelSize: Math.round(12 * win.zoom)

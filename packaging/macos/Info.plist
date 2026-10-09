@@ -24,16 +24,23 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
-    <!-- "Open in Koil" in Finder's Services menu, only there
-         (NSRequiredContext), taking nothing: Koil asks Finder which folder
-         its front window shows (cpp/finder_mac.mm), which macOS asks the
-         user to allow once. macOS handles its shortcut, launching Koil if
-         it isn't running. NSKeyEquivalent is always with Command, and
-         Shift for an uppercase letter, so not ⌥⌘K: ⇧⌘J, which Finder
-         doesn't use (⇧⌘K is its Network). The user changes it in System
-         Settings (see the README), which keeps it in pbs's preferences (by
-         the bundle ID, NSMenuItem and NSMessage, which Koil's Settings
-         reads it by). -->
+    <!-- "Open in Koil" on the folders selected in Finder (only there:
+         NSRequiredContext, without which macOS also has it off at first),
+         in their right-click menu's Services and the Services menu
+         (cpp/finder_mac.mm). Taking folders puts it under Files and
+         Folders in System Settings; one that takes nothing is under
+         General (NSServiceCategory doesn't change that), and isn't in
+         right-click menus. With nothing selected, macOS turns it off.
+         macOS handles its shortcut, launching Koil if it isn't running.
+         NSKeyEquivalent is a letter, with Command (and Shift if it's
+         uppercase), or modifiers and a key as pbs keeps them (^ Control,
+         ~ Option, $ Shift, @ Command: Keka's ^$K is ⌃⇧K). It's ⌃⇧K, which
+         Finder doesn't use (⌘K and ⇧⌘K are its), nor do text fields (⌃K
+         deletes to the line's end in them, and a service's shortcut comes
+         first; Finder's rename field may offer the folder). Keka's "Send to
+         Keka" is ⌃⇧K too. The user changes it in System Settings (see the
+         README), which keeps it in pbs's preferences (by the bundle ID,
+         NSMenuItem and NSMessage, which Koil's Settings reads it by). -->
     <key>NSServices</key>
     <array>
         <dict>
@@ -43,13 +50,17 @@
                 <string>Open in Koil</string>
             </dict>
             <key>NSMessage</key>
-            <string>openFinderFolder</string>
+            <string>openFolder</string>
             <key>NSPortName</key>
             <string>Koil</string>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.folder</string>
+            </array>
             <key>NSKeyEquivalent</key>
             <dict>
                 <key>default</key>
-                <string>J</string>
+                <string>^$k</string>
             </dict>
             <key>NSRequiredContext</key>
             <dict>
@@ -60,8 +71,6 @@
             </dict>
         </dict>
     </array>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Koil asks Finder which folder its window shows, to open it when you use Open in Koil.</string>
     <!-- Koil opens any file that is UTF-8 text, as an Alternate: it shows
          in Open With but isn't made the default of a type another app
          opens. public.text is what text and source code macOS knows are;

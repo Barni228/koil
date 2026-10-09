@@ -669,29 +669,39 @@ the scratchpad (see Scratchpad).
   reinstalled without the task; last, as Koil's Qt DLLs are on the PATH
   with it, and mustn't come before another Qt's. Untried, but CI's ISCC
   compiles the code.
-- **Open in Koil**: on macOS, a service (`NSServices` in Info.plist) in
-  Finder's Services menu, only there (`NSRequiredContext`). macOS handles
-  its shortcut, launching Koil if it isn't running, so Koil needn't run to
-  listen. It's ⇧⌘J at first: `NSKeyEquivalent` can only be with Command
-  (and Shift), so not ⌥⌘K, and Finder doesn't use it (the README says why,
-  and how to change it). It takes nothing (Finder sends
-  only what's selected), so Koil asks Finder which folder its front window
-  shows (the desktop with none), through `osascript` (finder_mac.mm), only
-  once the service returns, as Finder waits for it until then; macOS asks
-  the user once to allow it (`NSAppleEventsUsageDescription`). Then Koil
-  comes to the front (macOS doesn't bring it for a service that gives it
-  nothing back) and opens the folder as a dropped one (`Document`'s
-  `folderRequested`, `openDropped`, so not while a dialog is open), or the
-  status line says why it can't (Recents, or not allowed). Its provider is
-  set from the Document's `onCompleted`, before the app runs, so the
-  request that launched Koil comes. The user changes the shortcut in
-  System Settings (Keyboard Shortcuts > Services > General), which keeps
-  it in `pbs`'s preferences (`NSServicesStatus`, by the bundle ID, menu
-  item and message); the Settings window shows it from there
-  (`finderServiceShortcut`), read whenever it's active, and its button
-  opens Keyboard Shortcuts (no link goes on to Services). It works only
-  from an app bundle Launch Services knows (`lsregister -f`, then
-  `pbs -update` to have macOS read its services), not `cargo run`. On
+- **Open in Koil**: on macOS, a service (`NSServices` in Info.plist) on
+  the folders selected in Finder, only there (`NSRequiredContext`, without
+  which macOS also has a service off at first): in a folder's right-click
+  menu (Services) and the Services menu. It takes folders
+  (`NSSendFileTypes`), which is what puts it in right-click menus and
+  under Files and Folders in System Settings; one that takes nothing (as
+  it did, asking Finder through `osascript` which folder its front window
+  showed) is under General, and macOS ignores `NSServiceCategory` (tried
+  with a test bundle; `_NSCopyServiceActions` lists each service's
+  category, as System Settings does). The cost: with nothing selected,
+  macOS turns it off, shortcut and all. macOS handles its shortcut,
+  launching Koil if it isn't running, so Koil needn't run to listen. It's
+  ⌃⇧K at first (`^$k`), which Finder doesn't use, nor text fields (not
+  ⌃K, their delete to the line's end, which a service's shortcut would
+  take first, as in Finder's rename field), but Keka's "Send to Keka" does
+  (the README says how to change it). `NSKeyEquivalent` is a letter, with Command (and Shift if it's
+  uppercase), or modifiers and a key as pbs keeps them (`^$K` is ⌃⇧K, as
+  Keka's are; `_NSCopyServiceActions` shows the shortcut macOS takes). The folders come on the pasteboard (finder_mac.mm), and
+  Koil comes to the front (macOS doesn't bring it for a service that
+  gives it nothing back) and opens the first as a dropped one
+  (`Document`'s `folderRequested`, `openDropped`, so not while a dialog
+  is open). Its provider is set from the Document's `onCompleted`, before
+  the app runs, so the request that launched Koil comes. The user changes
+  the shortcut in System Settings (Keyboard Shortcuts > Services > Files
+  and Folders), which keeps it in `pbs`'s preferences (`NSServicesStatus`,
+  by the bundle ID, menu item and message); the Settings window shows it
+  from there (`finderServiceShortcut`), read whenever it's active, and its
+  button opens Keyboard Shortcuts on Spotlight, the row under Services: no
+  anchor goes to Services (`?Shortcuts` lands on Modifier Keys, the last
+  row; the anchors are `name of every anchor of pane id
+  "com.apple.Keyboard-Settings.extension"`). It works only from an app
+  bundle Launch Services knows (`lsregister -f`, then `pbs -update` to
+  have macOS read its services), not `cargo run`. On
   Windows, the installer adds "Open in Koil" to the right-click menu of
   folders, a folder window's background and drives (a task, on at
   first), which starts Koil with the folder; on Windows 11 it's under

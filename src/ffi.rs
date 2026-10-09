@@ -12,10 +12,10 @@ mod bridge {
         #[cxx_name = "fileOpened"]
         unsafe fn file_opened(document: *mut QObject, path: &QString);
 
-        /// Emits `folderRequested(path, error)` on `document`, a Document
-        /// (see `watch_finder_service`).
+        /// Emits `folderRequested(path)` on `document`, a Document (see
+        /// `watch_finder_service`).
         #[cxx_name = "folderRequested"]
-        unsafe fn folder_requested(document: *mut QObject, path: &QString, error: &QString);
+        unsafe fn folder_requested(document: *mut QObject, path: &QString);
     }
 
     unsafe extern "C++" {

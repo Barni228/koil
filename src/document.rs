@@ -37,11 +37,10 @@ pub mod qobject {
         fn file_opened(self: Pin<&mut Document>, path: QString);
 
         /// Emitted for each request of "Open in Koil", once
-        /// `watch_finder_service` was called: the macOS service, in Finder,
-        /// with the folder its front window shows, or else why it can't be
-        /// read.
+        /// `watch_finder_service` was called: the macOS service, with the
+        /// folder selected in Finder (the first, if there are several).
         #[qsignal]
-        fn folder_requested(self: Pin<&mut Document>, path: QString, error: QString);
+        fn folder_requested(self: Pin<&mut Document>, path: QString);
 
         /// Emitted when writing fails, with why.
         #[qsignal]
@@ -68,7 +67,7 @@ pub mod qobject {
         fn watch_finder_service(self: Pin<&mut Document>);
 
         /// The shortcut of "Open in Koil" (see `folder_requested`), as
-        /// macOS shows it (⇧⌘J). Empty if it has none or is off, outside an
+        /// macOS shows it (⌃⇧K). Empty if it has none or is off, outside an
         /// app bundle, or not on macOS.
         #[qinvokable]
         fn finder_service_shortcut(self: &Document) -> QString;
@@ -326,17 +325,17 @@ pub unsafe fn file_opened(document: *mut cxx_qt::QObject, path: &QString) {
     }
 }
 
-/// Emits `folder_requested(path, error)` on `document`, if it's a Document:
-/// what the macOS service (finder_mac.mm) calls.
+/// Emits `folder_requested(path)` on `document`, if it's a Document: what
+/// the macOS service (finder_mac.mm) calls.
 ///
 /// # Safety
 ///
 /// `document` must point to a live QObject.
-pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString, error: &QString) {
+pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString) {
     // SAFETY: the caller's.
     let document = unsafe { Pin::new_unchecked(&mut *document) };
     if let Some(document) = document.downcast_pin::<qobject::Document>() {
-        document.folder_requested(path.clone(), error.clone());
+        document.folder_requested(path.clone());
     }
 }
 
