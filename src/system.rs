@@ -1,8 +1,10 @@
 use std::io;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::Command;
 use std::thread;
 
+use cxx_qt::Threading;
 use cxx_qt_lib::{QString, QStringList};
 
 use crate::ffi;
@@ -11,7 +13,7 @@ use crate::listing;
 /// What the QML needs from the system, mostly through Qt's C++ side: the
 /// clipboard, the installed fonts and the one Koil ships, the editor's line
 /// height and the listing's and path field's colors, and showing a path in
-/// Finder (or Explorer).
+/// Finder (or Explorer) or opening it in its default app.
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -49,6 +51,17 @@ pub mod qobject {
         /// can't, or "".
         #[qinvokable]
         fn reveal(self: &System, path: &QString) -> QString;
+
+        /// Opens `path` as a double-click in Finder or Explorer does (a
+        /// file in its default app, a dir in the file manager, an app
+        /// launched), for Space o, without waiting for it. Returns why it
+        /// can't, or "", and emits `open_failed` if it fails after.
+        #[qinvokable]
+        fn open_in_app(self: Pin<&mut System>, path: &QString) -> QString;
+
+        /// Emitted when `open_in_app` failed after it returned, with why.
+        #[qsignal]
+        fn open_failed(self: Pin<&mut System>, message: QString);
 
         /// Gives every line of a TextEdit's `textDocument` the same height,
         /// plus a margin below it.
@@ -124,6 +137,8 @@ pub mod qobject {
             keyword_colors: &QStringList,
         );
     }
+
+    impl cxx_qt::Threading for System {}
 }
 
 #[derive(Default)]
@@ -160,6 +175,21 @@ impl qobject::System {
             String::new()
         };
         QString::from(why.as_str())
+    }
+
+    fn open_in_app(self: Pin<&mut Self>, path: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        if path.symlink_metadata().is_err() {
+            let why = format!("“{}” isn't on disk any more", listing::show_path(&path));
+            return QString::from(why.as_str());
+        }
+        let thread = self.qt_thread();
+        thread::spawn(move || {
+            if let Err(why) = open_in_app(&path) {
+                let _ = thread.queue(move |system| system.open_failed(QString::from(&why)));
+            }
+        });
+        QString::default()
     }
 
     /// # Safety
@@ -281,4 +311,59 @@ fn reveal(path: &Path) -> io::Result<()> {
     // waited for, so it doesn't stay a zombie once it's done
     thread::spawn(move || child.wait());
     Ok(())
+}
+
+/// Opens `path` as a double-click in Finder or Explorer does, and waits for
+/// the command (not for the app), so it's for a thread. The error is why it
+/// failed, to show.
+fn open_in_app(path: &Path) -> Result<(), String> {
+    let shown = listing::show_path(path);
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("open")
+            .arg(path)
+            .output()
+            .map_err(|e| format!("Can't open “{shown}”: {e}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // which `open` says with the URL and the whole NSError
+        if stderr.contains("kLSApplicationNotFoundErr") {
+            return Err(format!("No app opens “{shown}”"));
+        }
+        let why = stderr.lines().next().map(str::trim).unwrap_or_default();
+        let why = if why.is_empty() {
+            output.status.to_string()
+        } else {
+            why.to_string()
+        };
+        Err(format!("Can't open “{shown}”: {why}"))
+    }
+    // Explorer exits with 1 whatever happened (and asks which app itself),
+    // and xdg-open's app can keep its output open, so only starting it is
+    // checked.
+    #[cfg(not(target_os = "macos"))]
+    {
+        #[cfg(windows)]
+        let mut command = {
+            use std::os::windows::process::CommandExt;
+            let path = path.to_string_lossy().replace('/', "\\");
+            let mut command = Command::new("explorer");
+            command.raw_arg(format!("\"{path}\""));
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("xdg-open");
+            command.arg(path);
+            command
+        };
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Can't open “{shown}”: {e}"))?;
+        // so it doesn't stay a zombie once it's done
+        let _ = child.wait();
+        Ok(())
+    }
 }

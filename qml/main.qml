@@ -544,6 +544,8 @@ ApplicationWindow {
             undoApply(true);
         else if (name === "reveal")
             reveal();
+        else if (name === "openInApp")
+            openInApp();
         else if (name === "parent")
             updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
         else if (name === "open")
@@ -599,16 +601,35 @@ ApplicationWindow {
         }
     }
 
-    // Space r: shows the entry on the cursor's line in Finder (Explorer on
-    // Windows), where it is on disk even if the line renames it, or from
-    // the path field, the open dir.
-    function reveal() {
+    // Space r and Space o: where the entry on the cursor's line is on disk,
+    // even if the line renames it, or from the path field, the open dir; or
+    // else "", once the status line says why there's none.
+    function entryPath() {
         const t = editorView.textArea.text;
         const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
         const target = JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
         const why = !target ? "No entry on this line"
             : target.new !== undefined ? "“" + target.new + "” isn't on disk until the changes are applied"
-            : system.reveal(target.path);
+            : "";
+        if (why)
+            vim.showError(why);
+        return why ? "" : target.path;
+    }
+
+    // Space r: shows the entry on the cursor's line in Finder (Explorer on
+    // Windows).
+    function reveal() {
+        const path = entryPath();
+        const why = path && system.reveal(path);
+        if (why)
+            vim.showError(why);
+    }
+
+    // Space o: opens the entry on the cursor's line as a double-click in
+    // Finder (Explorer) does: a file in its default app.
+    function openInApp() {
+        const path = entryPath();
+        const why = path && system.openInApp(path);
         if (why)
             vim.showError(why);
     }
@@ -961,6 +982,8 @@ ApplicationWindow {
 
     System {
         id: system
+
+        onOpenFailed: message => vim.showError(message)
     }
 
     Document {
@@ -1069,6 +1092,7 @@ ApplicationWindow {
             " a": "applyAsking",
             " u": "undoApply",
             " r": "reveal",
+            " o": "openInApp",
             "-": "parent",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",

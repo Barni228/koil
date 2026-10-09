@@ -40,7 +40,7 @@ the scratchpad (see Scratchpad).
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, the editor's
   text, line format and colors, and showing a path in Finder or Explorer
-  (`reveal`).
+  (`reveal`) or opening it in its default app (`openInApp`).
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
@@ -273,7 +273,12 @@ the scratchpad (see Scratchpad).
   ID is on disk, as Enter opens it; from the path field, the open dir; a
   new entry isn't on disk yet, so the status line says so; `System.reveal`
   runs `open -R`, or `explorer /select,`, or on Linux opens the dir it's
-  in), `-` opens `..`
+  in), `Space o` opens the same path (`entryPath`) as a double-click in
+  Finder or Explorer does, a file in its default app (`System.openInApp`:
+  `open`, `explorer` or `xdg-open`, waited for on a thread, as `open`
+  waits while an app launches; on macOS `openFailed` then says why it
+  failed, like "No app opens", which Finder would ask about, while
+  Explorer asks itself), `-` opens `..`
   (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the

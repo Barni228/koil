@@ -7,19 +7,20 @@ ones to create (`notes.txt`, `docs/` for a dir, `a/b/c.txt` with its dirs).
 Cut a line, go to another dir and paste it to move. Nothing changes on disk
 until you apply, and your edits stay while you go through other dirs.
 
-| Key            | Does                                                                          |
-| -------------- | ----------------------------------------------------------------------------- |
-| `Cmd+S`        | Update: read your edits and show the listing again (doesn't change anything)  |
-| `Space Space`  | Apply, Deletes go to the trash. In a file, save                               |
-| `u`            | Undo                                                                          |
-| `Enter`        | Open the dir or file on the line                                              |
-| `-`            | The dir above (`3-`: three up). In a file, back to the listing                |
-| `Tab`          | Go between the listing and the path field over it                             |
-| `g.` `gi` `gr` | Toggle hidden files, hiding what git ignores, and reading the path as a regex |
-| `gs`           | Change sort order: `gss` by size, `gsm` by date modified, `gsS` biggest last, |
-| `_`            | The scratchpad                                                                |
-| `Space r`      | Show the entry in Finder or Explorer                                          |
-| `:h`           | Show help page                                                                |
+| Key            | Does                                                                              |
+| -------------- | --------------------------------------------------------------------------------- |
+| `Cmd+S`        | Update: read your edits and show the listing again (doesn't change anything)      |
+| `Space Space`  | Apply, Deletes go to the trash. In a file, save                                   |
+| `u`            | Undo                                                                              |
+| `Enter`        | Open the dir or file on the line                                                  |
+| `-`            | The dir above (`3-`: three up). In a file, back to the listing                    |
+| `Tab`          | Go between the listing and the path field over it                                 |
+| `g.` `gi` `gr` | Toggle hidden files, hiding what git ignores, and reading the path as a regex     |
+| `gs`           | Change sort order, (sort by size, size on disk, last modified, natural, and more) |
+| `_`            | The scratchpad                                                                    |
+| `Space r`      | Show the entry in Finder or Explorer                                              |
+| `Space o`      | Open the entry in its default app                                                 |
+| `:h`           | Show help page                                                                    |
 
 `Cmd` is `Ctrl` on Windows.
 
