@@ -185,10 +185,10 @@ pub mod qobject {
         fn create(self: Pin<&mut Koil>, path: &QString) -> QString;
 
         /// The applies that can be undone, newest first, as a list of
-        /// `listing::HistoryLine`s (`{ text, needs, blocked }`), which `undo`
-        /// picks from: `{ applies, message }`, where `message` says why
-        /// nothing can be undone now. They're those of every session (see
-        /// history.rs).
+        /// `listing::HistoryLine`s (`{ text, needs, blocked, steps }`),
+        /// which `undo` picks from: `{ applies, message }`, where `message`
+        /// says why nothing can be undone now. They're those of every
+        /// session (see history.rs).
         #[qinvokable]
         fn history(self: Pin<&mut Koil>) -> QString;
 

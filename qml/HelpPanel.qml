@@ -59,10 +59,11 @@ Popup {
                 ["`Space a`", "Apply, always listing the changes first (so does File > Apply Changes…)."],
                 ["󰄲", "In that list: `j` and `k` move, `Space`, `x` or a click picks or leaves out a change "
                     + "(with what it needs), and `a` picks all or none. What's left out is discarded."],
-                ["`Space u`  `u`", "Undo applies, picked from all of them, also those of earlier sessions, "
-                    + "newest first (`u` once there's nothing left to undo). The last one is picked; "
-                    + "picking an older one picks the newer ones that changed the same paths. "
-                    + "Deleted files come back from the trash."],
+                ["`Space u`", "Undo applies, picked from all of them, also those of earlier sessions, "
+                    + "newest first. The last one is picked; picking an older one picks the newer ones "
+                    + "that changed the same paths. Deleted files come back from the trash."],
+                ["`u`", "Once there's nothing left to undo: undo the last apply, after listing what that "
+                    + "does."],
                 ["`Enter`", "Open the dir or file on the line. A new file is created first, after asking."],
                 ["`Space r`", "Show the entry on the line in " + fileManager + " (from the path field, the "
                     + "open dir)."],

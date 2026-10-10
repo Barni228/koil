@@ -364,21 +364,23 @@ the scratchpad (see Scratchpad).
   too. `:confirm q` and `ZZ` always ask, and their question is whether to
   quit without the changes.
 - **Undo history** (`undoApply`, koil-core's `Koil::undoable` and
-  `Koil::undo_only`): `u` or Cmd+Z with nothing left to undo in vim emits
-  `nothingToUndo`, and `undoApply` updates (vim's undo may have taken the
-  buffer back past an update) and lists the applies (and Enter's
-  creates) koil can undo, newest first, in `ConfirmDialog`
-  (`listing::history`: each one's time, its dir if it isn't the open one,
-  and what undoing it does, up to `SHOWN_STEPS` steps, relative to its
-  dir); koil refuses while changes are pending. Not from the path field,
-  whose undo history is its own; `Space u` asks at once, from either.
-  Only the last apply is picked at first, so Enter undoes what `u` did
-  before there was a history. An apply needs the newer ones that changed
-  a path it changed, or one in it or that it's in (koil-core's
-  `Undoable::needs`), which picking it picks. One that can't be undone
-  now (koil-core checks every step against the disk, with what it needs:
-  something gone, or taken, or emptied from the trash) says why, has a
-  crossed out box (`blocked`) and can't be picked. Yes undoes the picked
+  `Koil::undo_only`): `Space u` (from the listing or the path field)
+  updates (vim's undo may have taken the buffer back past an update) and
+  lists the applies (and Enter's creates) koil can undo, newest first, in
+  `ConfirmDialog` (`listing::history`: each one's time, its dir if it
+  isn't the open one, and what undoing it does, up to `SHOWN_STEPS`
+  steps, relative to its dir); koil refuses while changes are pending.
+  Only the last apply is picked at first. `u` or Cmd+Z with nothing left
+  to undo in vim emits `nothingToUndo`, and `undoLast` asks only about
+  the last apply, as before there was a history: "Undo the last apply?"
+  over every step undoing it does, relative to the open dir
+  (`HistoryLine::steps`), or says why it can't be undone. Not from the
+  path field, whose undo history is its own. An apply needs the newer
+  ones that changed a path it changed, or one in it or that it's in
+  (koil-core's `Undoable::needs`), which picking it picks. One that can't
+  be undone now (koil-core checks every step against the disk, with what
+  it needs: something gone, or taken, or emptied from the trash) says
+  why, has a crossed out box (`blocked`, the reason) and can't be picked. Yes undoes the picked
   ones, newest first (`Koil.undo(picked)`, indexes into the
   `shown_history` that `history()` kept); a step koil can see won't run
   undoes nothing. Undoing always asks (a `u` too many mustn't change files

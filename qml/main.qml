@@ -549,7 +549,7 @@ ApplicationWindow {
         else if (name === "applyAsking")
             applyChanges(false, false, true);
         else if (name === "undoApply")
-            undoApply(true);
+            undoApply();
         else if (name === "reveal")
             reveal();
         else if (name === "openInApp")
@@ -872,43 +872,72 @@ ApplicationWindow {
             orQuit ? () => Qt.quit() : null, null, changeKeywords);
     }
 
-    // Space u, or u with no change left to undo: lists the applies Koil can
-    // undo, of every session (see history.rs), newest first, to pick from
-    // (with the newer ones each needs, see Koil::undoable), the last one
-    // picked; Yes undoes the picked ones. Those that can't be undone now say
-    // why, and can't be picked. With `say` (Space u), it says so when
-    // there's nothing to undo (u has already).
-    function undoApply(say) {
-        // Undo may have taken the listing back to before an update, which
-        // Koil must see before anything can be undone.
-        if (!updateListing())
+    // Space u: lists the applies Koil can undo, of every session (see
+    // history.rs), newest first, to pick from (with the newer ones each
+    // needs, see Koil::undoable), the last one picked; Yes undoes the picked
+    // ones. Those that can't be undone now say why, and can't be picked.
+    function undoApply() {
+        const applies = undoHistory();
+        if (!applies)
             return;
-        const r = JSON.parse(koil.history());
-        if (r.message) {
-            vim.showError(r.message);
-            return;
-        }
-        if (!r.applies.length) {
-            if (say)
-                vim.showMessage("Nothing to undo");
+        if (!applies.length) {
+            vim.showMessage("Nothing to undo");
             return;
         }
         vim.showMessage("");
-        // The last apply picked, as u and Space u undo that.
-        const applies = r.applies.map((a, i) => Object.assign({ picked: i === 0 }, a));
-        const any = applies.some(a => !a.blocked);
+        // The last apply picked, as u undoes that.
+        const lines = applies.map((a, i) => Object.assign({ picked: i === 0 }, a));
+        const any = lines.some(a => !a.blocked);
         const question = (count, picked) => !any ? "Nothing can be undone now"
             : !count ? "Pick what to undo (Space)"
             : count === 1 && picked[0] ? "Undo the last apply?"
             : "Undo " + count + (count === 1 ? " apply?" : " applies?");
-        confirmDialog.ask(question, applies, picked => {
-            if (!picked.length)
-                return;
-            const spot = listingSpot();
-            const u = JSON.parse(koil.undo(JSON.stringify(picked)));
-            showListing(true, "", spot);
-            report(u);
+        confirmDialog.ask(question, lines, picked => {
+            if (picked.length)
+                undoPicked(picked);
         }, null, null, changeKeywords);
+    }
+
+    // u with no change left to undo: undoes the last apply alone (the
+    // newest of every session), once the user confirms it, listing what
+    // undoing it does. With nothing to undo it says nothing (u has already).
+    function undoLast() {
+        const applies = undoHistory();
+        if (!applies?.length)
+            return;
+        const last = applies[0];
+        if (last.blocked) {
+            vim.showError("Can't undo: " + last.blocked);
+            return;
+        }
+        vim.showMessage("");
+        confirmDialog.ask("Undo the last apply?", last.steps.join("\n"), () => undoPicked([0]), null, null,
+            changeKeywords);
+    }
+
+    // The applies Koil can undo (`Koil.history`), newest first, or null if
+    // the listing can't be read, or nothing can be undone now (which the
+    // status line says why).
+    function undoHistory() {
+        // Undo may have taken the listing back to before an update, which
+        // Koil must see before anything can be undone.
+        if (!updateListing())
+            return null;
+        const r = JSON.parse(koil.history());
+        if (r.message) {
+            vim.showError(r.message);
+            return null;
+        }
+        return r.applies;
+    }
+
+    // Undoes the applies `picked` (indexes into what `Koil.history` gave),
+    // and shows the listing again where it was.
+    function undoPicked(picked) {
+        const spot = listingSpot();
+        const u = JSON.parse(koil.undo(JSON.stringify(picked)));
+        showListing(true, "", spot);
+        report(u);
     }
 
     // Where the cursor is in the listing (its line and column) and how far
@@ -1274,7 +1303,7 @@ ApplicationWindow {
         onStopRequested: system.stopShell()
         onNothingToUndo: {
             if (root.listing && root.activeView === editorView)
-                root.undoApply();
+                root.undoLast();
         }
         onShowHiddenChanged: root.settingChanged()
         onGitignoreChanged: root.settingChanged()

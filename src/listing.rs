@@ -1298,8 +1298,11 @@ pub struct HistoryLine {
     /// The lines (in the list) it can't be undone without: newer applies
     /// that changed the same paths.
     pub needs: Vec<usize>,
-    /// Whether it can't be undone now (see `Undoable::blocked`).
-    pub blocked: bool,
+    /// Why it can't be undone now (see `Undoable::blocked`), if it can't.
+    pub blocked: Option<String>,
+    /// What undoing it does, every step, relative to the open dir, as `u`
+    /// lists the last apply on its own.
+    pub steps: Vec<String>,
     #[serde(skip)]
     pub applied: Applied,
 }
@@ -1324,13 +1327,17 @@ pub fn history(koil: &Koil) -> Result<Vec<HistoryLine>, String> {
         if steps.len() > SHOWN_STEPS {
             text += &format!("\n… {} more", steps.len() - SHOWN_STEPS);
         }
-        if let Some((_, blocked)) = &undoable.blocked {
-            text += &format!("\nCan't be undone: {}", describe_blocked(dir, blocked));
+        let blocked =
+            (undoable.blocked.as_ref()).map(|(_, blocked)| describe_blocked(dir, blocked));
+        if let Some(why) = &blocked {
+            text += &format!("\nCan't be undone: {why}");
         }
+        let open = koil.current_dir();
         HistoryLine {
             text,
             needs: undoable.needs.iter().map(|j| newest - j).collect(),
-            blocked: undoable.blocked.is_some(),
+            blocked,
+            steps: steps.iter().map(|step| undo_text(open, step)).collect(),
             applied: undoable.applied,
         }
     });

@@ -1465,17 +1465,17 @@ fn test_history() {
     // the first rename can't be undone without the second one
     let needs: Vec<&[usize]> = lines.iter().map(|line| line.needs.as_slice()).collect();
     assert_eq!(needs, [&[][..], &[], &[1]]);
-    assert!(lines.iter().all(|line| !line.blocked));
+    assert!(lines.iter().all(|line| line.blocked.is_none()));
 
     // what's gone on disk can't be put back
     fs::remove_file(temp.path().join("main.rs")).unwrap();
     let lines = history(&koil).unwrap();
-    assert!(lines[0].blocked);
+    assert_eq!(lines[0].blocked.as_deref(), Some("`main.rs` is gone"));
     assert_eq!(
         lines[0].text.lines().last(),
         Some("Can't be undone: `main.rs` is gone")
     );
-    assert!(!lines[1].blocked);
+    assert!(lines[1].blocked.is_none());
 
     // and where it was applied, from another dir
     let dir = show_path(koil.current_dir());
@@ -1483,4 +1483,9 @@ fn test_history() {
     let lines = history(&koil).unwrap();
     let header = format!("{}  {dir}", time(&lines[1]));
     assert_eq!(lines[1].text.lines().next(), Some(header.as_str()));
+    // while its steps, as `u` lists them, are relative to the open dir
+    assert_eq!(
+        lines[1].steps,
+        [format!("MOVE    {dir}/notes3 -> {dir}/notes2")]
+    );
 }
