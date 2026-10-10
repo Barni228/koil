@@ -7,7 +7,8 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 
 // The Settings window (Cmd+,): font, font size, line numbers, theme, when
-// applying asks first, and the dir Koil starts in; and on macOS, the
+// applying asks first, the dir Koil starts in, and the shell :! runs
+// commands in; and on macOS, the
 // shortcut that opens the folder selected in Finder, which System Settings
 // changes, and the `koil` command, which it installs. It
 // shows the saved settings, which Koil starts with; changes here are saved
@@ -18,10 +19,11 @@ import QtQuick.Templates as T
 Window {
     id: win
 
-    // main.qml's window: the defaults, the fonts, changeSetting.
+    // main.qml's window: the defaults, the fonts, the shells,
+    // changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // colorScheme, confirmChanges, startDir.
+    // colorScheme, confirmChanges, startDir, shell.
     required property var settings
     required property Theme theme
     // main.qml's Document, for the folder picked (a var, so this file needs
@@ -71,6 +73,7 @@ Window {
     readonly property bool customColorScheme: settings.colorScheme !== "system"
     readonly property bool customConfirm: settings.confirmChanges !== "always"
     readonly property bool customStartDir: settings.startDir !== ""
+    readonly property bool customShell: settings.shell !== ""
 
     function setFontSize(size) {
         app.changeSetting("fontSize", Math.max(app.minFontSize, Math.min(app.maxFontSize, size)));
@@ -98,6 +101,7 @@ Window {
         app.changeSetting("colorScheme", "system");
         app.changeSetting("confirmChanges", "always");
         settings.startDir = "";
+        app.changeSetting("shell", "");
     }
 
     // Shows the window, centered near the top of the main window the first
@@ -114,6 +118,8 @@ Window {
             sizeInput.deselect();
             startInput.focus = false;
             startInput.deselect();
+            shellInput.focus = false;
+            shellInput.deselect();
         }
         show();
         raise();
@@ -155,10 +161,10 @@ Window {
         sequences: [StandardKey.Close]
         onActivated: win.close()
     }
-    // Not while the font list is open, which Esc closes.
+    // Not while the font or shell list is open, which Esc closes.
     Shortcut {
         sequence: "Escape"
-        enabled: !fontList.visible
+        enabled: !fontList.visible && !shellList.visible
         onActivated: win.close()
     }
 
@@ -665,6 +671,142 @@ Window {
             }
 
             SettingLabel {
+                text: qsTr("Shell")
+            }
+            // The shell :! runs commands in: a path, or a name on the PATH,
+            // or one of those installed, which the button lists. Empty for
+            // the system's, which shows dimmed.
+            Rectangle {
+                id: shellPicker
+
+                // The shells installed: { name, path }.
+                property var shells: []
+
+                Layout.fillWidth: true
+                implicitWidth: 180 * win.zoom
+                implicitHeight: 26 * win.zoom
+                radius: 4 * win.zoom
+                color: win.theme.field
+                border.color: shellInput.activeFocus ? win.accent : win.borderColor
+
+                TextInput {
+                    id: shellInput
+
+                    x: 8 * win.zoom
+                    width: parent.width - x - shellButton.width - 2 * win.zoom
+                    height: parent.height
+                    clip: true
+                    text: win.settings.shell
+                    font.pixelSize: Math.round(13 * win.zoom)
+                    color: win.textColor
+                    verticalAlignment: TextInput.AlignVCenter
+                    selectByMouse: true
+                    selectionColor: win.theme.highlight
+                    selectedTextColor: win.theme.highlightedText
+                    Accessible.name: qsTr("Shell")
+                    onEditingFinished: {
+                        win.app.changeSetting("shell", text.trim());
+                        text = Qt.binding(() => win.settings.shell);
+                    }
+
+                    Text {
+                        anchors.fill: parent
+                        visible: !shellInput.text
+                        text: win.app.systemShell
+                        font: shellInput.font
+                        color: win.textColor
+                        opacity: 0.5
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideMiddle
+                    }
+                }
+                SettingButton {
+                    id: shellButton
+
+                    anchors.right: parent.right
+                    anchors.rightMargin: 2 * win.zoom
+                    anchors.verticalCenter: parent.verticalCenter
+                    iconPath: "M5 6.5 L8 9.5 L11 6.5"
+                    tip: qsTr("Show Shells")
+                    onClicked: shellList.visible ? shellList.close() : shellList.open()
+                }
+
+                // Its own window, as the font list.
+                T.Popup {
+                    id: shellList
+
+                    y: shellPicker.height + 2 * win.zoom
+                    width: shellPicker.width
+                    height: Math.min(implicitContentHeight + topPadding + bottomPadding, 320 * win.zoom)
+                    padding: 4 * win.zoom
+                    popupType: Popup.Window
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                    onAboutToShow: shellPicker.shells = win.app.shellChoices()
+
+                    contentItem: ListView {
+                        clip: true
+                        implicitHeight: Math.max(contentHeight, 24 * win.zoom)
+                        model: shellPicker.shells
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollIndicator.vertical: ScrollIndicator {}
+
+                        delegate: AbstractButton {
+                            id: shellOption
+
+                            required property var modelData
+
+                            width: ListView.view.width
+                            implicitHeight: 24 * win.zoom
+                            focusPolicy: Qt.NoFocus
+                            hoverEnabled: true
+                            Accessible.name: modelData.name
+                            onClicked: {
+                                win.app.changeSetting("shell", modelData.path);
+                                shellList.close();
+                            }
+
+                            background: Rectangle {
+                                radius: 3 * win.zoom
+                                color: shellOption.hovered ? win.accent : "transparent"
+                            }
+                            // Its name, then where it is, dimmed.
+                            contentItem: Text {
+                                leftPadding: 4 * win.zoom
+                                rightPadding: 4 * win.zoom
+                                text: shellOption.modelData.name + "&nbsp;&nbsp;<font color=\"" + (shellOption.hovered
+                                    ? win.theme.highlightedText : win.theme.dim) + "\">"
+                                    + shellOption.modelData.path.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                                    + "</font>"
+                                textFormat: Text.StyledText
+                                font.pixelSize: Math.round(13 * win.zoom)
+                                color: shellOption.hovered ? win.theme.highlightedText : win.textColor
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        Text {
+                            anchors.centerIn: parent
+                            visible: !shellPicker.shells.length
+                            text: qsTr("No shells found")
+                            font.pixelSize: Math.round(13 * win.zoom)
+                            color: win.textColor
+                            opacity: 0.6
+                        }
+                    }
+                    background: Rectangle {
+                        radius: 4 * win.zoom
+                        color: win.theme.field
+                        border.color: win.borderColor
+                    }
+                }
+            }
+            ResetButton {
+                enabled: win.customShell
+                onClicked: win.app.changeSetting("shell", "")
+            }
+
+            SettingLabel {
                 visible: win.app.isMac
                 text: qsTr("Open from Finder")
             }
@@ -773,7 +915,7 @@ Window {
             Layout.alignment: Qt.AlignRight
             text: qsTr("Restore Defaults")
             enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme
-                || win.customConfirm || win.customStartDir
+                || win.customConfirm || win.customStartDir || win.customShell
             onClicked: win.restoreDefaults()
         }
     }

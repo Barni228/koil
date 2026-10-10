@@ -20,6 +20,7 @@ until you apply, and your edits stay while you go through other dirs.
 | `_`            | The scratchpad                                                                    |
 | `Space r`      | Show the entry in Finder or Explorer                                              |
 | `Space o`      | Open the entry in its default app                                                 |
+| `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
 | `:h`           | Show help page                                                                    |
 
 `Cmd` is `Ctrl` on Windows.
@@ -51,6 +52,10 @@ until you apply, and your edits stay while you go through other dirs.
   underlined as you type. Errors block applying.
 - **Sizes**: sorted by size, each line shows its entry's, and dirs' are
   counted in the background (the `...` animation), then sorted.
+- **Shell commands** run in the open dir, in the shell from Settings (Git
+  Bash, say, on Windows). `%` is the entry on the line (or the open file),
+  quoted, like vim's: `:!mv % old/`. `!` in visual mode runs one on every
+  selected entry, and in a file, `:%!sort` filters the lines as in vim.
 
 ## Install
 

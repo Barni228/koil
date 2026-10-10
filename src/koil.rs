@@ -130,6 +130,25 @@ pub mod qobject {
         #[qinvokable]
         fn path_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
+        /// Where the entries on lines `first` to `last` (from 0) are on
+        /// disk, for a shell command run on them (see
+        /// `listing::paths_on_lines`): `{ paths, message }`, where `message`
+        /// says why there are none. With a negative `first` (the path
+        /// field), the open dir.
+        #[qinvokable]
+        fn paths_on_lines(
+            self: &Koil,
+            text: &QString,
+            hidden: &QString,
+            first: i32,
+            last: i32,
+        ) -> QString;
+
+        /// The dir that's open (a pattern's base dir), where shell commands
+        /// run.
+        #[qinvokable]
+        fn current_dir(self: &Koil) -> QString;
+
         /// The path the ID `id` (an icon's hidden text) stands for (see
         /// `listing::id_path`), or "" if koil doesn't know it.
         #[qinvokable]
@@ -564,6 +583,25 @@ impl qobject::Koil {
             Err(_) => Some(listing::OnDisk::Path(self.koil.current_dir().to_path_buf())),
         };
         to_json(&on_disk)
+    }
+
+    fn paths_on_lines(&self, text: &QString, hidden: &QString, first: i32, last: i32) -> QString {
+        let paths = match (usize::try_from(first), usize::try_from(last)) {
+            (Ok(first), Ok(last)) => {
+                let text = text.to_string();
+                listing::paths_on_lines(&self.koil, &text, &read_hidden(hidden), first, last)
+            }
+            _ => Ok(vec![self.koil.current_dir().to_path_buf()]),
+        };
+        let (paths, message) = match paths {
+            Ok(paths) => (paths, String::new()),
+            Err(message) => (Vec::new(), message),
+        };
+        to_json(&json!({ "paths": paths, "message": message }))
+    }
+
+    fn current_dir(&self) -> QString {
+        QString::from(self.koil.current_dir().to_string_lossy().as_ref())
     }
 
     fn id_path(&self, id: &QString) -> QString {

@@ -6,14 +6,17 @@ use std::thread;
 
 use cxx_qt::Threading;
 use cxx_qt_lib::{QString, QStringList};
+use serde_json::json;
 
 use crate::ffi;
 use crate::listing;
+use crate::shell;
 
 /// What the QML needs from the system, mostly through Qt's C++ side: the
 /// clipboard, the installed fonts and the one Koil ships, the editor's line
-/// height and the listing's and path field's colors, and showing a path in
-/// Finder (or Explorer) or opening it in its default app.
+/// height and the listing's and path field's colors, showing a path in
+/// Finder (or Explorer) or opening it in its default app, and running shell
+/// commands (see shell.rs).
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -62,6 +65,32 @@ pub mod qobject {
         /// Emitted when `open_in_app` failed after it returned, with why.
         #[qsignal]
         fn open_failed(self: Pin<&mut System>, message: QString);
+
+        /// The shell commands run in when the setting names none (see
+        /// `shell::default_shell`).
+        #[qinvokable]
+        fn default_shell(self: &System) -> QString;
+
+        /// The shells installed, for the Settings window to offer, as a
+        /// list of `shell::Found` (`{ name, path }`).
+        #[qinvokable]
+        fn shells(self: &System) -> QString;
+
+        /// Starts the shell command `request` (a `shell::Request`, as JSON)
+        /// on another thread, and emits `shell_done` once it's done. Returns
+        /// `{ line, error }`: the command line as it runs, or else why it
+        /// can't.
+        #[qinvokable]
+        fn run_shell(self: Pin<&mut System>, request: &QString) -> QString;
+
+        /// Ends the shell command running, if any (see `Running::stop`).
+        #[qinvokable]
+        fn stop_shell(self: &System);
+
+        /// Emitted when the command `run_shell` started is done, with what
+        /// it did (a `shell::Ran`, as JSON).
+        #[qsignal]
+        fn shell_done(self: Pin<&mut System>, result: QString);
 
         /// Gives every line of a TextEdit's `textDocument` the same height,
         /// plus a margin below it.
@@ -142,7 +171,17 @@ pub mod qobject {
 }
 
 #[derive(Default)]
-pub struct SystemRust;
+pub struct SystemRust {
+    /// The shell command running, if any.
+    running: shell::Running,
+}
+
+/// A command still running as Koil quits ends with it.
+impl Drop for SystemRust {
+    fn drop(&mut self) {
+        self.running.stop();
+    }
+}
 
 impl qobject::System {
     fn clipboard_text(&self) -> QString {
@@ -190,6 +229,39 @@ impl qobject::System {
             }
         });
         QString::default()
+    }
+
+    fn default_shell(&self) -> QString {
+        QString::from(shell::default_shell().as_str())
+    }
+
+    fn shells(&self) -> QString {
+        let found = serde_json::to_string(&shell::shells()).unwrap_or_default();
+        QString::from(found.as_str())
+    }
+
+    fn run_shell(self: Pin<&mut Self>, request: &QString) -> QString {
+        let started = serde_json::from_str::<shell::Request>(&request.to_string())
+            .map_err(|e| e.to_string())
+            .and_then(|request| shell::start(&request, &self.running));
+        let (line, error) = match started {
+            Ok((line, started)) => {
+                let thread = self.qt_thread();
+                let running = self.running.clone();
+                thread::spawn(move || {
+                    let ran = started.finish(&running);
+                    let result = serde_json::to_string(&ran).unwrap_or_default();
+                    let _ = thread.queue(move |system| system.shell_done(QString::from(&result)));
+                });
+                (line, String::new())
+            }
+            Err(error) => (String::new(), error),
+        };
+        QString::from(json!({ "line": line, "error": error }).to_string().as_str())
+    }
+
+    fn stop_shell(&self) {
+        self.running.stop();
     }
 
     /// # Safety

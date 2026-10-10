@@ -6,11 +6,13 @@ import QtQuick.Controls
 import "text.js" as Txt
 
 // :help, a box over the editor with what isn't obvious: Koil's listing,
-// :set and its forms, the commands, search, registers and macros, visual
-// block and multiple cursors, hidden text and other keys. :help topic scrolls to a section.
-// :reg shows the registers in it too (showList).
+// :set and its forms, the commands, shell commands, search, registers and
+// macros, visual block and multiple cursors, hidden text and other keys.
+// :help topic scrolls to a section. :reg shows the registers in it too
+// (showList), and :! what a command wrote (showText).
 // Keys scroll it as in a vim help buffer, / and ? search it (see Search);
-// Esc or q closes it. Its text can be selected with the mouse and copied.
+// Esc, q or Enter (as after vim's :!) closes it. Its text can be selected
+// with the mouse and copied.
 Popup {
     id: help
 
@@ -27,6 +29,8 @@ Popup {
     // Where Space r shows an entry (and Space o opens it as from there).
     readonly property string fileManager: isMac ? "Finder" : Qt.platform.os === "windows" ? "Explorer"
         : "the file manager"
+    // The shell :! runs commands in, unless Settings says otherwise.
+    readonly property string systemShell: Qt.platform.os === "windows" ? "cmd.exe" : "$SHELL"
     readonly property real lineStep: Math.round(20 * zoom)
     // What it shows: the help, or a list (see showList).
     property string heading: "Koil Help"
@@ -64,6 +68,8 @@ Popup {
                     + "open dir)."],
                 ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
                     + fileManager + " does (from the path field, the open dir)."],
+                ["`!`", "Run a shell command on the entry on the line: `!git add` or `!rm`, then `Enter` "
+                    + "(see `:h !`)."],
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
                 ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing."],
                 ["`_`", "The scratchpad: text of your own, never saved, kept as you left it until Koil "
@@ -105,6 +111,8 @@ Popup {
                 ["`number`  `nu`", "Line numbers."],
                 ["`relativenumber`  `rnu`", "Line numbers counted from the cursor's line."],
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
+                ["`shell`  `sh`", "The shell `:!` runs commands in: a path, or a name on the PATH, like "
+                    + "`:set sh=bash`. Default: the one in Settings, else `" + systemShell + "`."],
                 ["`hidden`  `hid`", "Show entries starting with `.`, and `../`."],
                 ["`gitignore`  `ignore`", "Hide what git ignores, and `.git`."],
                 ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."],
@@ -160,7 +168,8 @@ Popup {
                 ["`:q!`  `ZQ`", "Quit without saving."],
                 ["`:qa!`", "Quit without saving anything."],
                 ["`:conf q`  `:confirm q`", "Quit, asking whether to save first (`y`, `n`, or `c` to cancel)."],
-                ["`:42`  `:$`", "Go to line 42, or the last line."],
+                ["`:42`  `:$`  `:+3`", "Go to line 42, the last line, or 3 lines down."],
+                ["`:!cmd`", "Run a shell command (see `:h !`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
                 ["`:h`  `:help [topic]`", "This help, e.g. `:h set`, `:h search`, `:h macros`."],
@@ -168,6 +177,28 @@ Popup {
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
                 ["`@:`", "Run the last command again."]
             ]
+        },
+        {
+            title: "Shell commands",
+            tags: ["!", ":!", "!!", ":!!", "shell", "sh", "filter", "%", "%:p", "%:h", "%:t", "%:r", "%:e",
+                "terminal", "run"],
+            intro: "`:!cmd` runs `cmd` in the shell (`:set shell`, or Settings), in the dir that's open, like "
+                + "`:!git status`. What it writes shows in the status line, or in a box like this one if it's "
+                + "longer. `Esc` stops it.",
+            rows: [
+                ["`!`", "In the listing: a command for the entry on the line, like `!git add` or `!rm`, then "
+                    + "`Enter`. The entry goes at the end, or where `%` is (`!mv % old/`). With a count "
+                    + "(`3!`) or in visual mode, the entries on those lines."],
+                ["`%`", "The entry on the line (from the path field, the open dir), or in a file, the file, "
+                    + "quoted for the shell. `\\%` is a `%`, as in `:!date +\\%F`."],
+                ["`%:p`  `%:h`  `%:t`", "Its full path, the dir it's in, its name."],
+                ["`%:r`  `%:e`", "It without its extension, and its extension (`%:t:r`: its name without it)."],
+                ["`:.,+2!cmd`  `:'<,'>!cmd`", "In the listing: run it on the entries on those lines. In a "
+                    + "file, as in vim: put the lines through it, and its output in their place (`:%!sort`, "
+                    + "or `!ip` then `fmt`)."],
+                ["`:!!`", "Run the last command again."]
+            ],
+            note: "A command can't read what you type: one that asks (`rm -i`) gets no answer."
         },
         {
             title: "Search",
@@ -274,8 +305,19 @@ Popup {
     // as they are in the editor's font, the keys taking `keyColumns`
     // characters (:reg).
     function showList(title, rows, keyColumns) {
+        showPlain(title, { title: "", rows: rows, plain: true, keyColumns: keyColumns });
+    }
+
+    // Opens the box with `title` over `text`, as it is in the editor's
+    // font, with its line breaks, and `note` after it (what a shell command
+    // wrote).
+    function showText(title, text, note) {
+        showPlain(title, { title: "", intro: text, plain: true, rows: [], note: note });
+    }
+
+    function showPlain(title, section) {
         heading = title;
-        shownSections = [{ title: "", rows: rows, plain: true, keyColumns: keyColumns }];
+        shownSections = [section];
         clearSearch();
         open();
         shownSection = 0;
@@ -364,6 +406,9 @@ Popup {
             let run = t.slice(i, j).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             if (plain || f & inCode)
                 run = run.replace(/ /g, " ");
+            // One character in the document, as the line break is.
+            if (plain)
+                run = run.replace(/\n/g, "<br>");
             const style = (f & inCode ? "font-family:'" + monoFamily + "';" : "")
                 + (f & spaced ? "letter-spacing:" + codePadding + "px;" : "") + (f & marked ? "color:black;" : "");
             html += style ? "<span style=\"" + style + "\">" + run + "</span>" : run;
@@ -781,6 +826,9 @@ Popup {
             HelpText {
                 id: title
 
+                // A long one (a shell command) wraps, clear of the keys.
+                width: Math.min(implicitWidth, parent.width - keysHint.implicitWidth - 12 * help.zoom)
+                wrapMode: TextEdit.WrapAnywhere
                 leftPadding: help.codePadding // as CodeText's
                 text: help.heading
                 font.pixelSize: Math.round(18 * help.zoom)
@@ -788,6 +836,8 @@ Popup {
                 color: help.theme.text
             }
             CodeText {
+                id: keysHint
+
                 anchors.right: parent.right
                 anchors.baseline: title.baseline
                 markup: "`/` to search · `j` `k` to scroll · `Esc` or `q` to close"
@@ -833,7 +883,8 @@ Popup {
                     help.copySelection();
                 else if (event.key === Qt.Key_Escape && help.searchShown)
                     help.clearSearch();
-                else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q && !event.modifiers)
+                else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q && !event.modifiers
+                        || event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                     help.close();
                 else if (!ctrl && (event.text === "/" || event.text === "?"))
                     help.startSearch(event.text);
@@ -894,6 +945,8 @@ Popup {
                             visible: !!section.modelData.intro
                             key: section.index + "/intro"
                             markup: section.modelData.intro || ""
+                            plain: !!section.modelData.plain
+                            font.family: plain ? help.monoFamily : help.font.family
                             font.pixelSize: Math.round(13 * help.zoom)
                             color: help.theme.text
                         }

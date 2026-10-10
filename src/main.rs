@@ -9,6 +9,7 @@ mod history;
 mod install;
 mod koil;
 mod listing;
+mod shell;
 mod sizes;
 mod system;
 

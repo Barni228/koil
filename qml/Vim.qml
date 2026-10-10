@@ -56,6 +56,11 @@ QtObject {
     // cursor when the view scrolls sideways (see showColumn). Vim's
     // default is 0.
     property int sideScrollOff: 4
+    // :set shell, the shell :! runs commands in (empty for the system's,
+    // `systemShell`), with its default.
+    property string shell: ""
+    property string defaultShell: ""
+    property string systemShell: ""
     // Koil's :set hidden, gitignore and regex: show hidden entries (and
     // ../), hide what git ignores, and read the path to open as a regex
     // (see Settings in koil-core). The view applies them to the listing.
@@ -136,12 +141,19 @@ QtObject {
     signal registersRequested(var rows)
     // One of commandKeys was typed, with its count (0 if none).
     signal keyCommand(string name, int count)
+    // :!command, with the lines of the range before it ({ first, last },
+    // from 1), or null: Koil runs it in the shell (on the entries of those
+    // lines, in the listing), while vim waits (see waiting). In a file, the
+    // lines go through it, and its output replaces them (see filterLines).
+    signal shellRequested(string command, var range)
+    // Esc or Ctrl-C while vim waits.
+    signal stopRequested()
     // u (or Cmd+Z) with no change left to undo: Koil offers to undo its last
     // apply.
     signal nothingToUndo()
 
     readonly property bool isMac: Qt.platform.os === "osx"
-    readonly property var operators: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?"]
+    readonly property var operators: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!"]
     readonly property var motions: ["h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ",
         "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G",
         ";", ",", "%", "{", "}", "+", "-", "_", "<CR>", "<S-CR>", "|", "n", "N", "*", "#", "H", "M", "L",
@@ -172,6 +184,14 @@ QtObject {
     property var registers: ({})
     // The text the last insert typed (the ". register).
     property string lastInsert: ""
+    // The last command :! ran, which a ! it starts with stands for (:!!
+    // runs it again).
+    property string lastShell: ""
+    // While Koil waits for something vim can't go on without (a shell
+    // command, see shellRequested): what the status line calls it. Keys do
+    // nothing then, but Esc or Ctrl-C, which emit stopRequested. A run
+    // waits too, and goes on once it's done (see endWait).
+    property string waiting: ""
     // The file or listing being edited (the "% register).
     property string fileName: ""
     property var undoStack: []
@@ -295,6 +315,11 @@ QtObject {
     // Returns whether the key was consumed; unconsumed keys go to the editor.
     function handleKey(event) {
         const tok = tokenFor(event);
+        if (waiting) {
+            if (tok === "<Esc>" || tok === "<C-c>")
+                stopRequested();
+            return true;
+        }
         // While a run goes on (keys come between its chunks), Esc or Ctrl-C
         // stops it, and other keys do nothing.
         if (running) {
@@ -764,9 +789,10 @@ QtObject {
         return outOfPrefix(t, q);
     }
 
-    function openCommandLine(kind) {
-        commandCursor = 1;
-        commandLine = kind;
+    // With `text` typed already (a range), and the cursor after it.
+    function openCommandLine(kind, text) {
+        commandLine = kind + (text || "");
+        commandCursor = commandLine.length;
     }
 
     // Replaces commandLine[from, to) with text and puts the cursor after it.
@@ -1104,8 +1130,9 @@ QtObject {
     function isChange(cmd) {
         if (isVisual)
             return !cmd.motion && !cmd.textObj
-                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q"].includes(cmd.action);
-        return cmd.op ? cmd.op !== "y" : changeActions.includes(cmd.action);
+                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "!"].includes(cmd.action);
+        // ! only types a command line, whose command may change the text.
+        return cmd.op ? cmd.op !== "y" && cmd.op !== "!" : changeActions.includes(cmd.action);
     }
 
     function execute(cmd) {
@@ -1127,7 +1154,7 @@ QtObject {
         }
         if (isVisual)
             executeVisual(cmd);
-        else if (cmd.op && cursors.length)
+        else if (cmd.op && cursors.length && cmd.op !== "!")
             atEveryCursor(() => executeOperator(cmd));
         else if (cmd.op)
             executeOperator(cmd);
@@ -1278,6 +1305,13 @@ QtObject {
         case "<":
             shiftLines(range, op === ">" ? 1 : -1, 1);
             break;
+        case "!": {
+            // As vim's: a command line for the lines, on the first of them.
+            const first = Txt.lineOf(t, range.start), last = Txt.lineOf(t, Math.max(range.start, range.end - 1));
+            setCursor(clampNormal(t, firstNonBlank(t, range.start)));
+            openCommandLine(":", (last > first ? ".,.+" + (last - first) : ".") + "!");
+            break;
+        }
         default: // g~, gu, gU
             changeCase(range, op[1]);
             break;
@@ -1484,7 +1518,14 @@ QtObject {
             setCursor(cursor);
             return;
         }
-        if (a === ":" || a === "/" || a === "?") {
+        // : and ! leave visual mode, for a command on its lines, as in vim.
+        if (a === ":" || a === "!") {
+            setMode("normal");
+            setCursor(clampNormal(t, cursor));
+            openCommandLine(":", "'<,'>" + (a === "!" ? "!" : ""));
+            return;
+        }
+        if (a === "/" || a === "?") {
             openCommandLine(a);
             return;
         }
@@ -2460,7 +2501,7 @@ QtObject {
         if (own)
             batch = newBatch();
         try {
-            while (task || typeahead.length) {
+            while ((task || typeahead.length) && !waiting) {
                 if (task)
                     stepTask();
                 else
@@ -2478,7 +2519,9 @@ QtObject {
             if (own)
                 batch = null;
             inChunk = false;
-            if (task || typeahead.length) {
+            if ((task || typeahead.length) && waiting) {
+                progress = progressLabel(); // and on once it's done (endWait)
+            } else if (task || typeahead.length) {
                 progress = progressLabel();
                 const now = Date.now(), draw = now >= nextDraw;
                 if (draw)
@@ -2518,6 +2561,16 @@ QtObject {
         progress = "";
         if (!inserting)
             commitChange();
+    }
+
+    // What vim waited for is done (see waiting). A run that waited for it
+    // goes on, unless it's `stopped`.
+    function endWait(stopped) {
+        waiting = "";
+        if (running && stopped)
+            stopRun();
+        else if (running)
+            runChunk();
     }
 
     // Also drops what a macro left half typed (a command, a command line).
@@ -3664,20 +3717,35 @@ QtObject {
     function runEx(c, confirm) {
         if (c === "")
             return;
+        const r = exRange(c);
+        if (r.error) {
+            showError(r.error);
+            return;
+        }
+        c = r.rest.trim();
+        // A range alone goes to its last line.
+        if (r.first !== undefined && c === "") {
+            const t = bufferText();
+            const line = Math.max(1, Math.min(r.last, Txt.countLines(t)));
+            if (isVisual)
+                setMode("normal");
+            setCursor(clampNormal(t, firstNonBlank(t, Txt.lineToPos(t, line))));
+            return;
+        }
+        if (c[0] === "!") {
+            shellCommand(c.slice(1), r.first === undefined ? null : r);
+            return;
+        }
+        if (r.first !== undefined) {
+            showError("E481: No range allowed");
+            return;
+        }
         if (/^conf(i|ir|irm)?(\s|$)/.test(c)) {
             const rest = c.replace(/^\S+\s*/, "");
             if (rest)
                 runEx(rest, true);
             else
                 showError("E471: Argument required");
-            return;
-        }
-        if (/^\d+$/.test(c) || c === "$") {
-            const t = bufferText();
-            const line = c === "$" ? Txt.countLines(t) : Math.max(1, Math.min(parseInt(c, 10), Txt.countLines(t)));
-            if (isVisual)
-                setMode("normal");
-            setCursor(clampNormal(t, firstNonBlank(t, Txt.lineToPos(t, line))));
             return;
         }
         if (["w", "write"].includes(c))
@@ -3702,11 +3770,107 @@ QtObject {
             showError("E492: Not an editor command: " + c);
     }
 
+    // The range an Ex command starts with, as { first, last, rest } (lines,
+    // from 1), or { rest } if it has none, or { error }: one address or two
+    // with a , between (a missing one is the cursor's line), or % for every
+    // line. An address is a line number, . (the cursor's), $ (the last), or
+    // '< or '> (the first or last of the last visual selection), with +N
+    // or -N after it (+ is +1), or those alone, from the cursor's line. A
+    // range backwards is turned round.
+    function exRange(c) {
+        const t = bufferText(), here = Txt.lineOf(t, cursor);
+        if (c[0] === "%")
+            return { first: 1, last: Txt.countLines(t), rest: c.slice(1) };
+        let i = 0, error = "";
+        const address = () => {
+            const m = /^\s*(\d+|\.|\$|'[<>])?((?:\s*[-+]\d*)*)/.exec(c.slice(i));
+            if (!m[1] && !m[2].trim())
+                return null;
+            i += m[0].length;
+            let n = here;
+            if (m[1] === "$") {
+                n = Txt.countLines(t);
+            } else if (m[1] && m[1][0] === "'") {
+                if (!lastVisual) {
+                    error = "E20: Mark not set";
+                    return null;
+                }
+                const a = Math.min(lastVisual.anchor, lastVisual.cursor, t.length);
+                const b = Math.min(Math.max(lastVisual.anchor, lastVisual.cursor), t.length);
+                n = Txt.lineOf(t, m[1] === "'<" ? a : b);
+            } else if (m[1] && m[1] !== ".") {
+                n = parseInt(m[1], 10);
+            }
+            for (const o of m[2].match(/[-+]\d*/g) || [])
+                n += (o[0] === "-" ? -1 : 1) * (o.length > 1 ? parseInt(o.slice(1), 10) : 1);
+            return n;
+        };
+        const first = address();
+        if (error)
+            return { error: error };
+        if (!/^\s*,/.test(c.slice(i)))
+            return first === null ? { rest: c } : { first: first, last: first, rest: c.slice(i) };
+        i = c.indexOf(",", i) + 1;
+        const second = address();
+        if (error)
+            return { error: error };
+        const a = first === null ? here : first, b = second === null ? here : second;
+        return { first: Math.min(a, b), last: Math.max(a, b), rest: c.slice(i) };
+    }
+
+    // :!command (see shellRequested), on the lines of `range` if not null.
+    // A ! it starts with is the last one (:!! runs it again).
+    function shellCommand(command, range) {
+        if (command[0] === "!") {
+            if (!lastShell) {
+                showError("E34: No previous command");
+                return;
+            }
+            command = lastShell + command.slice(1);
+        }
+        if (!command.trim()) {
+            showError("E471: Argument required");
+            return;
+        }
+        if (range && (range.first < 1 || range.last > Txt.countLines(bufferText()))) {
+            showError("E16: Invalid range");
+            return;
+        }
+        lastShell = command;
+        if (isVisual) {
+            setMode("normal");
+            setCursor(clampNormal(bufferText(), cursor));
+        }
+        outside(() => shellRequested(command, range));
+    }
+
+    // Puts `text` in place of lines first to last (from 1), as a change of
+    // its own: a filter's output (see shellRequested). Without text, the
+    // lines go, as with dd. The cursor goes to the first of them.
+    function filterLines(first, last, text) {
+        batched(() => {
+            beginChange();
+            const t = bufferText();
+            let s = Txt.lineToPos(t, first), e = Txt.lineEnd(t, Txt.lineToPos(t, last));
+            if (text === "" && e < t.length)
+                e++;
+            else if (text === "" && s > 0)
+                s--;
+            replaceRange(s, e, text);
+            const u = bufferText();
+            setCursor(clampNormal(u, firstNonBlank(u, Math.min(s, u.length))));
+            commitChange(); // during a run, with it (see commitChange)
+            if (last > first + 1)
+                showMessage((last - first + 1) + " lines filtered");
+        });
+    }
+
     // The options :set knows: full name, short name (if any), property,
     // default, for a number option its range, and for a string option other
-    // than guifont the values it can have. fontsize isn't vim's (gvim has
-    // guifont); its short name is vim's for fsync, which Koil hasn't.
-    // guifont is only the family (gvim's also takes a size, like Menlo:h14).
+    // than guifont and shell the values it can have. fontsize isn't vim's
+    // (gvim has guifont); its short name is vim's for fsync, which Koil
+    // hasn't. guifont is only the family (gvim's also takes a size, like
+    // Menlo:h14), and shell only the program (vim's can have arguments).
     // hidden, gitignore, regex, sort and sortreverse are Koil's (vim's hidden
     // is about buffers; its sr, shiftround, Koil hasn't).
     readonly property var options: [
@@ -3716,6 +3880,7 @@ QtObject {
         { name: "number", short: "nu", property: "number", default: defaultNumber },
         { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber },
         { name: "sidescrolloff", short: "siso", property: "sideScrollOff", default: 4, min: 0, max: 999 },
+        { name: "shell", short: "sh", property: "shell", default: defaultShell },
         { name: "hidden", short: "hid", property: "showHidden", default: false },
         { name: "gitignore", short: "ignore", property: "gitignore", default: false },
         { name: "regex", short: "re", property: "regex", default: false },
@@ -3724,18 +3889,19 @@ QtObject {
     ]
 
     // An option as :set shows it: "  nu", "nonu", "  fs=16" or
-    // "  gfn=Fira Code".
+    // "  gfn=Fira Code". An empty shell is the system's.
     function optionLabel(o) {
-        const value = vim[o.property];
+        const value = o.property === "shell" ? shell || systemShell : vim[o.property];
         return typeof value === "boolean" ? (value ? "  " : "no") + o.name : "  " + o.name + "=" + value;
     }
 
     // :set with args like "nu", "nonu", "nu!", "invnu", "nu?" or "nu&", for
     // a number option "fs=16" (or "fs:16"), "fs+=2", "fs-=2", "fs^=2"
     // (multiplies), "fs" or "fs?" (shows it) and "fs&", and for a string
-    // option "gfn=Fira\ Code" (a backslash escapes a space; empty is the
-    // default) or "sort=size", "gfn", "gfn?" and "gfn&". No args lists the
-    // options that aren't at their default.
+    // option "gfn=Fira\ Code" (a backslash escapes a space or a backslash,
+    // as in vim, and stays before anything else, as in a Windows path;
+    // empty is the default) or "sort=size", "gfn", "gfn?" and "gfn&". No
+    // args lists the options that aren't at their default.
     function setOptions(args) {
         const words = args.match(/(?:\\.|\S)+/g) || [];
         const shown = [];
@@ -3760,14 +3926,16 @@ QtObject {
             } else if (suffix === "&") {
                 vim[o.property] = o.default;
             } else if (isString && o.values) {
-                const value = m[5].replace(/\\(.)/g, "$1") || o.default;
+                const value = m[5].replace(/\\([\\ ])/g, "$1") || o.default;
                 if (!o.values.includes(value)) {
                     showError("E474: Invalid argument: " + w + " (" + o.values.join(", ") + ")");
                     return;
                 }
                 vim[o.property] = value;
+            } else if (isString && o.property === "shell") {
+                vim[o.property] = m[5].replace(/\\([\\ ])/g, "$1") || o.default;
             } else if (isString) {
-                const value = m[5].replace(/\\(.)/g, "$1");
+                const value = m[5].replace(/\\([\\ ])/g, "$1");
                 if (value)
                     fontFamiliesNeeded();
                 const family = value ? fontFamilies.find(f => f.toLowerCase() === value.toLowerCase())

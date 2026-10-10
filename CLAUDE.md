@@ -21,12 +21,18 @@ the scratchpad (see Scratchpad).
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `history`), the path field's regex parts
   (`path_syntax`), what Tab completes in it (`complete`), what's shown after
-  each line when sorted by size or a date (`notes`), and what changed on
-  disk as edits to the text and questions (`sync`, `resolve`, `merge`).
-  Its tests (`src/listing/tests.rs`) use a temp dir.
+  each line when sorted by size or a date (`notes`), what changed on
+  disk as edits to the text and questions (`sync`, `resolve`, `merge`),
+  and the entries a shell command runs on (`paths_on_lines`). Its tests
+  (`src/listing/tests.rs`) use a temp dir.
 - `src/history.rs`: `History`, the undo history kept in a file across
   sessions (see Undo history). Its tests (`src/history/tests.rs`) use a
   temp dir.
+- `src/shell.rs`: shell commands (see Shell commands): the shell's kind
+  (`Kind`), `%` in a command (`expand`), running one (`start`, then
+  `Started::finish` on a thread) and stopping it (`Running::stop`), its
+  output as shown (`as_shown`), and the shells installed (`shells`). Its
+  tests (`src/shell/tests.rs`) run sh on Unix.
 - `src/sizes.rs`: `Sizes`, which counts the sizes of dirs on its own
   threads and keeps them (see Kept sizes). Its tests
   (`src/sizes/tests.rs`) use a temp dir.
@@ -39,8 +45,9 @@ the scratchpad (see Scratchpad).
   command line, and installing the `koil` command (on a thread).
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, the editor's
-  text, line format and colors, and showing a path in Finder or Explorer
-  (`reveal`) or opening it in its default app (`openInApp`).
+  text, line format and colors, showing a path in Finder or Explorer
+  (`reveal`) or opening it in its default app (`openInApp`), and running
+  shell commands (`runShell`, `stopShell`, `shellDone`).
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
@@ -66,8 +73,8 @@ the scratchpad (see Scratchpad).
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, hidden text, the listing's
-  prefixes, `:` and `/`, buffers). It drives the `TextArea` through
-  `insert`/`remove`/`select`.
+  prefixes, `:` and its ranges, `/`, buffers). It drives the `TextArea`
+  through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects),
   imported as `Txt` by Vim.qml and the views. The only state it keeps is
   where the lines of the last two long texts start (`lineIndex`), so
@@ -75,8 +82,8 @@ the scratchpad (see Scratchpad).
   highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious;
-  `:reg` shows the registers in it (`showList`). `/` and `?` search it (see
-  Help).
+  `:reg` shows the registers in it (`showList`), and `:!` what a command
+  wrote (`showText`). `/` and `?` search it (see Help).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
   the question: `:confirm q`, applying and undoing (lists to pick from),
   and what changed on disk against the user's edits.
@@ -279,7 +286,8 @@ the scratchpad (see Scratchpad).
   waits while an app launches; on macOS `openFailed` then says why it
   failed, like "No app opens", which Finder would ask about, while
   Explorer asks itself), `-` opens `..`
-  (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), Tab goes to
+  (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), `!` a shell
+  command on the entry (see Shell commands), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
   buttons), and `gs` and a key sort it (see Sorting). Cmd+S (File > Save,
@@ -618,6 +626,57 @@ the scratchpad (see Scratchpad).
   last was), and opens that in its place as File > Open does, with the
   cursor and the view where they were; the scratchpad keeps its text, as
   it does when anything else is shown.
+- **Shell commands** (shell.rs, `runShell` in main.qml, vim's
+  `shellRequested`): `:!cmd` runs `cmd` in the shell (`:set shell`, a vim
+  setting the Settings window saves; empty for `System.defaultShell`:
+  `$SHELL`, or `%ComSpec%` on Windows, as vim's) in the dir koil has open
+  (`Koil.currentDir`, also while a file is, as vim's cwd), with nothing on
+  its stdin. `%` in it is, as in vim, the file (relative to that dir if
+  it's in it), but in the listing the entry on the cursor's line (from the
+  path field, the open dir, `.`), where its ID is on disk, as for Space r
+  (`listing::paths_on_lines`; a new entry is an error), with vim's
+  modifiers (`%:p`, `:h`, `:t`, `:r`, `:e`); `\%` is a `%` (`date +\%F`),
+  as in vim, also in quotes. A path is quoted as the shell's kind needs
+  (`shell::Kind`, by its name: cmd.exe, PowerShell, else sh), only if it
+  must be, and escaped instead where the `%` is in quotes (`"%"` works);
+  one starting with `-` gets `./`. With a range (`:.,+2!`, `:'<,'>!`), in
+  the listing it runs on the entries of its lines (blank lines left out),
+  which go after a command without `%` (`!git add`); in a file (or the
+  scratchpad) it's vim's filter: the lines go to its stdin, and its stdout
+  replaces them (`Vim.filterLines`, one undo step; no output deletes them;
+  a failure, or the text changed meanwhile, leaves them), without the
+  empty line after a file's last line break, which `:%!sort` would sort
+  first. `!` in the listing and the path field is one of `commandKeys`
+  (`bangLines`), typing `:.!` (`3!`: `:.,.+2!`); in a file it's vim's
+  operator, typing the range of the lines `!{motion}` covers, and in
+  visual mode `:'<,'>!` (`:` types `'<,'>` too, leaving visual mode, as in
+  vim). Ex commands take vim's ranges (`exRange`: numbers, `.`, `$`, `'<`,
+  `'>`, `+N`, `-N`, `%`): one alone goes to its last line, and commands
+  other than `!` refuse one (E481). A `!` first is the last command
+  (`:!!`). It runs on a thread (`System.runShell`, one at a time): sh and
+  the like with `-c` (and on macOS those in `LOGIN_SHELLS` with `-l`, as
+  MacVim: an app opened from Finder has only the system's PATH), cmd.exe
+  with `/d /s /c "…"` as a raw argument, PowerShell with
+  `-EncodedCommand`, and Git Bash with its command line always quoted (its
+  runtime globs an argument that isn't), in a process group of its own
+  (no console window on Windows). Meanwhile vim waits (`Vim.waiting`,
+  "Running (Esc to stop)"): keys do nothing but Esc and Ctrl-C, which stop
+  it (`Running::stop`: SIGINT to the group, SIGKILL a second later;
+  `taskkill /T /F` on Windows), a macro running it waits too (`runChunk`
+  stops; `endWait` goes on), and `boxOpen` keeps the menu, drops and syncs
+  from changing anything. Its stdout and stderr come through one pipe
+  (`io::pipe`), in order, shown as a terminal would show them
+  (`shell::as_shown`: no escapes, `\r` and backspaces writing over, tabs
+  as spaces), the first `SHOWN_LINES` (1000: the help box took half a
+  second to lay out 3000): a line that fits goes in the status line
+  (`fitsStatus`), more in the help box (`help.showText`, plain, where `/`
+  searches it, and Enter closes it, as vim's "Press ENTER"). A failure
+  ("shell returned 1") is an error, which stops a macro. What it starts
+  with `&` keeps its output open, which is read only `AFTER_EXIT` longer.
+  Koil quitting stops it (`SystemRust`'s `Drop`). The Settings window's
+  list is `shell::shells`: `/etc/shells`, or cmd.exe, both PowerShells and
+  Git Bash where it installs or by git on the PATH. Windows' kinds are
+  untried, but `shell.rs` checks for its target.
 - **Command line** (cli.rs, read in `main` before the app, so `--help`
   doesn't show it in the Dock): `koil [OPTIONS] [PATH] [+N]`, parsed by
   clap's builder (`arg!`, not derive), its help and errors clap's (exit
@@ -1151,7 +1210,7 @@ the scratchpad (see Scratchpad).
   gutter width (the digits and two spaces) to it. Only visible lines get a row.
 - **Settings**: `settings` (a QtCore `Settings` in main.qml) holds the saved
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
-  `relativeNumber`, which `:set` changes: `root.vimSettings`),
+  `relativeNumber`, `shell`, which `:set` changes: `root.vimSettings`),
   `root.colorScheme` and `root.confirmChanges`, bound to the saved ones at
   startup. The Settings window
   shows the saved ones and changes both (`changeSetting`). The zoom and `:set`

@@ -235,6 +235,20 @@ TestCase {
         signalName: "writeRequested"
     }
 
+    SignalSpy {
+        id: shells
+
+        target: vim
+        signalName: "shellRequested"
+    }
+
+    SignalSpy {
+        id: stops
+
+        target: vim
+        signalName: "stopRequested"
+    }
+
     FindBar {
         id: findBar
 
@@ -881,6 +895,173 @@ TestCase {
         compare(quits.signalArguments.map(a => [a[0], a[1], a[2]]), [[false, false, false], [false, false, true], [true, false, false], [true, false, false], [true, false, true], [false, true, false]]);
         keys(":w<CR>:wq<CR>ZZ");
         compare(writes.signalArguments.map(a => [a[0], a[1]]), [[false, false], [true, false], [true, true]]);
+    }
+
+    // ---- Ranges and shell commands -------------------------------------------
+
+    // The line the cursor is on.
+    function cursorLine() {
+        return Txt.lineOf(editor.text, vim.cursor);
+    }
+
+    // The commands :! asked for, as [command, "first-last"] (or null for
+    // no range).
+    function shellCalls() {
+        return shells.signalArguments.map(a => [a[0], a[1] ? a[1].first + "-" + a[1].last : null]);
+    }
+
+    function test_ranges() {
+        load("one\ntwo\nthree\nfour\nfive");
+        keys(":3<CR>");
+        compare(cursorLine(), 3);
+        keys(":+<CR>");
+        compare(cursorLine(), 4);
+        keys(":-2<CR>");
+        compare(cursorLine(), 2);
+        keys(":.+2<CR>");
+        compare(cursorLine(), 4);
+        keys(":$-3<CR>");
+        compare(cursorLine(), 2);
+        keys(":0<CR>");
+        compare(cursorLine(), 1);
+        keys(":99<CR>");
+        compare(cursorLine(), 5);
+        keys(":1,3<CR>");
+        compare(cursorLine(), 3);
+        keys(":%<CR>");
+        compare(cursorLine(), 5);
+        keys(":2,3set nu<CR>");
+        compare(vim.message, "E481: No range allowed");
+    }
+
+    function test_shellCommand() {
+        load("one\ntwo\nthree\nfour");
+        shells.clear();
+        vim.lastShell = "";
+        keys(":!!<CR>");
+        compare(vim.message, "E34: No previous command");
+        keys(":!ls -la<CR>");
+        keys("j:.,+2!sort<CR>");
+        keys(":%!tr a-z A-Z<CR>");
+        keys(":!! | wc<CR>");
+        keys(":$ !rev<CR>");
+        keys(":3,2!rev<CR>");
+        compare(shellCalls(), [["ls -la", null], ["sort", "2-4"], ["tr a-z A-Z", "1-4"],
+            ["tr a-z A-Z | wc", null], ["rev", "4-4"], ["rev", "2-3"]]);
+        keys(":!<CR>");
+        compare(vim.message, "E471: Argument required");
+        keys(":2,9!sort<CR>");
+        compare(vim.message, "E16: Invalid range");
+        compare(shells.count, 6);
+    }
+
+    // : and ! in visual mode are for its lines, after it.
+    function test_visualRange() {
+        load("one\ntwo\nthree\nfour");
+        shells.clear();
+        vim.lastVisual = null;
+        // (a < alone, as keys() reads <,'> as a key's name)
+        keys(":'");
+        keyClick("<");
+        keys(",'>!x<CR>");
+        compare(vim.message, "E20: Mark not set");
+        keys("jVj:");
+        compare(vim.commandLine, ":'<,'>");
+        compare(vim.mode, "normal");
+        keys("!sort<CR>");
+        keys("ggvj!");
+        compare(vim.commandLine, ":'<,'>!");
+        keys("rev<CR>");
+        compare(shellCalls(), [["sort", "2-3"], ["rev", "1-2"]]);
+    }
+
+    // ! and a motion type the lines' range, as in vim, and change nothing.
+    function test_bangOperator() {
+        load("one\ntwo\nthree\nfour");
+        keys("j!j");
+        compare(vim.commandLine, ":.,.+1!");
+        keys("<Esc>!!");
+        compare(vim.commandLine, ":.!");
+        keys("<Esc>3!!");
+        compare(vim.commandLine, ":.,.+2!");
+        keys("<Esc>G!k");
+        compare(vim.commandLine, ":.,.+1!");
+        compare(cursorLine(), 3);
+        keys("<Esc>u");
+        compare(editor.text, "one\ntwo\nthree\nfour");
+        compare(vim.undoStack.length, 0);
+    }
+
+    // While vim waits (for a shell command), keys do nothing, but Esc asks
+    // to stop it.
+    function test_waiting() {
+        load("one\ntwo");
+        stops.clear();
+        vim.waiting = "Running";
+        keys("dd");
+        compare(editor.text, "one\ntwo");
+        keys("<Esc>");
+        compare(stops.count, 1);
+        vim.endWait(false);
+        keys("dd");
+        compare(editor.text, "two");
+    }
+
+    // A macro waits for a command it runs, and goes on once it's done.
+    function test_macroWaits() {
+        load("a\nb\nc\nd");
+        const wait = () => vim.waiting = "Running";
+        vim.shellRequested.connect(wait);
+        keys("qq:!x<CR>");
+        vim.endWait(false);
+        keys("jxq");
+        compare(editor.text, "a\n\nc\nd");
+        keys("@q");
+        verify(vim.running);
+        compare(editor.text, "a\n\nc\nd");
+        vim.endWait(false);
+        verify(!vim.running);
+        compare(editor.text, "a\n\n\nd");
+        // stopped: not the rest of it
+        keys("gg@q");
+        vim.endWait(true);
+        verify(!vim.running);
+        compare(editor.text, "a\n\n\nd");
+        compare(vim.message, "Interrupted");
+        vim.shellRequested.disconnect(wait);
+    }
+
+    // A filter's output in place of its lines.
+    function test_filterLines() {
+        load("one\ntwo\nthree\nfour");
+        vim.filterLines(2, 3, "TWO\nTHREE\nextra");
+        compare(editor.text, "one\nTWO\nTHREE\nextra\nfour");
+        compare(cursorLine(), 2);
+        keys("u");
+        compare(editor.text, "one\ntwo\nthree\nfour");
+        // no output: the lines go, as with dd
+        vim.filterLines(2, 3, "");
+        compare(editor.text, "one\nfour");
+        compare(cursorLine(), 2);
+        vim.filterLines(2, 2, "");
+        compare(editor.text, "one");
+        vim.filterLines(1, 1, "");
+        compare(editor.text, "");
+    }
+
+    function test_setShell() {
+        load("a");
+        vim.shell = "";
+        vim.defaultShell = "";
+        vim.systemShell = "/bin/zsh";
+        keys(":set sh?<CR>");
+        compare(vim.message, "  shell=/bin/zsh");
+        keys(":set sh=/bin/bash<CR>");
+        compare(vim.shell, "/bin/bash");
+        keys(":set shell=C:\\Program\\ Files\\Git\\bin\\bash.exe<CR>");
+        compare(vim.shell, "C:\\Program Files\\Git\\bin\\bash.exe");
+        keys(":set sh&<CR>");
+        compare(vim.shell, "");
     }
 
     // ---- Koil's keys ---------------------------------------------------------

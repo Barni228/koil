@@ -111,10 +111,13 @@ ApplicationWindow {
     // being asked about.
     property bool diskChanged: false
     property bool askingConflicts: false
-    // A box over the editor that has the keys (:help, or a question), while
-    // which the menu can't open, save or edit anything (see also
-    // keepHelpKeys).
-    readonly property bool boxOpen: help.opened || confirmDialog.opened
+    // The shell command running (see runShell), which vim waits for: {
+    // line, filter }, or null.
+    property var shellRun: null
+    // A box over the editor that has the keys (:help, or a question), or a
+    // shell command vim waits for, while which the menu can't open, save or
+    // edit anything (see also keepHelpKeys).
+    readonly property bool boxOpen: help.opened || confirmDialog.opened || shellRun !== null
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
     property bool quitAfterSave: false
@@ -133,7 +136,10 @@ ApplicationWindow {
     // "never". The other settings in use are vim's.
     property string confirmChanges: settings.confirmChanges
     // The settings vim keeps, which :set changes (see changeSetting).
-    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber"]
+    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "shell"]
+    // The shell :! runs commands in when the shell setting is empty: $SHELL,
+    // or cmd.exe on Windows.
+    readonly property string systemShell: system.defaultShell()
 
     width: 900
     height: 650
@@ -568,6 +574,17 @@ ApplicationWindow {
             leaveFile(false);
         else if (name === "scratch")
             openScratch();
+        else if (name === "shell")
+            bangLines(count);
+    }
+
+    // ! in the listing (or the path field): the command line for a shell
+    // command on the entry on the cursor's line, or with a count, on as
+    // many lines from there as there are (see runShell).
+    function bangLines(count) {
+        const t = activeView.textArea.text;
+        const more = Math.min(Math.max(count, 1) - 1, Txt.countLines(t) - Txt.lineOf(t, vim.cursor));
+        vim.openCommandLine(":", (more ? ".,.+" + more : ".") + "!");
     }
 
     // Sorts the listing by `by` (one of Vim.sorts), the other way round if
@@ -634,6 +651,113 @@ ApplicationWindow {
         const why = path && system.openInApp(path);
         if (why)
             vim.showError(why);
+    }
+
+    // :!command, and with a range (see Vim.shellRequested): runs it in the
+    // shell (:set shell), in the dir Koil has open, while vim waits for it
+    // (Esc stops it), then shows what it wrote (see shellDone). In the
+    // listing, % is the entries on the range's lines (else the cursor's),
+    // which go after a command without % if there's a range; in the path
+    // field, the open dir. In a file, % is the file, and a range is
+    // filtered: its lines go through the command, whose output replaces
+    // them.
+    function runShell(command, range) {
+        const t = activeView.textArea.text, filter = !!range && !listing;
+        // A file's last line break ends its last line, as in vim: the empty
+        // line after it isn't one to filter (:%!sort would sort it first).
+        const last = filter && range.last > range.first && range.last === Txt.countLines(t) && t.endsWith("\n")
+            ? range.last - 1 : range && range.last;
+        let files = [], why = "";
+        if (listing) {
+            const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
+            const from = range && line >= 0 ? range.first - 1 : line, to = range && line >= 0 ? range.last - 1 : line;
+            const r = JSON.parse(koil.pathsOnLines(editorView.textArea.text, JSON.stringify(editorView.hidden), from, to));
+            files = r.paths;
+            why = r.message;
+        } else if (filePath) {
+            files = [filePath];
+        }
+        const r = JSON.parse(system.runShell(JSON.stringify({
+            shell: vim.shell || systemShell,
+            command: command,
+            cwd: koil.currentDir(),
+            files: files,
+            why: why,
+            append: listing && !!range,
+            input: filter ? t.slice(Txt.lineToPos(t, range.first), Txt.lineEnd(t, Txt.lineToPos(t, last))) + "\n" : null
+        })));
+        if (r.error) {
+            vim.showError(r.error);
+            return;
+        }
+        shellRun = {
+            line: r.line,
+            filter: filter ? { first: range.first, last: last, text: t, path: filePath, scratchpad: scratchpad } : null
+        };
+        vim.showMessage(":!" + r.line);
+        vim.waiting = "Running";
+    }
+
+    // The command runShell started is done: `ran` is what it did (see
+    // shell::Ran). A failed one says why in the status line, which stops
+    // a macro running it.
+    function shellDone(ran) {
+        const run = shellRun, title = ":!" + run.line;
+        shellRun = null;
+        const exit = ran.code === 0 ? "" : ran.code === null ? "killed" : "shell returned " + ran.code;
+        const f = run.filter;
+        if (ran.stopped) {
+            vim.showMessage("Interrupted");
+        } else if (ran.error) {
+            vim.showError(ran.error);
+        } else if (!f) {
+            showOutput(title, ran.output, ran.cut, exit);
+        } else if (exit) {
+            // The lines stay.
+            showOutput(title, ran.errors, ran.cut, exit);
+        } else if (listing || filePath !== f.path || scratchpad !== f.scratchpad || editorView.textArea.text !== f.text) {
+            vim.showError("The text changed while the command ran, so its output wasn't put in");
+        } else {
+            vim.filterLines(f.first, f.last, ran.output);
+            if (ran.errors)
+                showOutput(title, ran.errors, ran.cut, "");
+        }
+        vim.endWait(ran.stopped);
+    }
+
+    // What a shell command wrote (`text`, and `cut` lines after it), and
+    // why it failed (`exit`, like "shell returned 1"): in the status line,
+    // if it's a line that fits there, else in a box over the editor (the
+    // help's, where / searches it).
+    function showOutput(title, text, cut, exit) {
+        const failed = exit ? title + " (" + exit + ")" : "";
+        if (!text) {
+            if (failed)
+                vim.showError(failed);
+        } else if (!cut && !text.includes("\n") && fitsStatus(text)) {
+            if (exit)
+                vim.showError(text);
+            else
+                vim.showMessage(text);
+        } else {
+            const notes = (exit ? [exit[0].toUpperCase() + exit.slice(1) + "."] : []).concat(cut
+                ? [cut + (cut === 1 ? " more line" : " more lines") + " not shown: in the scratchpad (`_`), "
+                    + "`:.!` puts all of it in the text."] : []);
+            help.showText(title, text, notes.join(" "));
+            if (failed)
+                vim.showError(failed);
+        }
+    }
+
+    // Whether `text` fits in the status line.
+    function fitsStatus(text) {
+        statusMetrics.text = text;
+        return statusMetrics.advanceWidth <= status.width;
+    }
+
+    // The shells the Settings window offers: [{ name, path }].
+    function shellChoices() {
+        return JSON.parse(system.shells());
     }
 
     // Enter on a new file (`{ path, name }`): once the user says so, creates
@@ -969,6 +1093,9 @@ ApplicationWindow {
         property string confirmChanges: "always"
         property bool number: false
         property bool relativeNumber: false
+        // The shell :! runs commands in: a path, or a name on the PATH;
+        // empty for the system's (root.systemShell).
+        property string shell: ""
         // The dir Koil lists when no path is given (see Document.startDir),
         // read only at startup; empty for the home dir.
         property string startDir: ""
@@ -986,6 +1113,7 @@ ApplicationWindow {
         id: system
 
         onOpenFailed: message => vim.showError(message)
+        onShellDone: result => root.shellDone(JSON.parse(result))
     }
 
     Document {
@@ -1092,6 +1220,9 @@ ApplicationWindow {
         fontFamily: settings.fontFamily
         defaultFontFamily: settings.fontFamily
         fontFamilies: root.fontFamilies
+        shell: settings.shell
+        defaultShell: settings.shell
+        systemShell: root.systemShell
         // In the path field, Shift+Enter updates like Enter but stays
         // there; in the listing it's vim's Enter.
         commandKeys: root.listing ? Object.assign({
@@ -1106,7 +1237,8 @@ ApplicationWindow {
             "g.": "hidden",
             "gi": "gitignore",
             "gr": "regex",
-            "_": "scratch"
+            "_": "scratch",
+            "!": "shell"
         }, root.sortKeys, root.activeView === pathView ? {
             "<S-CR>": "update"
         } : {}) : Object.assign({
@@ -1138,6 +1270,8 @@ ApplicationWindow {
             }
         }
         onKeyCommand: (name, count) => root.runKeyCommand(name, count)
+        onShellRequested: (command, range) => root.runShell(command, range)
+        onStopRequested: system.stopShell()
         onNothingToUndo: {
             if (root.listing && root.activeView === editorView)
                 root.undoApply();
@@ -1327,7 +1461,7 @@ ApplicationWindow {
         parent: root.Overlay.overlay
         anchors.fill: parent
         keys: ["text/uri-list"]
-        enabled: !confirmDialog.opened && !help.opened && !root.askingConflicts
+        enabled: !root.boxOpen && !root.askingConflicts
 
         onEntered: event => {
             dropArea.path = "";
@@ -1428,6 +1562,13 @@ ApplicationWindow {
             color: vim.commandLine === "" && vim.message !== "" && vim.messageIsError ? "#d33" : theme.windowText
             text: vim.commandLine || vim.message || vim.modeLabel || " "
 
+            // For what's shown here or not (see fitsStatus).
+            TextMetrics {
+                id: statusMetrics
+
+                font: status.font
+            }
+
             // Measured with TextMetrics, whose widths are properties, so they
             // follow font size changes (FontMetrics.advanceWidth() is a call).
             TextMetrics {
@@ -1471,8 +1612,10 @@ ApplicationWindow {
             font.family: vim.fontFamily
             font.pointSize: vim.fontSize
             // A macro's progress while it runs: not the position, which
-            // would be found again at every key it runs.
-            text: vim.progress ? vim.progress + " (Esc to stop)" : vim.pendingKeys + "    " + vim.positionLabel()
+            // would be found again at every key it runs. Or what vim waits
+            // for (a shell command).
+            text: vim.waiting || vim.progress ? (vim.waiting || vim.progress) + " (Esc to stop)"
+                : vim.pendingKeys + "    " + vim.positionLabel()
         }
     }
 

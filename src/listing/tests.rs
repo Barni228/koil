@@ -483,6 +483,30 @@ fn test_path_on_line() {
 }
 
 #[test]
+fn test_paths_on_lines() {
+    let (_temp, koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    let rendered = render(&koil);
+    // dir renamed on its line, then a blank line and a new file
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "dir/" => Some(format!("{}\n\nnew.txt", line.replace("dir/", "renamed/"))),
+        _ => Some(line.to_string()),
+    });
+    let paths = |first, last| paths_on_lines(&koil, &text, &hidden, first, last);
+    assert_eq!(paths(0, 1), Ok(vec![root.join("dir")]));
+    assert_eq!(
+        paths(3, 4),
+        Ok(vec![root.join("file.rs"), root.join("notes")])
+    );
+    assert_eq!(
+        paths(0, 2),
+        Err("“new.txt” isn't on disk until the changes are applied".into())
+    );
+    assert_eq!(paths(1, 1), Err("No entry on this line".into()));
+    assert_eq!(paths(7, 9), Err("No entries on these lines".into()));
+}
+
+#[test]
 fn test_id_path() {
     let (_temp, mut koil) = koil();
     let root = koil.current_dir().to_path_buf();

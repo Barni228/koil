@@ -24,6 +24,10 @@ notify = "8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# signals to stop a shell command and what it started (its process group)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 

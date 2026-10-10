@@ -1140,7 +1140,43 @@ pub enum OnDisk {
 pub fn path_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> Option<OnDisk> {
     let parsed = parse(text, hidden);
     let i = parsed.spots.iter().position(|&(l, _)| l == line)?;
-    let entry = &parsed.entries[i];
+    on_disk(koil, &parsed.entries[i])
+}
+
+/// Where the entries on lines `first` to `last` are on disk, as
+/// [`path_on_line`] finds each, leaving out lines without one, for a shell
+/// command run on them; or else why it can't be: one of them is new, or
+/// there are none.
+pub fn paths_on_lines(
+    koil: &Koil,
+    text: &str,
+    hidden: &[Hidden],
+    first: usize,
+    last: usize,
+) -> Result<Vec<PathBuf>, String> {
+    let parsed = parse(text, hidden);
+    let mut paths = Vec::new();
+    for (&(line, _), entry) in parsed.spots.iter().zip(&parsed.entries) {
+        match on_disk(koil, entry) {
+            _ if line < first || line > last => {}
+            Some(OnDisk::Path(path)) => paths.push(path),
+            Some(OnDisk::New(name)) => {
+                return Err(format!(
+                    "“{name}” isn't on disk until the changes are applied"
+                ));
+            }
+            None => {}
+        }
+    }
+    match (paths.is_empty(), first == last) {
+        (false, _) => Ok(paths),
+        (true, true) => Err("No entry on this line".to_string()),
+        (true, false) => Err("No entries on these lines".to_string()),
+    }
+}
+
+/// Where `entry` is on disk (see [`path_on_line`]).
+fn on_disk(koil: &Koil, entry: &Entry) -> Option<OnDisk> {
     let path = match entry.id {
         Some(id) => koil.path_of(id)?,
         None if entry.is_parent() => {

@@ -672,6 +672,7 @@ dependencies = [
  "devicons",
  "embed-resource",
  "koil-core",
+ "libc",
  "notify",
  "serde",
  "serde_json",
