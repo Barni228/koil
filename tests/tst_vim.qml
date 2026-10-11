@@ -910,7 +910,9 @@ TestCase {
     // The commands :! asked for, as [command, "first-last"] (or null for
     // no range).
     function shellCalls() {
-        return shells.signalArguments.map(a => [a[0], a[1] ? a[1].first + "-" + a[1].last : null]);
+        // "_" after those for the scratchpad's (:_!)
+        return shells.signalArguments.map(a => [a[0], a[1] ? a[1].first + "-" + a[1].last : null]
+            .concat(a[2] ? ["_"] : []));
     }
 
     function test_ranges() {
@@ -956,6 +958,20 @@ TestCase {
         keys(":2,9!sort<CR>");
         compare(vim.message, "E16: Invalid range");
         compare(shells.count, 6);
+    }
+
+    // :_! is for the scratchpad, with a range too.
+    function test_scratchpadCommand() {
+        load("one\ntwo\nthree\nfour");
+        shells.clear();
+        keys(":_!git log<CR>");
+        keys(":%_ !sort<CR>");
+        keys(":2_!!<CR>");
+        keys(":_<CR>");
+        compare(vim.message, "E492: Not an editor command: _");
+        keys(":_!<CR>");
+        compare(vim.message, "E471: Argument required");
+        compare(shellCalls(), [["git log", null, "_"], ["sort", "1-4", "_"], ["sort", "2-2", "_"]]);
     }
 
     // : and ! in visual mode are for its lines, after it.
@@ -1032,6 +1048,44 @@ TestCase {
         compare(editor.text, "a\n\n\nd");
         compare(vim.message, "Interrupted");
         vim.shellRequested.disconnect(wait);
+    }
+
+    // What a command shows as vim's wait ends (:_!'s output, in the
+    // scratchpad, after it starts over) is a step of the macro that ran it,
+    // which goes on rather than being stopped by it.
+    function test_macroWaitsForScratchpad() {
+        load("a\nb\nc");
+        const wait = () => vim.waiting = "Running";
+        const shown = () => {
+            editor.text = "old";
+            vim.reset([]);
+            vim.replaceWhole("p\nq\nr");
+        };
+        vim.shellRequested.connect(wait);
+        keys("qq:_!x<CR>");
+        vim.endWait(false, shown);
+        keys("jxq");
+        compare(editor.text, "p\n\nr");
+        keys("@q");
+        verify(vim.running);
+        vim.endWait(false, shown);
+        verify(!vim.running);
+        compare(editor.text, "p\n\nr");
+        verify(vim.message !== "Interrupted");
+        vim.shellRequested.disconnect(wait);
+    }
+
+    // :_!'s output in place of all of the text, as a change of its own.
+    function test_replaceWhole() {
+        load("one\ntwo\nthree");
+        keys("Gl");
+        vim.replaceWhole("a\nb");
+        compare(editor.text, "a\nb");
+        compare(vim.cursor, 0);
+        keys("u");
+        compare(editor.text, "one\ntwo\nthree");
+        keys("<C-r>");
+        compare(editor.text, "a\nb");
     }
 
     // A filter's output in place of its lines.

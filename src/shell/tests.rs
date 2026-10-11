@@ -151,7 +151,7 @@ fn test_encoded() {
 
 #[test]
 fn test_as_shown() {
-    let shown = |s: &str| as_shown(s.as_bytes().to_vec());
+    let shown = |s: &str| as_shown(s.as_bytes().to_vec(), false);
     assert_eq!(shown("a\r\nb\n\n\n"), "a\nb");
     assert_eq!(shown("\x1b[1;31mred\x1b[0m done"), "red done");
     assert_eq!(shown("\x1b]0;title\x07x\x1b]8;;url\x1b\\y"), "xy");
@@ -160,6 +160,10 @@ fn test_as_shown() {
     assert_eq!(shown("b\x08bo\x08old"), "bold");
     assert_eq!(shown("a\tb\n\tc"), "a       b\n        c");
     assert_eq!(shown("a  \nb"), "a\nb");
+    // kept, each a column
+    let with_tabs = |s: &str| as_shown(s.as_bytes().to_vec(), true);
+    assert_eq!(with_tabs("a\tb\n\tc\t\n"), "a\tb\n\tc");
+    assert_eq!(with_tabs("\t10%\r\t100%"), "\t100%");
 }
 
 #[test]
@@ -181,13 +185,16 @@ mod running {
 
     /// Runs `command` in sh, in `cwd`, with `input` for a filter.
     fn run(command: &str, cwd: &Path, input: Option<&str>) -> Ran {
-        let request = Request {
+        run_request(Request {
             shell: "/bin/sh".into(),
             command: command.into(),
             cwd: cwd.into(),
             input: input.map(String::from),
             ..Request::default()
-        };
+        })
+    }
+
+    fn run_request(request: Request) -> Ran {
         let running = Running::default();
         let (_, started) = start(&request, &running).unwrap();
         started.finish(&running)
@@ -225,6 +232,35 @@ mod running {
         // one that doesn't read it all
         let input = "x\n".repeat(1 << 20);
         assert_eq!(run("head -n 1", temp.path(), Some(&input)).output, "x");
+    }
+
+    #[test]
+    fn test_scratchpad() {
+        // all of it, stderr too, with its tabs
+        let temp = tempfile::tempdir().unwrap();
+        let command = format!("seq {}; printf 'a\\tb\\n'; echo oops >&2", SHOWN_LINES + 5);
+        let ran = run_request(Request {
+            shell: "/bin/sh".into(),
+            command,
+            cwd: temp.path().into(),
+            scratchpad: true,
+            ..Request::default()
+        });
+        let lines: Vec<&str> = ran.output.lines().collect();
+        assert_eq!(lines.len(), SHOWN_LINES + 7);
+        assert_eq!(lines[SHOWN_LINES + 5..], ["a\tb", "oops"]);
+        assert_eq!(ran.cut, 0);
+        // with the lines of a range on its stdin
+        let ran = run_request(Request {
+            shell: "/bin/sh".into(),
+            command: "sort -r; exit 2".into(),
+            cwd: temp.path().into(),
+            input: Some("a\nb\n".into()),
+            scratchpad: true,
+            ..Request::default()
+        });
+        assert_eq!(ran.output, "b\na");
+        assert_eq!(ran.code, Some(2));
     }
 
     #[test]

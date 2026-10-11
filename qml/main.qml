@@ -112,7 +112,7 @@ ApplicationWindow {
     property bool diskChanged: false
     property bool askingConflicts: false
     // The shell command running (see runShell), which vim waits for: {
-    // line, filter }, or null.
+    // line, filter, scratch }, or null.
     property var shellRun: null
     // A box over the editor that has the keys (:help, or a question), or a
     // shell command vim waits for, while which the menu can't open, save or
@@ -598,7 +598,8 @@ ApplicationWindow {
 
     // ! in the listing (or the path field): the command line for a shell
     // command on the entry on the cursor's line, or with a count, on as
-    // many lines from there as there are (see runShell).
+    // many lines from there as there are (see runShell). In the scratchpad,
+    // a filter of those lines.
     function bangLines(count) {
         const t = activeView.textArea.text;
         const more = Math.min(Math.max(count, 1) - 1, Txt.countLines(t) - Txt.lineOf(t, vim.cursor));
@@ -678,8 +679,15 @@ ApplicationWindow {
     // which go after a command without % if there's a range; in the path
     // field, the open dir. In a file, % is the file, and a range is
     // filtered: its lines go through the command, whose output replaces
-    // them.
-    function runShell(command, range) {
+    // them. With `scratch` (:_!), the output goes in the scratchpad instead
+    // (see showInScratch), and a file's lines only go through it. As the
+    // scratchpad is shown in the file's place, its unsaved changes are
+    // asked about first (unless `asked`), as for File > Open.
+    function runShell(command, range, scratch, asked) {
+        if (scratch && !listing && !scratchpad && modified && !asked) {
+            askToSave(() => runShell(command, range, scratch, true));
+            return;
+        }
         const t = activeView.textArea.text, filter = !!range && !listing;
         // A file's last line break ends its last line, as in vim: the empty
         // line after it isn't one to filter (:%!sort would sort it first).
@@ -695,24 +703,32 @@ ApplicationWindow {
         } else if (filePath) {
             files = [filePath];
         }
-        const r = JSON.parse(system.runShell(JSON.stringify({
+        const request = JSON.stringify({
             shell: vim.shell || systemShell,
             command: command,
             cwd: koil.currentDir(),
             files: files,
             why: why,
             append: listing && !!range,
-            input: filter ? t.slice(Txt.lineToPos(t, range.first), Txt.lineEnd(t, Txt.lineToPos(t, last))) + "\n" : null
-        })));
+            input: filter ? t.slice(Txt.lineToPos(t, range.first), Txt.lineEnd(t, Txt.lineToPos(t, last))) + "\n" : null,
+            scratchpad: scratch
+        });
+        // Koil takes the listing's edits before leaving it for the
+        // scratchpad, as _ does: before the command runs, after which they
+        // might not read (an entry it deleted).
+        if (scratch && listing && !updateListing())
+            return;
+        const r = JSON.parse(system.runShell(request));
         if (r.error) {
             vim.showError(r.error);
             return;
         }
         shellRun = {
             line: r.line,
-            filter: filter ? { first: range.first, last: last, text: t, path: filePath, scratchpad: scratchpad } : null
+            filter: filter && !scratch ? { first: range.first, last: last, text: t, path: filePath, scratchpad: scratchpad } : null,
+            scratch: scratch
         };
-        vim.showMessage(":!" + r.line);
+        vim.showMessage((scratch ? ":_!" : ":!") + r.line);
         vim.waiting = "Running";
     }
 
@@ -720,7 +736,7 @@ ApplicationWindow {
     // shell::Ran). A failed one says why in the status line, which stops
     // a macro running it.
     function shellDone(ran) {
-        const run = shellRun, title = ":!" + run.line;
+        const run = shellRun, title = (run.scratch ? ":_!" : ":!") + run.line;
         shellRun = null;
         const exit = ran.code === 0 ? "" : ran.code === null ? "killed" : "shell returned " + ran.code;
         const f = run.filter;
@@ -728,6 +744,10 @@ ApplicationWindow {
             vim.showMessage("Interrupted");
         } else if (ran.error) {
             vim.showError(ran.error);
+        } else if (run.scratch) {
+            // A macro that ran it goes on in the scratchpad.
+            vim.endWait(false, () => showInScratch(title, ran.output, exit));
+            return;
         } else if (!f) {
             showOutput(title, ran.output, ran.cut, exit);
         } else if (exit) {
@@ -741,6 +761,28 @@ ApplicationWindow {
                 showOutput(title, ran.errors, ran.cut, "");
         }
         vim.endWait(ran.stopped);
+    }
+
+    // What :_! ran wrote (`text`), in place of the scratchpad's text, as a
+    // change undo takes back, which shows it: from the listing as _ does
+    // (Koil took its edits before it ran), and from a file over its dir's
+    // listing, as - from it would show. Nothing changes if it wrote
+    // nothing. `exit` says why it failed, if it did (see shellDone).
+    function showInScratch(title, text, exit) {
+        if (text && !scratchpad) {
+            if (!listing)
+                leaveFile(true);
+            // Its dir can't be listed (the status line says why).
+            if (!listing)
+                return;
+            showScratch();
+        }
+        if (text)
+            vim.replaceWhole(text);
+        if (exit)
+            vim.showError(title + " (" + exit + ")");
+        else
+            vim.showMessage(title);
     }
 
     // What a shell command wrote (`text`, and `cut` lines after it), and
@@ -759,8 +801,8 @@ ApplicationWindow {
                 vim.showMessage(text);
         } else {
             const notes = (exit ? [exit[0].toUpperCase() + exit.slice(1) + "."] : []).concat(cut
-                ? [cut + (cut === 1 ? " more line" : " more lines") + " not shown: in the scratchpad (`_`), "
-                    + "`:.!` puts all of it in the text."] : []);
+                ? [cut + (cut === 1 ? " more line" : " more lines") + " not shown: `:_!` puts all of it in "
+                    + "the scratchpad (`_`)."] : []);
             help.showText(title, text, notes.join(" "));
             if (failed)
                 vim.showError(failed);
@@ -1377,7 +1419,8 @@ ApplicationWindow {
             "-": "back"
         } : root.scratchpad ? {
             "-": "back",
-            "_": "back"
+            "_": "back",
+            "!": "shell"
         } : {})
         // With a selection too, so the list can run a shortcut on it.
         visualCommandKeys: ({
@@ -1406,7 +1449,7 @@ ApplicationWindow {
             }
         }
         onKeyCommand: (name, count) => root.runKeyCommand(name, count)
-        onShellRequested: (command, range) => root.runShell(command, range)
+        onShellRequested: (command, range, scratchpad) => root.runShell(command, range, scratchpad)
         onStopRequested: system.stopShell()
         onNothingToUndo: {
             if (root.listing && root.activeView === editorView)

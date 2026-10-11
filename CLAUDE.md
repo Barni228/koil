@@ -617,7 +617,9 @@ the scratchpad (see Scratchpad).
   (`koil -s` starts in it, and text piped in starts it: see Command line).
   It leaves the listing as a file does (updating it first, `fileSpot`),
   and `_` or `-` there goes back (`leaveFile`) to where the cursor was,
-  in the path field if it was there (`scratchFromPath`). It's the
+  in the path field if it was there (`scratchFromPath`). `!` there is
+  Koil's too, as in the listing (a filter of the line: see Shell
+  commands), and `:_!` puts a command's output in it. It's the
   listing's editor, so whatever shows something else in it saves the
   scratchpad's text, cursor, undo history and view first (`keepScratch`,
   from `showListing` and `load`, as anything shown goes through those),
@@ -654,16 +656,29 @@ the scratchpad (see Scratchpad).
   replaces them (`Vim.filterLines`, one undo step; no output deletes them;
   a failure, or the text changed meanwhile, leaves them), without the
   empty line after a file's last line break, which `:%!sort` would sort
-  first. `!` in the listing and the path field is one of `commandKeys`
-  (`bangLines`), typing `:.!` (`3!`: `:.,.+2!`); in a file it's vim's
-  operator, typing the range of the lines `!{motion}` covers, and in
-  visual mode `:'<,'>!` (`:` types `'<,'>` too, leaving visual mode, as in
-  vim). Ex commands take vim's ranges (`exRange`: numbers, `.`, `$`, `'<`,
-  `'>`, `+N`, `-N`, `%`): one alone goes to its last line, and commands
-  other than `!` refuse one (E481). A `!` first is the last command
-  (`:!!`). It runs on a thread (`System.runShell`, one at a time): sh and
-  the like with `-c` (and on macOS those in `LOGIN_SHELLS` with `-l`, as
-  MacVim: an app opened from Finder has only the system's PATH), cmd.exe
+  first. `!` in the listing, the path field and the scratchpad is one of
+  `commandKeys` (`bangLines`), typing `:.!` (`3!`: `:.,.+2!`); in a file
+  it's vim's operator, typing the range of the lines `!{motion}` covers,
+  and in visual mode `:'<,'>!` (`:` types `'<,'>` too, leaving visual
+  mode, as in vim). Ex commands take vim's ranges (`exRange`: numbers,
+  `.`, `$`, `'<`, `'>`, `+N`, `-N`, `%`): one alone goes to its last line,
+  and commands other than `!` refuse one (E481). A `!` first is the last
+  command (`:!!`). `:_!cmd` (Koil's, after the scratchpad's key; `:%_!`
+  with a range) puts what it writes in the scratchpad (`showInScratch`),
+  in place of its text, as a change `u` takes back (`Vim.replaceWhole`):
+  stdout and stderr as for `:!`, but all of it (up to `FILTER_BYTES`) and
+  with its tabs (`Request::scratchpad`). A range is the listing's entries,
+  as for `:!`, or a file's lines on its stdin, which stay. It shows the
+  scratchpad from the listing as `_` does, updating before the command
+  runs (after which the listing might not read: an entry it deleted), and
+  from a file over its dir's listing, as `-` from it would, asking about
+  the file's unsaved changes first (`askToSave`). If it writes nothing,
+  nothing changes. A macro running it goes on in the scratchpad:
+  `endWait`'s `done` shows it as a step of the run (`inChunk`), which
+  `vim.reset` would otherwise interrupt. It runs on a thread
+  (`System.runShell`, one at a time): sh and the like with `-c` (and on
+  macOS those in `LOGIN_SHELLS` with `-l`, as MacVim: an app opened from
+  Finder has only the system's PATH), cmd.exe
   with `/d /s /c "…"` as a raw argument, PowerShell with
   `-EncodedCommand`, and Git Bash with its command line always quoted (its
   runtime globs an argument that isn't), in a process group of its own

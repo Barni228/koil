@@ -154,7 +154,9 @@ QtObject {
     // from 1), or null: Koil runs it in the shell (on the entries of those
     // lines, in the listing), while vim waits (see waiting). In a file, the
     // lines go through it, and its output replaces them (see filterLines).
-    signal shellRequested(string command, var range)
+    // With `scratchpad` (:_!command), its output goes in the scratchpad
+    // instead (see replaceWhole), and a file's lines only go through it.
+    signal shellRequested(string command, var range, bool scratchpad)
     // Esc or Ctrl-C while vim waits.
     signal stopRequested()
     // u (or Cmd+Z) with no change left to undo: Koil offers to undo its last
@@ -2658,9 +2660,20 @@ QtObject {
     }
 
     // What vim waited for is done (see waiting). A run that waited for it
-    // goes on, unless it's `stopped`.
-    function endWait(stopped) {
+    // goes on, unless it's `stopped`. `done`, if given, shows what it did
+    // first (:_!'s output, in the scratchpad), as a step of the run, which
+    // goes on from there rather than being interrupted by it.
+    function endWait(stopped, done) {
         waiting = "";
+        if (done) {
+            const was = inChunk;
+            inChunk = true;
+            try {
+                done();
+            } finally {
+                inChunk = was;
+            }
+        }
         if (running && stopped)
             stopRun();
         else if (running)
@@ -3826,8 +3839,10 @@ QtObject {
             setCursor(clampNormal(t, firstNonBlank(t, Txt.lineToPos(t, line))));
             return;
         }
-        if (c[0] === "!") {
-            shellCommand(c.slice(1), r.first === undefined ? null : r);
+        // :_! is Koil's: the output in the scratchpad (_ in the listing).
+        const bang = /^(_\s*)?!/.exec(c);
+        if (bang) {
+            shellCommand(c.slice(bang[0].length), r.first === undefined ? null : r, !!bang[1]);
             return;
         }
         if (r.first !== undefined) {
@@ -3912,9 +3927,10 @@ QtObject {
         return { first: Math.min(a, b), last: Math.max(a, b), rest: c.slice(i) };
     }
 
-    // :!command (see shellRequested), on the lines of `range` if not null.
-    // A ! it starts with is the last one (:!! runs it again).
-    function shellCommand(command, range) {
+    // :!command (see shellRequested), on the lines of `range` if not null,
+    // its output for the scratchpad with `scratchpad`. A ! it starts with is
+    // the last one (:!! runs it again).
+    function shellCommand(command, range, scratchpad) {
         if (command[0] === "!") {
             if (!lastShell) {
                 showError("E34: No previous command");
@@ -3935,7 +3951,7 @@ QtObject {
             setMode("normal");
             setCursor(clampNormal(bufferText(), cursor));
         }
-        outside(() => shellRequested(command, range));
+        outside(() => shellRequested(command, range, scratchpad));
     }
 
     // Puts `text` in place of lines first to last (from 1), as a change of
@@ -3956,6 +3972,18 @@ QtObject {
             commitChange(); // during a run, with it (see commitChange)
             if (last > first + 1)
                 showMessage((last - first + 1) + " lines filtered");
+        });
+    }
+
+    // Puts `text` in place of all of the text, as a change of its own: what
+    // :_! ran wrote, in the scratchpad (see shellRequested). The cursor goes
+    // to its start.
+    function replaceWhole(text) {
+        batched(() => {
+            beginChange();
+            replaceRange(0, bufferText().length, text);
+            setCursor(clampNormal(bufferText(), 0));
+            commitChange(); // during a run, with it (see commitChange)
         });
     }
 

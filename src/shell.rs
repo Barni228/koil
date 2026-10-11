@@ -1,6 +1,7 @@
 //! Shell commands, as vim's `:!`: `:!cmd` runs `cmd` in the dir Koil has
 //! open, with `%` in it for the entries (or the file) it's run on, and a
-//! filter (`:{range}!cmd` in a file) puts lines through it (see `Request`).
+//! filter (`:{range}!cmd` in a file) puts lines through it, and `:_!cmd`
+//! puts what it writes in the scratchpad (see `Request`).
 //! It runs in the shell the `shell` setting names, else the system's (see
 //! `default_shell`), whose kind says how the command line is passed and how
 //! a path is quoted in it (see `Kind`). One runs at a time, on another
@@ -24,8 +25,8 @@ use crate::{document, listing};
 /// what it shows at once (3000 lines took half a second).
 const SHOWN_BYTES: usize = 1 << 20;
 const SHOWN_LINES: usize = 1000;
-/// How much of a filter's output is kept: past that, it isn't put in, as
-/// the lines would be lost.
+/// How much of a filter's output (or one for the scratchpad) is kept: past
+/// that, it isn't put in, as the lines would be lost (or the rest of it).
 const FILTER_BYTES: usize = 256 << 20;
 /// How often a command that's running is checked for having ended.
 const POLL: Duration = Duration::from_millis(50);
@@ -195,9 +196,14 @@ pub struct Request {
     /// Whether the files go after a command that has no `%` (one run on
     /// lines of the listing).
     pub append: bool,
-    /// The lines a filter puts through it, which it gets on its stdin; none
-    /// for a command whose output is shown, which gets nothing there.
+    /// The lines a filter (or one for the scratchpad) puts through it,
+    /// which it gets on its stdin; none for a command whose output is
+    /// shown, which gets nothing there.
     pub input: Option<String>,
+    /// Whether what it writes goes in the scratchpad (`:_!`): stdout and
+    /// stderr together, as for one whose output is shown, but all of it,
+    /// and with its tabs.
+    pub scratchpad: bool,
 }
 
 /// What a command did.
@@ -205,7 +211,7 @@ pub struct Request {
 pub struct Ran {
     /// What it wrote: a filter's stdout as it is (but `\r\n`, and the line
     /// break at its end), or else stdout and stderr together, as shown (see
-    /// `as_shown`).
+    /// `as_shown`; all of it, with its tabs, for the scratchpad).
     pub output: String,
     /// What a filter wrote to stderr, as shown.
     pub errors: String,
@@ -215,7 +221,8 @@ pub struct Ran {
     pub code: Option<i32>,
     /// Whether `Running::stop` ended it.
     pub stopped: bool,
-    /// Why a filter's output can't be put in, or why waiting failed.
+    /// Why a filter's output (or the scratchpad's) can't be put in, or why
+    /// waiting failed.
     pub error: String,
 }
 
@@ -306,6 +313,7 @@ pub struct Started {
     /// a filter) or stderr (1), and `None` once that's closed.
     output: Receiver<(usize, Option<Vec<u8>>)>,
     filter: bool,
+    scratchpad: bool,
 }
 
 /// Starts `request`'s command: returns the command line as it runs, with
@@ -334,11 +342,15 @@ pub fn start(request: &Request, running: &Running) -> Result<(String, Started), 
     }
     let cant = |err: io::Error| format!("Can't run {}: {err}", request.shell);
     let mut command = command(&request.shell, &line, &request.cwd);
-    let filter = request.input.is_some();
+    let filter = request.input.is_some() && !request.scratchpad;
     let (sender, output) = mpsc::sync_channel(16);
     let mut child;
+    command.stdin(if request.input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
     if filter {
-        command.stdin(Stdio::piped());
         command.stdout(Stdio::piped()).stderr(Stdio::piped());
         child = command.spawn().map_err(cant)?;
         read(child.stdout.take(), 0, sender.clone());
@@ -346,7 +358,6 @@ pub fn start(request: &Request, running: &Running) -> Result<(String, Started), 
     } else {
         // Both through one pipe, so they're in the order they were written.
         let (reader, writer) = io::pipe().map_err(cant)?;
-        command.stdin(Stdio::null());
         command
             .stdout(writer.try_clone().map_err(cant)?)
             .stderr(writer);
@@ -365,6 +376,7 @@ pub fn start(request: &Request, running: &Running) -> Result<(String, Started), 
         child,
         output,
         filter,
+        scratchpad: request.scratchpad,
     };
     Ok((line, started))
 }
@@ -393,7 +405,7 @@ impl Started {
     /// Waits for the command to end, keeping what it writes, and a moment
     /// longer for what it started (`&`), if that still has its output open.
     pub fn finish(mut self, running: &Running) -> Ran {
-        let limit = if self.filter {
+        let limit = if self.filter || self.scratchpad {
             FILTER_BYTES
         } else {
             SHOWN_BYTES
@@ -443,9 +455,14 @@ impl Started {
                 Some(output) => output.to_string(),
                 None => output,
             };
-            (ran.errors, ran.cut) = shown_lines(as_shown(err.bytes), err.more_lines);
+            (ran.errors, ran.cut) = shown_lines(as_shown(err.bytes, false), err.more_lines);
+        } else if self.scratchpad {
+            if out.over {
+                ran.error = "The output is too long to put in".to_string();
+            }
+            ran.output = as_shown(out.bytes, true);
         } else {
-            (ran.output, ran.cut) = shown_lines(as_shown(out.bytes), out.more_lines);
+            (ran.output, ran.cut) = shown_lines(as_shown(out.bytes, false), out.more_lines);
         }
         ran
     }
@@ -494,9 +511,10 @@ fn shown_lines(text: String, more: usize) -> (String, usize) {
 /// Output as a terminal would show it, as plain text: without what's for
 /// the terminal (colors and other escapes, the control characters), with
 /// what `\r` or a backspace went back and wrote over written over (a
-/// progress bar, a man page's bold), tabs as spaces (to every 8th column),
-/// and no blanks at the ends of lines, or blank lines at the end.
-pub fn as_shown(bytes: Vec<u8>) -> String {
+/// progress bar, a man page's bold), tabs as spaces (to every 8th column;
+/// with `tabs`, kept, each a column), and no blanks at the ends of lines, or
+/// blank lines at the end.
+pub fn as_shown(bytes: Vec<u8>, tabs: bool) -> String {
     let text = document::decode_lossy(bytes);
     let mut lines: Vec<String> = Vec::new();
     let mut line: Vec<char> = Vec::new();
@@ -519,6 +537,7 @@ pub fn as_shown(bytes: Vec<u8>) -> String {
             }
             '\r' => column = 0,
             '\x08' => column = column.saturating_sub(1),
+            '\t' if tabs => put(&mut line, &mut column, c),
             '\t' => {
                 for _ in 0..8 - column % 8 {
                     put(&mut line, &mut column, ' ');
