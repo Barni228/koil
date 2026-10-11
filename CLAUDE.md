@@ -782,7 +782,9 @@ the scratchpad (see Scratchpad).
 - **Colors** (`setListingColors` in native.cpp): a `QSyntaxHighlighter` on
   the editor's document colors each line's icon (colors from devicons,
   gathered from every listing shown, `iconColors`, dark or light by theme)
-  and `/`-ending names (`theme.directory`). It's text-based, so it follows
+  and a name up to its last `/` (`theme.directory`: a dir's whole name,
+  and the dirs of a pattern's path, `src/` of `src/main.rs`). It's
+  text-based, so it follows
   edits. A pending entry's icon (one applying would change: new, but not
   `../`, or at a path that isn't its ID's on disk, so renamed, copied or
   moved here; `listing::pending_lines`, from `Koil::is_pending`) is pure white in a dark theme and

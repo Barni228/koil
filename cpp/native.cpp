@@ -146,8 +146,11 @@ protected:
       setFormat(start, length, pending.contains(currentBlock().blockNumber()) ? pendingIcon : *icon);
       start += length;
     }
-    if (trimmed.endsWith(u'/'))
-      setFormat(start, text.size() - start, directory);
+    // A dir's name ends with a `/`, and so do the dirs in a pattern's
+    // path (`src/main.rs`): all of it up to the last one is dirs.
+    const qsizetype slash = text.lastIndexOf(u'/');
+    if (slash >= start)
+      setFormat(start, slash + 1 - start, directory);
   }
 };
 
