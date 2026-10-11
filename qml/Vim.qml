@@ -160,9 +160,13 @@ QtObject {
         "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>"]
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
-        "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "gv", "gh", "<C-a>", "<C-x>", "q", "@", "<C-v>", "<Esc>"]
+        "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
+        "<C-x>", "q", "@", "<C-v>", "<Esc>"]
     readonly property var visualActions: ["<Esc>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D", "s",
-        "C", "S", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>"]
+        "C", "S", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>",
+        "zh", "zl", "zH", "zL", "zs", "ze"]
+    // Scroll the view sideways (see scrollSideways).
+    readonly property var sideScrolls: ["zh", "zl", "zH", "zL", "zs", "ze"]
     // Normal-mode commands that run at every cursor (as do operators and
     // motions). "." does too, through the command it repeats.
     readonly property var everyCursorActions: ["i", "a", "I", "A", "gI", "o", "O", "x", "<Del>", "X", "s",
@@ -1447,6 +1451,14 @@ QtObject {
         case "<C-y>":
             scrollText(cmd.action === "<C-e>" ? count : -count);
             break;
+        case "zh":
+        case "zl":
+        case "zH":
+        case "zL":
+        case "zs":
+        case "ze":
+            scrollSideways(cmd.action, count);
+            break;
         case "<Esc>":
             highlightPattern = "";
             cursors = [];
@@ -1535,6 +1547,10 @@ QtObject {
         }
         if (a === "<C-e>" || a === "<C-y>") {
             scrollText(a === "<C-e>" ? count : -count);
+            return;
+        }
+        if (sideScrolls.includes(a)) {
+            scrollSideways(a, count);
             return;
         }
         if (mode === "visualBlock" && executeBlock(cmd))
@@ -2651,7 +2667,7 @@ QtObject {
         // past the end of a shorter text, it showed nothing.
         const restore = () => {
             if (view) {
-                flickable.contentX = Math.min(view.x, Math.max(0, flickable.contentWidth - flickable.width));
+                flickable.contentX = Math.min(view.x, maxScrollX());
                 flickable.contentY = Math.min(view.y, maxScroll());
             }
         };
@@ -4291,7 +4307,7 @@ QtObject {
             return;
         }
         const r = editor.positionToRectangle(searchTarget);
-        const maxX = Math.max(0, flickable.contentWidth - flickable.width);
+        const maxX = maxScrollX();
         // Text in the left padding is under the line numbers, if they're on.
         const x = r.x < searchView.x + editor.leftPadding || r.x + r.width > searchView.x + flickable.width
             ? r.x - flickable.width / 2 : searchView.x;
@@ -4376,6 +4392,34 @@ QtObject {
         showColumn();
     }
 
+    // How far right the view scrolls at most: into the room the editor
+    // leaves right of the text (Editor.qml's `sideScrollRoom`), as far as the
+    // notes and messages after the lines reach.
+    function maxScrollX() {
+        return Math.max(0, flickable.contentWidth + flickable.rightMargin - flickable.width);
+    }
+
+    // The columns kept in view on either side of the cursor: sideScrollOff,
+    // or fewer if the view is too narrow for them.
+    function sideRoom() {
+        const columns = Math.floor((flickable.width - editor.leftPadding - editor.rightPadding) / charWidth);
+        return Math.max(0, Math.min(sideScrollOff, Math.floor((columns - 1) / 2)));
+    }
+
+    // Where the view's left edge goes at most and at least to show the
+    // cursor (see showColumn), as { left, right } contentX.
+    function cursorSpan() {
+        const t = bufferText(), p = Math.min(cursor, t.length), ls = Txt.lineStart(t, p);
+        const r = editor.positionToRectangle(p), room = sideRoom() * charWidth;
+        let left = r.x - room;
+        if (left <= editor.positionToRectangle(prefixEnd(t, ls)).x)
+            left = editor.positionToRectangle(ls).x;
+        const right = (p < Txt.lineEnd(t, p) ? editor.positionToRectangle(Txt.charEnd(t, p)).x : r.x + charWidth)
+            + room + editor.rightPadding;
+        // The left edge is the padding, where the line numbers are.
+        return { left: left - editor.leftPadding, right: right - flickable.width };
+    }
+
     // Scrolls sideways as little as shows all of the character the cursor
     // is on (the editor's cursor rectangle is a bar, only as wide as a
     // line), sideScrollOff columns on either side of it (fewer if the view
@@ -4385,25 +4429,52 @@ QtObject {
     function showColumn() {
         if (!flickable || batch)
             return; // as showCursor
-        const t = bufferText(), p = Math.min(cursor, t.length), ls = Txt.lineStart(t, p);
-        const f = flickable, r = editor.positionToRectangle(p);
-        const columns = Math.floor((f.width - editor.leftPadding - editor.rightPadding) / charWidth);
-        const room = Math.max(0, Math.min(sideScrollOff, Math.floor((columns - 1) / 2))) * charWidth;
-        let left = r.x - room;
-        if (left <= editor.positionToRectangle(prefixEnd(t, ls)).x)
-            left = editor.positionToRectangle(ls).x;
-        const right = (p < Txt.lineEnd(t, p) ? editor.positionToRectangle(Txt.charEnd(t, p)).x : r.x + charWidth)
-            + room + editor.rightPadding;
-        // The left edge is the padding, where the line numbers are. If both
-        // sides can't be in view, the left one is.
+        const f = flickable, span = cursorSpan();
+        // If both sides can't be in view, the left one is.
         let x = f.contentX;
-        if (right > x + f.width)
-            x = right - f.width;
-        if (left < x + editor.leftPadding)
-            x = left - editor.leftPadding;
-        x = Math.max(0, Math.min(x, f.contentWidth - f.width));
+        if (span.right > x)
+            x = span.right;
+        if (span.left < x)
+            x = span.left;
+        x = Math.max(0, Math.min(x, maxScrollX()));
         if (x !== f.contentX)
             f.contentX = x;
+    }
+
+    // zh and zl scroll the view sideways `count` columns, zH and zL half
+    // the view, as far as maxScrollX, and move the cursor only as far as
+    // keeps it in view (sideScrollOff columns from the edge), as vim's do.
+    // Unless its line ends before the view: then the view shows past it
+    // (a long line's note or message, which vim can't), until the cursor
+    // moves. zs and ze scroll the cursor to the left or right edge.
+    function scrollSideways(how, count) {
+        if (!flickable)
+            return;
+        if (batch)
+            flush(); // as scrollLines
+        const f = flickable, span = cursorSpan();
+        const half = Math.max(1, Math.floor((f.width - editor.leftPadding - editor.rightPadding) / charWidth / 2));
+        const by = { zh: -count, zl: count, zH: -half, zL: half }[how];
+        const x = how === "zs" ? span.left : how === "ze" ? span.right : f.contentX + by * charWidth;
+        f.contentX = Math.max(0, Math.min(x, maxScrollX()));
+        // Half a pixel either way, as the view scrolls by whole ones (a
+        // ScrollView's Flickable is pixelAligned).
+        if (how === "zs" || how === "ze" || span.left >= f.contentX - 0.5 && span.right <= f.contentX + 0.5)
+            return;
+        // The column sideRoom from the edge the cursor is past. Going right,
+        // past where its room would reach a name's prefix, which would
+        // scroll back to show all of it (see cursorSpan).
+        const t = bufferText(), ls = Txt.lineStart(t, Math.min(cursor, t.length));
+        const x0 = editor.positionToRectangle(ls).x, room = sideRoom() * charWidth;
+        const col = span.left < f.contentX
+            ? Math.max(Math.ceil((f.contentX + editor.leftPadding + room - x0 - 0.5) / charWidth),
+                Txt.column(t, prefixEnd(t, ls)) + sideRoom() + 1)
+            : Math.floor((f.contentX + f.width - editor.rightPadding - room - x0 + 0.5) / charWidth) - 1;
+        const p = Txt.atColumn(t, ls, Math.max(0, col));
+        if (Txt.column(t, p) < col)
+            return; // the line ends before the view
+        setCursor(p);
+        wantCol = Txt.column(t, cursor);
     }
 
     // Ctrl-E and Ctrl-Y: scrolls the view `lines` whole lines (down if

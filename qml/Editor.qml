@@ -122,6 +122,22 @@ Item {
             system.setPendingLines(editor.textDocument, pendingLines.map(String));
     }
 
+    // A press at x, y in the editor's coordinates, in the room the view
+    // scrolls into past the text (`scrollRoom`, `sideScrollRoom`), which
+    // isn't the editor's: to the closest position, as in the editor.
+    function pressBeside(x, y, modifiers) {
+        if (!active)
+            activated();
+        editor.forceActiveFocus();
+        const p = editor.positionAt(x, y);
+        if (modifiers & Qt.AltModifier) {
+            vim.toggleCursor(p);
+        } else {
+            vim.clearCursors();
+            editor.cursorPosition = p;
+        }
+    }
+
     onListingChanged: applyColors()
     onIconColorsChanged: applyColors()
     onPendingIconColorChanged: applyColors()
@@ -404,6 +420,18 @@ Item {
         when: !view.pathField
     }
 
+    // Room right of the text for the view to scroll into, as far as the
+    // notes and messages after the lines reach (see `aside`), so one that
+    // ends past the view can be read. A margin, as `scrollRoom` is: padding
+    // would have Qt lay out all of the text again whenever it changed.
+    Binding {
+        id: sideScrollRoom
+
+        target: view.flickable
+        property: "rightMargin"
+        value: Math.max(0, editor.leftPadding + aside.widest * view.charWidth + editor.rightPadding - view.flickable.contentWidth)
+    }
+
     // A line with a cursor, a shade off the background as in other editors.
     component Band: Rectangle {
         required property rect row
@@ -565,17 +593,23 @@ Item {
                 width: editor.width
                 height: view.flickable.bottomMargin
                 cursorShape: Qt.IBeamCursor
-                onPressed: mouse => {
-                    if (!view.active)
-                        view.activated();
-                    editor.forceActiveFocus();
-                    const p = editor.positionAt(mouse.x, editor.height + mouse.y);
-                    if (mouse.modifiers & Qt.AltModifier) {
-                        view.vim.toggleCursor(p);
-                    } else {
-                        view.vim.clearCursors();
-                        editor.cursorPosition = p;
-                    }
+                onPressed: mouse => view.pressBeside(mouse.x, editor.height + mouse.y, mouse.modifiers)
+            }
+
+            // Nor is the room right of it (see `sideScrollRoom`): a click
+            // there goes to its line's end, as one past a short line does,
+            // and the pointer on a message there shows it, as on one in
+            // the editor.
+            MouseArea {
+                x: editor.width
+                width: view.flickable.rightMargin
+                height: editor.height
+                cursorShape: Qt.IBeamCursor
+                onPressed: mouse => view.pressBeside(editor.width + mouse.x, mouse.y, mouse.modifiers)
+
+                HoverHandler {
+                    onPointChanged: hover.pointerAt(hovered ? Qt.point(editor.width + point.position.x, point.position.y) : null)
+                    onHoveredChanged: hover.pointerAt(hovered ? Qt.point(editor.width + point.position.x, point.position.y) : null)
                 }
             }
 
@@ -703,6 +737,8 @@ Item {
                 // Where the notes and the messages are lined up (-1: not).
                 property int noteColumn: -1
                 property int messageColumn: -1
+                // The column the last of them ends at (see sideScrollRoom).
+                property int widest: 0
                 readonly property var inputs: [view.infos, view.hidden, view.problems, editor.revision, room]
 
                 function refresh() {
@@ -733,6 +769,14 @@ Item {
                     const all = Array.from(lines.values());
                     noteColumn = Txt.inLine(all.filter(l => l.note).map(l => ({ own: l.end + gap, width: l.note.length })), room);
                     messageColumn = Txt.inLine(all.filter(l => l.message).map(l => ({ own: messageFrom(l.end, l.note), width: l.message.length })), room);
+                    let end = 0;
+                    for (const l of all) {
+                        if (l.note)
+                            end = Math.max(end, Txt.cellColumn(l.end + gap, l.note.length, noteColumn, room) + l.note.length);
+                        if (l.message)
+                            end = Math.max(end, Txt.cellColumn(messageFrom(l.end, l.note), l.message.length, messageColumn, room) + l.message.length);
+                    }
+                    widest = end;
                 }
 
                 // The column a message goes at on a line ending at column

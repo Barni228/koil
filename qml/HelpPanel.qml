@@ -270,12 +270,15 @@ Popup {
         {
             title: "Other keys",
             tags: ["keys", "other", "ctrl-a", "ctrl-x", "g?", "rot13", "ctrl-e", "ctrl-y", "scroll", "zoom",
-                "settings", "undo", "gv", "zz"],
+                "settings", "undo", "gv", "zz", "zl", "zh", "sideways"],
             rows: [
                 ["`Ctrl-A`  `Ctrl-X`", "Add to or subtract from the number at or after the cursor."],
                 ["`g?`  `g~`  `gu`  `gU`", "ROT13, toggle case, lowercase, uppercase (e.g. `g?w`)."],
                 ["`Ctrl-E`  `Ctrl-Y`", "Scroll a line down or up."],
                 ["`zz`  `zt`  `zb`", "Scroll the cursor's line to the middle, top or bottom."],
+                ["`zl`  `zh`  `zL`  `zH`", "Scroll sideways a column or half the view, as far as the sizes "
+                    + "and messages after the lines."],
+                ["`zs`  `ze`", "Scroll sideways to put the cursor at the left or right edge."],
                 ["`gv`", "Select the last visual selection again."],
                 [isMac ? "`⌘Z`  `⇧⌘Z`" : "`Ctrl+Z`  `Ctrl+Shift+Z`",
                     "Undo and redo, like `u` and `Ctrl-R`."],

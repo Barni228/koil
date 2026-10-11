@@ -951,7 +951,14 @@ the scratchpad (see Scratchpad).
   cursor keeps `:set sidescrolloff` (default 4) columns in view on either
   side wherever it moves (`showColumn`, after Qt's own scroll: `flush`,
   `setCursor`, and typing, a `Qt.callLater`), and at a name's start in the
-  listing the whole prefix, so `0` scrolls all the way left. Vim keeps its own undo stack (diffs per change), so native
+  listing the whole prefix, so `0` scrolls all the way left. The view
+  scrolls right past the text as far as the notes and messages after its
+  lines reach (`sideScrollRoom`, the `rightMargin`; `maxScrollX`), for
+  the wheel, the scroll bar and `zh`, `zl`, `zH`, `zL`
+  (`scrollSideways`), which move the cursor as far as keeps it in view, as
+  vim's do, but unlike vim's go on past the end of its line (which vim
+  stops at), leaving the cursor, so a long line's note or message can be
+  read; `zs` and `ze` put the cursor at an edge. Vim keeps its own undo stack (diffs per change), so native
   undo (Cmd+Z) is routed to it. Only the `"+`/`"*` registers use the system
   clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
@@ -1103,7 +1110,11 @@ the scratchpad (see Scratchpad).
   still end in view (`Txt.inLine`: one of their own columns, right after
   the line), so a line too long for it has its own after its end, and so
   does one that would end past the view's edge if it went in line (a long
-  message) and is cut there anyway. They're worked out over all the text
+  message), which the view then scrolls to (`widest`, the column the last
+  of them ends at, makes `sideScrollRoom`; a click there goes to the
+  line's end, and the hover box shows a message there, through a
+  `MouseArea` of its own, as the room isn't the editor's). They're worked
+  out over all the text
   (`aside.refresh`, counting a column per code point, `Txt.columns`, as
   `Txt.column` is too slow for all of a long listing), so they don't move
   as it scrolls, but whenever it changes, or the notes, the problems or the

@@ -295,6 +295,7 @@ TestCase {
         vim.flickable = null;
         narrow.height = 30;
         (narrow.contentItem as Flickable).bottomMargin = 0;
+        (narrow.contentItem as Flickable).rightMargin = 0;
         vim.singleLine = false;
         vim.linePrefixes = false;
         vim.commandKeys = {};
@@ -1266,6 +1267,88 @@ TestCase {
         compare(vim.cursor, 20);
         fuzzyCompare(f.contentX + f.width, x(23) + narrowText.rightPadding, 0.5);
         keys("<Esc>");
+    }
+
+    // zl and zh scroll sideways, as far as the room right of the text
+    // (Editor.qml's sideScrollRoom), and move the cursor as far as keeps
+    // it sidescrolloff columns in view, unless its line ends before the
+    // view, which then stays. zL and zH scroll half the view, zs and ze
+    // put the cursor at its edges.
+    function test_scrollSideways() {
+        load("one");
+        narrowText.text = "x".repeat(60) + "\nab";
+        waitForRendering(narrow);
+        const f = narrow.contentItem as Flickable;
+        switchTo(narrowText, {
+            cursor: 0
+        }, f);
+        const x = p => narrowText.positionToRectangle(p).x;
+        const cw = x(1) - x(0), left = narrowText.leftPadding, right = narrowText.rightPadding;
+        vim.charWidth = cw;
+        f.rightMargin = 20 * cw;
+        keys(":set siso=2<CR>");
+        keys("3zl");
+        fuzzyCompare(f.contentX, 3 * cw, 0.5);
+        compare(vim.cursor, 5);
+        // The cursor's line is long enough until the view is past it.
+        const max = f.contentWidth + f.rightMargin - f.width;
+        keys("100zl");
+        fuzzyCompare(f.contentX, max, 0.5);
+        verify(f.contentX > f.contentWidth - f.width + 1, "into the room right of the text");
+        compare(vim.cursor, 5);
+        keys("zh");
+        fuzzyCompare(f.contentX, max - cw, 0.5);
+        // Moving the cursor shows it again.
+        keys("l");
+        compare(vim.cursor, 6);
+        fuzzyCompare(f.contentX + left, x(4), 0.5);
+        keys("zL");
+        const half = Math.floor((f.width - left - right) / cw / 2);
+        fuzzyCompare(f.contentX + left, x(4) + half * cw, 0.5);
+        compare(vim.cursor, 4 + half + 2);
+        keys("zH");
+        fuzzyCompare(f.contentX + left, x(4), 0.5);
+        compare(vim.cursor, 4 + half + 2, "still in view");
+        keys("zs");
+        fuzzyCompare(f.contentX + left, x(vim.cursor - 2), 0.5);
+        keys("ze");
+        fuzzyCompare(f.contentX + f.width, x(vim.cursor + 3) + right, 0.5);
+        // The cursor right of the view goes left.
+        keys("$100zh");
+        compare(f.contentX, 0);
+        fuzzyCompare(x(vim.cursor + 3) + right, f.width, cw);
+        verify(x(vim.cursor + 3) + right <= f.width + 0.5, "the cursor is in view");
+        // In visual mode too.
+        keys("0v10zl");
+        fuzzyCompare(f.contentX, 10 * cw, 0.5);
+        compare(vim.mode, "visual");
+        compare(vim.cursor, 12);
+        keys("<Esc>");
+    }
+
+    // From a name's start in the listing, zl keeps scrolling right: the
+    // cursor goes past where its room would reach the prefix, which would
+    // scroll back to show all of it.
+    function test_scrollSidewaysPrefix() {
+        load("one");
+        narrowText.text = mushroom + "  " + "x".repeat(60);
+        waitForRendering(narrow);
+        const f = narrow.contentItem as Flickable;
+        vim.linePrefixes = true;
+        switchTo(narrowText, {
+            hidden: [{ at: 0, icon: mushroom, text: "1" }]
+        }, f);
+        const x = p => narrowText.positionToRectangle(p).x;
+        vim.charWidth = x(10) - x(9);
+        keys(":set siso=2<CR>");
+        keys("0");
+        compare(f.contentX, 0);
+        let last = 0;
+        for (let i = 1; i <= 10; i++) {
+            keys("zl");
+            verify(f.contentX > last, "zl " + i + " scrolls right");
+            last = f.contentX;
+        }
     }
 
     // At a name's start in the listing, the view shows its prefix, the
