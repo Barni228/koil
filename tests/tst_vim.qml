@@ -299,6 +299,7 @@ TestCase {
         vim.singleLine = false;
         vim.linePrefixes = false;
         vim.commandKeys = {};
+        vim.shortcuts = [];
         vim.completer = null;
         vim.lineHistory = null;
     }
@@ -1119,6 +1120,71 @@ TestCase {
         keys("gx");
         compare(vim.pendingKeys, "");
         compare(keyCommands.count, 2);
+    }
+
+    // The user's shortcuts run their keys as a macro does, with a count,
+    // in the modes they're for.
+    function test_shortcuts() {
+        load("1\n1\n1\n1");
+        vim.commandKeys = { "  ": "apply" };
+        vim.shortcuts = [
+            { keys: " i", macro: "<C-a>j", label: "Space i", normal: true, visual: false },
+            { keys: " u", macro: "U", label: "Space u", normal: false, visual: true }
+        ];
+        keys(" i");
+        compare(editor.text, "2\n1\n1\n1");
+        compare(cursorLine(), 2);
+        keys("2 i");
+        compare(editor.text, "2\n2\n2\n1");
+        // a run is one undo step
+        keys("u");
+        compare(editor.text, "2\n1\n1\n1");
+        // not in the other mode: Space u in normal mode is a bad command,
+        // and Space i in visual mode still moves
+        keys("gg u");
+        compare(editor.text, "2\n1\n1\n1");
+        compare(vim.pendingKeys, "");
+        load("one two\nthree");
+        const visual = vim.shortcuts.filter(s => s.visual);
+        vim.shortcuts = vim.shortcuts.filter(s => s.normal);
+        keys("v ");
+        compare(vim.cursor, 1);
+        keys("<Esc>");
+        vim.shortcuts = vim.shortcuts.concat(visual, [
+            { keys: " d", macro: "d", label: "Space d", normal: false, visual: true }
+        ]);
+        keys("viw u");
+        compare(editor.text, "ONE two\nthree");
+        compare(vim.mode, "normal");
+        keys("wvl d");
+        compare(editor.text, "ONE o\nthree");
+        // Space then a key no shortcut has, in visual mode
+        keys("v x");
+        compare(vim.mode, "visual");
+        compare(editor.text, "ONE o\nthree");
+        keys("<Esc>");
+    }
+
+    // Koil's own keys come before a shortcut's, which a macro records as
+    // typed, and the registers a shortcut can take its keys from.
+    function test_shortcutsAndMacros() {
+        load("1\n1\n1");
+        vim.commandKeys = { " a": "applyAsking" };
+        vim.shortcuts = [
+            { keys: " a", macro: "x", label: "Space a", normal: true, visual: false },
+            { keys: " i", macro: "<C-a>j", label: "Space i", normal: true, visual: false }
+        ];
+        keyCommands.clear();
+        keys(" a");
+        compare(keyCommands.signalArguments.map(a => a[0]), ["applyAsking"]);
+        compare(editor.text, "1\n1\n1");
+        keys("qq iq");
+        compare(editor.text, "2\n1\n1");
+        compare(vim.getRegister("q").text, " i");
+        keys("@q");
+        compare(editor.text, "2\n2\n1");
+        keys("\"ayy");
+        compare(vim.macroList().map(m => "\"" + m.name + " " + m.keys), ["\"a 1<CR>", "\"q  i", "\"\" 1<CR>"]);
     }
 
     // What's drawn after lines (Editor's notes and messages) goes in a

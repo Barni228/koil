@@ -33,7 +33,7 @@ Window {
     readonly property real zoom: theme.zoom
     readonly property color textColor: theme.windowText
     readonly property color accent: theme.accent
-    readonly property color borderColor: theme.dark ? Qt.tint(theme.window, "#30ffffff") : "#cecece"
+    readonly property color borderColor: theme.fieldBorder
 
     // Line numbers as one choice: :set nonu nornu, nu, rnu, or both.
     readonly property var lineNumberModes: [
@@ -180,90 +180,6 @@ Window {
         iconPath: "M6 3 L3 6 L6 9 M3 6 H10 A3 3 0 0 1 10 12 H7"
         tip: qsTr("Reset to Default")
         opacity: enabled ? 1 : 0
-    }
-
-    // One of a few options, as a row of buttons.
-    component Segmented: Rectangle {
-        id: segmented
-
-        property var options: [] // { label }
-        property int current: -1
-
-        signal picked(int index)
-
-        implicitWidth: row.implicitWidth + 4 * win.zoom
-        implicitHeight: 26 * win.zoom
-        radius: 4 * win.zoom
-        color: win.theme.field
-        border.color: win.borderColor
-
-        Row {
-            id: row
-
-            anchors.centerIn: parent
-            spacing: 2 * win.zoom
-
-            Repeater {
-                model: segmented.options
-
-                AbstractButton {
-                    id: option
-
-                    required property var modelData
-                    required property int index
-                    readonly property bool selected: index === segmented.current
-
-                    implicitWidth: optionText.implicitWidth + 20 * win.zoom
-                    implicitHeight: segmented.height - 4 * win.zoom
-                    focusPolicy: Qt.TabFocus
-                    hoverEnabled: true
-                    Accessible.name: modelData.label
-                    Accessible.role: Accessible.RadioButton
-                    Accessible.checked: selected
-                    onClicked: segmented.picked(index)
-
-                    background: Rectangle {
-                        radius: 3 * win.zoom
-                        color: option.selected ? win.accent : option.hovered ? win.theme.hover : "transparent"
-                        border.color: option.visualFocus ? win.accent : "transparent"
-                    }
-                    contentItem: Text {
-                        id: optionText
-
-                        text: option.modelData.label
-                        font.pixelSize: Math.round(13 * win.zoom)
-                        color: option.selected ? win.theme.highlightedText : win.textColor
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-            }
-        }
-    }
-
-    // A button with a label.
-    component TextButton: AbstractButton {
-        id: textButton
-
-        implicitWidth: implicitContentWidth + 24 * win.zoom
-        implicitHeight: 26 * win.zoom
-        opacity: enabled ? 1 : 0.4
-        focusPolicy: Qt.TabFocus
-        hoverEnabled: true
-        Accessible.name: text
-
-        background: Rectangle {
-            radius: 4 * win.zoom
-            color: textButton.hovered || textButton.pressed ? Qt.tint(win.theme.field, win.theme.hover) : win.theme.field
-            border.color: textButton.visualFocus ? win.accent : win.borderColor
-        }
-        contentItem: Text {
-            text: textButton.text
-            font.pixelSize: Math.round(13 * win.zoom)
-            color: win.textColor
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
     }
 
     component SettingLabel: Label {
@@ -568,6 +484,7 @@ Window {
                 text: qsTr("Line numbers")
             }
             Segmented {
+                theme: win.theme
                 options: win.lineNumberModes
                 current: win.lineNumberMode
                 onPicked: index => win.setLineNumberMode(index)
@@ -581,6 +498,7 @@ Window {
                 text: qsTr("Theme")
             }
             Segmented {
+                theme: win.theme
                 options: win.colorSchemes
                 current: win.colorSchemes.findIndex(t => t.value === win.settings.colorScheme)
                 onPicked: index => win.app.changeSetting("colorScheme", win.colorSchemes[index].value)
@@ -594,6 +512,7 @@ Window {
                 text: qsTr("Ask before applying")
             }
             Segmented {
+                theme: win.theme
                 options: win.confirmModes
                 current: win.confirmModes.findIndex(m => m.value === win.settings.confirmChanges)
                 onPicked: index => win.app.changeSetting("confirmChanges", win.confirmModes[index].value)
@@ -807,6 +726,35 @@ Window {
             }
 
             SettingLabel {
+                text: qsTr("Shortcuts")
+            }
+            // The user's (see ShortcutsWindow), which Restore Defaults
+            // leaves alone.
+            TextButton {
+                theme: win.theme
+                text: qsTr("Edit Shortcuts…")
+                onClicked: win.app.openShortcuts()
+            }
+            Item {}
+
+            Item {}
+            Text {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                Layout.topMargin: -4 * win.zoom
+                text: (win.app.shortcuts.length === 0 ? qsTr("None yet")
+                    : win.app.shortcuts.length === 1 ? qsTr("1 shortcut") : qsTr("%1 shortcuts").arg(win.app.shortcuts.length))
+                    + qsTr(": Space and a key of yours, which run keys as a macro does.")
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+                font.pixelSize: Math.round(12 * win.zoom)
+                color: win.textColor
+                opacity: 0.6
+                wrapMode: Text.WordWrap
+            }
+            Item {}
+
+            SettingLabel {
                 visible: win.app.isMac
                 text: qsTr("Open from Finder")
             }
@@ -840,6 +788,7 @@ Window {
                     }
                 }
                 TextButton {
+                    theme: win.theme
                     text: qsTr("Change in System Settings…")
                     onClicked: Qt.openUrlExternally("x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Spotlight")
                 }
@@ -876,6 +825,7 @@ Window {
             // /usr/local/bin that runs this Koil, which macOS asks an
             // admin's password to put there or take away.
             TextButton {
+                theme: win.theme
                 visible: win.app.isMac
                 enabled: !win.changingCommand
                 text: win.commandStatus === "installed" ? qsTr("Remove “koil” Command")
@@ -912,6 +862,7 @@ Window {
         }
 
         TextButton {
+            theme: win.theme
             Layout.alignment: Qt.AlignRight
             text: qsTr("Restore Defaults")
             enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme

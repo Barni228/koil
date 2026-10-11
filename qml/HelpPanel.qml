@@ -222,7 +222,8 @@ Popup {
             title: "Registers and macros",
             tags: ["registers", "register", "reg", "clipboard", "\"", "\"+", "+", "*", "\"0", "\"_", "\"-",
                 "\"1", "\".", "\":", "\"/", "\"%", "macros", "macro",
-                "q", "@", "@@", "record", "recording", "yank", "paste", "p", "y"],
+                "q", "@", "@@", "record", "recording", "yank", "paste", "p", "y", "shortcuts", "shortcut", "map",
+                "mapping", "mappings"],
             rows: [
                 ["`\"+`  `\"*`", "The system clipboard, e.g. `\"+yy`. Plain `y` and `p` don't use it; "
                     + (isMac ? "`⌘C` and `⌘V` do." : "`Ctrl+C` does, and `Ctrl+V` while typing.")],
@@ -232,7 +233,10 @@ Popup {
                 ["`\".`  `\":`  `\"/`  `\"%`", "The last insert, command and search, and the open file or dir."],
                 ["`qa` … `q`", "Record keys into register `a`. `qA` appends to it."],
                 ["`@a`  `3@a`  `@@`", "Run the macro in `a`, three times, or the last one again. `u` undoes a "
-                    + "whole run, and `Esc` stops a long one."]
+                    + "whole run, and `Esc` stops a long one."],
+                ["`Space` and a key", "Your shortcuts (" + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
+                    + ", or Settings): keys of yours that run as a macro does, like `:!git add %<CR>`, in normal "
+                    + "mode, visual mode or both. A count runs one that many times."]
             ]
         },
         {

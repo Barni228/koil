@@ -88,8 +88,11 @@ the scratchpad (see Scratchpad).
   the question: `:confirm q`, applying and undoing (lists to pick from),
   and what changed on disk against the user's edits.
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,).
+- `qml/ShortcutsWindow.qml`: the user's shortcuts, listed and edited (see
+  Shortcuts).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
-  look the app's own controls share (see Theme).
+  look the app's own controls share (see Theme), and `TextButton.qml` and
+  `Segmented.qml`, the buttons the Settings and Shortcuts windows share.
 - `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml, the find bar and the
   help's search.
 - `scripts/`: `bundle-macos.sh` (makes the `.app`), `package-macos.sh` (the
@@ -824,6 +827,29 @@ the scratchpad (see Scratchpad).
   (`defaultFontFamily`), by the family Qt gives it (`System.nerdFontFamily`,
   as the font has two names, and which one Qt uses depends on the
   platform). Only the regular weight is shipped: the editor draws no bold.
+- **Shortcuts** (`Vim.shortcuts`, ShortcutsWindow.qml): the user's own,
+  Space and a key that run keys of theirs as `@` runs a register's
+  (`runKeys`: in chunks, one undo step, Esc stops it, a count runs it that
+  many times), in normal mode, visual mode or both, wherever vim is (the
+  listing, the path field, a file, the scratchpad). `commandFor` matches
+  them after `commandKeys`, which are normal mode's only; in visual mode
+  too, so once one is for visual mode, Space there waits for its key
+  rather than moving, and Space and another key is a bad command. A macro
+  recorded meanwhile keeps the Space and the key, not what they ran.
+  They're saved in `settings.shortcuts`, as JSON of `{ name, key, macro,
+  mode, enabled }` (`readShortcuts` drops what isn't one, as the settings
+  can be edited by hand), which Restore Defaults leaves alone, and only
+  the enabled ones with a key reach vim. The window (Koil > Shortcuts…,
+  `ApplicationSpecificRole`, which puts it in the app menu; File >
+  Shortcuts… elsewhere; and a button in Settings) lists each by its name,
+  else its key, else its keys, and a click (or +) shows it in a form,
+  which Save saves (Esc and Cancel go back to the list). Its key can't be
+  one of Koil's after Space (`spaceKeys`), nor one another enabled shortcut
+  has in the same mode (`problemOf`). Its keys are typed as `q` records
+  them (`<CR>`), or taken from a register `q` records into
+  (`Vim.macroList`). The window's height is the form's, worked out before
+  the form is first laid out, when a wrapped text is measured too tall, so
+  its hint is one line.
 - **Clipboard**: the `"+` data carries `session`, random per run; another
   Koil's hidden texts (IDs, which mean other paths there) are dropped on
   paste, so its lines become new entries rather than copies of whatever has

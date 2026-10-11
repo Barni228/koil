@@ -77,6 +77,13 @@ QtObject {
     // Space and "<CR>" Enter. Only at the start of a command, so "d-" still
     // deletes up a line. Typing one emits keyCommand.
     property var commandKeys: ({})
+    // The user's shortcuts (Koil's, see ShortcutsWindow): keys that run
+    // keys of theirs, as @ runs a register's, as many times as their
+    // count, as { keys, macro, label, normal, visual }: `keys` written as
+    // commandKeys' are (" c" is Space c), which type it in normal mode,
+    // visual mode or both, `macro` as a register's text, and `label` what
+    // the status line calls its run. commandKeys come first.
+    property var shortcuts: []
     // A buffer of one line (Koil's path field): a line break put in it
     // becomes a space, and Enter while typing leaves insert mode, then does
     // what it does in normal mode.
@@ -971,10 +978,11 @@ QtObject {
         const c1 = readCount(keys, i);
         cmd.count = c1.count;
         i = c1.next;
-        if (!visual && i < keys.length) {
-            const c = commandFor(keys.slice(i));
-            if (c && c.name) {
+        if (i < keys.length) {
+            const c = commandFor(keys.slice(i), visual);
+            if (c && (c.name || c.shortcut)) {
                 cmd.command = c.name;
+                cmd.shortcut = c.shortcut;
                 return { status: "ok", cmd };
             }
             if (c)
@@ -983,7 +991,7 @@ QtObject {
             // (Space l), unless they went on as a name of vim's (gg, where
             // g. is one).
             let started = 0;
-            while (commandFor(keys.slice(i, i + started + 1)))
+            while (commandFor(keys.slice(i, i + started + 1), visual))
                 started++;
             if (started && readName(keys, i).next - i <= started)
                 return bad;
@@ -1073,13 +1081,20 @@ QtObject {
         return { status: "ok", cmd };
     }
 
-    // The command of commandKeys that `keys` type, as { name }, where name
-    // is "" while they're only the start of its keys. Null if none.
-    function commandFor(keys) {
-        for (const k in commandKeys) {
+    // The command of commandKeys (only in normal mode) or the shortcut that
+    // `keys` type, as { name } or { shortcut }, or {} while they're only
+    // the start of its keys. Null if none.
+    function commandFor(keys, visual) {
+        const typing = ks => keys.length <= ks.length && keys.every((t, j) => t === ks[j]);
+        for (const k in visual ? {} : commandKeys) {
             const ks = macroKeys(k);
-            if (keys.length <= ks.length && keys.every((t, j) => t === ks[j]))
-                return { name: keys.length === ks.length ? commandKeys[k] : "" };
+            if (typing(ks))
+                return keys.length === ks.length ? { name: commandKeys[k] } : {};
+        }
+        for (const s of shortcuts) {
+            const ks = macroKeys(s.keys);
+            if ((visual ? s.visual : s.normal) && typing(ks))
+                return keys.length === ks.length ? { shortcut: s } : {};
         }
         return null;
     }
@@ -1142,6 +1157,10 @@ QtObject {
     function execute(cmd) {
         if (cmd.command) {
             outside(() => keyCommand(cmd.command, cmd.count));
+            return;
+        }
+        if (cmd.shortcut) {
+            runKeys(macroKeys(cmd.shortcut.macro), Math.max(cmd.count, 1), cmd.shortcut.label);
             return;
         }
         // ". ": "/ and "% can only be pasted.
@@ -2430,9 +2449,13 @@ QtObject {
             return;
         }
         const r = getRegister(reg);
-        if (!r)
-            return;
-        const ks = r.keys || macroKeys(r.text);
+        if (r)
+            runKeys(r.keys || macroKeys(r.text), count, "@" + reg);
+    }
+
+    // Runs keys as a macro's, `count` times, called `label` on the status
+    // line (see Runs): a register's, or a shortcut's.
+    function runKeys(ks, count, label) {
         if (!ks.length)
             return;
         if (typeahead.length >= maxMacroDepth) {
@@ -2443,7 +2466,20 @@ QtObject {
         const frame = { keys: ks, next: 0, runs: count };
         typeahead.push(frame);
         if (!running)
-            startRun("@" + reg, frame, count);
+            startRun(label, frame, count);
+    }
+
+    // The registers q records into that hold something, the named ones
+    // first, as { name, keys }: their keys as a shortcut's macro has them,
+    // like ":!ls<CR>".
+    function macroList() {
+        const list = [];
+        for (const name of "abcdefghijklmnopqrstuvwxyz0123456789\"") {
+            const r = registers[name];
+            if (r && r.text)
+                list.push({ name: name, keys: (r.keys || macroKeys(r.text)).join("") });
+        }
+        return list;
     }
 
     // The next key of the macros running (see typeahead).

@@ -140,6 +140,21 @@ ApplicationWindow {
     // The shell :! runs commands in when the shell setting is empty: $SHELL,
     // or cmd.exe on Windows.
     readonly property string systemShell: system.defaultShell()
+    // The user's shortcuts (see ShortcutsWindow), as saved: { name, key,
+    // macro, mode, enabled }, where `key` is the one after Space ("" for
+    // none), `macro` the keys it runs (as a register's text), and `mode`
+    // "normal", "visual" or "both".
+    readonly property var shortcuts: readShortcuts(settings.shortcuts)
+    // What Koil's own keys after Space do (see Vim.commandKeys), which
+    // shortcuts can't take.
+    readonly property var spaceKeys: ({
+        " ": qsTr("applies the changes (in a file, saves)"),
+        "a": qsTr("applies, listing the changes first"),
+        "u": qsTr("lists the applies to undo"),
+        "r": isMac ? qsTr("shows the entry in Finder") : Qt.platform.os === "windows"
+            ? qsTr("shows the entry in Explorer") : qsTr("shows the entry in the file manager"),
+        "o": qsTr("opens the entry in its app")
+    })
 
     width: 900
     height: 650
@@ -1109,6 +1124,38 @@ ApplicationWindow {
         settings[name] = value;
     }
 
+    // The shortcuts saved as `json` (see shortcuts), leaving out what isn't
+    // one, as the settings can be edited by hand.
+    function readShortcuts(json) {
+        let list;
+        try {
+            list = JSON.parse(json);
+        } catch (e) {
+            return [];
+        }
+        return Array.isArray(list) ? list.filter(s => s && typeof s.macro === "string").map(s => ({
+            name: typeof s.name === "string" ? s.name : "",
+            key: typeof s.key === "string" && [...s.key].length === 1 ? s.key : "",
+            macro: s.macro,
+            mode: ["normal", "visual", "both"].includes(s.mode) ? s.mode : "normal",
+            enabled: s.enabled !== false
+        })) : [];
+    }
+
+    // Saves the shortcuts, which vim then runs.
+    function saveShortcuts(list) {
+        settings.shortcuts = JSON.stringify(list);
+    }
+
+    // The macros recorded, which a shortcut can run (see Vim.macroList).
+    function macroList() {
+        return vim.macroList();
+    }
+
+    function openShortcuts() {
+        shortcutsWindow.open();
+    }
+
     // The saved settings, which Koil starts with. The Settings window shows
     // and changes them (along with the ones in use); the zoom and :set change
     // only the ones in use, until Koil quits, and Cmd+0 or :set fs& goes back
@@ -1128,6 +1175,8 @@ ApplicationWindow {
         // The dir Koil lists when no path is given (see Document.startDir),
         // read only at startup; empty for the home dir.
         property string startDir: ""
+        // The user's shortcuts, as JSON (see root.shortcuts).
+        property string shortcuts: "[]"
     }
 
     Theme {
@@ -1278,6 +1327,14 @@ ApplicationWindow {
             "-": "back",
             "_": "back"
         } : {})
+        // The user's, which are on and have a key, everywhere.
+        shortcuts: root.shortcuts.filter(s => s.enabled && s.key && s.macro).map(s => ({
+            keys: " " + s.key,
+            macro: s.macro,
+            label: "Space " + s.key,
+            normal: s.mode !== "visual",
+            visual: s.mode !== "normal"
+        }))
 
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: (quit, confirm) => root.save(quit, confirm)
@@ -1570,6 +1627,13 @@ ApplicationWindow {
         document: doc
     }
 
+    ShortcutsWindow {
+        id: shortcutsWindow
+
+        app: root
+        theme: theme
+    }
+
     footer: Pane {
         contentHeight: position.implicitHeight
         padding: 4
@@ -1737,6 +1801,12 @@ ApplicationWindow {
                     shortcut: StandardKey.Preferences
                     onTriggered: settingsWindow.open()
                 }
+                // In the app menu, under Settings.
+                Platform.MenuItem {
+                    text: qsTr("Shortcuts…")
+                    role: Platform.MenuItem.ApplicationSpecificRole
+                    onTriggered: shortcutsWindow.open()
+                }
                 Platform.MenuItem {
                     text: qsTr("Quit Koil")
                     role: Platform.MenuItem.QuitRole
@@ -1837,6 +1907,10 @@ ApplicationWindow {
                     // Preferences and Quit have no Ctrl binding on Windows.
                     shortcut: "Ctrl+,"
                     onTriggered: settingsWindow.open()
+                }
+                Action {
+                    text: qsTr("S&hortcuts…")
+                    onTriggered: shortcutsWindow.open()
                 }
                 MenuSeparator {}
                 Action {

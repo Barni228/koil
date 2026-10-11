@@ -56,6 +56,10 @@ until you apply, and your edits stay while you go through other dirs.
   Bash, say, on Windows). `%` is the entry on the line (or the open file),
   quoted, like vim's: `:!mv % old/`. `!` in visual mode runs one on every
   selected entry, and in a file, `:%!sort` filters the lines as in vim.
+- **Shortcuts** (_Koil → Shortcuts…_, _File → Shortcuts…_ on Windows, or
+  Settings): `Space` and a key of yours run keys as a macro does, like
+  `:!echo %:p | pbcopy<CR>` to copy the entry's path. Type the keys, or take
+  a macro you recorded with `q`.
 
 ## Install
 

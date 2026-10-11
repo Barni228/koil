@@ -60,8 +60,10 @@ QtObject {
     // A box over the editor (see Panel), and its border.
     readonly property color panel: Qt.tint(base, dark ? "#12ffffff" : "#08000000")
     readonly property color panelBorder: Qt.tint(base, dark ? "#40ffffff" : "#30000000")
-    // A text field.
+    // A text field, and its border (and a button's) in a window (Settings,
+    // Shortcuts).
     readonly property color field: dark ? Qt.tint(base, "#1effffff") : base
+    readonly property color fieldBorder: dark ? Qt.tint(window, "#30ffffff") : "#cecece"
     // Behind code in a box, like a tooltip's shortcut (over what's behind
     // the box, which shows through).
     readonly property color code: dark ? "#26ffffff" : "#14000000"
