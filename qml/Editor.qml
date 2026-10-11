@@ -84,6 +84,9 @@ Item {
     // The editor was clicked (or given the keyboard) while vim edits the
     // other one, which should switch.
     signal activated
+    // A key was let go (not one repeating), which main.qml waits for to
+    // open a window (see openShortcuts).
+    signal keyReleased
 
     // Replaces the text (a file or a listing was opened); not an edit. Qt
     // lays out all of a text again when its format or the editor's padding
@@ -531,6 +534,10 @@ Item {
                 // Keys for an editor vim doesn't edit (which it should, see
                 // onActiveFocusChanged) go nowhere.
                 event.accepted = !view.active || view.vim.handleKey(event);
+            }
+            Keys.onReleased: event => {
+                if (!event.isAutoRepeat)
+                    view.keyReleased();
             }
 
             Component {

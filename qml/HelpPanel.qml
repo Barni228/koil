@@ -234,9 +234,12 @@ Popup {
                 ["`qa` … `q`", "Record keys into register `a`. `qA` appends to it."],
                 ["`@a`  `3@a`  `@@`", "Run the macro in `a`, three times, or the last one again. `u` undoes a "
                     + "whole run, and `Esc` stops a long one."],
-                ["`Space` and a key", "Your shortcuts (" + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
-                    + ", or Settings): keys of yours that run as a macro does, like `:!git add %<CR>`, in normal "
-                    + "mode, visual mode or both. A count runs one that many times."]
+                ["`Space` and a key", "Your shortcuts: keys of yours that run as a macro does, like "
+                    + "`:!git add %<CR>`, in normal mode, visual mode or both. A count runs one that many times."],
+                ["`Space q`", "List your shortcuts (so do " + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
+                    + " and Settings). Typing searches them, `↑` and `↓` pick one, and `Enter` or a click runs "
+                    + "it, also one with no key, on the selection if it's for visual mode. The pencil edits one, "
+                    + "and `" + cmdKey + "N` adds one."]
             ]
         },
         {

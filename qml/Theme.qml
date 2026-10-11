@@ -70,6 +70,8 @@ QtObject {
     // A search match, and the current one, under dark text.
     readonly property color searchMatch: "#f5d547"
     readonly property color currentMatch: "#ff9f1a"
+    // The name of a key in keys written out, like <CR> (a shortcut's).
+    readonly property color specialKey: dark ? "#c586c0" : "#af00db"
     // A dir's name in Koil's listing, and the path it lists.
     readonly property color directory: dark ? "#6cb6ff" : "#0b62c4"
     // The parts of a regex on the listing's path line (see listing::Span),

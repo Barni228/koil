@@ -153,7 +153,8 @@ ApplicationWindow {
         "u": qsTr("lists the applies to undo"),
         "r": isMac ? qsTr("shows the entry in Finder") : Qt.platform.os === "windows"
             ? qsTr("shows the entry in Explorer") : qsTr("shows the entry in the file manager"),
-        "o": qsTr("opens the entry in its app")
+        "o": qsTr("opens the entry in its app"),
+        "q": qsTr("lists your shortcuts")
     })
 
     width: 900
@@ -591,6 +592,8 @@ ApplicationWindow {
             openScratch();
         else if (name === "shell")
             bangLines(count);
+        else if (name === "shortcuts")
+            openShortcuts(true);
     }
 
     // ! in the listing (or the path field): the command line for a shell
@@ -1147,13 +1150,60 @@ ApplicationWindow {
         settings.shortcuts = JSON.stringify(list);
     }
 
+    // A shortcut as vim has it (see Vim.shortcuts).
+    function vimShortcut(s) {
+        return {
+            keys: " " + s.key,
+            macro: s.macro,
+            label: s.key ? "Space " + s.key : s.name || qsTr("Shortcut"),
+            normal: s.mode !== "visual",
+            visual: s.mode !== "normal"
+        };
+    }
+
+    // A click in the shortcuts' list: runs the shortcut in the editor vim
+    // edits, as its key would (see Vim.runShortcut), unless a box over it
+    // has the keys or vim waits for a shell command.
+    function runShortcut(s) {
+        requestActivate();
+        if (boxOpen || askingConflicts)
+            return;
+        activeView.textArea.forceActiveFocus();
+        vim.runShortcut(vimShortcut(s));
+    }
+
+    // A shortcut's keys in parts, the names of keys apart (see
+    // Vim.keyParts).
+    function keyParts(text) {
+        return vim.keyParts(text);
+    }
+
     // The macros recorded, which a shortcut can run (see Vim.macroList).
     function macroList() {
         return vim.macroList();
     }
 
-    function openShortcuts() {
-        shortcutsWindow.open();
+    // The shortcuts' window. After a key (Space q), once it's up (or a
+    // moment later, if the keys came from a macro): opened while it's
+    // down, its release goes to the window, and macOS's text input, which
+    // watches a held key for its accent menu, logs warnings
+    // ("TSMSendMessageToUIServer: … FAILED").
+    function openShortcuts(afterKey) {
+        if (afterKey) {
+            shortcutsAfterKey.restart();
+        } else {
+            shortcutsAfterKey.stop();
+            shortcutsWindow.open();
+        }
+    }
+
+    // A key let go in the editor: the shortcuts' window, if Space q waits
+    // for it (see openShortcuts).
+    function keyReleased() {
+        if (shortcutsAfterKey.running) {
+            shortcutsAfterKey.stop();
+            Qt.callLater(openShortcuts, false);
+        }
     }
 
     // The saved settings, which Koil starts with. The Settings window shows
@@ -1309,6 +1359,7 @@ ApplicationWindow {
             " u": "undoApply",
             " r": "reveal",
             " o": "openInApp",
+            " q": "shortcuts",
             "-": "parent",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",
@@ -1320,21 +1371,20 @@ ApplicationWindow {
         }, root.sortKeys, root.activeView === pathView ? {
             "<S-CR>": "update"
         } : {}) : Object.assign({
-            "  ": "save"
+            "  ": "save",
+            " q": "shortcuts"
         }, root.filePath ? {
             "-": "back"
         } : root.scratchpad ? {
             "-": "back",
             "_": "back"
         } : {})
+        // With a selection too, so the list can run a shortcut on it.
+        visualCommandKeys: ({
+            " q": "shortcuts"
+        })
         // The user's, which are on and have a key, everywhere.
-        shortcuts: root.shortcuts.filter(s => s.enabled && s.key && s.macro).map(s => ({
-            keys: " " + s.key,
-            macro: s.macro,
-            label: "Space " + s.key,
-            normal: s.mode !== "visual",
-            visual: s.mode !== "normal"
-        }))
+        shortcuts: root.shortcuts.filter(s => s.enabled && s.key && s.macro).map(root.vimShortcut)
 
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: (quit, confirm) => root.save(quit, confirm)
@@ -1414,6 +1464,7 @@ ApplicationWindow {
             pathSyntax: root.pathSyntax
             problems: root.pathProblems
             onActivated: root.activate(pathView)
+            onKeyReleased: root.keyReleased()
             onEdited: {
                 root.pathProblems = [];
                 root.updatePathSyntax();
@@ -1507,6 +1558,7 @@ ApplicationWindow {
         busyInfos: root.listing ? root.busyInfos : ({})
         infoDots: root.infoDots
         onActivated: root.activate(editorView)
+        onKeyReleased: root.keyReleased()
         onEdited: {
             // The scratchpad is never saved, so there's nothing to ask about.
             if (!root.scratchpad)
@@ -1633,6 +1685,25 @@ ApplicationWindow {
         app: root
         theme: theme
     }
+
+    Timer {
+        id: shortcutsAfterKey
+
+        interval: 300
+        onTriggered: shortcutsWindow.open()
+    }
+
+
+
+
+
+
+
+
+
+
+
+
 
     footer: Pane {
         contentHeight: position.implicitHeight

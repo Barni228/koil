@@ -20,6 +20,7 @@ until you apply, and your edits stay while you go through other dirs.
 | `_`            | The scratchpad                                                                    |
 | `Space r`      | Show the entry in Finder or Explorer                                              |
 | `Space o`      | Open the entry in its default app                                                 |
+| `Space q`      | Your shortcuts: run one, edit them or make one                                    |
 | `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
 | `:h`           | Show help page                                                                    |
 
@@ -56,10 +57,10 @@ until you apply, and your edits stay while you go through other dirs.
   Bash, say, on Windows). `%` is the entry on the line (or the open file),
   quoted, like vim's: `:!mv % old/`. `!` in visual mode runs one on every
   selected entry, and in a file, `:%!sort` filters the lines as in vim.
-- **Shortcuts** (_Koil → Shortcuts…_, _File → Shortcuts…_ on Windows, or
-  Settings): `Space` and a key of yours run keys as a macro does, like
-  `:!echo %:p | pbcopy<CR>` to copy the entry's path. Type the keys, or take
-  a macro you recorded with `q`.
+- **Shortcuts** (`Space q`, _Koil → Shortcuts…_, or Settings): `Space` and
+  a key of yours run keys as a macro does, like `:!echo %:p | pbcopy<CR>` to
+  copy the entry's path. Type the keys, or take a macro you recorded with
+  `q`. A click in the list runs one, also one with no key.
 
 ## Install
 

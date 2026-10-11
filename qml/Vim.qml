@@ -77,6 +77,8 @@ QtObject {
     // Space and "<CR>" Enter. Only at the start of a command, so "d-" still
     // deletes up a line. Typing one emits keyCommand.
     property var commandKeys: ({})
+    // Like commandKeys, in visual mode (Space q, the shortcuts' list).
+    property var visualCommandKeys: ({})
     // The user's shortcuts (Koil's, see ShortcutsWindow): keys that run
     // keys of theirs, as @ runs a register's, as many times as their
     // count, as { keys, macro, label, normal, visual }: `keys` written as
@@ -1081,15 +1083,16 @@ QtObject {
         return { status: "ok", cmd };
     }
 
-    // The command of commandKeys (only in normal mode) or the shortcut that
-    // `keys` type, as { name } or { shortcut }, or {} while they're only
-    // the start of its keys. Null if none.
+    // The command of commandKeys (visualCommandKeys in visual mode) or the
+    // shortcut that `keys` type, as { name } or { shortcut }, or {} while
+    // they're only the start of its keys. Null if none.
     function commandFor(keys, visual) {
         const typing = ks => keys.length <= ks.length && keys.every((t, j) => t === ks[j]);
-        for (const k in visual ? {} : commandKeys) {
+        const own = visual ? visualCommandKeys : commandKeys;
+        for (const k in own) {
             const ks = macroKeys(k);
             if (typing(ks))
-                return keys.length === ks.length ? { name: commandKeys[k] } : {};
+                return keys.length === ks.length ? { name: own[k] } : {};
         }
         for (const s of shortcuts) {
             const ks = macroKeys(s.keys);
@@ -2421,8 +2424,29 @@ QtObject {
     // Splits register text into keys.
     function macroKeys(text) {
         const named = { "\n": "<CR>", "\r": "<CR>", "\t": "<Tab>", "\x1b": "<Esc>" };
-        const re = /<(?:Esc|CR|S-CR|BS|Del|Tab|S-Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z])>|[\s\S]/gu;
-        return (text.match(re) || []).map(k => named[k] || k);
+        return keysIn(text).map(k => named[k] || k);
+    }
+
+    // Register text as it's written: a key's name, like <CR>, or a
+    // character.
+    function keysIn(text) {
+        return text.match(/<(?:Esc|CR|S-CR|BS|Del|Tab|S-Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z])>|[\s\S]/gu) || [];
+    }
+
+    // Register text (a shortcut's macro) in parts, as { text, special }:
+    // the name of a key (see macroKeys), or characters, which type
+    // themselves. Koil colors the names.
+    function keyParts(text) {
+        const parts = [];
+        for (const k of keysIn(text)) {
+            const special = k.length > 1 && k[0] === "<";
+            const last = parts[parts.length - 1];
+            if (!special && last && !last.special)
+                last.text += k;
+            else
+                parts.push({ text: k, special: special });
+        }
+        return parts;
     }
 
     function runMacro(reg, count) {
@@ -2467,6 +2491,24 @@ QtObject {
         typeahead.push(frame);
         if (!running)
             startRun(label, frame, count);
+    }
+
+    // Runs a shortcut (as `shortcuts` has them) from outside vim, as its
+    // keys would: Koil's list of them runs one with a click, also one with
+    // no keys. In visual mode if vim is in it and the shortcut is for it,
+    // else in normal mode, which vim goes to first (see toNormal).
+    function runShortcut(s) {
+        batched(() => {
+            if (isVisual && s.visual) {
+                interrupt();
+                keys = [];
+                pendingKeys = "";
+                awaitingReplaceChar = false;
+            } else {
+                toNormal();
+            }
+            runKeys(macroKeys(s.macro), 1, s.label);
+        });
     }
 
     // The registers q records into that hold something, the named ones

@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls
 
 // A small button with an icon (an SVG path, see Icon) or a short label, and
-// a tooltip below it, with the keys that do the same, if any.
+// a tooltip below it, with the keys that do the same, if any. With the
+// keys (focusPolicy), Space or Enter clicks it.
 AbstractButton {
     id: button
 
@@ -23,6 +24,8 @@ AbstractButton {
     hoverEnabled: true
     opacity: enabled ? 1 : 0.4
     Accessible.name: tip || label
+    Keys.onReturnPressed: click()
+    Keys.onEnterPressed: click()
 
     Tip {
         theme: button.theme

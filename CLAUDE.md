@@ -94,7 +94,8 @@ the scratchpad (see Scratchpad).
   look the app's own controls share (see Theme), and `TextButton.qml` and
   `Segmented.qml`, the buttons the Settings and Shortcuts windows share.
 - `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml, the find bar and the
-  help's search.
+  help's search; `tests/tst_shortcuts.qml`, the Shortcuts window with the
+  keys alone.
 - `scripts/`: `bundle-macos.sh` (makes the `.app`), `package-macos.sh` (the
   `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup
   installer), `make-icons.sh` (the icons, from `packaging/icon.png`).
@@ -304,7 +305,9 @@ the scratchpad (see Scratchpad).
   and goes to the listing, unless the update fails; Shift+Enter there only
   updates, so vim stays in the field. In a file, `Space Space` saves (as
   `:w`: `save`), and with a path, `-` is Koil's too (`leaveFile`): back
-  to the listing, on the file's line.
+  to the listing, on the file's line. `Space q` lists the user's shortcuts
+  (see Shortcuts) everywhere, in visual mode too (`visualCommandKeys`), so
+  the list can run one on the selection.
   They're only matched at the start of a normal-mode command (so `d-` and
   visual `-` are vim's), with a count; keys that start one and go on
   differently are a bad command (Space l), unless they go on as a name of
@@ -833,21 +836,67 @@ the scratchpad (see Scratchpad).
   many times), in normal mode, visual mode or both, wherever vim is (the
   listing, the path field, a file, the scratchpad). `commandFor` matches
   them after `commandKeys`, which are normal mode's only; in visual mode
-  too, so once one is for visual mode, Space there waits for its key
-  rather than moving, and Space and another key is a bad command. A macro
+  too, so Space there waits for a key rather than moving (`Space q` is
+  one), and Space and another key is a bad command. A macro
   recorded meanwhile keeps the Space and the key, not what they ran.
   They're saved in `settings.shortcuts`, as JSON of `{ name, key, macro,
   mode, enabled }` (`readShortcuts` drops what isn't one, as the settings
   can be edited by hand), which Restore Defaults leaves alone, and only
-  the enabled ones with a key reach vim. The window (Koil > Shortcuts…,
-  `ApplicationSpecificRole`, which puts it in the app menu; File >
-  Shortcuts… elsewhere; and a button in Settings) lists each by its name,
-  else its key, else its keys, and a click (or +) shows it in a form,
-  which Save saves (Esc and Cancel go back to the list). Its key can't be
+  the enabled ones with a key reach vim. The window (`Space q`, Koil >
+  Shortcuts…, `ApplicationSpecificRole`, which puts it in the app menu;
+  File > Shortcuts… elsewhere; and a button in Settings) lists each by its
+  name, else its key, else its keys. A click on one (or Enter) closes it
+  and runs it in the main window
+  (`runShortcut`), even one that's off or has no key: in visual mode if
+  vim is in it and the shortcut is for it, else in normal mode, which vim
+  goes to first; not while a box has the keys or a shell command runs.
+  Its pencil shows it in a form, as + (or Cmd+N) does a new one, which Save
+  saves (Esc and Cancel go back to the list), and its trash deletes it at
+  once. `Space q` opens it once the key is up (`openShortcuts`, on the
+  editor's `keyReleased`, or 300 ms later for a macro's keys): opened while
+  `q` was down, its release went to the new window, and macOS's text input
+  (which watches a held key for its accent menu) logged
+  "TSMSendMessageToUIServer: … FAILED" up to three times. A window becoming
+  active still logs it now and then (Settings too), which nothing here
+  causes. In the form, Enter saves whatever has the keys (a `Shortcut`, as
+  Return is a macOS dialog's default button, which `primary` colors), and
+  Space clicks a button. Everything in it is reached with Tab (`tab`, a list of what each
+  page has, which every control there hands Tab and Shift+Tab to): Qt's
+  own Tab reaches only text fields and lists on macOS unless Keyboard
+  navigation is on in System Settings, and skips every button. The list
+  has no keys of its own (it had vim's `j`, `k`, `e`, `a` and `/`): the
+  search over it has them whenever the list shows (`focusSearch`), so
+  typing searches, Up and Down pick a shortcut, Enter runs it, and Tab
+  goes to the picked one's pencil and trash, then +. The search shows only
+  the shortcuts every word of it matches (`shown`: in the name or the
+  keys, or the key as a whole word, `space` or `c`, as a part of "space"
+  would match every shortcut with a key). Esc empties it, as in a macOS
+  search field, and with none, closes the window (`back`). A row gets its
+  shortcut with its index (`{ at, shortcut }`), not the index alone, as
+  the shortcuts change before the list does, which left a deleted one's
+  row reading past their end. Opened anew, it has no search, on its
+  first. Its shortcuts, and Settings' (Esc, Cmd+W), are on only while
+  their window has the keys (`focused`: its `activeFocusItem`, which is
+  null otherwise): with Qt Quick Controls loaded, a `Shortcut` takes its
+  window as active while any of the main window's family has the keys,
+  so Esc in the editor closed them, and with both open, their Escs were
+  ambiguous and neither ran. Space or Enter clicks a
+  button (`TextButton`, `IconButton`), and `Segmented` is one stop, where
+  Left and Right pick. While the macros are listed, their popup's window
+  gets the keys (so it has `focus`, and both it and the button handle
+  them: `macroKey`), and the window asks to be active again once it
+  closes, as Qt's offscreen platform left the popup's. Its key can't be
   one of Koil's after Space (`spaceKeys`), nor one another enabled shortcut
   has in the same mode (`problemOf`). Its keys are typed as `q` records
   them (`<CR>`), or taken from a register `q` records into
-  (`Vim.macroList`). The window's height is the form's, worked out before
+  (`Vim.macroList`). The names of keys in them are colored
+  (`theme.specialKey`, `styledKeys`, from `Vim.keyParts`, so only what a
+  macro reads as a key), in the field, the list and the macros: the
+  field's own text is clear, and a `Text` over it draws it, at the
+  cursor's place less the text before it, so it follows the field's
+  scrolling (a font of one width, so the colors move nothing). Qt draws
+  the cursor in the text's color, so the field has its own
+  (`cursorDelegate`), which blinks as Qt's does. The window's height is the form's, worked out before
   the form is first laid out, when a wrapped text is measured too tall, so
   its hint is one line.
 - **Clipboard**: the `"+` data carries `session`, random per run; another

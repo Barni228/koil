@@ -4,7 +4,8 @@ import QtQuick
 import QtQuick.Controls
 
 // One of a few options, as a row of buttons, in a window (Settings,
-// Shortcuts).
+// Shortcuts). With the keys, it's one stop for Tab, where Left and Right
+// pick the option before or after.
 Rectangle {
     id: segmented
 
@@ -18,7 +19,16 @@ Rectangle {
     implicitHeight: 26 * theme.zoom
     radius: 4 * theme.zoom
     color: theme.field
-    border.color: theme.fieldBorder
+    border.color: activeFocus ? theme.accent : theme.fieldBorder
+    activeFocusOnTab: true
+    Keys.onLeftPressed: {
+        if (current > 0)
+            picked(current - 1);
+    }
+    Keys.onRightPressed: {
+        if (current < options.length - 1)
+            picked(current + 1);
+    }
 
     Row {
         id: row
@@ -38,7 +48,7 @@ Rectangle {
 
                 implicitWidth: optionText.implicitWidth + 20 * segmented.theme.zoom
                 implicitHeight: segmented.height - 4 * segmented.theme.zoom
-                focusPolicy: Qt.TabFocus
+                focusPolicy: Qt.NoFocus
                 hoverEnabled: true
                 Accessible.name: modelData.label
                 Accessible.role: Accessible.RadioButton
@@ -48,7 +58,6 @@ Rectangle {
                 background: Rectangle {
                     radius: 3 * segmented.theme.zoom
                     color: option.selected ? segmented.theme.accent : option.hovered ? segmented.theme.hover : "transparent"
-                    border.color: option.visualFocus ? segmented.theme.accent : "transparent"
                 }
                 contentItem: Text {
                     id: optionText

@@ -299,6 +299,7 @@ TestCase {
         vim.singleLine = false;
         vim.linePrefixes = false;
         vim.commandKeys = {};
+        vim.visualCommandKeys = {};
         vim.shortcuts = [];
         vim.completer = null;
         vim.lineHistory = null;
@@ -1185,6 +1186,41 @@ TestCase {
         compare(editor.text, "2\n2\n1");
         keys("\"ayy");
         compare(vim.macroList().map(m => "\"" + m.name + " " + m.keys), ["\"a 1<CR>", "\"q  i", "\"\" 1<CR>"]);
+    }
+
+    // A shortcut's keys in parts, the names of keys apart, which Koil
+    // colors: only the names macros read as keys.
+    function test_keyParts() {
+        const parts = text => vim.keyParts(text).map(p => (p.special ? "*" : "") + p.text);
+        compare(parts(":!ls <C-r>x<CR><Esc>"), [":!ls ", "*<C-r>", "x", "*<CR>", "*<Esc>"]);
+        compare(parts("<cr><Foo><CR"), ["<cr><Foo><CR"]);
+        compare(parts("<S-CR><S-CR>"), ["*<S-CR>", "*<S-CR>"]);
+        compare(parts(""), []);
+    }
+
+    // Koil's list of shortcuts opens with Space q in visual mode too, and
+    // runs one (also one with no key) from there: on the selection if it's
+    // for visual mode, else in normal mode, which vim goes to first.
+    function test_shortcutsFromOutside() {
+        load("one two\nthree");
+        vim.visualCommandKeys = { " q": "shortcuts" };
+        keyCommands.clear();
+        keys("viw q");
+        compare(keyCommands.signalArguments.map(a => a[0]), ["shortcuts"]);
+        compare(vim.mode, "visual");
+        vim.runShortcut({ macro: "U", label: "Upper", visual: true });
+        compare(editor.text, "ONE two\nthree");
+        compare(vim.mode, "normal");
+        keys("A!");
+        vim.runShortcut({ macro: "ddp", label: "Swap", visual: false });
+        compare(editor.text, "three\nONE two!");
+        compare(vim.mode, "normal");
+        keys("u");
+        compare(editor.text, "ONE two!\nthree");
+        keys("j0v");
+        vim.runShortcut({ macro: "x", label: "x", visual: false });
+        compare(editor.text, "ONE two!\nhree");
+        compare(vim.mode, "normal");
     }
 
     // What's drawn after lines (Editor's notes and messages) goes in a

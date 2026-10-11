@@ -51,7 +51,8 @@ ToolTip {
 
                 required property string modelData
 
-                anchors.verticalCenter: parent.verticalCenter
+                // Gone with the tip's button (a row of the shortcuts' list).
+                anchors.verticalCenter: parent?.verticalCenter
                 width: keyText.implicitWidth
                 height: keyText.implicitHeight
                 radius: 3 * tip.theme.zoom

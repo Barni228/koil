@@ -157,14 +157,18 @@ Window {
     minimumHeight: fitHeight
     maximumHeight: fitHeight
 
+    // Only while this window has the keys: a Shortcut takes its window as
+    // active while any of the main window's has them (see
+    // ShortcutsWindow.focused).
     Shortcut {
         sequences: [StandardKey.Close]
+        enabled: win.activeFocusItem !== null
         onActivated: win.close()
     }
     // Not while the font or shell list is open, which Esc closes.
     Shortcut {
         sequence: "Escape"
-        enabled: !fontList.visible && !shellList.visible
+        enabled: win.activeFocusItem !== null && !fontList.visible && !shellList.visible
         onActivated: win.close()
     }
 
@@ -729,11 +733,21 @@ Window {
                 text: qsTr("Shortcuts")
             }
             // The user's (see ShortcutsWindow), which Restore Defaults
-            // leaves alone.
-            TextButton {
-                theme: win.theme
-                text: qsTr("Edit Shortcuts…")
-                onClicked: win.app.openShortcuts()
+            // leaves alone, and how many there are.
+            Row {
+                spacing: 10 * win.zoom
+
+                TextButton {
+                    theme: win.theme
+                    text: qsTr("Edit Shortcuts…")
+                    onClicked: win.app.openShortcuts()
+                }
+                SettingLabel {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: win.app.shortcuts.length === 0 ? qsTr("None yet")
+                        : win.app.shortcuts.length === 1 ? qsTr("1 shortcut")
+                        : qsTr("%1 shortcuts").arg(win.app.shortcuts.length)
+                }
             }
             Item {}
 
@@ -742,9 +756,7 @@ Window {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
                 Layout.topMargin: -4 * win.zoom
-                text: (win.app.shortcuts.length === 0 ? qsTr("None yet")
-                    : win.app.shortcuts.length === 1 ? qsTr("1 shortcut") : qsTr("%1 shortcuts").arg(win.app.shortcuts.length))
-                    + qsTr(": Space and a key of yours, which run keys as a macro does.")
+                text: qsTr("Space and a key of yours, which run keys as a macro does. Space q lists them.")
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
                 font.pixelSize: Math.round(12 * win.zoom)
