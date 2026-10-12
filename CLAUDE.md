@@ -131,6 +131,13 @@ the scratchpad (see Scratchpad).
   `Document` and `System`; `Editor` takes `System` as a `var`).
 - `qmllint -I target/cxxqt/qml_modules qml/*.qml` should print nothing.
   cxx-qt-build writes `.qmlls.ini` (ignored by git) for qmlls.
+- Windows' Qt (6.10, see CI) can be tried on macOS, for a bug only
+  Windows has: `uvx --from aqtinstall aqt install-qt mac desktop 6.10.3
+  clang_64 -O <dir>`, then `cargo build` with its `bin` first on `PATH`,
+  `CXXFLAGS="-include arm_acle.h"` (its `qyieldcpu.h` fails with newer
+  Apple clang otherwise) and a `CARGO_TARGET_DIR` of its own.
+  `QML_DISABLE_DISK_CACHE=1` runs the QML without what qmlcachegen
+  compiled, which tells a bug of the compiled code apart.
 - Checking the real app: `osascript` / System Events can send keys, click
   menus (process `koil`, or `Koil` from the bundle) and read the status
   line and the editor's text (`value of every UI element of window 1`).
@@ -1385,7 +1392,10 @@ the scratchpad (see Scratchpad).
   property bound to objects of constants (`dark ? { create: "#73c991" } :
   { … }`) came out undefined in the compiled app, though qmltestrunner had
   it (`regexColors`, with a `String(text)` in it, works), so
-  `theme.changeColor` is a function.
+  `theme.changeColor` is a function. Compiled, a `var` property's `({})`
+  is a `QVariantMap`, not a JS object, and in Qt 6.10 (Windows' CI)
+  taking a key after one was `delete`d crashed (the help's `textItems`,
+  so `:!`'s output closed Koil), so one whose keys go is a `Map`.
 
 ## CI and releases
 

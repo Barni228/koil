@@ -461,8 +461,11 @@ Popup {
     // The view, highlights and match before a search was typed, which
     // cancelling it goes back to, and the match it goes from (or null).
     property var searchStart: null
-    // The CodeTexts by key, to find a match on the screen.
-    property var textItems: ({})
+    // The CodeTexts by key, to find a match on the screen. A Map, as
+    // keys come and go: qmlcachegen compiles ({}) to a QVariantMap, not a
+    // JS object, and in Qt 6.10 taking a key after one was deleted
+    // crashed (showing what :! wrote, on Windows).
+    property var textItems: new Map()
 
     readonly property bool searchShown: searchPattern !== "" || searchMessage !== ""
 
@@ -520,7 +523,7 @@ Popup {
 
     // Where match m's line is in the body.
     function matchY(m) {
-        const item = textItems[m.key];
+        const item = textItems.get(m.key);
         return item ? item.mapToItem(body, 0, item.positionToRectangle(m.start).y).y : 0;
     }
 
@@ -532,7 +535,7 @@ Popup {
     // Scrolls match i to the middle, if it's out of view.
     function reveal(i) {
         shownSection = -1;
-        const item = textItems[matches[i].key];
+        const item = textItems.get(matches[i].key);
         if (!item)
             return;
         const height = item.positionToRectangle(matches[i].start).height;
@@ -794,11 +797,11 @@ Popup {
         onLayoutChanged: Qt.callLater(place)
         Component.onCompleted: {
             if (key !== "")
-                help.textItems[key] = codeText;
+                help.textItems.set(key, codeText);
         }
         Component.onDestruction: {
-            if (help.textItems[key] === codeText)
-                delete help.textItems[key];
+            if (help.textItems.get(key) === codeText)
+                help.textItems.delete(key);
         }
 
         Repeater {
