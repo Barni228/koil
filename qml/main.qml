@@ -855,7 +855,7 @@ ApplicationWindow {
         // Only the new dirs need saying.
         const details = r.steps.length > 1 ? r.steps.join("\n") : "";
         confirmDialog.ask("“" + target.name + "” doesn't exist yet. Create it?", details, create, null, null,
-            changeKeywords);
+            { keywords: changeKeywords });
     }
 
     // Whether changing files asks first, as the confirmChanges setting
@@ -929,13 +929,15 @@ ApplicationWindow {
         const what = picked => !picked ? "Discard " + these : picked === total ? "Apply " + these
             : "Apply " + picked + " of " + these;
         confirmDialog.ask(picked => what(picked) + (orQuit ? " before quitting?" : "?"), actions, apply,
-            orQuit ? () => Qt.quit() : null, null, changeKeywords);
+            orQuit ? () => Qt.quit() : null, null, { keywords: changeKeywords });
     }
 
     // Space u: lists the applies Koil can undo, of every session (see
     // history.rs), newest first, to pick from (with the newer ones each
-    // needs, see Koil::undoable), the last one picked; Yes undoes the picked
-    // ones. Those that can't be undone now say why, and can't be picked.
+    // needs, see Koil::undoable), none picked, the first highlighted; Yes
+    // undoes the picked ones, and Delete from History (d) forgets them,
+    // once the user confirms it. Those that can't be undone now say why,
+    // and can be picked only to delete them.
     function undoApply() {
         const applies = undoHistory();
         if (!applies)
@@ -945,17 +947,36 @@ ApplicationWindow {
             return;
         }
         vim.showMessage("");
-        // The last apply picked, as u undoes that.
-        const lines = applies.map((a, i) => Object.assign({ picked: i === 0 }, a));
+        const lines = applies.map(a => Object.assign({ picked: false }, a));
         const any = lines.some(a => !a.blocked);
-        const question = (count, picked) => !any ? "Nothing can be undone now"
-            : !count ? "Pick what to undo (Space)"
-            : count === 1 && picked[0] ? "Undo the last apply?"
-            : "Undo " + count + (count === 1 ? " apply?" : " applies?");
+        const question = (count, picked) => {
+            const blocked = lines.filter((a, i) => a.blocked && picked[i]).length;
+            return !count ? (any ? "Pick what to undo (Space)" : "Nothing can be undone now")
+                : blocked ? (blocked < count ? blocked + " of the picked applies"
+                    : count === 1 ? "The picked apply" : "The picked applies") + " can't be undone, only deleted"
+                : count === 1 && picked[0] ? "Undo the last apply?"
+                : "Undo " + count + (count === 1 ? " apply?" : " applies?");
+        };
         confirmDialog.ask(question, lines, picked => {
             if (picked.length)
                 undoPicked(picked);
-        }, null, null, changeKeywords);
+        }, null, null, {
+            keywords: changeKeywords,
+            showRow: true,
+            extra: { label: "(D)elete from History", key: Qt.Key_D, action: forgetApplies }
+        });
+    }
+
+    // Forgets the applies `picked` (indexes into what `Koil.history`
+    // gave), once the user confirms it, so they can't be undone.
+    function forgetApplies(picked) {
+        const one = picked.length === 1;
+        const them = one ? "the picked apply" : picked.length + " applies";
+        confirmDialog.ask("Delete " + them + " from the undo history? " + (one ? "It" : "They")
+            + " can't be undone after that.", "", () => {
+            koil.forgetHistory(JSON.stringify(picked));
+            vim.showMessage((one ? "1 apply" : picked.length + " applies") + " deleted from the undo history");
+        });
     }
 
     // u with no change left to undo: undoes the last apply alone (the
@@ -972,7 +993,7 @@ ApplicationWindow {
         }
         vim.showMessage("");
         confirmDialog.ask("Undo the last apply?", last.steps.join("\n"), () => undoPicked([0]), null, null,
-            changeKeywords);
+            { keywords: changeKeywords });
     }
 
     // The applies Koil can undo (`Koil.history`), newest first, or null if

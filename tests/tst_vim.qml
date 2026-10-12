@@ -2523,10 +2523,64 @@ TestCase {
         verify(!confirm.opened);
     }
 
+    // The undo history's: the first line highlighted at once, so j moves
+    // off it, and a button apart from the choices for the picked lines,
+    // which its key clicks, off while none is picked. With it, a line Yes
+    // can't do can be picked too, which turns Yes off.
+    function test_confirmShowRowAndExtra() {
+        let chosen = null, extra = null;
+        const lines = [
+            { text: "A", needs: [], picked: false },
+            { text: "B", needs: [], picked: false },
+            { text: "C", needs: [], picked: false, blocked: true }
+        ];
+        confirm.ask("Undo?", lines, picked => chosen = picked, null, null,
+            { showRow: true, extra: { label: "(D)elete History", key: Qt.Key_D, action: picked => extra = picked } });
+        tryCompare(confirm, "opened", true);
+        verify(confirm.rowShown);
+        compare(confirm.picked, [false, false, false]);
+        compare(confirm.choices.map(c => c.answer), ["yes", "no"]);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 1);
+        keyClick(Qt.Key_D);
+        compare(extra, null);
+        verify(confirm.opened);
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Space);
+        compare(confirm.picked, [false, true, true]);
+        const [off, on, blocked, blockedOn] = confirm.boxes;
+        compare(confirm.list, off + "A\n" + on + "B\n" + blockedOn + "C");
+        verify(!confirm.canAnswer("yes"));
+        keyClick(Qt.Key_Y);
+        compare(chosen, null);
+        verify(confirm.opened);
+        // a picks only those Yes can do, which turns it on again.
+        keyClick(Qt.Key_A);
+        compare(confirm.picked, [true, true, false]);
+        verify(confirm.canAnswer("yes"));
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_D);
+        compare(extra, [0, 1, 2]);
+        compare(chosen, null);
+        verify(!confirm.opened);
+
+        // Without them, as before: nor can that line be picked.
+        confirm.ask("Undo?", lines, () => {});
+        tryCompare(confirm, "opened", true);
+        verify(!confirm.rowShown);
+        compare(confirm.extra, null);
+        confirm.toggle(2);
+        compare(confirm.picked, [false, false, false]);
+        keyClick(Qt.Key_D);
+        verify(confirm.opened);
+        confirm.answer("cancel");
+    }
+
     // The words lines start with get the color of the change they stand
     // for, only in the questions that say so.
     function test_confirmKeywords() {
-        confirm.ask("Apply?", "MOVE   a -> b", () => {}, null, null, { MOVE: "rename", TRASH: "delete" });
+        confirm.ask("Apply?", "MOVE   a -> b", () => {}, null, null, { keywords: { MOVE: "rename", TRASH: "delete" } });
         compare(confirm.keywordColors, ["MOVE", theme.changeColor("rename"), "TRASH", theme.changeColor("delete")]);
         confirm.answer("cancel");
         confirm.ask("Delete it anyway?", "MOVE -> b", () => {});

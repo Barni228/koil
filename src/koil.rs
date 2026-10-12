@@ -197,6 +197,12 @@ pub mod qobject {
         /// `{ ok, message }`.
         #[qinvokable]
         fn undo(self: Pin<&mut Koil>, picked: &QString) -> QString;
+
+        /// Forgets the applies `picked` (a list of indexes into what
+        /// `history` gave last), so they can't be undone, also in other
+        /// sessions (see history.rs).
+        #[qinvokable]
+        fn forget_history(self: Pin<&mut Koil>, picked: &QString);
     }
 
     impl cxx_qt::Threading for Koil {}
@@ -738,6 +744,16 @@ impl qobject::Koil {
         }
         rust.history.merge(&mut rust.koil);
         to_json(&outcome)
+    }
+
+    fn forget_history(self: Pin<&mut Self>, picked: &QString) {
+        let picked: Vec<usize> = serde_json::from_str(&picked.to_string()).unwrap_or_default();
+        let mut rust = self.rust_mut();
+        let rust = &mut *rust;
+        let applies: Vec<Applied> = (picked.iter())
+            .filter_map(|&i| rust.shown_history.get(i).cloned())
+            .collect();
+        rust.history.forget(&mut rust.koil, &applies);
     }
 }
 

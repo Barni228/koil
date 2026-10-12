@@ -376,9 +376,10 @@ the scratchpad (see Scratchpad).
   `ConfirmDialog` (`listing::history`: each one's time, its dir if it
   isn't the open one, and what undoing it does, up to `SHOWN_STEPS`
   steps, relative to its dir); koil refuses while changes are pending.
-  Only the last apply is picked at first. `u` or Cmd+Z with nothing left
+  None is picked at first, and the first is highlighted at once
+  (`ask`'s `showRow`). `u` or Cmd+Z with nothing left
   to undo in vim emits `nothingToUndo`, and `undoLast` asks only about
-  the last apply, as before there was a history: "Undo the last apply?"
+  the last apply alone: "Undo the last apply?"
   over every step undoing it does, relative to the open dir
   (`HistoryLine::steps`), or says why it can't be undone. Not from the
   path field, whose undo history is its own. An apply needs the newer
@@ -386,10 +387,18 @@ the scratchpad (see Scratchpad).
   (koil-core's `Undoable::needs`), which picking it picks. One that can't
   be undone now (koil-core checks every step against the disk, with what
   it needs: something gone, or taken, or emptied from the trash) says
-  why, has a crossed out box (`blocked`, the reason) and can't be picked. Yes undoes the picked
+  why and has a crossed out box (`blocked`, the reason). Yes undoes the picked
   ones, newest first (`Koil.undo(picked)`, indexes into the
-  `shown_history` that `history()` kept); a step koil can see won't run
-  undoes nothing. Undoing always asks (a `u` too many mustn't change files
+  `shown_history` that `history()` kept), and is off while one that
+  can't be undone is picked (`blockedPicked`); a step koil can see won't run
+  undoes nothing. Delete from History (`d`; `ask`'s `extra`, a button
+  on the left, apart from the choices, so Enter never answers it, and
+  off while none is picked) asks again, then forgets the picked ones
+  (`Koil.forgetHistory`, `History::forget`, by their time, also for
+  other Koils), so they can't be undone: it's what one that can't be
+  undone is picked for (a filled crossed out box; `a` picks only the
+  others). An older apply that needed one deleted is then checked
+  against the disk without it. Undoing always asks (a `u` too many mustn't change files
   unasked). The history lasts across sessions (`History` in history.rs):
   it's in `history.json` in Koil's data dir (`~/Library/Application
   Support/Koil` on macOS, `%APPDATA%\Koil` on Windows), the newest

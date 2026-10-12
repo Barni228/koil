@@ -60,8 +60,9 @@ Popup {
                 ["󰄲", "In that list: `j` and `k` move, `Space`, `x` or a click picks or leaves out a change "
                     + "(with what it needs), and `a` picks all or none. What's left out is discarded."],
                 ["`Space u`", "Undo applies, picked from all of them, also those of earlier sessions, "
-                    + "newest first. The last one is picked; picking an older one picks the newer ones "
-                    + "that changed the same paths. Deleted files come back from the trash."],
+                    + "newest first. Picking one picks the newer ones that changed the same paths. "
+                    + "Deleted files come back from the trash. `d` there deletes the picked ones from "
+                    + "the history instead, also those that can't be undone any more."],
                 ["`u`", "Once there's nothing left to undo: undo the last apply, after listing what that "
                     + "does."],
                 ["`Enter`", "Open the dir or file on the line. A new file is created first, after asking."],

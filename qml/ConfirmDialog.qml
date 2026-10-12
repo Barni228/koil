@@ -17,16 +17,20 @@ import QtQuick.Layouts
 // first unless a line says otherwise. Then j and k move the current line
 // instead, Space or x (or a click on its box) picks it or leaves it out,
 // along with the lines it needs or that need it, and a picks all of them,
-// or none if all are. A line can be one that can't be picked (an apply
-// that can't be undone), with a crossed out box. What Yes does with none
+// or none if all are. A line can be one Yes can't do (an apply that can't
+// be undone), with a crossed out box, which can't be picked, unless the
+// question has a button for the picked lines (see below): then Yes is off
+// while one is picked (and a leaves them out). What Yes does with none
 // picked is up to the question (applying none forgets them all: see
 // applyChanges in main.qml). A line to pick can take several lines of
 // text, the rest lined up after its box, and then an empty line goes
 // between each and the next, so they're told apart. The current line is
-// highlighted only once one of those is used: the first j or k shows it
-// where it is, on the first line.
+// highlighted only once one of those is used (the first j or k shows it
+// where it is, on the first line), unless the question shows it at once.
 // The word that starts a line of the list (after its box) can be colored
-// by what it stands for, like CREATE in green (see ask).
+// by what it stands for, like CREATE in green, and a question can have one
+// more button, on the left, apart from the choices, which does something
+// with the picked lines, and is off while none are (see ask).
 Popup {
     id: dialog
 
@@ -57,24 +61,30 @@ Popup {
     property var neededBy: []
     property var starts: []
     readonly property int pickedCount: picked.filter(p => p).length
+    // Whether a line Yes can't do is picked, which turns Yes off.
+    readonly property bool blockedPicked: items.some((item, i) => item.blocked && picked[i])
     // The line j and k move, and Space picks or leaves out, and whether
     // it's highlighted (see moveRow).
     property int row: 0
     property bool rowShown: false
-    // What goes before a line to pick from, left out, picked and one that
-    // can't be: the Nerd Font's nf-md-checkbox_blank_outline,
-    // nf-md-checkbox_marked and nf-md-checkbox_blank_off_outline, and two
+    // What goes before a line to pick from, left out, picked, and one Yes
+    // can't do, left out and picked: the Nerd Font's
+    // nf-md-checkbox_blank_outline, nf-md-checkbox_marked,
+    // nf-md-checkbox_blank_off_outline and nf-md-checkbox_blank_off, and two
     // spaces, as it draws them wider than a column (as the listing's icons).
     // All are as long. Each takes three columns, which `pad` fills on the
     // lines of text after a line's first.
-    readonly property var boxes: ["󰄱  ", "󰄲  ", "󱋭  "]
+    readonly property var boxes: ["󰄱  ", "󰄲  ", "󱋭  ", "󱋬  "]
     readonly property string pad: "   "
-    readonly property string list: items.length ? items.map((item, i) => boxes[item.blocked ? 2 : picked[i] ? 1 : 0] + rows[i])
-        .join(gap) : details
+    readonly property string list: items.length ? items.map((item, i) => boxes[(item.blocked ? 2 : 0) + (picked[i] ? 1 : 0)]
+        + rows[i]).join(gap) : details
     // What the answers do, and what's done after any of them (see ask).
     property var yesAction: null
     property var noAction: null
     property var afterAction: null
+    // The button apart from the choices, `{ label, key, action }`, or null
+    // (see ask).
+    property var extra: null
     // Without anything for No to do, No is the same as Cancel, so it's
     // offered alone.
     readonly property var choices: [
@@ -90,13 +100,21 @@ Popup {
     // `details` can also be lines to pick from, `{ text, needs }`, where
     // `needs` are the indexes of the lines it can't go without, and a line
     // can also have `picked: false` (left out at first) and `blocked: true`
-    // (it can't be picked; nor then can a line that needs it): then
+    // (Yes can't do it, nor then a line that needs it; it can be picked
+    // only for `extra`, see below, and starts left out): then
     // `question` can be a function of how many are picked (and the list of
     // whether each is), and `yes` gets the indexes of the picked ones.
-    // `keywords` colors the word a line of the list starts with by the kind
-    // of change it stands for (see `keywords`), if it's one of them.
-    function ask(question, details, yes, no, after, keywords) {
-        dialog.keywords = keywords || {};
+    // `options` can have `keywords`, which colors the word a line of the
+    // list starts with by the kind of change it stands for (see
+    // `keywords`), if it's one of them; `showRow`, to highlight the current
+    // line to pick from at once; and `extra`, a button apart from the
+    // choices, `{ label, key, action }`, which `key` (like Qt.Key_D) clicks
+    // too, and whose action runs as an answer's would, with the picked
+    // lines; with lines to pick from, it's off while none are.
+    function ask(question, details, yes, no, after, options) {
+        options = options || {};
+        dialog.keywords = options.keywords || {};
+        extra = options.extra || null;
         const pick = Array.isArray(details);
         rows = pick ? details.map(item => item.text.replace(/\n/g, "\n" + pad)) : [];
         gap = rows.some(row => row.includes("\n")) ? "\n\n" : "\n";
@@ -114,7 +132,8 @@ Popup {
         });
         neededBy = by;
         row = 0;
-        rowShown = false;
+        rowShown = !!options.showRow;
+        Qt.callLater(showRow);
         dialog.question = question;
         yesAction = yes;
         noAction = no || null;
@@ -124,8 +143,18 @@ Popup {
         open();
     }
 
+    // Whether `choice` ("yes", "no", "cancel" or "extra") can be answered
+    // now.
+    function canAnswer(choice) {
+        return choice === "yes" ? !blockedPicked
+            : choice === "extra" ? extra !== null && (!items.length || pickedCount > 0) : true;
+    }
+
     function answer(choice) {
-        const action = choice === "yes" ? yesAction : choice === "no" ? noAction : null;
+        if (!canAnswer(choice))
+            return;
+        const action = choice === "yes" ? yesAction : choice === "no" ? noAction
+            : choice === "extra" ? extra?.action : null;
         const chosen = [];
         picked.forEach((p, i) => {
             if (p)
@@ -143,7 +172,7 @@ Popup {
     // Picks line `i`, with the lines it needs, or leaves it out, with the
     // lines that need it. One that can't be picked stays as it is.
     function toggle(i) {
-        if (items[i].blocked)
+        if (items[i].blocked && !extra)
             return;
         const on = !picked[i], p = picked.slice(), todo = [i];
         while (todo.length) {
@@ -165,9 +194,9 @@ Popup {
         rowShown = true;
     }
 
-    // Those that can be picked.
+    // Those Yes can do.
     function pickAll() {
-        const all = pickedCount < items.filter(item => !item.blocked).length;
+        const all = items.some((item, i) => !item.blocked && !picked[i]);
         picked = items.map(item => all && !item.blocked);
     }
 
@@ -251,6 +280,8 @@ Popup {
         padding: 4 * dialog.zoom
         leftPadding: 12 * dialog.zoom
         rightPadding: 12 * dialog.zoom
+        enabled: dialog.canAnswer(modelData.answer)
+        opacity: enabled ? 1 : 0.4
         focusPolicy: Qt.NoFocus
         hoverEnabled: true
         text: modelData.label
@@ -328,6 +359,8 @@ Popup {
                 dialog.scrollBy(-step);
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                 dialog.answer(dialog.choices[dialog.current].answer);
+            else if (dialog.extra && event.key === dialog.extra.key)
+                dialog.answer("extra");
             else if (event.key === Qt.Key_Y)
                 dialog.answer("yes");
             else if (event.key === Qt.Key_N)
@@ -418,11 +451,22 @@ Popup {
             }
         }
 
-        Row {
+        RowLayout {
             id: buttons
 
-            Layout.alignment: Qt.AlignRight
+            Layout.fillWidth: true
             spacing: 8 * dialog.zoom
+
+            // Never highlighted, so Enter doesn't answer it.
+            Choice {
+                visible: dialog.extra !== null
+                modelData: ({ label: dialog.extra?.label ?? "", answer: "extra" })
+                index: -1
+            }
+
+            Item {
+                Layout.fillWidth: true
+            }
 
             Repeater {
                 model: dialog.choices

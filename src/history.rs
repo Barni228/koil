@@ -62,6 +62,20 @@ impl History {
             self.merge(koil);
         }
     }
+
+    /// Forgets `applies` (told apart by their time, as a sync may have
+    /// changed their steps since), for other Koils too, as if this one
+    /// undid them.
+    pub fn forget(&mut self, koil: &mut Koil, applies: &[Applied]) {
+        self.merge(koil);
+        let times: HashSet<SystemTime> = applies.iter().map(|a| a.time).collect();
+        let kept = (koil.history().iter())
+            .filter(|a| !times.contains(&a.time))
+            .cloned()
+            .collect();
+        koil.set_history(kept);
+        self.merge(koil);
+    }
 }
 
 /// The history `saved` in the file and `ours` (Koil's) together, given

@@ -108,3 +108,31 @@ fn test_file_that_cant_be_read() {
     history.merge(&mut koil);
     assert_eq!(Some(vec![a, b]), read(&path));
 }
+
+#[test]
+fn test_forget() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("history.json");
+    let (mut one, mut two) = (
+        History::at(Some(path.clone())),
+        History::at(Some(path.clone())),
+    );
+    let (mut koil_one, mut koil_two) = (Koil::default(), Koil::default());
+    let (a, b, c) = (applied(1, "/a"), applied(2, "/b"), applied(3, "/c"));
+    koil_one.set_history(vec![a.clone(), b.clone()]);
+    one.merge(&mut koil_one);
+    // the other Koil's own goes too
+    koil_two.set_history(vec![c.clone()]);
+    two.merge(&mut koil_two);
+
+    // as they were shown, before a sync changed their steps
+    let shown = |applied: &Applied| Applied {
+        steps: Vec::new(),
+        ..applied.clone()
+    };
+    one.forget(&mut koil_one, &[shown(&b), shown(&c)]);
+    assert_eq!(std::slice::from_ref(&a), koil_one.history());
+    assert_eq!(Some(vec![a.clone()]), read(&path));
+    two.merge(&mut koil_two);
+    assert_eq!([a], koil_two.history());
+}
