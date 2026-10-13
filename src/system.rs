@@ -142,6 +142,82 @@ pub mod qobject {
         #[qinvokable]
         unsafe fn redraw_text(self: &System, text_edit: *mut QObject);
 
+        /// Hides the lines of a TextEdit's `textDocument` longer than
+        /// `long_length` from Qt, as they're edited, which Koil places and
+        /// draws itself (see native.h).
+        #[qinvokable]
+        unsafe fn watch_long_lines(self: &System, text_document: *mut QObject, long_length: i32);
+
+        /// Call after each change to the text or the line format of a
+        /// `textDocument` with hidden lines: places them on the grid of
+        /// rows `line_height` tall, `row_length` characters a row while
+        /// lines wrap, else 0 (see native.h).
+        #[qinvokable]
+        unsafe fn place_long_lines(
+            self: &System,
+            text_document: *mut QObject,
+            line_height: f64,
+            bottom_margin: f64,
+            row_length: i32,
+        );
+
+        /// The length of the longest hidden line, or 0 for none.
+        #[qinvokable]
+        unsafe fn longest_line(self: &System, text_document: *mut QObject) -> i32;
+
+        /// The row and the column in it of `position`, as "row column", if
+        /// it's in a hidden line, else "".
+        #[qinvokable]
+        unsafe fn long_line_spot(
+            self: &System,
+            text_document: *mut QObject,
+            position: i32,
+        ) -> QString;
+
+        /// The position closest to `column` in row `row`, if the row is a
+        /// hidden line's, else -1.
+        #[qinvokable]
+        unsafe fn long_line_position(
+            self: &System,
+            text_document: *mut QObject,
+            row: i32,
+            column: f64,
+        ) -> i32;
+
+        /// What to draw of the hidden lines in rows `first_row` to
+        /// `last_row`, columns `first_column` up to `last_column`, as JSON
+        /// runs `{ row, column, text, color, underline }`.
+        #[qinvokable]
+        unsafe fn long_line_runs(
+            self: &System,
+            text_document: *mut QObject,
+            first_row: i32,
+            last_row: i32,
+            first_column: i32,
+            last_column: i32,
+        ) -> QString;
+
+        /// Keeps what changes in a TextEdit's `textDocument`, for
+        /// `take_text_change`.
+        #[qinvokable]
+        unsafe fn watch_text_changes(self: &System, text_document: *mut QObject);
+
+        /// What changed in the text of `textDocument` since this was last
+        /// called, as from, removed and text: the text from `from`,
+        /// `removed` long, became `text`. Empty if nothing did.
+        #[qinvokable]
+        unsafe fn take_text_change(self: &System, text_document: *mut QObject) -> QStringList;
+
+        /// Has a TextEdit build all its lines in view again, after its
+        /// selection changed in a text with long lines (see native.h).
+        #[qinvokable]
+        unsafe fn rebuild_text_nodes(self: &System, text_edit: *mut QObject);
+
+        /// Has a TextArea in a ScrollView leave scrolling to its cursor to
+        /// its QML (see native.h).
+        #[qinvokable]
+        unsafe fn scroll_to_cursor_in_qml(self: &System, text_area: *mut QObject);
+
         /// Colors Koil's listing in a TextEdit's `textDocument`: each icon in
         /// `icon_colors` (icons and colors, alternating), or a pending
         /// entry's in `pending_icon_color`, and dirs in `directory_color`. No
@@ -367,6 +443,108 @@ impl qobject::System {
     /// `text_edit` must be null or point to a live QObject.
     unsafe fn redraw_text(&self, text_edit: *mut qobject::QObject) {
         unsafe { ffi::redraw_text(text_edit.cast()) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn watch_long_lines(&self, text_document: *mut qobject::QObject, long_length: i32) {
+        unsafe { ffi::watch_long_lines(text_document.cast(), long_length) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn place_long_lines(
+        &self,
+        text_document: *mut qobject::QObject,
+        line_height: f64,
+        bottom_margin: f64,
+        row_length: i32,
+    ) {
+        unsafe {
+            ffi::place_long_lines(text_document.cast(), line_height, bottom_margin, row_length)
+        };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn longest_line(&self, text_document: *mut qobject::QObject) -> i32 {
+        unsafe { ffi::longest_line(text_document.cast()) }
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn long_line_spot(
+        &self,
+        text_document: *mut qobject::QObject,
+        position: i32,
+    ) -> QString {
+        unsafe { ffi::long_line_spot(text_document.cast(), position) }
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn long_line_position(
+        &self,
+        text_document: *mut qobject::QObject,
+        row: i32,
+        column: f64,
+    ) -> i32 {
+        unsafe { ffi::long_line_position(text_document.cast(), row, column) }
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn long_line_runs(
+        &self,
+        text_document: *mut qobject::QObject,
+        first_row: i32,
+        last_row: i32,
+        first_column: i32,
+        last_column: i32,
+    ) -> QString {
+        unsafe {
+            ffi::long_line_runs(
+                text_document.cast(),
+                first_row,
+                last_row,
+                first_column,
+                last_column,
+            )
+        }
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn watch_text_changes(&self, text_document: *mut qobject::QObject) {
+        unsafe { ffi::watch_text_changes(text_document.cast()) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn take_text_change(&self, text_document: *mut qobject::QObject) -> QStringList {
+        unsafe { ffi::take_text_change(text_document.cast()) }
+    }
+
+    /// # Safety
+    ///
+    /// `text_edit` must be null or point to a live QObject.
+    unsafe fn rebuild_text_nodes(&self, text_edit: *mut qobject::QObject) {
+        unsafe { ffi::rebuild_text_nodes(text_edit.cast()) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_area` must be null or point to a live QObject.
+    unsafe fn scroll_to_cursor_in_qml(&self, text_area: *mut qobject::QObject) {
+        unsafe { ffi::scroll_to_cursor_in_qml(text_area.cast()) };
     }
 
     /// # Safety

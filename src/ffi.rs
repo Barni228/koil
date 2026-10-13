@@ -194,6 +194,65 @@ mod bridge {
         /// bug; call it before setting its text (see native.h).
         #[cxx_name = "redrawText"]
         unsafe fn redraw_text(text_edit: *mut QObject);
+
+        /// Hides a QQuickTextDocument's lines longer than `long_length`
+        /// from Qt, as they're edited (see native.h).
+        #[cxx_name = "watchLongLines"]
+        unsafe fn watch_long_lines(text_document: *mut QObject, long_length: i32);
+
+        /// Places the hidden lines on the line grid (see native.h).
+        #[cxx_name = "placeLongLines"]
+        unsafe fn place_long_lines(
+            text_document: *mut QObject,
+            line_height: f64,
+            bottom_margin: f64,
+            row_length: i32,
+        );
+
+        /// The longest hidden line's length, or 0 (see native.h).
+        #[cxx_name = "longestLine"]
+        unsafe fn longest_line(text_document: *mut QObject) -> i32;
+
+        /// The row and column of a position in a hidden line (see
+        /// native.h).
+        #[cxx_name = "longLineSpot"]
+        unsafe fn long_line_spot(text_document: *mut QObject, position: i32) -> QString;
+
+        /// The position at a row and column of a hidden line, or -1 (see
+        /// native.h).
+        #[cxx_name = "longLinePosition"]
+        unsafe fn long_line_position(text_document: *mut QObject, row: i32, column: f64) -> i32;
+
+        /// What to draw of the hidden lines in view, as JSON (see
+        /// native.h).
+        #[cxx_name = "longLineRuns"]
+        unsafe fn long_line_runs(
+            text_document: *mut QObject,
+            first_row: i32,
+            last_row: i32,
+            first_column: i32,
+            last_column: i32,
+        ) -> QString;
+
+        /// Keeps what changes in a QQuickTextDocument's text (see
+        /// native.h).
+        #[cxx_name = "watchTextChanges"]
+        unsafe fn watch_text_changes(text_document: *mut QObject);
+
+        /// What changed in the text since it was last asked, as from,
+        /// removed and text, or nothing (see native.h).
+        #[cxx_name = "takeTextChange"]
+        unsafe fn take_text_change(text_document: *mut QObject) -> QStringList;
+
+        /// Has a TextEdit build all its lines in view again (see
+        /// native.h).
+        #[cxx_name = "rebuildTextNodes"]
+        unsafe fn rebuild_text_nodes(text_edit: *mut QObject);
+
+        /// Has a TextArea's QML scroll to its cursor rather than Qt (see
+        /// native.h).
+        #[cxx_name = "scrollToCursorInQml"]
+        unsafe fn scroll_to_cursor_in_qml(text_area: *mut QObject);
     }
 }
 

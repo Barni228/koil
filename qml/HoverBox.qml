@@ -12,9 +12,9 @@ import "text.js" as Txt
 Item {
     id: hover
 
-    // The Editor it shows things in: its textArea, cellAt, rowSpans,
-    // lineHeight and metrics, its hidden text, and the warnings and errors.
-    // Untyped, since Editor.qml can't name its own type.
+    // The Editor it shows things in: its textArea, positionAt, cellAt,
+    // rowSpans, lineHeight and metrics, its hidden text, and the warnings
+    // and errors. Untyped, since Editor.qml can't name its own type.
     required property var editor
     required property Theme theme
     readonly property TextArea textArea: editor.textArea
@@ -89,7 +89,7 @@ Item {
     function targetUnder(p) {
         if (!p)
             return null;
-        const t = textArea.text, pos = textArea.positionAt(p.x, p.y);
+        const t = textArea.text, pos = editor.positionAt(p.x, p.y);
         // positionAt gives the nearest gap, which is after the character on its right half.
         for (const c of [pos, pos > 0 ? Txt.charStart(t, pos - 1) : -1]) {
             const target = c >= 0 ? targetAt(c) : null;

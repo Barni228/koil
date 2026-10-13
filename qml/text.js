@@ -21,7 +21,11 @@ function lineIndex(t) {
     const fresh = { text: t, starts: [0], done: false };
     if (t.length < indexedLength)
         return fresh;
-    const x = lineIndexes.find(x => x.text === t) || fresh;
+    // The lengths first: V4 compares two strings by hashing all of both
+    // (and then going through both), unless they're the same one, which
+    // `t` is from then on.
+    const x = lineIndexes.find(x => x.text.length === t.length && x.text === t) || fresh;
+    x.text = t;
     lineIndexes = [x].concat(lineIndexes.filter(y => y !== x)).slice(0, 2);
     return x;
 }
@@ -118,6 +122,14 @@ function attaches(t, i) {
         || t.charCodeAt(i - 1) === 0x200D;
 }
 
+// A code unit that may not be a character of its own, or may have the
+// next one attach to it (see attaches): a surrogate, a zero-width joiner or
+// a combining mark. Any other is a character of its own, so a line of only
+// those has as many columns as code units, which `column` and `atColumn`
+// count without going through it a character at a time (a long line took
+// seconds).
+const mayAttach = /[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u200d\u20d0-\u20ff\ud800-\udfff\ufe00-\ufe0f\ufe20-\ufe2f]/;
+
 function isLowSurrogate(t, i) {
     const c = t.charCodeAt(i), h = t.charCodeAt(i - 1);
     return c >= 0xDC00 && c <= 0xDFFF && h >= 0xD800 && h <= 0xDBFF;
@@ -171,8 +183,12 @@ function column(t, p) {
     // p can be past the end: the editor may report its cursor before the
     // text change that moved it.
     p = Math.min(p, t.length);
-    let col = 0;
-    for (let q = lineStart(t, p); q < p; q = charEnd(t, q))
+    const ls = lineStart(t, p), i = t.slice(ls, p).search(mayAttach);
+    if (i < 0)
+        return p - ls;
+    // A character a code unit up to the first that may not be one.
+    let q = charStart(t, ls + i), col = q - ls;
+    for (; q < p; q = charEnd(t, q))
         col++;
     return col;
 }
@@ -232,6 +248,9 @@ function cellColumn(own, width, column, room) {
 // last character when it's shorter.
 function atColumn(t, ls, col) {
     const le = lineEnd(t, ls);
+    // A character a code unit (see mayAttach) as far as the column.
+    if (t.slice(ls, Math.min(le, ls + col + 1)).search(mayAttach) < 0)
+        return Math.max(ls, Math.min(ls + col, le - 1));
     let q = ls;
     for (let i = 0; i < col && charEnd(t, q) < le; i++)
         q = charEnd(t, q);

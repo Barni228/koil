@@ -91,6 +91,67 @@ void followTextLength(QObject* textEdit);
 // nothing). Then this has it build every line in view from scratch.
 void redrawText(QObject* textEdit);
 
+// Hides the lines of a TextEdit's document (a QQuickTextDocument) longer
+// than `longLength` characters from Qt, as they're edited: Qt lays out and
+// draws all of a line in view, so a megabyte took seconds, and once a
+// second for each edit. Koil draws only what's in view of them, and places
+// them itself (see placeLongLines and the longLine functions).
+void watchLongLines(QObject* textDocument, int longLength);
+
+// Call after each change to the text of a document watchLongLines watches,
+// and to its line format: gives each line Qt lays out after the hidden ones
+// a top margin as tall as their rows (and the end of the document after the
+// last of them), so all lines are on a grid of rows `lineHeight` tall, of
+// which a line Qt lays out has `bottomMargin` at its end (see
+// setLineFormat). While lines wrap, a hidden line has `rowLength`
+// characters a row (0 while they don't, when every line is a row).
+void placeLongLines(QObject* textDocument, double lineHeight, double bottomMargin, int rowLength);
+
+// The length of the longest hidden line (see watchLongLines), or 0 if
+// there's none.
+int longestLine(QObject* textDocument);
+
+// Where the character at `position` is, if it's in a hidden line: its row
+// and its column in the row (a UTF-16 index), as "row column", both from 0.
+// Empty if it isn't.
+QString longLineSpot(QObject* textDocument, int position);
+
+// The position closest to `column` (a UTF-16 index) in row `row`, if the
+// row is a hidden line's, else -1.
+int longLinePosition(QObject* textDocument, int row, double column);
+
+// What to draw of the hidden lines in rows `firstRow` to `lastRow`, from
+// column `firstColumn` up to `lastColumn` of a row, as JSON: runs of text
+// of one format, as { row, column, text, color, underline } (no color for
+// the text's own), with a tab as a space.
+QString longLineRuns(QObject* textDocument,
+                     int firstRow,
+                     int lastRow,
+                     int firstColumn,
+                     int lastColumn);
+
+// Keeps what changes in the text of a TextEdit's document (a
+// QQuickTextDocument), for takeTextChange.
+void watchTextChanges(QObject* textDocument);
+
+// What changed in the text of a document watchTextChanges watches since
+// this was last called, as one change, from, removed and text: the text
+// from `from`, `removed` long, became `text` (as toPlainText would give
+// it). Empty if nothing changed. So the text needn't be read whole after
+// each change (toPlainText took 100 ms for a long one).
+QStringList takeTextChange(QObject* textDocument);
+
+// Has a TextEdit build all its lines in view again when it next draws,
+// rather than those a change of its selection touched: past a line Qt
+// doesn't lay out (see watchLongLines), Qt moves the lines after those
+// down by as much as they are from the top.
+void rebuildTextNodes(QObject* textEdit);
+
+// Stops a TextArea in a ScrollView from scrolling to show its cursor
+// rectangle, which is at the text's start in a hidden line (see
+// watchLongLines): its QML does it instead.
+void scrollToCursorInQml(QObject* textArea);
+
 // Colors Koil's listing in a TextEdit's document (a QQuickTextDocument):
 // the icon at a line's start in its color (`iconColors` alternates icons and
 // colors), or in `pendingIconColor` on a pending entry's line (see

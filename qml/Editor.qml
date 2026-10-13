@@ -67,6 +67,9 @@ Item {
     // The link a press with Cmd was on, which its release opens if it's
     // still on it.
     property var pressedLink: null
+    // Where a press on a long line was, while its drag selects from there
+    // (see longLength), else -1.
+    property int dragFrom: -1
 
     // Whether vim edits this editor. The other one keeps its cursor where
     // vim left it (`cursorPos`), and its hidden text.
@@ -116,12 +119,20 @@ Item {
     readonly property var viewport: [flickable.contentY, flickable.height]
     // Set while the text changes in a way that isn't an edit.
     property bool quiet: false
-    // The text as of its last change, to tell edits from changes to its
-    // format (fixLineFormat, colors), which Qt reports as text changes too.
-    property string lastText: ""
+    // Set while only the text's format changes (its line format, colors or
+    // margins), which Qt reports as a change to the text, but which leaves
+    // the text as it was, so it isn't read again (a long one took 100 ms).
+    property bool formatting: false
     // The line format the text was given last (see lineFormat), so it
     // isn't given the same again: Qt lays all of it out for each.
     property string formatted: ""
+    // Lines longer than this Qt doesn't lay out or draw, as it would all
+    // of one in view (a line of a megabyte took seconds to open, and as
+    // long for each edit), but `longText` draws what's in view of them,
+    // on the line grid (see watchLongLines in native.h). `longest` is the
+    // longest one's length, or 0 if there's none.
+    readonly property int longLength: 10000
+    property int longest: 0
 
     // The text changed, by vim or by typing (not by setText).
     signal edited
@@ -159,6 +170,13 @@ Item {
     // Colors the listing (see `listing`), the path field or a file, in the
     // light or dark theme's colors.
     function applyColors() {
+        const was = formatting;
+        formatting = true;
+        colorText();
+        formatting = was;
+    }
+
+    function colorText() {
         if (pathField) {
             const spans = [];
             for (const s of pathSyntax)
@@ -180,8 +198,12 @@ Item {
     }
 
     function applyPendingLines() {
-        if (listing)
-            system.setPendingLines(editor.textDocument, pendingLines.map(String));
+        if (!listing)
+            return;
+        const was = formatting;
+        formatting = true;
+        system.setPendingLines(editor.textDocument, pendingLines.map(String));
+        formatting = was;
     }
 
     // A press at x, y in the editor's coordinates, in the room the view
@@ -191,7 +213,7 @@ Item {
         if (!active)
             activated();
         editor.forceActiveFocus();
-        const p = editor.positionAt(x, y);
+        const p = editor.posAt(x, y);
         if (modifiers & Qt.AltModifier) {
             vim.toggleCursor(p);
         } else {
@@ -204,8 +226,8 @@ Item {
     // nearest it, which positionAt gives), or -1 if there's none: past
     // its line's end, or under the text.
     function charUnder(p) {
-        const t = editor.text, pos = editor.positionAt(p.x, p.y);
-        const c = pos > 0 && editor.positionToRectangle(pos).x > p.x ? Txt.charStart(t, pos - 1) : pos;
+        const t = editor.latest.text, pos = editor.posAt(p.x, p.y);
+        const c = pos > 0 && editor.rectAt(pos).x > p.x ? Txt.charStart(t, pos - 1) : pos;
         const cell = cellAt(c);
         return c < t.length && t[c] !== "\n" && p.y >= cell.y && p.y < cell.y + cell.height ? c : -1;
     }
@@ -214,7 +236,7 @@ Item {
     function linkUnder(p) {
         if (!p || pathField)
             return null;
-        const t = editor.text, c = charUnder(p);
+        const t = editor.latest.text, c = charUnder(p);
         if (c < 0)
             return null;
         const ls = Txt.lineStart(t, c), le = Txt.lineEnd(t, c);
@@ -267,8 +289,82 @@ Item {
             return;
         formatted = key;
         quiet = true;
+        formatting = true;
         system.setLineFormat(editor.textDocument, f.height, f.bottomMargin, f.indent, f.rightMargin);
+        formatting = false;
         quiet = false;
+        placeLongLines();
+    }
+
+    // Puts the long lines Qt doesn't lay out (see longLength) on the line
+    // grid, after a change to the text or its format: a line after them
+    // gets a margin as tall as their rows.
+    function placeLongLines() {
+        if (pathField)
+            return;
+        const was = formatting;
+        formatting = true;
+        system.placeLongLines(editor.textDocument, lineHeight, lineFormat().bottomMargin, wrapping ? rowLength() : 0);
+        formatting = was;
+        longest = system.longestLine(editor.textDocument);
+    }
+
+    // While lines wrap, how many characters a row of a long line has: as
+    // many as fit (see longLength).
+    function rowLength() {
+        return Math.max(1, Math.floor((editor.width - editor.leftPadding - editor.rightPadding) / charWidth) - noteRoom);
+    }
+
+    // The position closest to point x, y in the editor, in a long line too
+    // (see longLength).
+    function positionAt(x, y) {
+        return editor.posAt(x, y);
+    }
+
+    // The row and column of the character at pos, if it's in a long line
+    // (see longLength), as { row, column }, else null.
+    function longSpot(pos) {
+        const spot = longest ? system.longLineSpot(editor.textDocument, pos) : "";
+        if (!spot)
+            return null;
+        const parts = spot.split(" ");
+        return { row: Number(parts[0]), column: Number(parts[1]) };
+    }
+
+    // The position in a long line closest to point x, y (in the editor),
+    // or -1 if there's none there.
+    function longPositionAt(x, y) {
+        if (!longest)
+            return -1;
+        return system.longLinePosition(editor.textDocument, Math.floor((y - textTop) / lineHeight), (x - editor.leftPadding) / charWidth);
+    }
+
+    // Scrolls as little as shows the editor's cursor, as Qt's TextArea does
+    // (QQuickTextAreaPrivate::ensureCursorVisible), which Qt leaves to this
+    // (see scrollToCursorInQml), as its cursor rectangle in a long line is
+    // at the text's start.
+    function ensureCursorVisible() {
+        const f = flickable, cx = f.contentX, cy = f.contentY, w = f.width, h = f.height;
+        const tp = editor.topPadding, lp = editor.leftPadding, p = editor.cursorPosition;
+        const cr = longSpot(p) ? editor.rectAt(p) : editor.cursorRectangle;
+        if (cr.x <= cx + lp) {
+            f.contentX = cr.x - lp;
+        } else {
+            // The next character, if it's on the cursor's row.
+            const rp = editor.rightPadding;
+            const nr = p < editor.length ? editor.rectAt(p + 1) : null;
+            if (nr && Math.abs(nr.y - cr.y) * 1e12 <= Math.min(Math.abs(nr.y), Math.abs(cr.y)) && nr.x + nr.width >= cx + lp + w - rp)
+                f.contentX = nr.x + nr.width - w + rp;
+            else if (cr.x + cr.width >= cx + lp + w - rp)
+                f.contentX = cr.x + cr.width - w + rp;
+        }
+        if (cr.y <= cy + tp) {
+            f.contentY = cr.y - tp;
+        } else {
+            const bp = editor.bottomPadding;
+            if (cr.y + cr.height >= cy + tp + h - bp && cr.y + cr.height <= f.contentHeight)
+                f.contentY = cr.y + cr.height - h + bp;
+        }
     }
 
     // The format fixLineFormat gives every line: { height, bottomMargin,
@@ -295,7 +391,7 @@ Item {
     // positionToRectangle, which gives a line with an emoji its natural
     // height, while every line is lineHeight tall (see fixLineFormat).
     function cellAt(pos) {
-        const r = editor.positionToRectangle(pos);
+        const r = editor.rectAt(pos);
         const h = lineHeight;
         const line = Math.round((r.y + r.height / 2 - textTop - h / 2) / h);
         return Qt.rect(r.x, textTop + line * h, r.width, h);
@@ -311,9 +407,9 @@ Item {
         if (!wrapping || b.y === a.y)
             return [{ start: start, end: end, rect: Qt.rect(a.x, a.y, b.x - a.x, a.height) }];
         // As far as the rows in view (a long line can have thousands).
-        const f = flickable, t = editor.text;
-        const from = Math.max(start, editor.positionAt(0, f.contentY));
-        const to = Math.min(end, editor.positionAt(0, f.contentY + f.height + lineHeight));
+        const f = flickable, t = editor.latest.text;
+        const from = Math.max(start, editor.posAt(0, f.contentY));
+        const to = Math.min(end, editor.posAt(0, f.contentY + f.height + lineHeight));
         if (from > to)
             return [];
         const spans = [], z = cellAt(to);
@@ -344,7 +440,7 @@ Item {
     // character is the whole character there (an emoji, say), or "" for
     // none (at a line's end or on a tab), and `line` its line's rows.
     function spotAt(pos, main) {
-        const t = editor.text, p = Math.min(pos, editor.length);
+        const t = editor.latest.text, p = Math.min(pos, editor.length);
         const ch = t.slice(p, Txt.charEnd(t, p));
         const cell = cellAt(p);
         let line = cell;
@@ -356,7 +452,8 @@ Item {
             cell: cell,
             character: ch === "\t" || ch === "\n" || ch === "\u2029" ? "" : ch,
             main: main,
-            line: line
+            line: line,
+            long: !!longSpot(p)
         };
     }
 
@@ -387,7 +484,7 @@ Item {
         if (!active)
             return [];
         const shown = vim.visualShown;
-        const t = editor.text, v = visibleRange();
+        const t = editor.latest.text, v = visibleRange();
         if (shown ? shown.mode === "visualBlock" : vim.mode === "visualBlock")
             return vim.blockSpans(v.from, v.to, shown || undefined);
         const r = shown ? vim.selectedRange(t, shown.mode, shown.anchor, shown.cursor)
@@ -428,10 +525,10 @@ Item {
     // them if it edited this editor.
     function visibleLines() {
         if (wrapping) {
-            const t = editor.text, f = flickable;
+            const t = editor.latest.text, f = flickable;
             return {
-                top: Txt.lineOf(t, editor.positionAt(0, f.contentY)) - 1,
-                bottom: Txt.lineOf(t, editor.positionAt(0, f.contentY + f.height)) - 1
+                top: Txt.lineOf(t, editor.posAt(0, f.contentY)) - 1,
+                bottom: Txt.lineOf(t, editor.posAt(0, f.contentY + f.height)) - 1
             };
         }
         const y = flickable.contentY - textTop;
@@ -443,7 +540,7 @@ Item {
 
     // The part of the text [from, to] in the visible lines.
     function visibleRange() {
-        const t = editor.text, v = visibleLines();
+        const t = editor.latest.text, v = visibleLines();
         return {
             from: Txt.lineToPos(t, v.top + 1),
             to: Txt.lineEnd(t, Txt.lineToPos(t, v.bottom + 1))
@@ -527,7 +624,7 @@ Item {
         // In the listing, the cursor is never on an icon (see Prefixes in
         // Vim.qml): with nothing under it, gh shows its line's icon's text.
         function onHoverRequested(at) {
-            hover.show(view.listing && !hover.targetAt(at) ? Txt.lineStart(editor.text, at) : at, false);
+            hover.show(view.listing && !hover.targetAt(at) ? Txt.lineStart(editor.latest.text, at) : at, false);
         }
     }
 
@@ -657,15 +754,17 @@ Item {
 
     // Room right of the text for the view to scroll into, as far as the
     // notes and messages after the lines reach (see `aside`), so one that
-    // ends past the view can be read. A margin, as `scrollRoom` is: padding
-    // would have Qt lay out all of the text again whenever it changed. None
-    // while lines wrap, when one that would end past the view is cut off.
+    // ends past the view can be read, and the long lines, which Qt doesn't
+    // count in the text's width (see longLength), with the cursor after
+    // their end. A margin, as `scrollRoom` is: padding would have Qt lay
+    // out all of the text again whenever it changed. None while lines wrap,
+    // when one that would end past the view is cut off.
     Binding {
         id: sideScrollRoom
 
         target: view.flickable
         property: "rightMargin"
-        value: view.wrapping ? 0 : Math.max(0, editor.leftPadding + aside.widest * view.charWidth + editor.rightPadding - view.flickable.contentWidth)
+        value: view.wrapping ? 0 : Math.max(0, editor.leftPadding + Math.max(aside.widest, view.longest + 1) * view.charWidth + editor.rightPadding - view.flickable.contentWidth)
     }
 
     // While lines wrap, the view doesn't scroll sideways, though its
@@ -713,6 +812,16 @@ Item {
             // Bumped on every change to the text, for things that must
             // refresh after one.
             property int revision: 0
+            // The text as of its last change, as { text }, one string: each
+            // read of `text` makes a new one, and V4 compares two strings
+            // by hashing all of both (a long text's took milliseconds, many
+            // times a key), unless they're the same one. In an object, as
+            // writing a long string to a property took as long. Also tells
+            // edits from changes to the text's format (fixLineFormat,
+            // colors), which Qt reports as text changes too. Vim's edit
+            // gives the text it makes as `expected`, which is the text once
+            // it's as long.
+            property var latest: null
 
             font.family: view.vim.fontFamily
             font.pointSize: view.vim.fontSize
@@ -725,23 +834,79 @@ Item {
             readOnly: true // vim starts in normal mode
             focus: true
             onTextChanged: {
+                const change = view.system.takeTextChange(textDocument);
+                if (view.formatting) {
+                    revision++;
+                    return;
+                }
+                // The text before with what changed in it, rather than all
+                // of it from Qt (a long one took 100 ms), or the same string
+                // as before if nothing did (only its colors). As Qt has it
+                // only if that doesn't add up.
+                const old = latest ? latest.text : "";
+                let expected = latest && latest.expected, t = null, changed = false;
+                if (expected && expected.length === length) {
+                    t = expected;
+                    changed = true;
+                    expected = null;
+                } else if (change.length === 3) {
+                    const from = Number(change[0]), removed = Number(change[1]), added = change[2];
+                    if (from >= 0 && removed >= 0 && old.length - removed + added.length === length) {
+                        changed = removed !== added.length || added !== old.slice(from, from + removed);
+                        t = changed ? old.slice(0, from) + added + old.slice(from + removed) : old;
+                    }
+                } else if (old.length === length) {
+                    t = old;
+                }
+                if (t === null) {
+                    t = text;
+                    changed = t.length !== old.length || t !== old;
+                    if (!changed)
+                        t = old;
+                }
+                // Until the edit that makes it (the insert after a remove).
+                latest = { text: t, expected: expected };
                 // Only the lines in view built, if the text grew long.
                 view.system.followTextLength(editor);
-                if (!view.quiet && text !== view.lastText)
+                if (!view.quiet && changed)
                     view.edited();
-                view.lastText = text;
                 revision++;
+                // After it's done: the margins it gives are a change too.
+                view.placeLongLines();
             }
             // Not while the text is replaced (setText), whose cursor Qt
             // moves before `text` has the new text, which vim would read:
             // vim starts over after.
             onCursorPositionChanged: {
+                if (view.longest && selectionStart !== selectionEnd)
+                    view.system.rebuildTextNodes(editor);
                 if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
             }
             onSelectedTextChanged: {
+                // Qt draws again the lines a selection changes, which
+                // moves the lines after a long one (see rebuildTextNodes).
+                if (view.longest)
+                    view.system.rebuildTextNodes(editor);
                 if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
+            }
+            // While lines wrap, a long line has as many characters a row as
+            // fit (see rowLength). Once Qt is done resizing: placed while
+            // it was, the text's new height went nowhere.
+            onWidthChanged: {
+                if (view.wrapping)
+                    Qt.callLater(view.placeLongLines);
+            }
+            onLeftPaddingChanged: {
+                if (view.wrapping)
+                    Qt.callLater(view.placeLongLines);
+            }
+            // Not Qt's, which doesn't know where a long line is (see
+            // scrollToCursorInQml).
+            onCursorRectangleChanged: {
+                if (!view.pathField)
+                    view.ensureCursorVisible();
             }
             onRevisionChanged: {
                 hover.hide();
@@ -761,6 +926,7 @@ Item {
                 }
             }
             Component.onCompleted: {
+                latest = { text: text };
                 // Make room for the line numbers beside the style's padding.
                 const base = leftPadding;
                 leftPadding = Qt.binding(() => base + gutter.columnWidth);
@@ -778,6 +944,28 @@ Item {
                 }
                 view.paddingTop = topPadding;
                 view.paddingBottom = bottomPadding;
+                // Before any text: see onTextChanged.
+                view.system.watchTextChanges(textDocument);
+                // Qt never lays out a long line (see longLength), nor
+                // scrolls to it.
+                if (!view.pathField) {
+                    view.system.watchLongLines(textDocument, view.longLength);
+                    view.system.scrollToCursorInQml(editor);
+                }
+            }
+
+            // positionToRectangle and positionAt, in a long line too, which
+            // Qt doesn't lay out (see longLength): its rows are on the line
+            // grid, a column a character.
+            function rectAt(pos) {
+                const spot = view.longSpot(pos);
+                if (!spot)
+                    return positionToRectangle(pos);
+                return Qt.rect(leftPadding + spot.column * view.charWidth, view.textTop + spot.row * view.lineHeight, 1, view.lineHeight);
+            }
+            function posAt(x, y) {
+                const p = view.longPositionAt(x, y);
+                return p < 0 ? positionAt(x, y) : p;
             }
             Keys.onPressed: event => {
                 // Cmd (Ctrl elsewhere) shows the link under the pointer
@@ -830,7 +1018,11 @@ Item {
                 width: 2
                 visible: view.vim.mode === "insert" && editor.activeFocus
 
+                // Not in a long line (see longLength), where Qt puts the bar
+                // at the text's start, and hides it when that's out of
+                // view: `carets` draws it there.
                 Rectangle {
+                    visible: !view.longSpot(editor.cursorPosition)
                     y: view.cellAt(editor.cursorPosition).y - bar.y
                     width: parent.width
                     height: view.lineHeight
@@ -854,15 +1046,30 @@ Item {
                         editor.forceActiveFocus();
                     } else if (mouse.modifiers & Qt.AltModifier) {
                         editor.forceActiveFocus();
-                        view.vim.toggleCursor(editor.positionAt(mouse.x, mouse.y));
+                        view.vim.toggleCursor(editor.posAt(mouse.x, mouse.y));
                     } else {
                         view.vim.clearCursors();
-                        mouse.accepted = false;
+                        // Qt doesn't know where a long line is (see
+                        // longLength): a press on one goes there here, and
+                        // a drag from it selects.
+                        const p = view.longPositionAt(mouse.x, mouse.y);
+                        if (p < 0) {
+                            mouse.accepted = false;
+                            return;
+                        }
+                        editor.forceActiveFocus();
+                        editor.cursorPosition = p;
+                        view.dragFrom = p;
                     }
+                }
+                onPositionChanged: mouse => {
+                    if (view.dragFrom >= 0)
+                        editor.select(view.dragFrom, editor.posAt(mouse.x, mouse.y));
                 }
                 onReleased: mouse => {
                     const pressed = view.pressedLink, p = Qt.point(mouse.x, mouse.y);
                     view.pressedLink = null;
+                    view.dragFrom = -1;
                     const l = pressed && view.linkUnder(p);
                     if (l && l.start === pressed.start && l.end === pressed.end)
                         view.linkClicked(view.charUnder(p));
@@ -943,17 +1150,21 @@ Item {
             // matchparen shows them: in insert mode, the one before the
             // cursor if there's none at it. Both must be in view, which is
             // as far as it looks (an unmatched one in a long text would
-            // have it go through all of it at every key).
+            // have it go through all of it at every key), and no more than
+            // `reach` characters away, as long lines in view (see
+            // longLength) can have megabytes.
             Layer {
                 id: brackets
+
+                readonly property int reach: 100000
 
                 z: -0.55
                 inputs: [view.active, view.vim.cursor, view.vim.mode, view.layout, view.viewport]
                 compute: () => {
                     if (!view.active)
                         return [];
-                    const v = view.visibleRange();
-                    return Txt.bracketPair(editor.text, view.vim.cursor, view.vim.mode === "insert", v.from, v.to) || [];
+                    const v = view.visibleRange(), p = view.vim.cursor;
+                    return Txt.bracketPair(editor.latest.text, p, view.vim.mode === "insert", Math.max(v.from, p - reach), Math.min(v.to, p + reach)) || [];
                 }
 
                 Repeater {
@@ -1004,6 +1215,47 @@ Item {
                         width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
                         height: modelData.rect.height
                         color: view.theme.highlight
+                    }
+                }
+            }
+
+            // The long lines Qt doesn't draw (see longLength), as far as
+            // they're in view, a column a character, in the colors the
+            // highlighter gave them. Before the search highlights, which
+            // draw their text over this.
+            Layer {
+                id: longText
+
+                readonly property font underlined: Qt.font({
+                    family: editor.font.family,
+                    pointSize: editor.font.pointSize,
+                    underline: true
+                })
+
+                inputs: [view.longest, view.layout, view.viewport, view.flickable.contentX, view.flickable.width]
+                compute: () => {
+                    if (!view.longest)
+                        return [];
+                    const f = view.flickable, h = view.lineHeight, w = view.charWidth;
+                    const x = f.contentX - editor.leftPadding;
+                    return JSON.parse(view.system.longLineRuns(editor.textDocument,
+                        Math.floor((f.contentY - view.textTop) / h), Math.floor((f.contentY + f.height - view.textTop) / h),
+                        view.wrapping ? 0 : Math.max(0, Math.floor(x / w) - 1),
+                        view.wrapping ? view.rowLength() : Math.ceil((x + f.width) / w) + 1));
+                }
+
+                Repeater {
+                    model: longText.model
+
+                    Text {
+                        required property var modelData
+
+                        x: editor.leftPadding + modelData.column * view.charWidth
+                        y: view.textTop + modelData.row * view.lineHeight + view.textBaseline - baselineOffset
+                        text: modelData.text
+                        font: modelData.underline ? longText.underlined : editor.font
+                        color: modelData.color || editor.color
+                        textFormat: Text.PlainText
                     }
                 }
             }
@@ -1065,7 +1317,8 @@ Item {
                 compute: () => !view.active ? [] : [view.spotAt(view.vim.cursor, true)].concat(view.visibleCursors().map(c => view.spotAt(c.pos, false)))
 
                 // Shaped like the main one. In insert mode the main one is
-                // the editor's own bar (see cursorDelegate). None while the
+                // the editor's own bar (see cursorDelegate), but in a long
+                // line, where Qt doesn't know its place. None while the
                 // command line is open, which has the cursor, as in vim.
                 Repeater {
                     model: carets.model
@@ -1076,7 +1329,7 @@ Item {
                         cell: modelData.cell
                         character: modelData.character
                         shape: view.vim.cursorShape
-                        shown: view.vim.commandLine === "" && (!modelData.main || view.vim.mode !== "insert")
+                        shown: view.vim.commandLine === "" && (!modelData.main || view.vim.mode !== "insert" || modelData.long)
                     }
                 }
             }
@@ -1107,7 +1360,7 @@ Item {
                 readonly property var inputs: [view.infos, view.hidden, view.problems, view.layout, room, view.wrapping]
 
                 function refresh() {
-                    const t = editor.text, lines = new Map();
+                    const t = editor.latest.text, lines = new Map();
                     // The line starting at ls, as { end, note, message, error }.
                     const line = ls => {
                         if (!lines.has(ls))
@@ -1203,7 +1456,7 @@ Item {
 
                 inputs: [view.infos, view.busyInfos, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room, view.wrapping]
                 compute: () => {
-                    const list = [], hidden = view.hidden, t = editor.text, v = view.visibleRange();
+                    const list = [], hidden = view.hidden, t = editor.latest.text, v = view.visibleRange();
                     for (let i = view.vim.firstAt(hidden, v.from); i < hidden.length && hidden[i].at <= v.to; i++) {
                         const h = hidden[i], text = view.infos[h.text];
                         const ls = text ? Txt.lineStart(t, h.at) : 0, le = text ? Txt.lineEnd(t, h.at) : 0;
@@ -1276,7 +1529,7 @@ Item {
 
                 // The warning or error with the character at pos, or null.
                 function at(pos) {
-                    return find(editor.text, pos, pos).find(d => d.start <= pos && pos < d.end) || null;
+                    return find(editor.latest.text, pos, pos).find(d => d.start <= pos && pos < d.end) || null;
                 }
 
                 // The message shown after a line's end at point p, as
@@ -1315,7 +1568,7 @@ Item {
                     compute: () => {
                         const v = view.visibleRange();
                         found = []; // as Layer empties its model
-                        found = diagnostics.find(editor.text, v.from, v.to);
+                        found = diagnostics.find(editor.latest.text, v.from, v.to);
                         const waves = [];
                         for (const d of found) {
                             for (const r of view.rowSpans(d.start, d.end))
@@ -1396,7 +1649,7 @@ Item {
                         rows = [];
                         return;
                     }
-                    const t = editor.text, v = view.visibleLines();
+                    const t = editor.latest.text, v = view.visibleLines();
                     const count = Txt.countLines(t);
                     gutter.fit(count);
                     const current = Txt.lineOf(t, view.cursorPos) - 1;

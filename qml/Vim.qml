@@ -519,7 +519,7 @@ QtObject {
         if (syncing)
             return;
         interrupt();
-        const p = editor.cursorPosition, t = editor.text;
+        const p = editor.cursorPosition, t = editorText();
         if (inserting) {
             // Not into a line's prefix (by an arrow key, Home or a click):
             // to its end instead. Typing moves the cursor before `text`
@@ -2784,7 +2784,8 @@ QtObject {
 
     // A batch of the editor as it is.
     function newBatch() {
-        return { text: editor.text, cursor: cursor, anchor: anchor, mode: mode };
+        const t = editorText();
+        return { text: t, cursor: cursor, anchor: anchor, mode: mode, same: unchanged(t) };
     }
 
     // Runs fn (a key) in a batch.
@@ -2826,7 +2827,7 @@ QtObject {
     // what had been below). If none of them changed, the view stays where
     // it is, even if the mouse scrolled the cursor out of it.
     function flush() {
-        const b = batch, old = editor.text, edited = b.text !== old;
+        const b = batch, old = editorText(), edited = b.text.length !== old.length || b.text !== old;
         if (!edited && b.cursor === cursor && b.anchor === anchor && b.mode === mode)
             return;
         batch = null;
@@ -2841,13 +2842,23 @@ QtObject {
         };
         syncing = true;
         if (edited) {
-            const d = diff(old, b.text, [], []);
+            const d = diff(old, b.text, [], [], b.same), inserted = b.text.slice(d.start, d.end2);
+            // The editor's text will be vim's, unless Qt changes what goes
+            // in (a line break other than \n, a no-break space: see
+            // takeTextChange in native.h), so it can take vim's string
+            // (Editor.qml's `latest`), which V4 then needn't make of the
+            // pieces again (a long text took tens of milliseconds).
+            const latest = editor.latest;
+            if (latest && !/[\r\u00a0\u2028\u2029\ufdd0\ufdd1]/.test(inserted))
+                latest.expected = b.text;
             editing = true;
             if (d.end1 > d.start)
                 editor.remove(d.start, d.end1);
-            if (d.end2 > d.start)
-                editor.insert(d.start, b.text.slice(d.start, d.end2));
+            if (inserted)
+                editor.insert(d.start, inserted);
             editing = false;
+            if (editor.latest)
+                editor.latest.expected = null;
         }
         const newMode = b.mode !== mode;
         if (!newMode)
@@ -2864,7 +2875,8 @@ QtObject {
         else if (b.cursor !== cursor)
             showColumn();
         syncing = false;
-        b.text = editor.text;
+        b.text = editorText();
+        b.same = unchanged(b.text);
         b.cursor = cursor;
         b.anchor = anchor;
         b.mode = mode;
@@ -2878,7 +2890,23 @@ QtObject {
     // The text of the buffer vim edits: the editor's, or during a key or a
     // chunk of a run, the copy vim edits in its place (see Batches).
     function bufferText() {
-        return batch ? batch.text : editor.text;
+        return batch ? batch.text : editorText();
+    }
+
+    // The editor's text: as one string a change, if the editor keeps one
+    // (Editor.qml's `latest`), as V4 compares strings by hashing all of
+    // both, unless they're the same one, else as Qt gives it.
+    function editorText() {
+        const latest = editor.latest;
+        return latest ? latest.text : editor.text;
+    }
+
+    // How much of `t` is still the same at its start and at its end, as
+    // { prefix, suffix }, for diff: all of it, until replaceRange edits it.
+    // A batch and a change keep one, so their diffs don't go through all
+    // of a long text (each took milliseconds a megabyte, twice a key).
+    function unchanged(t) {
+        return { prefix: t.length, suffix: t.length };
     }
 
     // `entries` are the hidden-text entries for `text`, if it has any.
@@ -2886,6 +2914,13 @@ QtObject {
         // A space is as long as a line break, so positions stay right.
         if (singleLine)
             text = text.replace(new RegExp("[\\r\\n\\u2028\\u2029]", "g"), " ");
+        const length = bufferText().length;
+        for (const same of [batch && batch.same, change && change.same]) {
+            if (same) {
+                same.prefix = Math.min(same.prefix, start);
+                same.suffix = Math.min(same.suffix, length - end);
+            }
+        }
         if (batch) {
             const t = batch.text;
             batch.text = t.slice(0, start) + text + t.slice(end);
@@ -2903,7 +2938,7 @@ QtObject {
             shiftHidden(start, end, text.length, entries || []);
         shiftCursors(start, end, text.length);
         if (!batch && (hidden.length || cursors.length))
-            trackedText = editor.text;
+            trackedText = editorText();
     }
 
     function setMode(m) {
@@ -2977,8 +3012,10 @@ QtObject {
     // text around it.
 
     function beginChange() {
-        if (!change)
-            change = { before: bufferText(), hidden: hidden, cursor: cursor };
+        if (!change) {
+            const t = bufferText();
+            change = { before: t, hidden: hidden, cursor: cursor, same: unchanged(t) };
+        }
     }
 
     // During a run, its changes add up to one, which only ends with it,
@@ -2987,9 +3024,9 @@ QtObject {
         if (!change || running && !force)
             return;
         const before = change.before, after = bufferText();
-        const c = change.cursor, bh = change.hidden;
+        const c = change.cursor, bh = change.hidden, same = change.same;
         change = null;
-        const d = diff(before, after, bh, hidden);
+        const d = diff(before, after, bh, hidden, same);
         if (!d)
             return;
         const s = d.start, e1 = d.end1, e2 = d.end2;
@@ -3288,6 +3325,10 @@ QtObject {
         target: vim.editor
 
         function onTextChanged() {
+            // The editor's own edit (typing), which replaceRange doesn't
+            // see: the change may differ anywhere (or its colors changed).
+            if (!vim.editing && vim.change)
+                vim.change.same = null;
             vim.trackEdit();
         }
     }
@@ -3355,7 +3396,7 @@ QtObject {
         if (editing || !hidden.length && !cursors.length)
             return;
         const before = trackedText, after = editor.text;
-        if (after === before)
+        if (after.length === before.length && after === before)
             return; // only its colors changed
         trackedText = after;
         const d = diff(before, after, [], []);
@@ -3370,8 +3411,8 @@ QtObject {
     // if `fromEnd`), up to max. It compares slices, which V4 does natively,
     // rather than characters, each of which it makes a string of (in a long
     // text, a diff took milliseconds).
-    function sameLength(a, b, fromEnd, max) {
-        let n = 0;
+    function sameLength(a, b, fromEnd, max, from) {
+        let n = Math.min(from || 0, max);
         for (let step = 1024; step > 0;) {
             const same = n + step <= max && (fromEnd
                 ? a.slice(a.length - n - step, a.length - n) === b.slice(b.length - n - step, b.length - n)
@@ -3386,11 +3427,13 @@ QtObject {
 
     // The span that differs between two texts with their entries: `before`
     // [start, end1) became `after` [start, end2). Null if nothing differs.
-    function diff(before, after, beforeHidden, afterHidden) {
+    // `known`, if given, is how much is the same at their start and end for
+    // sure (see unchanged), which it doesn't compare.
+    function diff(before, after, beforeHidden, afterHidden, known) {
         const bh = beforeHidden, ah = afterHidden;
         const max = Math.min(before.length, after.length);
-        let s = sameLength(before, after, false, max);
-        const same = sameLength(before, after, true, max - s);
+        let s = sameLength(before, after, false, max, known && known.prefix);
+        const same = sameLength(before, after, true, max - s, known && known.suffix);
         let e1 = before.length - same, e2 = after.length - same;
         // An icon on both sides is only unchanged if its hidden text is too.
         for (let i = 0; ; i++) {
@@ -4805,7 +4848,7 @@ QtObject {
         // Not much further right than a row goes: Qt keeps an x in 64ths
         // of a pixel, in 32 bits.
         const x = rowWant && rowWant.at === p ? rowWant.x : wantCol === Infinity ? 1e6 : rowRect(p).x;
-        const q = Math.min(t.length, editor.positionAt(x, textTop + (row + 0.5) * lineHeight));
+        const q = Math.min(t.length, posAt(x, textTop + (row + 0.5) * lineHeight));
         if (!quiet)
             rowWant = { at: clampNormal(t, q), x: x };
         return q;
@@ -4933,7 +4976,7 @@ QtObject {
             flickable.contentY = searchView.y;
             return;
         }
-        const r = wrapping ? rowRect(searchTarget) : editor.positionToRectangle(searchTarget);
+        const r = wrapping ? rowRect(searchTarget) : rectAt(searchTarget);
         const maxX = maxScrollX();
         // Text in the left padding is under the line numbers, if they're on.
         const x = r.x < searchView.x + editor.leftPadding || r.x + r.width > searchView.x + flickable.width
@@ -4991,15 +5034,25 @@ QtObject {
 
     // ---- View --------------------------------------------------------------
 
+    // Where the character at p is in the editor, and the position closest
+    // to x, y in it: the editor's own, if it has them (Editor.qml's, which
+    // places the long lines Qt doesn't), else Qt's.
+    function rectAt(p) {
+        return editor.rectAt ? editor.rectAt(p) : editor.positionToRectangle(p);
+    }
+    function posAt(x, y) {
+        return editor.posAt ? editor.posAt(x, y) : editor.positionAt(x, y);
+    }
+
     // The lines in view, even partly, as { top, bottom } counted from 0
     // (bottom can be past the last line).
     function visibleLines() {
         if (!flickable)
             return { top: 0, bottom: Txt.countLines(bufferText()) - 1 };
         if (wrapping) {
-            const t = editor.text, f = flickable;
-            return { top: Txt.lineOf(t, editor.positionAt(0, f.contentY)) - 1,
-                bottom: Txt.lineOf(t, editor.positionAt(0, f.contentY + f.height)) - 1 };
+            const t = editorText(), f = flickable;
+            return { top: Txt.lineOf(t, posAt(0, f.contentY)) - 1,
+                bottom: Txt.lineOf(t, posAt(0, f.contentY + f.height)) - 1 };
         }
         const y = flickable.contentY - textTop;
         return { top: Math.max(0, Math.floor(y / lineHeight)), bottom: Math.max(0, Math.ceil((y + flickable.height) / lineHeight)) };
@@ -5009,7 +5062,7 @@ QtObject {
     // tall as the row, at p's x: as Editor's cellAt gives it, from the
     // editor's text.
     function rowRect(p) {
-        const r = editor.positionToRectangle(Math.min(p, editor.length));
+        const r = rectAt(Math.min(p, editor.length));
         const row = Math.max(0, Math.round((r.y + r.height / 2 - textTop) / lineHeight - 0.5));
         return Qt.rect(r.x, textTop + row * lineHeight, r.width, lineHeight);
     }
@@ -5021,7 +5074,7 @@ QtObject {
 
     // Where row `row` (from 0) starts in t, or t's end past its last.
     function rowStart(t, row) {
-        return Math.min(t.length, editor.positionAt(0, textTop + (row + 0.5) * lineHeight));
+        return Math.min(t.length, posAt(0, textTop + (row + 0.5) * lineHeight));
     }
 
     // The part of the text [from, to] in the visible lines.
@@ -5085,11 +5138,11 @@ QtObject {
     // cursor (see showColumn), as { left, right } contentX.
     function cursorSpan() {
         const t = bufferText(), p = Math.min(cursor, t.length), ls = Txt.lineStart(t, p);
-        const r = editor.positionToRectangle(p), room = sideRoom() * charWidth;
+        const r = rectAt(p), room = sideRoom() * charWidth;
         let left = r.x - room;
-        if (left <= editor.positionToRectangle(prefixEnd(t, ls)).x)
-            left = editor.positionToRectangle(ls).x;
-        const right = (p < Txt.lineEnd(t, p) ? editor.positionToRectangle(Txt.charEnd(t, p)).x : r.x + charWidth)
+        if (left <= rectAt(prefixEnd(t, ls)).x)
+            left = rectAt(ls).x;
+        const right = (p < Txt.lineEnd(t, p) ? rectAt(Txt.charEnd(t, p)).x : r.x + charWidth)
             + room + editor.rightPadding;
         // The left edge is the padding, where the line numbers are.
         return { left: left - editor.leftPadding, right: right - flickable.width };
@@ -5148,7 +5201,7 @@ QtObject {
         // past where its room would reach a name's prefix, which would
         // scroll back to show all of it (see cursorSpan).
         const t = bufferText(), ls = Txt.lineStart(t, Math.min(cursor, t.length));
-        const x0 = editor.positionToRectangle(ls).x, room = sideRoom() * charWidth;
+        const x0 = rectAt(ls).x, room = sideRoom() * charWidth;
         const col = span.left < f.contentX
             ? Math.max(Math.ceil((f.contentX + editor.leftPadding + room - x0 - 0.5) / charWidth),
                 Txt.column(t, prefixEnd(t, ls)) + sideRoom() + 1)
@@ -5189,7 +5242,7 @@ QtObject {
             flush(); // as scrollLines
         // The cursor's row, while lines wrap. The room below the rows is
         // less than the padding by as much as they start lower (textTop).
-        const r = wrapping ? rowRect(cursor) : editor.positionToRectangle(cursor);
+        const r = wrapping ? rowRect(cursor) : rectAt(cursor);
         const y = where === "t" ? r.y - textTop
             : where === "b" ? r.y + r.height + editor.bottomPadding - (textTop - editor.topPadding) - flickable.height
             : r.y + r.height / 2 - flickable.height / 2;

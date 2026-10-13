@@ -37,8 +37,8 @@ the scratchpad (see Scratchpad).
   threads and keeps them (see Kept sizes). Its tests
   (`src/sizes/tests.rs`) use a temp dir.
 - `src/syntax.rs`: a file's colors, found without knowing its language
-  (`spans`, see Syntax), which native.cpp's highlighter asks for a line at
-  a time through ffi.rs, and the URL or path at a place (`link_at`). Its
+  (`spans`, see Syntax), which native.cpp's `TextColors` asks for a line
+  at a time through ffi.rs, and the URL or path at a place (`link_at`). Its
   tests (`src/syntax/tests.rs`) take lines.
 - `src/link.rs`: what gf, gx and Cmd+click open (see Links): the link at a
   place in a line (`link_at`) and what its text stands for (`target`). Its
@@ -60,8 +60,10 @@ the scratchpad (see Scratchpad).
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
   `setText`, the listing's and path field's `QSyntaxHighlighter`, a
-  file's (`setTextColors`, with syntax.rs), and the confirmations'
-  (`setKeywordColors`), `redrawText`).
+  file's colors (`TextColors`: `setTextColors`, with syntax.rs), and the
+  confirmations' (`setKeywordColors`), `redrawText`, the long lines Qt
+  doesn't lay out (`LongLines`, see Long lines), and what changed in a
+  text (`TextChanges`, see Long texts)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
   Koil), Objective-C++, which `build.rs` adds only there.
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
@@ -73,7 +75,8 @@ the scratchpad (see Scratchpad).
   with it: cursors, selection, search highlights, the bracket matching the
   cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
   warnings and errors, line numbers, the link under the pointer with Cmd
-  held (`link`, see Links), the `HoverBox` and the
+  held (`link`, see Links), the long lines Qt doesn't draw (`longText`,
+  see Long lines), the `HoverBox` and the
   `CompletionList`, each in a part a row while lines wrap (`rowSpans`, see
   Wrapping). Both the listing (or
   file) and the path field are one (`pathField`).
@@ -853,8 +856,9 @@ the scratchpad (see Scratchpad).
   white). The highlighter is found by object name
   (no moc for native.cpp). Highlighting counts as a text change to Qt (as
   `fixLineFormat` does), so Editor.qml only emits `edited` when the text
-  really changed (`lastText`), and `trackEdit` returns at once. Coloring
-  again goes through `recolor`: only the lines whose pending state changed,
+  really changed (see `latest` under Long texts), and `trackEdit` returns
+  at once. Coloring again goes through `recolor`: only the lines whose
+  pending state changed,
   nothing if the colors are the same, and as one edit, with layout off for
   more than a few lines (`QSyntaxHighlighter` lays the document out after
   each line, so coloring a 3000-line listing again took a second, and `-`
@@ -885,9 +889,16 @@ the scratchpad (see Scratchpad).
   ones in Markdown (headings), no `//` in Python (division), which is all
   it knows of languages. Only a line's first `MAX_LENGTH` (3000)
   characters are colored, as with vim's `synmaxcol`. native.cpp's
-  `TextHighlighter` asks Rust for each line's spans (`syntaxSpans`, in
-  UTF-16, as Qt has it). Only one highlighter may color a document (each
-  would take the other's colors away), so Editor.qml takes the listing's
+  `TextColors` asks Rust for each line's spans (`syntaxSpans`, in UTF-16,
+  as Qt has it, of the line's first `coloredLength` characters) and gives
+  them to the line's layout, as a `QSyntaxHighlighter` would, but without
+  its format for each character of the line (5 ms for a line of a
+  megabyte), and not again when only the text's format changed
+  (`FormatOnly`: the line format, Koil's margins, see Long lines), which
+  had it color every line again; a line's state (in a `/* */`) is its
+  block's user state, as a highlighter's. Only one highlighter may color a
+  document (each would take the other's colors away), so Editor.qml takes
+  the listing's
   away before giving a file's, and the file's before the listing's. A new
   one colors at once (else Qt colors it all again once the event loop
   runs, without `recolor`'s batching, and colors no edit until then); new
@@ -1180,7 +1191,12 @@ the scratchpad (see Scratchpad).
   (`showCursor`), since an edit can move the editor's cursor to where vim's
   goes, and setting it there doesn't scroll (`100000dk` from the end of a
   long text left the view blank); a key that changes nothing leaves the
-  view alone, even off the cursor.
+  view alone, even off the cursor. A batch and a change (an undo step)
+  keep how much of their text's start and end no edit touched
+  (`unchanged`, which `replaceRange` narrows; the editor's own edits,
+  typing, make a change's unknown), so `diff` compares only what's
+  between: it compared slices from both ends of all of a long text, twice
+  a key.
   Signals main.qml handles by reading the editor are emitted through
   `outside`, which flushes first. Commands that edit in many places make
   one edit through `replaceRanges` (`J`, a block's lines, `putBlock`), which
@@ -1442,6 +1458,55 @@ the scratchpad (see Scratchpad).
   showed none of a short text past the old edges (a long one draws again
   as the view changes). Editor.qml calls `editor.update()` when the
   view's size changes.
+  Each read of `text` makes a new string of all of it (`toPlainText`: 100 ms
+  for 54 MB), and V4 compares two strings by hashing all of both, unless
+  they're the same one (an `===` of a long text took tens of milliseconds,
+  many times a key). So the TextArea keeps its text as one string a change
+  (`latest.text`, in an object: writing a long string to a property took as
+  long), which everything reads (vim's `editorText`): the one before with
+  what changed in it (`System.takeTextChange`, what `TextChanges` saw of
+  `contentsChange` since, as `toPlainText` gives it), or vim's text after
+  its edit (`latest.expected`, unless Qt changes what goes in: a `\r`, a
+  no-break space), or `text` if that doesn't add up. Changes only to the
+  format (`formatting` in Editor.qml, `FormatOnly` in native.cpp: the line
+  format, the colors, Koil's margins) leave it alone. Txt's line index takes
+  the string it's asked with (`lineIndex`), after comparing lengths first,
+  and `Txt.column` and `atColumn` count a code unit a character up to the
+  first that may not be one (`mayAttach`, found by a regex), as a long line
+  took seconds.
+- **Long lines** (`LongLines` in native.cpp, `longText` in Editor.qml): a
+  `TextEdit` builds only the lines in view, but all of each, so Qt shaped
+  every character of a line in view (300 ns each, again when the text's
+  width changed) and put a glyph of each in the scene graph: `big` (52 lines
+  of a megabyte) took a minute to show and seconds an edit. A line longer
+  than `longLength` (10,000) is hidden from Qt (`QTextBlock::setVisible`,
+  set in `contentsChange`, before Qt lays it out), which then never lays it
+  out or draws it, and the line after hidden ones gets a top margin as tall
+  as their rows (the text's end, a bottom margin of the root frame), so the
+  lines Qt lays out stay on the grid (`placeLongLines`, after each change,
+  around it). Koil places a hidden line's characters, a column a UTF-16
+  unit, `rowLength` a row while lines wrap (anywhere): `longLineSpot` and
+  `longLinePosition`, which the TextArea's `rectAt` and `posAt` give in
+  place of `positionToRectangle` and `positionAt` (vim's and the overlays'
+  go through them), and draws only what's in view of them (`longText`, a
+  `Text` a run of one color, from `TextColors`'s formats: `longLineRuns`; a
+  tab is a space). Qt's cursor rectangle in a hidden line is at the text's
+  start, so its TextArea mustn't scroll to it: its private
+  `ensureCursorVisible` is disconnected (`scrollToCursorInQml`), and
+  Editor.qml's does the same (QML handlers run before C++ slots anyway),
+  with Koil's rectangle in a hidden line; Qt hides its cursor delegate when
+  that rectangle is out of view, so there `carets` draws the insert bar, and
+  a press on one (and its drag) is Koil's (the `MouseArea`). Qt builds again
+  only the lines a selection touches, and past a hidden line put the lines
+  after it too far down (it takes an empty node, where it skipped the hidden
+  line, as the next one's place), so a selection change has it build all the
+  lines in view (`rebuildTextNodes`). Placed while Qt resized the TextArea,
+  the margins' height went nowhere (its `updateSize` guards against itself),
+  so a resize places them after. The matching bracket is looked for at most
+  `reach` characters away. A `QTextCursor` lays out the line it's put in to
+  find its x, so native.cpp reads text with `characterAt` and blocks' text
+  (`textBetween`). `big` shows in half a second, and an edit takes 0.1 to
+  0.3 s, mostly V4 copying all 54 MB.
 - **Wrapping** (`:set wrap`, a vim setting the Settings window saves, and
   View > Word Wrap, Alt+Z as in VS Code; never in the path field:
   `Editor.wrapping`, `Vim.wrapping`): a line too long for the view goes on
@@ -1487,7 +1552,7 @@ the scratchpad (see Scratchpad).
   applies the format, as `recolor` does: Qt's highlighter colors every line
   again on a format change and laid the document out after each one, so
   turning wrapping off took five minutes in a colored file of 100,000
-  lines.
+  lines (a file's `TextColors` doesn't color them again, see Syntax).
 - **Line numbers** (`:set nu`/`rnu`): the `gutter` is a child of the
   `TextArea` (so it scrolls with the text), kept at `contentX` and drawn over
   text scrolled under it. The styles hard-code `leftPadding` (7 on macOS,
