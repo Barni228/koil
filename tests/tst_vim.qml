@@ -1611,6 +1611,22 @@ TestCase {
         compare(vim.mode, "normal");
     }
 
+    // The bracket at the cursor and its match, as vim's matchparen shows
+    // them, looked for only in view.
+    function test_bracketPair() {
+        const t = "f(a[1], {b})\n)";
+        compare(Txt.bracketPair(t, 1, false, 0, t.length), [1, 11]);
+        compare(Txt.bracketPair(t, 11, false, 0, t.length), [11, 1]);
+        compare(Txt.bracketPair(t, 10, false, 0, t.length), [10, 8]);
+        // none at it: in insert mode, the one before it
+        compare(Txt.bracketPair(t, 2, false, 0, t.length), null);
+        compare(Txt.bracketPair(t, 2, true, 0, t.length), [1, 11]);
+        compare(Txt.bracketPair("f(x)", 4, true, 0, 4), [3, 1]);
+        // unmatched, or matched out of view
+        compare(Txt.bracketPair(t, 13, false, 0, t.length), null);
+        compare(Txt.bracketPair(t, 1, false, 0, 10), null);
+    }
+
     // What's drawn after lines (Editor's notes and messages) goes in a
     // column where the most of it is, and still ends by the view's edge.
     function test_inLine() {

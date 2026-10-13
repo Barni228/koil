@@ -2,10 +2,37 @@
 
 pub use bridge::*;
 
+use cxx_qt_lib::QString;
+
 use crate::document::{file_opened, folder_requested};
+use crate::syntax;
 
 #[cxx_qt::bridge]
 mod bridge {
+    /// What a part of a file's line is (see `syntax::Kind`), in the order
+    /// of the colors `setTextColors` takes.
+    enum SyntaxKind {
+        String,
+        Escape,
+        Number,
+        Comment,
+        Path,
+        Url,
+    }
+
+    /// A part of a line to color, from `start`, `length` UTF-16 units long.
+    struct SyntaxSpan {
+        start: i32,
+        length: i32,
+        kind: SyntaxKind,
+    }
+
+    /// Which comments a file can have (see `syntax::Comments`).
+    struct SyntaxComments {
+        hash: bool,
+        slashes: bool,
+    }
+
     extern "Rust" {
         /// Emits `fileOpened(path)` on `document`, a Document (see
         /// `watch_file_opens`).
@@ -16,6 +43,22 @@ mod bridge {
         /// (see `watch_finder_service`).
         #[cxx_name = "folderRequested"]
         unsafe fn folder_requested(document: *mut QObject, path: &QString, file: bool);
+
+        /// The comments the file `file_name` can have (see
+        /// `syntax::Comments::of`).
+        #[cxx_name = "syntaxComments"]
+        fn syntax_comments(file_name: &QString) -> SyntaxComments;
+
+        /// Puts the parts of a file's `line` to color in `spans` (see
+        /// `syntax::spans`), for a line that starts in `state`, and gives
+        /// the state it ends in (QSyntaxHighlighter's block states).
+        #[cxx_name = "syntaxSpans"]
+        fn syntax_spans(
+            line: &[u16],
+            state: i32,
+            comments: SyntaxComments,
+            spans: &mut Vec<SyntaxSpan>,
+        ) -> i32;
     }
 
     unsafe extern "C++" {
@@ -106,6 +149,14 @@ mod bridge {
         #[cxx_name = "setKeywordColors"]
         unsafe fn set_keyword_colors(text_document: *mut QObject, keyword_colors: &QStringList);
 
+        /// Colors a file's QQuickTextDocument (see native.h).
+        #[cxx_name = "setTextColors"]
+        unsafe fn set_text_colors(
+            text_document: *mut QObject,
+            colors: &QStringList,
+            file_name: &QString,
+        );
+
         /// The installed monospaced font families.
         #[cxx_name = "monospaceFamilies"]
         fn monospace_families() -> QStringList;
@@ -135,4 +186,39 @@ mod bridge {
         #[cxx_name = "redrawText"]
         unsafe fn redraw_text(text_edit: *mut QObject);
     }
+}
+
+fn syntax_comments(file_name: &QString) -> SyntaxComments {
+    let comments = syntax::Comments::of(&String::from(file_name));
+    SyntaxComments {
+        hash: comments.hash,
+        slashes: comments.slashes,
+    }
+}
+
+fn syntax_spans(
+    line: &[u16],
+    state: i32,
+    comments: SyntaxComments,
+    spans: &mut Vec<SyntaxSpan>,
+) -> i32 {
+    let comments = syntax::Comments {
+        hash: comments.hash,
+        slashes: comments.slashes,
+    };
+    let (found, state) = syntax::spans(line, syntax::State::from_number(state), comments);
+    spans.extend(found.iter().map(|span| SyntaxSpan {
+        // A line is at most syntax::MAX_LENGTH long.
+        start: span.start as i32,
+        length: (span.end - span.start) as i32,
+        kind: match span.kind {
+            syntax::Kind::String => SyntaxKind::String,
+            syntax::Kind::Escape => SyntaxKind::Escape,
+            syntax::Kind::Number => SyntaxKind::Number,
+            syntax::Kind::Comment => SyntaxKind::Comment,
+            syntax::Kind::Path => SyntaxKind::Path,
+            syntax::Kind::Url => SyntaxKind::Url,
+        },
+    }));
+    state.number()
 }

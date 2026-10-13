@@ -11,6 +11,7 @@ mod koil;
 mod listing;
 mod shell;
 mod sizes;
+mod syntax;
 mod system;
 
 use cxx_qt_lib::{QByteArray, QGuiApplication, QQmlApplicationEngine, QString, QUrl};

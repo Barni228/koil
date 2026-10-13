@@ -36,6 +36,9 @@ the scratchpad (see Scratchpad).
 - `src/sizes.rs`: `Sizes`, which counts the sizes of dirs on its own
   threads and keeps them (see Kept sizes). Its tests
   (`src/sizes/tests.rs`) use a temp dir.
+- `src/syntax.rs`: a file's colors, found without knowing its language
+  (`spans`, see Syntax), which native.cpp's highlighter asks for a line at
+  a time through ffi.rs. Its tests (`src/syntax/tests.rs`) take lines.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore`, `regex`,
   `sort` and `sortReverse` are properties, bound to vim's `:set` options.
@@ -51,8 +54,9 @@ the scratchpad (see Scratchpad).
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
-  `setText`, the listing's and path field's `QSyntaxHighlighter`, and the
-  confirmations' (`setKeywordColors`), `redrawText`).
+  `setText`, the listing's and path field's `QSyntaxHighlighter`, a
+  file's (`setTextColors`, with syntax.rs), and the confirmations'
+  (`setKeywordColors`), `redrawText`).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
   Koil), Objective-C++, which `build.rs` adds only there.
 - `qml/main.qml`: the window: settings, menus, dialogs, status line, the
@@ -61,9 +65,10 @@ the scratchpad (see Scratchpad).
   the scratchpad (`openScratch`), and which of the two editors vim edits (`activate`). It wires the pieces
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
-  with it: cursors, selection, search highlights, the notes after lines
-  (`infos`, see Sorting), warnings and errors, line numbers, the `HoverBox`
-  and the `CompletionList`. Both the listing (or
+  with it: cursors, selection, search highlights, the bracket matching the
+  cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
+  warnings and errors, line numbers, the `HoverBox` and the
+  `CompletionList`. Both the listing (or
   file) and the path field are one (`pathField`).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
@@ -853,6 +858,41 @@ the scratchpad (see Scratchpad).
   `Koil::read_location` says the regex starts, after the longest existing
   dir, at the first part with a special character that isn't quoted),
   drawn over that in `theme.regexColors`.
+- **Syntax** (syntax.rs, `setTextColors` in native.cpp): a file (and the
+  scratchpad) is colored by what most files share, not by its language:
+  strings (`"`, `` ` ``, and `'` only where no word goes on from its end,
+  so neither `it's` nor Rust's `&'a` starts one; Python's `f'…'` does),
+  with their escapes; numbers (not a unit after them, `10px`, nor a hash,
+  `3f2a`); comments (`//`, `/* */`, `<!-- -->`, and `#` before a blank,
+  more `#`s, a line of `-`s or a shebang, but not `#include`, `#[derive]`,
+  `#fff` or `#123`); and over those, URLs (underlined) and paths (in
+  `theme.directory`, as in the listing): `/abs`, `~/`, `./`, `C:\`, or a
+  relative one that looks like one (`src/main.rs`, `a/b/c`, `docs/`, but
+  not `and/or`, `km/h`, `1/2`). Strings and comments are found as their
+  starts come, left to right, so a `#` in a string isn't a comment. A `/*
+  */` or `<!-- -->` goes on to the next line as the block's state. The
+  file's name says which comments it can have (`Comments::of`): no `#`
+  ones in Markdown (headings), no `//` in Python (division), which is all
+  it knows of languages. Only a line's first `MAX_LENGTH` (3000)
+  characters are colored, as with vim's `synmaxcol`. native.cpp's
+  `TextHighlighter` asks Rust for each line's spans (`syntaxSpans`, in
+  UTF-16, as Qt has it). Only one highlighter may color a document (each
+  would take the other's colors away), so Editor.qml takes the listing's
+  away before giving a file's, and the file's before the listing's. A new
+  one colors at once (else Qt colors it all again once the event loop
+  runs, without `recolor`'s batching, and colors no edit until then); new
+  colors or comments color again a moment later (`stale`), which `setText`
+  drops, as the text it puts in is colored as it goes in: so main.qml's
+  `load` sets `filePath` before the text, and a `.md` opened after a `.rs`
+  isn't colored as the old text first. What colors cost is Qt's layout,
+  which splits lines where the colors change: a 105,000-line file opened
+  in 4.4 s rather than 3.5 (the Rust took 60 ms of that).
+- **Matching brackets** (`brackets` in Editor.qml, `Txt.bracketPair`): as
+  vim's matchparen does, the bracket at the cursor (or before it, in
+  insert mode) and the one it matches are boxed, in every buffer, but
+  only when both are in view, which is as far as it looks (vim's `%`,
+  `matchPair`, goes through all the text). Brackets in strings and
+  comments count.
 - **Icon font**: devicons' icons are Nerd Font glyphs in the Private Use
   Area. Koil ships one, JetBrains Mono NL Nerd Font (Nerd Fonts v3.5.1,
   `fonts/`), compiled into the binary (`include_bytes!` in main.rs), so no

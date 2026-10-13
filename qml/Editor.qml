@@ -32,6 +32,10 @@ Item {
     // to color (a regex's), as { start, length, kind } (see listing::Span).
     property bool pathField: false
     property var pathSyntax: []
+    // The file the text is, if any (not in the scratchpad), whose name says
+    // which comments it can have. Text that isn't the listing or the path
+    // field gets colors that suit any file (see syntax.rs).
+    property string filePath: ""
     // Koil's warnings and errors about the text's lines, as { line,
     // column, severity, message } (see listing::Problem): drawn from the
     // column to the line's end.
@@ -103,8 +107,8 @@ Item {
         quiet = false;
     }
 
-    // Colors the listing (see `listing`) or the path field, in the light or
-    // dark theme's colors; a file gets none.
+    // Colors the listing (see `listing`), the path field or a file, in the
+    // light or dark theme's colors.
     function applyColors() {
         if (pathField) {
             const spans = [];
@@ -113,10 +117,16 @@ Item {
             system.setPathColors(editor.textDocument, String(theme.directory), spans);
             return;
         }
+        // The file's colors go before the listing's come, as two
+        // highlighters would each take the other's away.
+        if (listing)
+            system.setTextColors(editor.textDocument, [], "");
         const colors = [];
         for (const icon in iconColors)
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
         system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1], listing ? String(theme.directory) : "");
+        if (!listing)
+            system.setTextColors(editor.textDocument, theme.syntaxColors(), filePath);
         applyPendingLines();
     }
 
@@ -146,6 +156,7 @@ Item {
     onPendingIconColorChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
     onPathSyntaxChanged: applyColors()
+    onFilePathChanged: applyColors()
 
     // An emoji comes from a taller font than the editor's, which makes its
     // line taller. Give every line the same height instead. Qt puts a
@@ -285,7 +296,10 @@ Item {
 
     onLineHeightChanged: fixLineFormat()
     onTextBaselineChanged: fixLineFormat()
-    Component.onCompleted: fixLineFormat()
+    Component.onCompleted: {
+        fixLineFormat();
+        applyColors();
+    }
 
     FontMetrics {
         id: metrics
@@ -638,6 +652,41 @@ Item {
                         required property var modelData
 
                         row: modelData.cell
+                    }
+                }
+            }
+
+            // The bracket at the cursor and the one it matches, as vim's
+            // matchparen shows them: in insert mode, the one before the
+            // cursor if there's none at it. Both must be in view, which is
+            // as far as it looks (an unmatched one in a long text would
+            // have it go through all of it at every key).
+            Layer {
+                id: brackets
+
+                z: -0.55
+                inputs: [view.active, view.vim.cursor, view.vim.mode, view.layout, view.viewport]
+                compute: () => {
+                    if (!view.active)
+                        return [];
+                    const v = view.visibleRange();
+                    return Txt.bracketPair(editor.text, view.vim.cursor, view.vim.mode === "insert", v.from, v.to) || [];
+                }
+
+                Repeater {
+                    model: brackets.model
+
+                    Rectangle {
+                        required property int modelData
+                        readonly property rect cell: view.cellAt(modelData)
+
+                        x: cell.x
+                        y: cell.y
+                        width: view.charWidth
+                        height: cell.height
+                        color: view.theme.bracketMatch
+                        border.color: view.theme.bracketBorder
+                        border.width: 1
                     }
                 }
             }

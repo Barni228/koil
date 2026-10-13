@@ -165,6 +165,18 @@ pub mod qobject {
             text_document: *mut QObject,
             keyword_colors: &QStringList,
         );
+
+        /// Colors a file's `textDocument` (see syntax.rs): `colors` has a
+        /// color for each kind of part, in the order of `SyntaxKind`, and
+        /// `file_name` says which comments it can have. No colors take
+        /// them away.
+        #[qinvokable]
+        unsafe fn set_text_colors(
+            self: &System,
+            text_document: *mut QObject,
+            colors: &QStringList,
+            file_name: &QString,
+        );
     }
 
     impl cxx_qt::Threading for System {}
@@ -351,6 +363,18 @@ impl qobject::System {
         keyword_colors: &QStringList,
     ) {
         unsafe { ffi::set_keyword_colors(text_document.cast(), keyword_colors) };
+    }
+
+    /// # Safety
+    ///
+    /// `text_document` must be null or point to a live QObject.
+    unsafe fn set_text_colors(
+        &self,
+        text_document: *mut qobject::QObject,
+        colors: &QStringList,
+        file_name: &QString,
+    ) {
+        unsafe { ffi::set_text_colors(text_document.cast(), colors, file_name) };
     }
 }
 

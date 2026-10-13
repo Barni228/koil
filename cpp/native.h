@@ -107,6 +107,13 @@ void setPathColors(QObject* textDocument, const QString& directoryColor, const Q
 // colors away.
 void setKeywordColors(QObject* textDocument, const QStringList& keywordColors);
 
+// Colors a file's text in a TextEdit's document (a QQuickTextDocument),
+// with what suits any file (see syntax.rs): its strings, numbers, comments,
+// paths and URLs, in `colors`, one for each SyntaxKind, in its order (URLs
+// are underlined too). `fileName` says which comments it can have. It
+// follows edits. No colors take them away.
+void setTextColors(QObject* textDocument, const QStringList& colors, const QString& fileName);
+
 // The installed font families whose text characters are all the same width,
 // in alphabetical order: the fonts the editor offers. It loads every font,
 // which takes a moment (a few hundred ms for a few hundred families).

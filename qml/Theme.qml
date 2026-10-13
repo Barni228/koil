@@ -92,6 +92,19 @@ QtObject {
         anchor: "#267f99"
     }
 
+    // A file's colors (see syntax.rs), for each kind of part in the order
+    // of SyntaxKind: strings, their escapes, numbers, comments, paths and
+    // URLs (which are underlined too). Paths are in the dirs' color, as in
+    // the listing. A function, as changeColor is.
+    function syntaxColors() {
+        return dark ? ["#98c379", "#56b6c2", "#d19a66", "#8b949e", String(directory), String(directory)]
+            : ["#3d8b37", "#0184bc", "#986801", "#6e7781", String(directory), String(directory)];
+    }
+    // Behind a bracket and the one it matches (see Editor's brackets), and
+    // around them.
+    readonly property color bracketMatch: dark ? "#2effffff" : "#1f000000"
+    readonly property color bracketBorder: dark ? "#80ffffff" : "#66000000"
+
     // The color of a kind of change in the confirmations (see
     // ConfirmDialog's keywords): "create", "delete", "rename" (or move) or
     // "copy". A function, as an object of constant colors in a binding

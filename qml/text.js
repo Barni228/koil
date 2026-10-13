@@ -383,6 +383,32 @@ function matchPair(t, p) {
     return null;
 }
 
+// The bracket at p and the one it matches, as [at, match], when both are
+// in [from, to]; with `before` (insert mode), the one before p if there's
+// none at it, as vim's matchparen does. Null if there's none. Unlike
+// matchPair, it looks no further than [from, to] (what's in view).
+function bracketPair(t, p, before, from, to) {
+    const pairs = "()[]{}";
+    let i = p < t.length ? pairs.indexOf(t[p]) : -1;
+    if (i < 0 && before && p > 0) {
+        p--;
+        i = pairs.indexOf(t[p]);
+    }
+    if (i < 0 || p < from || p > to)
+        return null;
+    const open = pairs[i & ~1], close = pairs[i | 1], step = i % 2 === 0 ? 1 : -1;
+    let depth = 0;
+    for (let k = p; k >= from && k <= to; k += step) {
+        if (t[k] === open)
+            depth += step;
+        else if (t[k] === close)
+            depth -= step;
+        if (depth === 0)
+            return [p, k];
+    }
+    return null;
+}
+
 function nextParagraph(t, p) {
     const n = t.length;
     let q = lineStart(t, p);

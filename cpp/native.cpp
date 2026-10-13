@@ -8,6 +8,7 @@
 #include <QtCore/QMimeData>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
+#include <QtCore/QTimer>
 #include <QtCore/QTranslator>
 #include <QtGui/QClipboard>
 #include <QtGui/QFileOpenEvent>
@@ -235,6 +236,45 @@ protected:
   }
 };
 
+const QString textHighlighterName = QStringLiteral("koilTextHighlighter");
+
+// See setTextColors.
+class TextHighlighter : public QSyntaxHighlighter
+{
+public:
+  using QSyntaxHighlighter::QSyntaxHighlighter;
+
+  // A format for each SyntaxKind, in its order.
+  QList<QTextCharFormat> formats;
+  SyntaxComments comments{ true, true };
+  // Whether the lines must be colored again (see setTextColors).
+  bool stale = false;
+
+protected:
+  void highlightBlock(const QString& text) override
+  {
+    rust::Vec<SyntaxSpan> spans;
+    const rust::Slice<const uint16_t> line(reinterpret_cast<const uint16_t*>(text.constData()),
+                                           static_cast<size_t>(text.size()));
+    setCurrentBlockState(syntaxSpans(line, previousBlockState(), comments, spans));
+    for (const auto& span : spans)
+      setFormat(span.start, span.length, formats.value(static_cast<int>(span.kind)));
+  }
+};
+
+// The text highlighter of a TextEdit's document (a QQuickTextDocument), if
+// it has one.
+TextHighlighter*
+textHighlighterOf(QObject* textDocument)
+{
+  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
+  if (!quickDocument)
+    return nullptr;
+  // No Q_OBJECT (so no moc), so it's found by name rather than by type.
+  return static_cast<TextHighlighter*>(quickDocument->textDocument()->findChild<QSyntaxHighlighter*>(
+    textHighlighterName, Qt::FindDirectChildrenOnly));
+}
+
 // Colors the document's lines again: the ones in `lines` (numbers, from
 // 0), or all of them. It's one edit, so the text's change signals (and what
 // QML does on them) come once, not once a line. QSyntaxHighlighter also
@@ -389,6 +429,9 @@ setText(QObject* textEdit, const QString& text, double height, double bottomMarg
   // way setting its text does) changed its width, as the scroll bar went,
   // and that laid out the new text again.
   auto* document = quickDocument->textDocument();
+  // The new text is colored as it goes in, with the colors as they are now.
+  if (auto* highlighter = textHighlighterOf(textDocument))
+    highlighter->stale = false;
   const bool undo = document->isUndoRedoEnabled();
   document->setUndoRedoEnabled(false);
   QTextCursor cursor(document);
@@ -534,6 +577,51 @@ setKeywordColors(QObject* textDocument, const QStringList& keywordColors)
     return;
   highlighter->keywords = keywords;
   recolor(highlighter);
+}
+
+void
+setTextColors(QObject* textDocument, const QStringList& colors, const QString& fileName)
+{
+  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
+  if (!quickDocument)
+    return;
+  auto* highlighter = textHighlighterOf(textDocument);
+  if (colors.isEmpty()) {
+    delete highlighter; // which takes its colors away
+    return;
+  }
+  QList<QTextCharFormat> formats;
+  for (const auto& color : colors)
+    formats.append(colored(color));
+  const auto url = static_cast<int>(SyntaxKind::Url);
+  if (url < formats.size())
+    formats[url].setFontUnderline(true);
+  const auto comments = syntaxComments(fileName);
+  if (!highlighter) {
+    // Colored at once: a new highlighter of a document with text colors it
+    // all again once the event loop runs, and until then colors no edit.
+    highlighter = new TextHighlighter(quickDocument->textDocument());
+    highlighter->setObjectName(textHighlighterName);
+    highlighter->formats = formats;
+    highlighter->comments = comments;
+    recolor(highlighter);
+    return;
+  }
+  if (formats == highlighter->formats && comments.hash == highlighter->comments.hash &&
+      comments.slashes == highlighter->comments.slashes)
+    return;
+  highlighter->formats = formats;
+  highlighter->comments = comments;
+  // Once the event loop runs, as another file's name comes right before
+  // its text, which setText colors as it puts it in (and then it isn't
+  // stale): coloring the old text first laid out a long one again.
+  highlighter->stale = true;
+  QTimer::singleShot(0, highlighter, [highlighter] {
+    if (highlighter->stale) {
+      highlighter->stale = false;
+      recolor(highlighter);
+    }
+  });
 }
 
 QStringList

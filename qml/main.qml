@@ -172,13 +172,15 @@ ApplicationWindow {
     }
 
     // Shows `text` as a new document, whose icons hide the texts in
-    // `entries` (see Hidden text in Vim.qml). `path` is its file, if any.
+    // `entries` (see Hidden text in Vim.qml). `path` is its file, if any:
+    // before the text, which is colored as it goes in, by the comments the
+    // file's name says it can have (see Editor.filePath).
     function load(text, entries, path) {
         keepScratch();
         activate(editorView);
+        filePath = path;
         editorView.setText(text);
         vim.reset(entries);
-        filePath = path;
         modified = false;
         editorView.textArea.forceActiveFocus();
     }
@@ -1616,6 +1618,7 @@ ApplicationWindow {
         theme: theme
         system: system
         listing: root.listing
+        filePath: root.filePath
         iconColors: root.iconColors
         pendingIconColor: root.pendingIconColor
         pendingLines: root.pendingLines

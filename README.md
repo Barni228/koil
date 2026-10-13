@@ -50,6 +50,10 @@ until you apply, and your edits stay while you go through other dirs.
 - **The scratchpad** (`_`, or `koil -s`) is a text that's never saved, kept
   until Koil quits. Lines pasted there keep their IDs, so you can put
   entries aside and paste them into a listing later.
+- **Colors in a file** (and the scratchpad) suit any file rather than its
+  language: strings, numbers, comments, paths and URLs, and the bracket
+  that matches the one at the cursor. In Markdown, `#` starts a heading,
+  not a comment, and in Python `//` divides.
 - **Changes on disk** show in the listing as they happen, keeping your
   edits. If one goes against them (a file you deleted was renamed), Koil
   asks.
