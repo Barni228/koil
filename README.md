@@ -36,9 +36,13 @@ until you apply, and your edits stay while you go through other dirs.
   in. For convenience, `,` is same as `.` except it does not match `/`, which
   is useful to list things without going into subdirectories
   (`dir/,*` matches `dir/file.txt` but not `dir/subdir/file.txt`)
-- **Smart case**: search and `Tab` completion ignore case unless you type an
-  uppercase letter. Search takes JavaScript regexes (`\d{3}`, `\bword\b`),
-  not vim's.
+- **Smart case**: search, `:s` and `Tab` completion ignore case unless you
+  type an uppercase letter. Search takes JavaScript regexes (`\d{3}`,
+  `\bword\b`), not vim's.
+- **Replace** with vim's `:s`: `:%s/old/new/g`, or in visual mode `:s` in
+  only the selection. As you type it, the text shows what it would become,
+  and `Esc` puts it back. In the listing a line starts at its name, so
+  `:%s/^/old_/` renames every entry.
 - **IDs**: each icon hides its entry's ID, which goes with the line wherever
   it's pasted, so a pasted line is a copy or a move, never a new empty file.
   `gh` (or hovering the mouse on the icon) shows the path an ID stands for.

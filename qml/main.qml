@@ -114,10 +114,12 @@ ApplicationWindow {
     // The shell command running (see runShell), which vim waits for: {
     // line, filter, scratch }, or null.
     property var shellRun: null
-    // A box over the editor that has the keys (:help, or a question), or a
-    // shell command vim waits for, while which the menu can't open, save or
-    // edit anything (see also keepHelpKeys).
-    readonly property bool boxOpen: help.opened || confirmDialog.opened || shellRun !== null
+    // A box over the editor that has the keys (:help, or a question), a
+    // shell command vim waits for, or a :s showing what it would do in the
+    // buffer (see Vim.previewSubstitute), while which the menu can't open,
+    // save or edit anything, and the listing doesn't sync (see also
+    // keepHelpKeys).
+    readonly property bool boxOpen: help.opened || confirmDialog.opened || shellRun !== null || vim.previewing
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
     property bool quitAfterSave: false
@@ -342,6 +344,8 @@ ApplicationWindow {
     // `from` if given. False if it can't (the problems and the status line
     // say why).
     function updateListing(open, from) {
+        // Not a :s's preview: the text as it was.
+        vim.endPreview();
         const r = JSON.parse(koil.update(pathView.textArea.text, editorView.textArea.text, JSON.stringify(editorView.hidden), open || ""));
         if (!r.ok) {
             if (r.problems.length)
@@ -1624,8 +1628,9 @@ ApplicationWindow {
         onActivated: root.activate(editorView)
         onKeyReleased: root.keyReleased()
         onEdited: {
-            // The scratchpad is never saved, so there's nothing to ask about.
-            if (!root.scratchpad)
+            // The scratchpad is never saved, so there's nothing to ask
+            // about, and a :s's preview isn't a change.
+            if (!root.scratchpad && !vim.previewing)
                 root.modified = true;
             if (root.listing) {
                 checkTimer.restart();

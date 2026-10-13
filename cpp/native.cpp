@@ -19,6 +19,7 @@
 #include <QtGui/QPixmap>
 #include <QtGui/QSyntaxHighlighter>
 #include <QtGui/QTextBlockFormat>
+#include <QtGui/QTextBlockUserData>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
 #include <QtQuick/QQuickItem>
@@ -102,6 +103,13 @@ hasFixedWidthText(const QString& family)
 
 const QString highlighterName = QStringLiteral("koilListingHighlighter");
 
+// Whether a line's icon was last colored as pending (see setPendingLines),
+// as its block's user data. None is as false.
+struct ColoredAs : QTextBlockUserData
+{
+  bool pending = false;
+};
+
 // See setListingColors and setPathColors.
 class ListingHighlighter : public QSyntaxHighlighter
 {
@@ -135,6 +143,14 @@ protected:
           setFormat(span.start, span.length, span.format);
       return;
     }
+    const bool isPending = pending.contains(currentBlock().blockNumber());
+    auto* colored = dynamic_cast<ColoredAs*>(currentBlockUserData());
+    if (!colored && isPending) {
+      colored = new ColoredAs;
+      setCurrentBlockUserData(colored);
+    }
+    if (colored)
+      colored->pending = isPending;
     const QStringView trimmed = QStringView(text).trimmed();
     if (trimmed.isEmpty())
       return;
@@ -143,7 +159,7 @@ protected:
       text.at(start).isHighSurrogate() && start + 1 < text.size() ? 2 : 1;
     const auto icon = icons.constFind(text.mid(start, length));
     if (icon != icons.cend()) {
-      setFormat(start, length, pending.contains(currentBlock().blockNumber()) ? pendingIcon : *icon);
+      setFormat(start, length, isPending ? pendingIcon : *icon);
       start += length;
     }
     // A dir's name ends with a `/`, and so do the dirs in a pattern's
@@ -463,14 +479,20 @@ setPendingLines(QObject* textDocument, const QStringList& lines)
   QSet<int> pending;
   for (const auto& line : lines)
     pending.insert(line.toInt());
-  if (pending == highlighter->pending)
-    return;
-  // The lines that were pending or are now, but not both.
-  QSet<int> changed = pending;
-  changed.unite(highlighter->pending);
-  changed.subtract(QSet<int>(pending).intersect(highlighter->pending));
+  // The lines colored otherwise than they're pending now: not only those
+  // that were pending, as Qt colors a line as an edit reaches it, with the
+  // pending lines it has then, and vim's edit is a remove and an insert,
+  // between which lines are other numbers (a :s's preview, a few lines
+  // longer at each key, left a file's icon white).
   highlighter->pending = pending;
-  recolor(highlighter, changed);
+  QSet<int> changed;
+  for (auto block = highlighter->document()->begin(); block.isValid(); block = block.next()) {
+    const auto* colored = dynamic_cast<ColoredAs*>(block.userData());
+    if ((colored && colored->pending) != pending.contains(block.blockNumber()))
+      changed.insert(block.blockNumber());
+  }
+  if (!changed.isEmpty())
+    recolor(highlighter, changed);
 }
 
 void

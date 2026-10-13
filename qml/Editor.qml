@@ -215,15 +215,20 @@ Item {
 
     // The selection in the visible lines, as one { start, end, eol } span
     // per line, where eol means it includes the line break. A visual block
-    // isn't the editor's selection, so vim gives it.
+    // isn't the editor's selection, so vim gives it, and so it does the one
+    // : left visual mode with, while the command line is open.
     function selectionSpans() {
-        const block = vim.mode === "visualBlock";
-        const s = editor.selectionStart, e = editor.selectionEnd;
-        if (!active || s === e && !block)
+        if (!active)
             return [];
+        const shown = vim.visualShown;
         const t = editor.text, v = visibleRange();
-        if (block)
-            return vim.blockSpans(v.from, v.to);
+        if (shown ? shown.mode === "visualBlock" : vim.mode === "visualBlock")
+            return vim.blockSpans(v.from, v.to, shown || undefined);
+        const r = shown ? vim.selectedRange(t, shown.mode, shown.anchor, shown.cursor)
+            : { start: editor.selectionStart, end: editor.selectionEnd };
+        const s = r.start, e = r.end;
+        if (s === e)
+            return [];
         const spans = [];
         for (let p = Math.max(s, v.from); p <= Math.min(e, v.to); ) {
             const le = Txt.lineEnd(t, p);
@@ -624,7 +629,7 @@ Item {
             // there's a selection, nor in the path field.
             Item {
                 z: -0.6
-                visible: !view.pathField && !(view.active && view.vim.isVisual)
+                visible: !view.pathField && !(view.active && (view.vim.isVisual || view.vim.visualShown))
 
                 Repeater {
                     model: carets.model
@@ -643,7 +648,7 @@ Item {
                 id: selection
 
                 z: -0.5
-                inputs: [view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.layout, view.viewport]
+                inputs: [view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.vim.visualShown, view.layout, view.viewport]
                 compute: () => view.selectionSpans()
 
                 Repeater {
@@ -664,13 +669,13 @@ Item {
                 }
             }
 
-            // Search matches: the search being typed, else the find bar's
-            // while it's open, else the last search until Esc.
+            // Search matches: the search (or :s) being typed, else the find
+            // bar's while it's open, else the last search until Esc.
             Layer {
                 id: highlights
 
-                inputs: [view.active, view.vim.commandLine, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
-                compute: () => !view.active ? [] : view.vim.typedSearch() === null && view.findBar.active ? view.findBar.highlightSpans() : view.vim.searchHighlights()
+                inputs: [view.active, view.vim.commandLine, view.vim.substitution, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
+                compute: () => !view.active ? [] : view.vim.typedSearch() === null && !view.vim.substitution && view.findBar.active ? view.findBar.highlightSpans() : view.vim.searchHighlights()
 
                 Repeater {
                     model: highlights.model
@@ -711,7 +716,8 @@ Item {
                 compute: () => !view.active ? [] : [view.spotAt(view.vim.cursor, true)].concat(view.visibleCursors().map(c => view.spotAt(c.pos, false)))
 
                 // Shaped like the main one. In insert mode the main one is
-                // the editor's own bar (see cursorDelegate).
+                // the editor's own bar (see cursorDelegate). None while the
+                // command line is open, which has the cursor, as in vim.
                 Repeater {
                     model: carets.model
 
@@ -721,7 +727,7 @@ Item {
                         cell: modelData.cell
                         character: modelData.character
                         shape: view.vim.cursorShape
-                        shown: !modelData.main || view.vim.mode !== "insert"
+                        shown: view.vim.commandLine === "" && (!modelData.main || view.vim.mode !== "insert")
                     }
                 }
             }

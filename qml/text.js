@@ -617,13 +617,86 @@ function ignoresCase(pattern, regex) {
 // What a search for pattern (vim's, the help's) looks for. A pattern that
 // isn't a valid regular expression (e.g. while it's still being typed) is
 // searched for literally. Either way, one without an uppercase letter
-// ignores case (smart case).
-function searchRegExp(pattern) {
+// ignores case (smart case), unless `ignoreCase` says (:s's i and I).
+function searchRegExp(pattern, ignoreCase) {
+    const flags = regex => (ignoreCase === undefined ? ignoresCase(pattern, regex) : ignoreCase) ? "gmi" : "gm";
     try {
-        return new RegExp(pattern, ignoresCase(pattern, true) ? "gmi" : "gm");
+        return new RegExp(pattern, flags(true));
     } catch (e) {
-        return new RegExp(escapeRegExp(pattern), ignoresCase(pattern, false) ? "gmi" : "gm");
+        return new RegExp(escapeRegExp(pattern), flags(false));
     }
+}
+
+// ---- Substitute ------------------------------------------------------------
+
+// :s's arguments, from the delimiter on (/pattern/replacement/flags, any
+// character but a letter, a digit, a blank, \, " or | in place of /, as in
+// vim), as { pattern, replacement, flags }. A backslash keeps the delimiter
+// in either (\/ is still a / to a regular expression). The replacement is
+// null if its delimiter isn't there (yet), and the flags "" if theirs isn't.
+// Null if s doesn't start with a delimiter.
+function substituteArgs(s) {
+    const d = s[0];
+    if (d === undefined || /[\sa-zA-Z0-9\\"|]/.test(d))
+        return null;
+    let i = 1;
+    const part = () => {
+        const from = i;
+        while (i < s.length && s[i] !== d)
+            i += s[i] === "\\" ? 2 : 1;
+        return s.slice(from, Math.min(i, s.length));
+    };
+    const pattern = part();
+    if (i++ >= s.length)
+        return { pattern: pattern, replacement: null, flags: "" };
+    const replacement = part();
+    return { pattern: pattern, replacement: replacement, flags: i < s.length ? s.slice(i + 1) : "" };
+}
+
+// What replaces the match m (a RegExp result) of :s, from its replacement
+// as vim reads it: & and \0 are the match, \1 to \9 its groups, \n and \r
+// a line break, \t a tab, \u and \l make the next character upper or lower
+// case, \U and \L everything up to \E or \e, and a backslash makes any
+// other character itself (\&, \\, the delimiter). ~ is only a ~ (vim's is
+// the last replacement, which a path like ~/x would take).
+function substitution(replacement, m) {
+    let out = "", one = "", all = "";
+    const add = s => {
+        if (all)
+            s = all === "U" ? s.toUpperCase() : s.toLowerCase();
+        if (one && s) {
+            s = (one === "u" ? s[0].toUpperCase() : s[0].toLowerCase()) + s.slice(1);
+            one = "";
+        }
+        out += s;
+    };
+    for (let i = 0; i < replacement.length; i++) {
+        const c = replacement[i];
+        if (c === "&") {
+            add(m[0]);
+            continue;
+        }
+        if (c !== "\\" || i + 1 >= replacement.length) {
+            add(c);
+            continue;
+        }
+        const d = replacement[++i];
+        if (d >= "0" && d <= "9")
+            add(m[+d] || "");
+        else if (d === "n" || d === "r")
+            add("\n");
+        else if (d === "t")
+            add("\t");
+        else if (d === "u" || d === "l")
+            one = d;
+        else if (d === "U" || d === "L")
+            all = d;
+        else if (d === "E" || d === "e")
+            all = "";
+        else
+            add(d);
+    }
+    return out;
 }
 
 // Adds the highlight of a match [start, end) to spans, split into one

@@ -173,6 +173,7 @@ Popup {
                 ["`:conf q`  `:confirm q`", "Quit, asking whether to save first (`y`, `n`, or `c` to cancel)."],
                 ["`:42`  `:$`  `:+3`", "Go to line 42, the last line, or 3 lines down."],
                 ["`:!cmd`", "Run a shell command (see `:h !`)."],
+                ["`:s/old/new/`  `:%s/old/new/g`", "Replace on the line, or every match in the file (see `:h s`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
                 ["`:h`  `:help [topic]`", "This help, e.g. `:h set`, `:h search`, `:h macros`."],
@@ -222,6 +223,31 @@ Popup {
                 [isMac ? "`⌃⌥C`  `⌃⌥W`  `⌃⌥R`" : "`Alt+C`  `Alt+W`  `Alt+R`",
                     "In the find bar: match case, whole word, regular expression."],
                 ["`↑`  `↓`", "In the find bar: earlier and later finds (or replacements)."]
+            ]
+        },
+        {
+            title: "Substitute",
+            tags: ["s", ":s", "substitute", "sub", "&", ":&", "&&", ":&&", "g&"],
+            intro: "`:s/old/new/` replaces the first match on the cursor's line, as in vim, and "
+                + "`:%s/old/new/g` every one in the file. As you type it, the matches are highlighted, then "
+                + "the text shows what it would become, and `Esc` puts it back. In the listing a line starts "
+                + "at its name, so `:%s/^/old_/` renames every entry.",
+            rows: [
+                ["`:%s`  `:2,5s`  `:'<,'>s`", "Every line, lines 2 to 5, or (`:` in visual mode) only what's "
+                    + "selected: its characters, its block or its lines."],
+                ["`old`", "A JavaScript regex, as `/` takes (`(\\d+)`, not vim's `\\(\\d\\+\\)`). Case counts "
+                    + "only if it has an uppercase letter. Empty, it's the last search."],
+                ["`&`  `\\0`  `\\1`", "In the replacement: the match, or its first group."],
+                ["`\\u`  `\\l`  `\\U`  `\\L`  `\\E`", "Uppercase or lowercase the next character, or all of "
+                    + "them up to `\\E`."],
+                ["`\\r`  `\\t`", "A line break (`\\n` too) or a tab. `\\&`, `\\/` and `\\\\` are themselves, "
+                    + "and so is `~` (unlike vim's)."],
+                ["`g`  `i`  `I`", "Flags, after the last `/`: every match on a line, not only the first; ignore "
+                    + "case; don't."],
+                ["`n`  `e`", "Only count the matches; no error if there are none."],
+                ["`:s#/#-#`", "Any punctuation can stand for `/`."],
+                ["`&`  `:s`  `:&&`", "Run the last one again on the cursor's line (`:&&`: with its flags)."],
+                ["`g&`", "Run it again on every line, with its flags, for the last search."]
             ]
         },
         {

@@ -274,9 +274,11 @@ TestCase {
     property real defaultCharWidth
     property real defaultLineHeight
     property int defaultSideScrollOff
+    property int defaultPreviewMargin
 
     function initTestCase() {
         defaultChunkTime = vim.chunkTime;
+        defaultPreviewMargin = vim.previewMargin;
         defaultCharWidth = vim.charWidth;
         defaultLineHeight = vim.lineHeight;
         defaultSideScrollOff = vim.sideScrollOff;
@@ -290,6 +292,7 @@ TestCase {
         vim.charWidth = defaultCharWidth;
         vim.lineHeight = defaultLineHeight;
         vim.sideScrollOff = defaultSideScrollOff;
+        vim.previewMargin = defaultPreviewMargin;
         if (vim.editor !== editor)
             switchTo(editor, null);
         vim.flickable = null;
@@ -1104,6 +1107,337 @@ TestCase {
         compare(editor.text, "one");
         vim.filterLines(1, 1, "");
         compare(editor.text, "");
+    }
+
+    // ---- Substitute ------------------------------------------------------
+
+    // :s on the cursor's line or a range, the first match on each line, or
+    // all with g, in smart case unless i or I says, as one change, with the
+    // cursor on the last line it changed.
+    function test_substitute() {
+        load("a a\nA a\n  b");
+        keys(":s/a/x/<CR>");
+        compare(editor.text, "x a\nA a\n  b");
+        keys(":%s/a/y/g<CR>");
+        compare(editor.text, "x y\ny y\n  b");
+        compare(vim.message, "3 substitutions on 2 lines");
+        compare(cursorLine(), 2);
+        keys("u");
+        compare(editor.text, "x a\nA a\n  b");
+        keys(":%s/A/z/<CR>");
+        compare(editor.text, "x a\nz a\n  b");
+        keys("u:%s/A/z/gi<CR>");
+        compare(editor.text, "x z\nz z\n  b");
+        keys("u:%s/a/z/gI<CR>");
+        compare(editor.text, "x z\nA z\n  b");
+        keys("u:2,$s/b/c/<CR>");
+        compare(editor.text, "x a\nA a\n  c");
+        compare(vim.cursor, 10); // the first non-blank
+        keys(":1,2s/^/> /<CR>");
+        compare(editor.text, "> x a\n> A a\n  c");
+        compare(vim.message, "");
+        // Patterns are /'s, which they become, and highlight.
+        compare(vim.lastSearch.pattern, "^");
+        compare(vim.highlightPattern, "^");
+    }
+
+    // The replacement: & or \0 the match, \1 its groups, \u \l \U \L \E for
+    // case, \r or \n a line break, and \ before anything else makes it itself.
+    function test_substituteReplacement() {
+        load("foo bar");
+        keys(":s/(\\w+) (\\w+)/\\2 \\1 [&]/<CR>");
+        compare(editor.text, "bar foo [foo bar]");
+        keys(":s/\\w+/\\u&/g<CR>");
+        compare(editor.text, "Bar Foo [Foo Bar]");
+        keys(":s/bar/\\U\\0\\E!/<CR>");
+        compare(editor.text, "BAR! Foo [Foo Bar]");
+        keys(":s/foo \\[/\\L&/<CR>");
+        compare(editor.text, "BAR! foo [Foo Bar]");
+        keys(":s/ /\\&\\/\\\\~/<CR>");
+        compare(editor.text, "BAR!&/\\~foo [Foo Bar]");
+        keys(":s/ \\[/\\r\\t/<CR>");
+        compare(editor.text, "BAR!&/\\~foo\n\tFoo Bar]");
+        load("a/b,c");
+        keys(":s#/#-#<CR>");
+        compare(editor.text, "a-b,c");
+        keys(":s/-/\\//<CR>");
+        compare(editor.text, "a/b,c");
+        keys(":s/\\//+<CR>");
+        compare(editor.text, "a+b,c");
+        // Without a replacement it deletes, as in vim.
+        keys(":s/,");
+        compare(editor.text, "a+b,c");
+        keys("<CR>");
+        compare(editor.text, "a+bc");
+    }
+
+    function test_substituteErrors() {
+        load("a\nb");
+        vim.lastSubstitute = null;
+        vim.lastSearch = null;
+        keys(":s<CR>");
+        compare(vim.message, "E35: No previous regular expression");
+        keys(":s//x/<CR>");
+        compare(vim.message, "E35: No previous regular expression");
+        keys(":s/z/x/<CR>");
+        compare(vim.message, "E486: Pattern not found: z");
+        keys(":s/z/x/e<CR>");
+        compare(vim.message, "");
+        keys(":s/a/x/c<CR>");
+        compare(vim.message, "E488: Trailing characters: c");
+        keys(":3s/a/x/<CR>");
+        compare(vim.message, "E16: Invalid range");
+        compare(editor.text, "a\nb");
+        // Not :s, though it starts with s.
+        keys(":set nu<CR>");
+        verify(vim.number);
+        keys(":set nonu<CR>");
+        keys(":sx<CR>");
+        compare(vim.message, "E492: Not an editor command: sx");
+        // n only counts.
+        load("a a\na");
+        keys(":%s/a//gn<CR>");
+        compare(vim.message, "3 matches on 2 lines");
+        compare(editor.text, "a a\na");
+    }
+
+    // :&& and g& run the last one again with its flags, :s alone (with
+    // flags of its own) and & without them (which, as in vim, they then
+    // forget), g& on every line with the last search's pattern.
+    function test_substituteAgain() {
+        load("a a\na a\na a\nb b");
+        keys(":s/a/b/g<CR>");
+        compare(editor.text, "b b\na a\na a\nb b");
+        keys("j:&&<CR>");
+        compare(editor.text, "b b\nb b\na a\nb b");
+        keys("j&");
+        compare(editor.text, "b b\nb b\nb a\nb b");
+        keys("u:s g<CR>");
+        compare(editor.text, "b b\nb b\nb b\nb b");
+        keys("u/a a<CR>g&");
+        compare(editor.text, "b b\nb b\nb\nb b");
+        // An empty pattern is the last search's.
+        keys("u/a<CR>:%s//c/g<CR>");
+        compare(editor.text, "b b\nb b\nc c\nb b");
+    }
+
+    // While a :s is typed, its matches are highlighted, and once its
+    // replacement is, the buffer shows what it would make (hidden text and
+    // all), which Esc takes back. Enter runs it, as one change.
+    function test_substitutePreview() {
+        load("a M a\nC a");
+        vim.highlightPattern = "";
+        const before = render();
+        keys(":%s/a");
+        compare(render(), before);
+        verify(!vim.previewing);
+        const shown = () => vim.searchHighlights().map(s => editor.text.slice(s.start, s.end));
+        compare(shown(), ["a", "a"]); // the first on each line
+        keys("/x");
+        compare(render(), "x <M:h1> a\n<C:h2> x");
+        verify(vim.previewing);
+        compare(shown(), ["x", "x"]);
+        keys("/g");
+        compare(render(), "x <M:h1> x\n<C:h2> x");
+        compare(shown(), ["x", "x", "x"]);
+        keys("<BS><BS><BS>y");
+        edits.clear();
+        keys("y");
+        compare(render(), "yy <M:h1> a\n<C:h2> yy");
+        verify(edits.count <= 2, edits.count + " edits");
+        keys("<Esc>");
+        compare(render(), before);
+        verify(!vim.previewing);
+        compare(vim.substitution, null);
+        compare(vim.undoStack.length, 0);
+        compare(shown(), []);
+        // Backspace back into the pattern shows the matches again.
+        keys(":s/a/b<BS><BS>");
+        compare(render(), before);
+        compare(shown(), ["a"]);
+        keys("<Esc>:%s/a/yy/g<CR>");
+        compare(render(), "yy <M:h1> yy\n<C:h2> yy");
+        verify(!vim.previewing);
+        compare(vim.undoStack.length, 1);
+        keys("u");
+        compare(render(), before);
+        keys("<C-r>");
+        compare(render(), "yy <M:h1> yy\n<C:h2> yy");
+        // n only counts, so it only highlights.
+        keys(":%s/yy/z/gn");
+        compare(render(), "yy <M:h1> yy\n<C:h2> yy");
+        compare(shown(), ["yy", "yy", "yy"]);
+        keys("<Esc>");
+    }
+
+    // The cursor stays on its character while a preview changes the text
+    // before it (or on what replaces its match), and goes back with it.
+    function test_substitutePreviewCursor() {
+        load("a a\nb x");
+        keys("j$");
+        const at = vim.cursor;
+        keys(":%s/a/AAA/g");
+        compare(editor.text, "AAA AAA\nb x");
+        compare(editor.text[vim.cursor], "x");
+        keys("<BS>");
+        compare(editor.text, "AAA a\nb x");
+        compare(editor.text[vim.cursor], "x");
+        keys("<Esc>");
+        compare(vim.cursor, at);
+        keys("gg:s/a/xy/");
+        compare(vim.cursor, 0);
+        keys("<Esc>");
+        // In the listing, it stays out of the icons.
+        loadListing("M  ab/\nC  cd/");
+        keys("j");
+        keys(":%s`../`&a");
+        compare(render(), "<M:h1>  ab/a\n<C:h2>  cd/a");
+        compare(editor.text[vim.cursor], "c");
+        keys("aa");
+        compare(render(), "<M:h1>  ab/aaa\n<C:h2>  cd/aaa");
+        compare(editor.text[vim.cursor], "c");
+        keys("<Esc>");
+        compare(editor.text[vim.cursor], "c");
+    }
+
+    // Starting over (another listing shown) drops the preview, as the text
+    // it replaced isn't there any more.
+    function test_substitutePreviewReset() {
+        load("a b");
+        keys(":s/a/x/");
+        compare(editor.text, "x b");
+        editor.text = "new";
+        vim.reset([]);
+        verify(!vim.previewing);
+        compare(vim.commandLine, "");
+        compare(editor.text, "new");
+        // endPreview (main.qml's, before it reads the listing) puts it back.
+        load("a b");
+        keys(":s/a/x/");
+        vim.endPreview();
+        compare(editor.text, "a b");
+        compare(vim.commandLine, "");
+        vim.endPreview();
+        compare(editor.text, "a b");
+    }
+
+    // :'<,'>s (: in visual mode) keeps to the selection: its characters,
+    // its block or its lines.
+    function test_substituteVisual() {
+        load("aaa aaa aaa\naaa aaa aaa");
+        // What : left visual mode with stays selected while the command is
+        // typed, as in vim, through the preview too.
+        const selected = () => {
+            const v = vim.visualShown, r = vim.selectedRange(editor.text, v.mode, v.anchor, v.cursor);
+            return editor.text.slice(r.start, r.end);
+        };
+        keys("wviw:");
+        compare(vim.commandLine, ":'<,'>");
+        compare(selected(), "aaa");
+        keys("s/a/bb/g");
+        compare(editor.text, "aaa bbbbbb aaa\naaa aaa aaa");
+        compare(selected(), "bbbbbb");
+        keys("<BS><BS>");
+        compare(editor.text, "aaa bbaa aaa\naaa aaa aaa");
+        compare(selected(), "bbaa");
+        keys("<BS>/g<CR>");
+        compare(editor.text, "aaa bbb aaa\naaa aaa aaa");
+        compare(vim.visualShown, null);
+        keys("viw:");
+        verify(vim.visualShown);
+        keys("<Esc>");
+        compare(vim.visualShown, null);
+        keys("uggvjl:s/a/b/g<CR>");
+        compare(editor.text, "bbb bbb bbb\nbba aaa aaa");
+        keys("uggw<C-v>jl:");
+        compare(vim.blockSpans(0, editor.text.length, vim.visualShown).map(b => editor.text.slice(b.start, b.end)),
+            ["aa", "aa"]);
+        keys("s/a/b/g<CR>");
+        compare(editor.text, "aaa bba aaa\naaa bba aaa");
+        keys("ugg<C-v>j$:s/a$/b/<CR>");
+        compare(editor.text, "aaa aaa aab\naaa aaa aab");
+        keys("uggVj:s/a/b/<CR>");
+        compare(editor.text, "baa aaa aaa\nbaa aaa aaa");
+        // A range typed otherwise is lines, as in vim.
+        keys("uggwviw<Esc>:1s/a/b/g<CR>");
+        compare(editor.text, "bbb bbb bbb\naaa aaa aaa");
+    }
+
+    // A macro runs :s as typed (without a preview), as one undo step, and
+    // stops where it finds nothing.
+    function test_substituteMacro() {
+        load("a1\na2\nb3\na4");
+        keys("qa:s/a/x/<CR>jq");
+        compare(editor.text, "x1\na2\nb3\na4");
+        edits.clear();
+        keys("@a");
+        compare(editor.text, "x1\nx2\nb3\na4");
+        verify(edits.count <= 2, edits.count + " edits"); // none for a preview
+        verify(!vim.previewing);
+        keys("3@a");
+        compare(editor.text, "x1\nx2\nb3\na4");
+        compare(vim.message, "E486: Pattern not found: a");
+        compare(cursorLine(), 3);
+        keys("u");
+        compare(editor.text, "x1\na2\nb3\na4");
+        // @: runs the last one again.
+        keys("G:s/a/y/<CR>ggj@:");
+        compare(editor.text, "x1\ny2\nb3\ny4");
+    }
+
+    // Through the text without the listing's prefixes, as a search: a line
+    // starts at its name, and a line a replacement starts gets a prefix.
+    function test_substitutePrefixes() {
+        loadListing("M  ab\nC  ba\n   b");
+        keys(":%s/^b/x/<CR>");
+        compare(render(), "<M:h1>  ab\n<C:h2>  xa\n   x");
+        keys("gg:s/a/a\\r/<CR>");
+        compare(render(), "<M:h1>  a\n   b\n<C:h2>  xa\n   x");
+        keys("u:%s/a/\\U&/g");
+        compare(render(), "<M:h1>  Ab\n<C:h2>  xA\n   x");
+        keys("<Esc>");
+        compare(render(), "<M:h1>  ab\n<C:h2>  xa\n   x");
+    }
+
+    // The view goes to the match from the cursor on as it's typed, and
+    // back when it's cancelled.
+    function test_substituteView() {
+        const lines = [];
+        for (let i = 1; i <= 100; i++)
+            lines.push((i === 80 ? "x" : "y") + i);
+        narrow.height = 100;
+        narrowText.text = lines.join("\n");
+        waitForRendering(narrow);
+        const f = narrow.contentItem as Flickable;
+        const line = n => narrowText.positionToRectangle(Txt.lineToPos(narrowText.text, n));
+        vim.lineHeight = line(2).y - line(1).y;
+        switchTo(narrowText, {
+            cursor: 0
+        }, f);
+        f.contentY = 0;
+        keys(":%s/x");
+        const r = line(80);
+        verify(f.contentY <= r.y && r.y + r.height <= f.contentY + f.height, "the match is in view");
+        keys("/z");
+        compare(narrowText.text.split("\n")[79], "z80");
+        verify(f.contentY <= r.y && r.y + r.height <= f.contentY + f.height, "the match is in view");
+        keys("<Esc>");
+        compare(f.contentY, 0);
+        compare(narrowText.text.split("\n")[79], "x80");
+        // In a long text, only the lines near the view are replaced, and
+        // the others are highlighted as they are.
+        vim.previewMargin = 10;
+        keys(":%s/y/w/");
+        const shown = narrowText.text.split("\n");
+        compare(shown[0], "w1");
+        compare(shown[15], "w16");
+        compare(shown[39], "y40");
+        const spans = vim.substitution.spans;
+        compare(spans.length, 99);
+        compare(narrowText.text.slice(spans[0].start, spans[0].end), "w");
+        compare(narrowText.text.slice(spans[98].start, spans[98].end), "y");
+        keys("<CR>");
+        compare(narrowText.text.split("\n").filter(l => l[0] === "w").length, 99);
     }
 
     function test_setShell() {

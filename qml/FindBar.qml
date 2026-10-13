@@ -348,21 +348,7 @@ FocusScope {
 
     // The matches in the visible lines, for the view to highlight.
     function highlightSpans() {
-        if (!active || !matches.length)
-            return [];
-        const t = editor.text, v = vim.visibleRange(t);
-        let lo = 0, hi = matches.length;
-        while (lo < hi) { // the first match that ends in view
-            const mid = (lo + hi) >> 1;
-            if (matches[mid].end < v.from)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        const spans = [];
-        for (let i = lo; i < matches.length && matches[i].start <= v.to && spans.length < 5000; i++)
-            vim.addHighlight(t, spans, matches[i].start, matches[i].end, i === current);
-        return spans;
+        return active ? vim.highlightsIn(matches, current) : [];
     }
 
     // Enter in a field: Shift+Enter finds the previous match, Cmd+Enter

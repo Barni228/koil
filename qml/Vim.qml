@@ -172,7 +172,7 @@ QtObject {
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
-        "<C-x>", "q", "@", "<C-v>", "<Esc>"]
+        "<C-x>", "q", "@", "<C-v>", "<Esc>", "&", "g&"]
     readonly property var visualActions: ["<Esc>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D", "s",
         "C", "S", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>",
         "zh", "zl", "zH", "zL", "zs", "ze"]
@@ -293,11 +293,37 @@ QtObject {
     property var searchView: null
     // The last search stays highlighted until Esc in normal mode (or :noh).
     property string highlightPattern: ""
-    // Start of the match to show as current: the one a typed search would
-    // jump to, otherwise the one under the cursor.
-    readonly property int highlightTarget: commandLine[0] === "/" || commandLine[0] === "?" ? searchTarget : cursor
+    // Start of the match to show as current: the one a typed search (or
+    // :s) would go to, otherwise the one under the cursor.
+    readonly property int highlightTarget: commandLine[0] === "/" || commandLine[0] === "?" || substitution
+        ? searchTarget : cursor
+    // The last :s, which :s alone, :&, & and g& run again: { pattern,
+    // replacement, flags }.
+    property var lastSubstitute: null
+    // While a :s is typed, what it would do (see previewSubstitute): {
+    // spans, target, before }, the matches it would replace, or once its
+    // replacement is typed, what replaced them in the buffer, as { start,
+    // end }; the index of the one to show; and the buffer before it was
+    // replaced, { text, hidden, cursors, cursor } (null if it wasn't).
+    // Null otherwise, and while it would replace nothing.
+    property var substitution: null
+    // While the buffer shows what a :s would make of it, and the edits that
+    // show it (or put the text back): they aren't the user's (see main.qml).
+    property bool previewing: false
+    // How many lines above and below the view a :s's preview replaces in
+    // (see previewWindow).
+    property int previewMargin: 500
+    // The selection : (or !) left visual mode with, which stays drawn while
+    // the command line is open, as in vim: lastVisual, in the text as shown
+    // (through a :s's preview, see previewedAt). Null otherwise.
+    property var visualShown: null
 
-    onCommandLineChanged: previewSearch()
+    onCommandLineChanged: {
+        previewSubstitute();
+        previewSearch();
+        if (commandLine === "")
+            visualShown = null;
+    }
     // The options are for where they were found (completing sets them again
     // after it moves the cursor).
     onCursorChanged: completion = null
@@ -313,6 +339,9 @@ QtObject {
         keys = [];
         pendingKeys = "";
         awaitingReplaceChar = false;
+        // The text a :s's preview replaced isn't the editor's any more.
+        substitution = null;
+        previewing = false;
         commandLine = "";
         message = "";
         undoStack = [];
@@ -1508,6 +1537,12 @@ QtObject {
         case "@":
             runMacro(cmd.ch, count);
             break;
+        case "&":
+            runEx("s");
+            break;
+        case "g&":
+            substituteEverywhere();
+            break;
         }
     }
 
@@ -1528,7 +1563,7 @@ QtObject {
             return;
         }
         const a = cmd.action;
-        lastVisual = { mode: mode, anchor: anchor, cursor: cursor };
+        lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
         if (a === "<Esc>" || visualModes[a] === mode) {
             setMode("normal");
             setCursor(clampNormal(t, cursor));
@@ -1554,10 +1589,12 @@ QtObject {
             setCursor(cursor);
             return;
         }
-        // : and ! leave visual mode, for a command on its lines, as in vim.
+        // : and ! leave visual mode, for a command on its lines, as in vim,
+        // which still shows them selected while it's typed.
         if (a === ":" || a === "!") {
             setMode("normal");
             setCursor(clampNormal(t, cursor));
+            visualShown = lastVisual;
             openCommandLine(":", "'<,'>" + (a === "!" ? "!" : ""));
             return;
         }
@@ -2083,11 +2120,14 @@ QtObject {
     // line, top to bottom: { line, ls, le, start, end, cols }, where
     // [start, end) is the part in the block (empty if the line is too short)
     // and cols the line's length. Only the lines in [from, to], if given.
-    function blockShape(t, from, to) {
-        const ca = Txt.column(t, anchor), cc = Txt.column(t, cursor);
-        const left = Math.min(ca, cc), right = wantCol === Infinity ? Infinity : Math.max(ca, cc);
-        let ls = Txt.lineStart(t, Math.min(anchor, cursor));
-        let last = Txt.lineStart(t, Math.max(anchor, cursor));
+    // The block's corners are vim's, or `corners`' (lastVisual's).
+    function blockShape(t, from, to, corners) {
+        const v = corners || { anchor: anchor, cursor: cursor, wantCol: wantCol };
+        const a = Math.min(v.anchor, t.length), c = Math.min(v.cursor, t.length);
+        const ca = Txt.column(t, a), cc = Txt.column(t, c);
+        const left = Math.min(ca, cc), right = v.wantCol === Infinity ? Infinity : Math.max(ca, cc);
+        let ls = Txt.lineStart(t, Math.min(a, c));
+        let last = Txt.lineStart(t, Math.max(a, c));
         if (from !== undefined) {
             ls = Math.max(ls, Txt.lineStart(t, from));
             last = Math.min(last, Txt.lineStart(t, to));
@@ -2104,9 +2144,11 @@ QtObject {
     }
 
     // The block as { start, end } spans, for drawing it: only its lines in
-    // [from, to], as all of a 100,000-line block took a second a key.
-    function blockSpans(from, to) {
-        return blockShape(bufferText(), from, to).lines.filter(l => l.end > l.start).map(l => ({ start: l.start, end: l.end }));
+    // [from, to], as all of a 100,000-line block took a second a key. Vim's,
+    // or the one with `corners` (see blockShape).
+    function blockSpans(from, to, corners) {
+        return blockShape(bufferText(), from, to, corners).lines.filter(l => l.end > l.start)
+            .map(l => ({ start: l.start, end: l.end }));
     }
 
     // Runs a visual block command. Returns false for the ones that work on
@@ -2875,18 +2917,23 @@ QtObject {
             // The editor's selection can't be a block: the view draws it.
             editor.deselect();
             editor.cursorPosition = Math.min(cursor, n);
-        } else if (mode === "visualLine") {
-            const s = Txt.lineStart(t, Math.min(anchor, cursor));
-            const e = Math.min(Txt.lineEnd(t, Math.max(anchor, cursor)) + 1, n);
-            if (cursor >= anchor)
-                editor.select(s, e);
-            else
-                editor.select(e, s);
-        } else if (cursor >= anchor) {
-            editor.select(anchor, Txt.charEnd(t, cursor));
         } else {
-            editor.select(Txt.charEnd(t, anchor), cursor);
+            const r = selectedRange(t, mode, anchor, cursor);
+            if (cursor >= anchor)
+                editor.select(r.start, r.end);
+            else
+                editor.select(r.end, r.start);
         }
+    }
+
+    // What visual mode `m` (not a block) selects of t from a to c, as {
+    // start, end }: the characters, both included, or the lines.
+    function selectedRange(t, m, a, c) {
+        if (m === "visualLine") {
+            return { start: Txt.lineStart(t, Math.min(a, c)),
+                end: Math.min(Txt.lineEnd(t, Math.max(a, c)) + 1, t.length) };
+        }
+        return { start: Math.min(a, c), end: Txt.charEnd(t, Math.max(a, c)) };
     }
 
     // ---- Undo ------------------------------------------------------------
@@ -3400,7 +3447,9 @@ QtObject {
             }
             if (lastVisual) {
                 lastVisual = { mode: lastVisual.mode, anchor: movedPast(lastVisual.anchor, edits),
-                    cursor: movedPast(lastVisual.cursor, edits) };
+                    cursor: movedPast(lastVisual.cursor, edits), wantCol: lastVisual.wantCol };
+                if (visualShown) // there's no preview while the listing syncs
+                    visualShown = lastVisual;
             }
             const t = bufferText();
             anchor = Math.min(a, t.length);
@@ -3821,15 +3870,15 @@ QtObject {
     }
 
     // `confirm` is set by :confirm, which runs the command after it.
-    function runEx(c, confirm) {
-        if (c === "")
+    function runEx(command, confirm) {
+        if (command === "")
             return;
-        const r = exRange(c);
+        const r = exRange(command);
         if (r.error) {
             showError(r.error);
             return;
         }
-        c = r.rest.trim();
+        const c = r.rest.trim();
         // A range alone goes to its last line.
         if (r.first !== undefined && c === "") {
             const t = bufferText();
@@ -3843,6 +3892,15 @@ QtObject {
         const bang = /^(_\s*)?!/.exec(c);
         if (bang) {
             shellCommand(c.slice(bang[0].length), r.first === undefined ? null : r, !!bang[1]);
+            return;
+        }
+        const sub = substituteParts(c);
+        if (sub) {
+            const range = substituteRange(command, r);
+            if (sub.error || range.error)
+                showError(sub.error || range.error);
+            else
+                substitute(range, sub);
             return;
         }
         if (r.first !== undefined) {
@@ -3985,6 +4043,353 @@ QtObject {
             setCursor(clampNormal(bufferText(), 0));
             commitChange(); // during a run, with it (see commitChange)
         });
+    }
+
+    // ---- Substitute --------------------------------------------------------
+    // :[range]s/pattern/replacement/[flags], as vim's, but its pattern is a
+    // JavaScript regular expression with smart case, as /'s is. Its flags: g
+    // (every match on a line, not only the first), i and I (ignore case, or
+    // not), n (only count them) and e (no error if there's none); & first
+    // keeps the last :s's. :s alone (with flags too), :& and :&& run the
+    // last one again. It goes through the text without its prefixes, as a
+    // search does, so a line starts at its name. With the range '<,'> (as :
+    // types in visual mode), only what was selected: its characters, its
+    // block, or its lines (vim's goes over all of their lines).
+
+    readonly property var substituteNames: ["s", "su", "sub", "subs", "subst", "substi", "substit",
+        "substitu", "substitut", "substitute"]
+
+    // Ex command c (after its range) as a :s: { pattern, replacement,
+    // flags, own }, where `own` says whether it has its own pattern (:s
+    // alone and :& take the last one's, and its replacement), the pattern
+    // is "" for the last search's, and the replacement is null while it
+    // isn't typed. Null if c isn't a :s, { error } if its flags are wrong
+    // or there's no last :s.
+    function substituteParts(c) {
+        const name = /^[a-z]*/.exec(c)[0];
+        let rest, args = null;
+        if (substituteNames.includes(name)) {
+            rest = c.slice(name.length);
+            args = Txt.substituteArgs(rest);
+        } else if (c[0] === "&") {
+            rest = c.slice(1);
+        } else {
+            return null;
+        }
+        const last = lastSubstitute;
+        if (!args && !last)
+            return { error: "E35: No previous regular expression" };
+        const s = args ? { pattern: args.pattern, replacement: args.replacement, flags: args.flags.trim(), own: true }
+            : { pattern: last.pattern, replacement: last.replacement, flags: rest.trim(), own: false };
+        if (!/^&?[gieIn]*$/.test(s.flags))
+            return { error: "E488: Trailing characters: " + s.flags };
+        if (s.flags[0] === "&")
+            s.flags = (last ? last.flags : "") + s.flags.slice(1);
+        return s;
+    }
+
+    // The lines (from 1) :s goes over, from c (an Ex command) and its range
+    // r (see exRange): the cursor's line if it has none. With '<,'>, the
+    // last selection's `region` (see selectionRegion). { first, last,
+    // region }, or { error }.
+    function substituteRange(c, r) {
+        const t = bufferText();
+        if (r.first === undefined) {
+            const line = Txt.lineOf(t, cursor);
+            return { first: line, last: line, region: null };
+        }
+        if (r.first < 1 || r.last > Txt.countLines(t))
+            return { error: "E16: Invalid range" };
+        const region = /^\s*'<\s*,\s*'>/.test(c) ? selectionRegion(t) : null;
+        return { first: r.first, last: r.last, region: region };
+    }
+
+    // The last visual selection as the spans :'<,'>s keeps to, in order and
+    // apart: its characters, or its block's part of each line. Null for
+    // lines, which its range is.
+    function selectionRegion(t) {
+        const v = lastVisual;
+        if (!v || v.mode === "visualLine")
+            return null;
+        if (v.mode === "visualBlock") {
+            return blockShape(t, undefined, undefined, v).lines.filter(l => l.end > l.start)
+                .map(l => ({ start: l.start, end: l.end }));
+        }
+        const a = Math.min(v.anchor, v.cursor, t.length), b = Math.min(Math.max(v.anchor, v.cursor), t.length);
+        return [{ start: a, end: Txt.charEnd(t, b) }];
+    }
+
+    // Whether the match m ({ start, end }) is all in one of region's spans.
+    function inRegion(region, m) {
+        let lo = 0, hi = region.length;
+        while (lo < hi) { // the first span that ends at m's start or after
+            const mid = (lo + hi) >> 1;
+            if (region[mid].end < m.start)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        return lo < region.length && region[lo].start <= m.start && m.end <= region[lo].end;
+    }
+
+    // What :s with these flags looks for: smart case, unless i or I says
+    // (the last one).
+    function substituteRegExp(pattern, flags) {
+        const i = flags.lastIndexOf("i"), I = flags.lastIndexOf("I");
+        return Txt.searchRegExp(pattern, i < 0 && I < 0 ? undefined : i > I);
+    }
+
+    // The matches of `re` that :s replaces in t, as { start, end, match }
+    // (the RegExp result): those that start on the lines first to last
+    // (from 1), only the first on each line unless `all` (g), and only
+    // those in `region`, if it's given.
+    function substituteMatches(t, first, last, region, re, all) {
+        const u = withoutPrefixes(t), s = u.text;
+        const to = unprefixedAt(u, Txt.lineEnd(t, Txt.lineToPos(t, last)));
+        const found = [];
+        re.lastIndex = unprefixedAt(u, Txt.lineToPos(t, first));
+        let m;
+        while ((m = re.exec(s)) !== null && m.index <= to) {
+            if (m[0] === "") // step over a whole code point
+                re.lastIndex = m.index + (Txt.isLowSurrogate(s, m.index + 1) ? 2 : 1);
+            const r = prefixedSpan(u, m.index, m.index + m[0].length);
+            if (region && !inRegion(region, r))
+                continue;
+            found.push({ start: r.start, end: r.end, match: m });
+            if (!all) { // on to the next line
+                const nl = s.indexOf("\n", m.index);
+                if (nl < 0)
+                    break;
+                re.lastIndex = Math.max(re.lastIndex, nl + 1);
+            }
+        }
+        return found;
+    }
+
+    // What t (the buffer's text) becomes with each of `found` (see
+    // substituteMatches) replaced as `replacement` says (see
+    // Txt.substitution): { start, end, text, entries } to put in place of
+    // [start, end) of t, from the first match to the end of the last (the
+    // hidden text between them stays), and `spans`, where each replacement
+    // is in the new text, as { start, end }. A line a replacement starts
+    // gets a prefix (see prefixLines).
+    function substituted(t, found, replacement) {
+        const start = found[0].start, entries = [], spans = [];
+        let text = "", i = start;
+        for (const f of found) {
+            for (const h of shifted(hiddenIn(hidden, i, f.start), text.length))
+                entries.push(h);
+            text += t.slice(i, f.start);
+            const r = prefixLines(f.start, f.end, Txt.substitution(replacement, f.match), []).text;
+            spans.push({ start: start + text.length, end: start + text.length + r.length });
+            text += r;
+            i = f.end;
+        }
+        return { start: start, end: i, text: text, entries: entries, spans: spans };
+    }
+
+    // "1 line", "3 lines".
+    function counted(n, one, many) {
+        return n + " " + (n === 1 ? one : many);
+    }
+
+    // Runs the :s `s` (see substituteParts) over `range` (see
+    // substituteRange), as a change of its own, as in vim: the cursor goes
+    // to the first non-blank of the last line it changed, its pattern is
+    // the last search's (highlighted, as after /), and over two
+    // replacements are counted in the status line.
+    function substitute(range, s) {
+        const pattern = s.pattern || (lastSearch ? lastSearch.pattern : "");
+        if (!pattern) {
+            showError("E35: No previous regular expression");
+            return;
+        }
+        const replacement = s.replacement || "";
+        lastSubstitute = { pattern: pattern, replacement: replacement, flags: s.flags };
+        lastSearch = { pattern: pattern, forward: lastSearch ? lastSearch.forward : true };
+        highlightPattern = pattern;
+        const t = bufferText();
+        const found = substituteMatches(t, range.first, range.last, range.region,
+            substituteRegExp(pattern, s.flags), s.flags.includes("g"));
+        if (!found.length) {
+            if (!s.flags.includes("e"))
+                showError("E486: Pattern not found: " + pattern);
+            return;
+        }
+        // The lines they're on, going through the text once (Txt.lineOf at
+        // each of 120,000 matches took 4 s).
+        let lines = 0, lineEnd = -1;
+        for (const f of found) {
+            if (f.start > lineEnd) {
+                lines++;
+                lineEnd = t.indexOf("\n", f.start);
+                if (lineEnd < 0)
+                    lineEnd = t.length;
+            }
+        }
+        if (s.flags.includes("n")) {
+            showMessage(counted(found.length, "match", "matches") + " on " + counted(lines, "line", "lines"));
+            return;
+        }
+        // In a batch, where prefixLines reads the text at each match as it's
+        // kept, rather than as the editor gives it.
+        batched(() => {
+            const r = substituted(t, found, replacement);
+            beginChange();
+            replaceRange(r.start, r.end, r.text, r.entries);
+            const u = bufferText();
+            setCursor(clampNormal(u, firstNonBlank(u, r.spans[r.spans.length - 1].start)));
+            wantCol = Txt.column(u, cursor);
+            commitChange(); // during a run, with it (see commitChange)
+        });
+        if (found.length > 2)
+            showMessage(counted(found.length, "substitution", "substitutions") + " on " + counted(lines, "line", "lines"));
+    }
+
+    // g&: the last :s again, with its flags, but the last search's pattern,
+    // over every line (vim's :%s//~/&).
+    function substituteEverywhere() {
+        if (!lastSubstitute) {
+            showError("E35: No previous regular expression");
+            return;
+        }
+        substitute({ first: 1, last: Txt.countLines(bufferText()), region: null },
+            { pattern: "", replacement: lastSubstitute.replacement, flags: lastSubstitute.flags });
+    }
+
+    // Like neovim's 'inccommand': while a :s with a pattern of its own is
+    // typed, the matches it would replace are highlighted, and once its
+    // replacement is (the delimiter after the pattern is), the buffer shows
+    // the text as it would make it, with what replaced them highlighted.
+    // The command line closing (Esc, Enter, whatever ends it) puts the text
+    // back, and then Enter runs it. Each preview is made from the text as
+    // it was, put back first, in the same batch, so the editor gets one
+    // edit. The view goes to the match from the cursor on, as a search's
+    // does (see previewSearch). Not for a :s a macro types.
+    function previewSubstitute() {
+        const typing = commandLine[0] === ":" && !inChunk;
+        if (!typing && !substitution)
+            return;
+        batched(() => {
+            const before = substitution && substitution.before;
+            if (before) {
+                previewing = true;
+                const d = diff(bufferText(), before.text, [], []);
+                if (d)
+                    replaceRange(d.start, d.end1, before.text.slice(d.start, d.end2));
+                hidden = before.hidden;
+                cursors = before.cursors;
+                setCursor(before.cursor);
+                if (visualShown)
+                    visualShown = lastVisual;
+            }
+            substitution = typing ? typedSubstitution() : null;
+            // Before the editor gets the preview, which may scroll it.
+            if (substitution && !searchView && flickable)
+                searchView = { x: flickable.contentX, y: flickable.contentY };
+            flush();
+            previewing = !!(substitution && substitution.before);
+        });
+    }
+
+    // What the :s being typed does to the buffer (see substitution), shown
+    // in it once its replacement is typed. Null if the command line isn't
+    // such a :s (yet), or it would do nothing.
+    function typedSubstitution() {
+        const c = commandLine.slice(1).trim(), r = exRange(c);
+        const s = r.error ? null : substituteParts(r.rest.trim());
+        if (!s || s.error || !s.own || s.pattern === "" && s.replacement === null)
+            return null;
+        const range = substituteRange(c, r);
+        const pattern = s.pattern || (lastSearch ? lastSearch.pattern : "");
+        if (range.error || !pattern)
+            return null;
+        const t = bufferText();
+        const found = substituteMatches(t, range.first, range.last, range.region,
+            substituteRegExp(pattern, s.flags), s.flags.includes("g"));
+        if (!found.length)
+            return null;
+        const next = found.findIndex(f => f.start >= cursor);
+        const target = next < 0 ? 0 : next;
+        if (s.replacement === null || s.flags.includes("n"))
+            return { spans: found.map(f => ({ start: f.start, end: f.end })), target: target, before: null };
+        const before = { text: t, hidden: hidden, cursors: cursors, cursor: cursor };
+        const near = previewWindow(t, found, target), replaced = found.slice(near.from, near.to);
+        const done = substituted(t, replaced, s.replacement);
+        const shift = done.text.length - (done.end - done.start);
+        previewing = true;
+        replaceRange(done.start, done.end, done.text, done.entries);
+        // The cursor and the selection drawn stay on their characters, the
+        // selection's end on the last of a replacement.
+        const u = bufferText(), at = (p, last) => previewedAt(u, p, replaced, done.spans, last);
+        setCursor(clampNormal(u, at(cursor, false)));
+        if (visualShown) {
+            const v = lastVisual, forward = v.anchor <= v.cursor;
+            visualShown = { mode: v.mode, anchor: at(v.anchor, !forward), cursor: at(v.cursor, forward),
+                wantCol: v.wantCol };
+        }
+        const spans = found.slice(0, near.from).map(f => ({ start: f.start, end: f.end })).concat(done.spans,
+            found.slice(near.to).map(f => ({ start: f.start + shift, end: f.end + shift })));
+        return { spans: spans, target: target, before: before };
+    }
+
+    // Which of `found` (see substituteMatches) the preview replaces, as
+    // { from, to } (indexes): Qt lays out again every line an edit changes
+    // (a 20,000-line text took 400 ms a key), so in a long text only those
+    // previewMargin lines or less from the view (as previewSearch leaves
+    // it, showing the one at `target`), and the others are highlighted as
+    // they are. All of them without a view.
+    function previewWindow(t, found, target) {
+        if (!flickable)
+            return { from: 0, to: found.length };
+        const y = Math.max(0, (searchView ? searchView.y : flickable.contentY) - editor.topPadding);
+        const top = Math.floor(y / lineHeight) + 1, bottom = top + Math.ceil(flickable.height / lineHeight);
+        const line = Txt.lineOf(t, found[target].start);
+        const inView = line >= top && line <= bottom;
+        const from = Txt.lineToPos(t, Math.max(1, (inView ? top : line) - previewMargin));
+        const last = Math.min(Txt.countLines(t), (inView ? bottom : line) + previewMargin);
+        const to = Txt.lineEnd(t, Txt.lineToPos(t, last));
+        const firstFrom = p => { // the first of found that starts at p or after
+            let lo = 0, hi = found.length;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (found[mid].start < p)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            return lo;
+        };
+        return { from: firstFrom(from), to: firstFrom(to + 1) };
+    }
+
+    // Where p, of the text as it was, is in u, a :s's preview, which
+    // replaced `replaced` (see substituteMatches) by what's at `spans`: on
+    // the same character, or in a match, on the first character of what
+    // replaced it (the `last` one, for the end of a selection).
+    function previewedAt(u, p, replaced, spans, last) {
+        let lo = 0, hi = replaced.length;
+        while (lo < hi) { // after the last one that starts at p or before
+            const mid = (lo + hi) >> 1;
+            if (replaced[mid].start <= p)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        const k = lo - 1;
+        if (k < 0)
+            return p;
+        if (p >= replaced[k].end)
+            return p + spans[k].end - replaced[k].end;
+        return last && spans[k].end > spans[k].start ? Txt.charStart(u, spans[k].end - 1) : spans[k].start;
+    }
+
+    // Closes the command line if the buffer shows what a :s being typed
+    // would make of it (see previewSubstitute), which puts the text back:
+    // for main.qml, before it reads the text as the user's.
+    function endPreview() {
+        if (previewing)
+            commandLineKey("<Esc>");
     }
 
     // The options :set knows: full name, short name (if any), property,
@@ -4382,15 +4787,16 @@ QtObject {
         return kind === "/" || kind === "?" ? commandLine.slice(1) : null;
     }
 
-    // Like vim's 'incsearch': while a search is typed, scroll to the match
-    // Enter would jump to, and restore the view when the search is cancelled.
+    // Like vim's 'incsearch': while a search (or a :s, see
+    // previewSubstitute) is typed, scroll to the match Enter would jump to,
+    // and restore the view when the search is cancelled.
     function previewSearch() {
         if (inChunk)
             return; // not for a search a macro types
         if (batch)
             flush(); // to scroll from where the editor is
         const pattern = typedSearch();
-        if (pattern === null) {
+        if (pattern === null && !substitution) {
             if (searchView && flickable) {
                 flickable.contentX = searchView.x;
                 flickable.contentY = searchView.y;
@@ -4401,10 +4807,14 @@ QtObject {
         }
         if (!searchView && flickable)
             searchView = { x: flickable.contentX, y: flickable.contentY };
-        const t = bufferText();
-        const re = Txt.searchRegExp(pattern);
-        searchTarget = pattern === "" ? -1
-            : commandLine[0] === "/" ? searchForward(re, t, cursor, true) : searchBackward(re, t, cursor, true);
+        if (substitution) {
+            searchTarget = substitution.spans[substitution.target].start;
+        } else {
+            const t = bufferText();
+            const re = Txt.searchRegExp(pattern);
+            searchTarget = pattern === "" ? -1
+                : commandLine[0] === "/" ? searchForward(re, t, cursor, true) : searchBackward(re, t, cursor, true);
+        }
         if (!flickable)
             return;
         if (searchTarget < 0) {
@@ -4424,8 +4834,11 @@ QtObject {
     }
 
     // Matches of the search being typed (or else of the last search, until
-    // it's cleared) that fall in the visible lines, as highlightSpans.
+    // it's cleared) that fall in the visible lines, as highlightSpans. While
+    // a :s is typed, what it would replace, or what replaced it.
     function searchHighlights() {
+        if (substitution)
+            return highlightsIn(substitution.spans, substitution.target);
         const typed = typedSearch();
         const pattern = typed !== null ? typed : highlightPattern;
         if (!pattern)
@@ -4444,6 +4857,24 @@ QtObject {
             const r = prefixedSpan(u, m.index, m.index + m[0].length);
             addHighlight(t, spans, r.start, r.end, r.start === highlightTarget);
         }
+        return spans;
+    }
+
+    // The spans of `list` (in order, as { start, end }) in the visible
+    // lines, as highlightSpans, the one at `current` as the current one.
+    function highlightsIn(list, current) {
+        const t = bufferText(), v = visibleRange(t);
+        let lo = 0, hi = list.length;
+        while (lo < hi) { // the first one that ends in view
+            const mid = (lo + hi) >> 1;
+            if (list[mid].end < v.from)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        const spans = [];
+        for (let i = lo; i < list.length && list[i].start <= v.to && spans.length < 5000; i++)
+            addHighlight(t, spans, list[i].start, list[i].end, i === current);
         return spans;
     }
 

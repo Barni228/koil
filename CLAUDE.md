@@ -73,10 +73,11 @@ the scratchpad (see Scratchpad).
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, hidden text, the listing's
-  prefixes, `:` and its ranges, `/`, buffers). It drives the `TextArea`
+  prefixes, `:` and its ranges, `/`, `:s`, buffers). It drives the `TextArea`
   through `insert`/`remove`/`select`.
-- `qml/text.js`: pure text helpers (lines, characters, words, text objects),
-  imported as `Txt` by Vim.qml and the views. The only state it keeps is
+- `qml/text.js`: pure text helpers (lines, characters, words, text objects,
+  `:s`'s arguments and replacement), imported as `Txt` by Vim.qml and the
+  views. The only state it keeps is
   where the lines of the last two long texts start (`lineIndex`), so
   `lineOf`, `lineToPos` and `countLines` (the status line, line numbers,
   highlights) don't go through the text each time.
@@ -832,7 +833,12 @@ the scratchpad (see Scratchpad).
   `Qt.callLater`: halfway through vim's `replaceRange` its hidden text isn't
   up to date, and coloring is a text change to Qt, which would make
   `trackEdit` shift the hidden text again), and the highlighter colors those
-  lines' icons (`setPendingLines`). The highlighter is found by object name
+  lines' icons (`setPendingLines`): every line whose icon was last colored
+  otherwise (`ColoredAs`, its block's user data), not only those that were
+  pending, as Qt colors a line as an edit reaches it, with the pending
+  lines it has then, and vim's edit is a remove and an insert, between
+  which lines have other numbers (a `:s` preview left a file's icon
+  white). The highlighter is found by object name
   (no moc for native.cpp). Highlighting counts as a text change to Qt (as
   `fixLineFormat` does), so Editor.qml only emits `edited` when the text
   really changed (`lastText`), and `trackEdit` returns at once. Coloring
@@ -1037,7 +1043,8 @@ the scratchpad (see Scratchpad).
   and keeps it; it's `palette.light`, not `base`), so the path field hides
   it, and the window behind the field uses the listing's background color.
 - **Vim**: `Vim.qml` owns the cursor (`vim.cursor` is the character under the
-  block), which Editor.qml draws. Insert mode uses the `TextArea`'s own cursor
+  block), which Editor.qml draws (not while the command line is open,
+  which has the cursor, as in vim). Insert mode uses the `TextArea`'s own cursor
   (`cursorDelegate`). Outside insert mode the `TextArea` is `readOnly`, so macOS
   doesn't open the accent picker on held keys and only vim edits the text.
   Changing `readOnly` makes the editor scroll to a stale cursor position, so
@@ -1233,6 +1240,35 @@ the scratchpad (see Scratchpad).
   takes what Yes and No do; without a No action it offers only [Y]es/(N)o. Saving a file that has
   no path opens the Save dialog, so `root.save(quit)` sets `quitAfterSave` to
   quit once it's saved (also for `:wq`).
+- **Substitute** (`:s`, Substitute in Vim.qml): vim's, with `/`'s patterns
+  (JavaScript regexes, smart case unless the `i` or `I` flag says) through
+  the text without its prefixes, as a search (a line starts at its name,
+  and a line a replacement starts gets one: `prefixLines`), and vim's
+  replacement (`Txt.substitution`: `&`, `\1`, `\u`, `\r`; but `~` is only
+  a `~`, which paths have). Flags `g`, `i`, `I`, `n`, `e`, `&` first
+  keeping the last one's; `:s` alone, `:&`, `:&&`, `&` and `g&` run
+  `lastSubstitute` again. With the range `'<,'>` it keeps to the last
+  selection (`selectionRegion`: its characters or block, where vim's takes
+  the lines), whose `wantCol` `lastVisual` keeps for a `$` block. Typed,
+  it's previewed as neovim's `inccommand` does (`previewSubstitute`, at
+  every `commandLine` change): the matches it would replace are
+  highlighted (`substitution.spans`, which `searchHighlights` and
+  `previewSearch`'s view use), and once the replacement's delimiter is
+  typed, the buffer itself shows the result, made at each key from the
+  text as it was (`substitution.before`, put back first in the same batch,
+  so the editor gets one edit). The cursor, and the selection `:` left
+  visual mode with (`visualShown`, drawn while the command line is open,
+  as in vim), stay on their characters through it (`previewedAt`). Qt lays
+  out again every line an edit changes (400 ms a key for 20,000 lines), so
+  only the matches `previewMargin` (500) lines or less from the view are
+  replaced (`previewWindow`), and the others are highlighted as they are.
+  The command line closing puts the text back, and Enter then runs it, as
+  one change. Not for a macro's keys (`inChunk`). The preview isn't the
+  user's text: `previewing` keeps main.qml's `onEdited` from making the
+  file modified, and is in `boxOpen` (nothing syncs, drops or saves
+  meanwhile); `updateListing` ends it first (`endPreview`: an option
+  button updates), and `reset` drops it without putting the text back, as
+  the new text replaced it.
 - **Find bar**: moving to a match moves vim's cursor to its start
   (`vim.jumpTo`, which leaves visual mode and breaks an insert); it doesn't
   select it. Its regex option (`useRegex`) is on at first, so Find's seed
