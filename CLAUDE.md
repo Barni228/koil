@@ -74,7 +74,8 @@ the scratchpad (see Scratchpad).
   cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
   warnings and errors, line numbers, the link under the pointer with Cmd
   held (`link`, see Links), the `HoverBox` and the
-  `CompletionList`. Both the listing (or
+  `CompletionList`, each in a part a row while lines wrap (`rowSpans`, see
+  Wrapping). Both the listing (or
   file) and the path field are one (`pathField`).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
@@ -1139,7 +1140,8 @@ the scratchpad (see Scratchpad).
   (`endScroll`). The vertical scroll bar shows only when the text itself
   doesn't fit, and then on macOS it's `AlwaysOn`: with `AsNeeded`, the
   style's `visible` reads its size, which follows the room, and the two
-  bars, which take room from each other, made a binding loop. Sideways, the
+  bars, which take room from each other, made a binding loop. Sideways
+  (not while lines wrap, see Wrapping), the
   cursor keeps `:set sidescrolloff` (default 4) columns in view on either
   side wherever it moves (`showColumn`, after Qt's own scroll: `flush`,
   `setCursor`, and typing, a `Qt.callLater`), and at a name's start in the
@@ -1312,7 +1314,8 @@ the scratchpad (see Scratchpad).
   as it scrolls, but whenever it changes, or the notes, the problems or the
   view's width do; the overlays then place the lines in view
   (`aside.spots`), never over what's before them (an emoji wider than a
-  column).
+  column). While lines wrap, they go after a line's last row, and the
+  view doesn't scroll to them (see Wrapping).
 - **Quitting**: `:q` with unsaved changes fails (E37); `:confirm q` asks
   instead, in a `ConfirmDialog` rather than a `MessageDialog` (which is native
   on macOS, can't use the editor's font or vim's keys). `ConfirmDialog.ask`
@@ -1439,6 +1442,52 @@ the scratchpad (see Scratchpad).
   showed none of a short text past the old edges (a long one draws again
   as the view changes). Editor.qml calls `editor.update()` when the
   view's size changes.
+- **Wrapping** (`:set wrap`, a vim setting the Settings window saves, and
+  View > Word Wrap, Alt+Z as in VS Code; never in the path field:
+  `Editor.wrapping`, `Vim.wrapping`): a line too long for the view goes on
+  in rows under it, at a word's start in a file (`TextEdit.Wrap`), but
+  anywhere in the listing (`WrapAnywhere`, as vim wraps oil.nvim's): at a
+  word's start, a name of one long word left its icon alone on a row.
+  The wrap mode goes in with the text (`setText` empties the editor
+  first, a file after the listing), not as a binding, which laid out the
+  old text again in the new mode (`applyWrapMode`). Qt gives each of a
+  wrapped line's rows the format's fixed height, and its bottom margin
+  after the last (`layoutBlock`), so while lines wrap, `lineFormat` makes
+  rows `lineHeight` tall with no margin. Qt then puts the baseline at 4/5
+  of a row, below `textBaseline`, so the rows start lower, by
+  `textShift` (`textTop`, the grid's top, which `cellAt` and vim's
+  `textTop` use): moving the text up by its padding instead made the
+  style's `implicitHeight` a binding loop. In the listing, a name's rows
+  after its first start under it, not under its icon (a hanging indent:
+  the blocks' left margin, and as much text indent taken off), and with
+  notes (sorted by size or a date) none reaches into the notes' room on
+  the right (`noteRoom`, the blocks' right margin), so each note fits
+  after its line, lined up as in a table. Qt fits a `TextArea` to its
+  view's width only as the view or the text's size changes, which a new
+  wrap mode doesn't do, so `fitWidth` gives it the width. On macOS the
+  vertical scroll bar is `AlwaysOn` while lines wrap: one showing up
+  narrowed the view inside Qt's own resize, whose new size Qt doesn't
+  tell then (`contentSizeChanged`), which left the content a row short.
+  The overlays draw a span in a part a row (`rowSpans`, finding where
+  rows start by `cellAt`, only those in view: a line can have thousands),
+  the current line's band covers all its rows, a line number is on its
+  first row, and the notes and messages after its last, cut off at the
+  view's edge (`asideWidth`), as the view doesn't scroll sideways then
+  (its `Flickable` is `VerticalFlick`, `maxScrollX` is 0, and `zh` and the
+  like do nothing, as in vim). Vim counts rows where it counted the lines
+  in view (`rowRect`, `rowOf`, `rowStart`): H, M and L go to the lines
+  that start and end in view, Ctrl-E and Ctrl-Y scroll rows, and the page
+  keys move the cursor as many rows (`rowMotion`), as `gj` and `gk` do,
+  which keep to an x in the rows they go through (`rowWant`, while the
+  cursor is where they left it), or go to a row's end after `$`. Not
+  `positionAt` far right with 1e9, which wrapped round (Qt keeps an x in
+  64ths of a pixel, in 32 bits) to the row's start. Toggling it lays all
+  the text out twice (the format, then the wrap mode): 10 s for 100,000
+  lines in a debug build. `setLineFormat` turns the layout off while it
+  applies the format, as `recolor` does: Qt's highlighter colors every line
+  again on a format change and laid the document out after each one, so
+  turning wrapping off took five minutes in a colored file of 100,000
+  lines.
 - **Line numbers** (`:set nu`/`rnu`): the `gutter` is a child of the
   `TextArea` (so it scrolls with the text), kept at `contentX` and drawn over
   text scrolled under it. The styles hard-code `leftPadding` (7 on macOS,
@@ -1446,8 +1495,8 @@ the scratchpad (see Scratchpad).
   gutter width (the digits and two spaces) to it. Only visible lines get a row.
 - **Settings**: `settings` (a QtCore `Settings` in main.qml) holds the saved
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
-  `relativeNumber`, `syntax`, `shell`, which `:set` changes:
-  `root.vimSettings`),
+  `relativeNumber`, `syntax`, `wrap`, `shell`, which `:set` changes, as
+  View > Word Wrap does `wrap`: `root.vimSettings`),
   `root.colorScheme` and `root.confirmChanges`, bound to the saved ones at
   startup. The Settings window
   shows the saved ones and changes both (`changeSetting`). The zoom and `:set`

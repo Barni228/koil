@@ -179,6 +179,31 @@ TestCase {
         }
     }
 
+    // A buffer whose lines wrap (see switchTo), a row about 16 columns
+    // wide.
+    ScrollView {
+        id: wrapView
+
+        x: 300
+        width: 150
+        height: 120
+
+        TextArea {
+            id: wrapText
+
+            textFormat: TextEdit.PlainText
+            wrapMode: TextEdit.Wrap
+            readOnly: true
+            onCursorPositionChanged: {
+                if (vim.editor === wrapText)
+                    vim.syncFromEditor();
+            }
+            Keys.onPressed: event => {
+                event.accepted = vim.handleKey(event);
+            }
+        }
+    }
+
     // As in the app: without a binding to it, a bug that hangs the app
     // while typing can go unnoticed.
     Label {
@@ -303,6 +328,9 @@ TestCase {
         if (vim.editor !== editor)
             switchTo(editor, null);
         vim.flickable = null;
+        vim.wrap = false;
+        (wrapView.contentItem as Flickable).contentY = 0;
+        (wrapView.contentItem as Flickable).bottomMargin = 0;
         narrow.height = 30;
         (narrow.contentItem as Flickable).bottomMargin = 0;
         (narrow.contentItem as Flickable).rightMargin = 0;
@@ -1899,6 +1927,141 @@ TestCase {
             verify(f.contentX > last, "zl " + i + " scrolls right");
             last = f.contentX;
         }
+    }
+
+    // Makes vim edit the buffer whose lines wrap (see wrapView), with
+    // :set wrap, from its line `at` (from 1), where `lines` start with a
+    // short one (so the rows' height is the first two lines' distance).
+    function loadWrapped(lines, at) {
+        load("a");
+        wrapText.text = lines.join("\n");
+        waitForRendering(wrapView);
+        const t = wrapText.text;
+        vim.lineHeight = wrapText.positionToRectangle(Txt.lineToPos(t, 2)).y - wrapText.positionToRectangle(0).y;
+        vim.charWidth = wrapText.positionToRectangle(1).x - wrapText.positionToRectangle(0).x;
+        vim.wrap = true;
+        switchTo(wrapText, {
+            cursor: Txt.lineToPos(t, at)
+        }, wrapView.contentItem as Flickable);
+        verify(vim.wrapping);
+        return t;
+    }
+
+    // While lines wrap, gj and gk go a row (screen line) down or up, to
+    // the same place in it, which they keep through shorter ones as j and
+    // k do; j and k still go a line. Without wrapping, gj and gk are j and
+    // k, but not linewise, as in vim.
+    function test_wrapRows() {
+        const t = loadWrapped(["x", "one two three four five six seven eight nine ten eleven", "short", "end"], 2);
+        const rect = p => wrapText.positionToRectangle(p);
+        const lh = vim.lineHeight, line2 = Txt.lineToPos(t, 2), last = Txt.lineEnd(t, line2) - 1;
+        verify(rect(last).y >= rect(line2).y + 2 * lh - 0.5, "line 2 wraps on three rows or more");
+        keys("w");
+        const x0 = rect(vim.cursor).x, y0 = rect(vim.cursor).y;
+        keys("gj");
+        compare(Txt.lineOf(t, vim.cursor), 2);
+        fuzzyCompare(rect(vim.cursor).y, y0 + lh, 0.5);
+        fuzzyCompare(rect(vim.cursor).x, x0, vim.charWidth);
+        keys("gk");
+        compare(vim.cursor, line2 + 4);
+        keys("j");
+        compare(Txt.lineOf(t, vim.cursor), 3);
+        // Through a shorter row and back.
+        keys("0fr");
+        const r = vim.cursor, line4 = Txt.lineToPos(t, 4);
+        keys("gj");
+        compare(vim.cursor, line4 + 2);
+        keys("gk");
+        compare(vim.cursor, r);
+        keys("gj2gk");
+        fuzzyCompare(rect(vim.cursor).y, rect(last).y, 0.5);
+        compare(Txt.lineOf(t, vim.cursor), 2);
+        // At the last row, there's nowhere to go.
+        keys("G");
+        const end = vim.cursor;
+        keys("gj");
+        compare(vim.cursor, end);
+        // After $, to the end of the row.
+        keys("2G$gk");
+        fuzzyCompare(rect(vim.cursor).y, rect(last).y - lh, 0.5);
+        verify(rect(vim.cursor + 1).y > rect(vim.cursor).y, "the row's end");
+        // An operator goes to the same place, not linewise.
+        keys("0w");
+        keys("gj");
+        const below = vim.cursor;
+        keys("gkdgj");
+        compare(wrapText.text, t.slice(0, line2 + 4) + t.slice(below));
+        // Not wrapping.
+        switchTo(editor, null);
+        vim.wrap = false;
+        load("abc\ndef");
+        keys("lgj");
+        compare(vim.cursor, 5);
+        keys("gk");
+        compare(vim.cursor, 1);
+        keys("dgj");
+        compare(editor.text, "aef");
+    }
+
+    // While lines wrap, Ctrl-E and Ctrl-Y scroll rows, moving the cursor a
+    // row at a time to keep it in view, H, M and L go to lines that start
+    // and end in view, zt puts the cursor's row at the top, the page keys
+    // count rows, and nothing scrolls sideways.
+    function test_wrapView() {
+        const long = "one two three four five six seven eight nine ten eleven twelve";
+        const t = loadWrapped(["x", long, long, long, long, long, long], 1);
+        const f = wrapView.contentItem as Flickable;
+        const rect = p => wrapText.positionToRectangle(p);
+        const lh = vim.lineHeight, top = wrapText.topPadding;
+        const rowOf = p => Math.round((rect(p).y - top) / lh);
+        f.bottomMargin = f.height - lh - wrapText.bottomPadding;
+        keys("2<C-e>");
+        fuzzyCompare(f.contentY, 2 * lh, 0.5);
+        compare(rowOf(vim.cursor), 2, "the cursor is on the top row in view");
+        compare(Txt.lineOf(t, vim.cursor), 2);
+        // Line 2 starts above the view, so H goes to line 3.
+        keys("H");
+        compare(Txt.lineOf(t, vim.cursor), 3);
+        keys("L");
+        const shown = Math.floor((f.contentY + f.height - top) / lh) - 1;
+        verify(rowOf(Txt.lineEnd(t, vim.cursor)) <= shown, "L's line ends in view");
+        verify(rowOf(Txt.lineEnd(t, Txt.lineEnd(t, vim.cursor) + 1)) > shown, "and the next one doesn't");
+        keys("zt");
+        fuzzyCompare(f.contentY, rect(vim.cursor).y - top, 0.5);
+        // The row it scrolls to at the top, as without wrapping.
+        keys("2<C-y>");
+        fuzzyCompare(f.contentY, rect(vim.cursor).y - 2 * lh, 0.5);
+        // Ctrl-D scrolls half a page, and the cursor goes as many rows.
+        keys("gg<C-d>");
+        const half = Math.floor(vim.pageLines / 2);
+        fuzzyCompare(f.contentY, half * lh, 0.5);
+        compare(rowOf(vim.cursor), half);
+        // Ctrl-F leaves the last two rows at the top, the cursor on them.
+        keys("gg<C-f>");
+        const below = Math.floor((f.height - top) / lh + 0.25);
+        fuzzyCompare(f.contentY, (below - 2) * lh, 0.5);
+        compare(rowOf(vim.cursor), below - 2);
+        const cursor = vim.cursor;
+        keys("zl5zl");
+        compare(f.contentX, 0);
+        compare(vim.cursor, cursor);
+        // A buffer of one line doesn't wrap.
+        vim.singleLine = true;
+        verify(!vim.wrapping);
+    }
+
+    function test_setWrap() {
+        load("a");
+        keys(":set wrap?<CR>");
+        compare(vim.message, "nowrap");
+        keys(":set wrap<CR>");
+        verify(vim.wrap);
+        keys(":set nowrap<CR>");
+        verify(!vim.wrap);
+        vim.defaultWrap = true;
+        keys(":set wrap&<CR>");
+        verify(vim.wrap);
+        vim.defaultWrap = false;
     }
 
     // At a name's start in the listing, the view shows its prefix, the

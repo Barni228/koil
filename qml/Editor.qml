@@ -85,15 +85,43 @@ Item {
     // Where the baseline is in a line: the font's characters sit in the
     // middle of it (see fixLineFormat).
     readonly property real textBaseline: (lineHeight + metrics.ascent - metrics.descent) / 2
+    // Whether lines wrap (vim's :set wrap, never in the path field): one
+    // too long for the view goes on in rows under it, each lineHeight tall
+    // (see lineFormat), and the view doesn't scroll sideways.
+    readonly property bool wrapping: vim.wrap && !pathField
+    // Where the first line's row starts in the editor, and how much room
+    // is under the last: the style's padding (none in the path field),
+    // `paddingTop` and `paddingBottom`. While lines wrap, Qt puts the
+    // baseline lower in a row than textBaseline (at 4/5 of it), and the
+    // rows start lower by `textShift`, so that the text is in their middle.
+    property real paddingTop: 0
+    property real paddingBottom: 0
+    readonly property real textShift: wrapping ? Math.floor(lineHeight * 256 / 5) / 64 - textBaseline : 0
+    readonly property real textTop: paddingTop + textShift
+    readonly property real textBottom: paddingBottom - textShift
+    // While lines wrap, the columns kept free right of the rows for the
+    // notes after the lines (`infos`): the longest's, and the spaces before
+    // it (see aside), so that each fits after its line, as in a table.
+    readonly property int noteRoom: {
+        let n = 0;
+        if (wrapping) {
+            for (const key in infos)
+                n = Math.max(n, infos[key].length);
+        }
+        return n && n + aside.gap;
+    }
     // Changes when the text or its layout does, and when the view scrolls
     // or resizes: what the overlays are computed from (see Layer).
-    readonly property var layout: [editor.revision, editor.font, editor.contentWidth, editor.contentHeight, editor.leftPadding]
+    readonly property var layout: [editor.revision, editor.font, editor.contentWidth, editor.contentHeight, editor.leftPadding, textTop, editor.width]
     readonly property var viewport: [flickable.contentY, flickable.height]
     // Set while the text changes in a way that isn't an edit.
     property bool quiet: false
     // The text as of its last change, to tell edits from changes to its
     // format (fixLineFormat, colors), which Qt reports as text changes too.
     property string lastText: ""
+    // The line format the text was given last (see lineFormat), so it
+    // isn't given the same again: Qt lays all of it out for each.
+    property string formatted: ""
 
     // The text changed, by vim or by typing (not by setText).
     signal edited
@@ -116,8 +144,15 @@ Item {
         if (gutter.shown)
             gutter.fit(Txt.countLines(text));
         const f = lineFormat();
+        formatted = JSON.stringify(f);
         quiet = true;
-        system.setText(editor, text, f.height, f.bottomMargin);
+        // A new wrap mode (a file after the listing) goes in with no text,
+        // which it would lay out again.
+        if (editor.wrapMode !== wrapModeOf(listing)) {
+            system.setText(editor, "", f.height, f.bottomMargin, f.indent, f.rightMargin);
+            applyWrapMode();
+        }
+        system.setText(editor, text, f.height, f.bottomMargin, f.indent, f.rightMargin);
         quiet = false;
     }
 
@@ -207,7 +242,14 @@ Item {
         updateLink();
     }
 
-    onListingChanged: applyColors()
+    // The listing's names are indented where they wrap (see lineFormat),
+    // and wrap anywhere (see wrapModeOf), once the text is replaced, which
+    // takes the format and the wrap mode with it (see setText).
+    onListingChanged: {
+        applyColors();
+        Qt.callLater(fixLineFormat);
+        Qt.callLater(applyWrapMode);
+    }
     onIconColorsChanged: applyColors()
     onPendingIconColorChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
@@ -220,44 +262,101 @@ Item {
     // line is made shorter and a bottom margin makes up the rest. Qt counts
     // the new block format as an edit, but it isn't one.
     function fixLineFormat() {
-        const f = lineFormat();
+        const f = lineFormat(), key = JSON.stringify(f);
+        if (key === formatted)
+            return;
+        formatted = key;
         quiet = true;
-        system.setLineFormat(editor.textDocument, f.height, f.bottomMargin);
+        system.setLineFormat(editor.textDocument, f.height, f.bottomMargin, f.indent, f.rightMargin);
         quiet = false;
     }
 
-    // The format fixLineFormat gives every line: { height, bottomMargin }.
+    // The format fixLineFormat gives every line: { height, bottomMargin,
+    // indent, rightMargin }. While lines wrap, each of a line's rows is
+    // `height` tall, and the margin comes after the last, so the rows are
+    // lineHeight and there's no margin (the rows start lower instead:
+    // textShift). In the listing, a name's rows after its first are
+    // indented (`indent`) to start under it, not under its icon, and none
+    // reaches into the notes' room (`rightMargin`, see noteRoom).
     function lineFormat() {
+        if (wrapping)
+            return { height: lineHeight, bottomMargin: 0, indent: listing ? 3 * charWidth : 0, rightMargin: noteRoom * charWidth };
         // Not textBaseline, which may not have caught up with the font yet.
         const baseline = (lineHeight + metrics.ascent - metrics.descent) / 2;
         // In whole 64ths of a pixel, as Qt keeps both and drops the rest:
         // else each line comes out a 64th short, and in a long file the
         // text drifts off the line grid the overlays are drawn on.
         const height = Math.floor(Math.min(lineHeight, baseline * 5 / 4) * 64) / 64;
-        return { height: height, bottomMargin: lineHeight - height };
+        return { height: height, bottomMargin: lineHeight - height, indent: 0, rightMargin: 0 };
     }
 
-    // The rectangle of the character at pos, as tall as the line. The
-    // cursors and highlights use it rather than positionToRectangle, which
-    // gives a line with an emoji its natural height, while every line is
-    // lineHeight tall (see fixLineFormat).
+    // The rectangle of the character at pos, as tall as the line (the row,
+    // while lines wrap). The cursors and highlights use it rather than
+    // positionToRectangle, which gives a line with an emoji its natural
+    // height, while every line is lineHeight tall (see fixLineFormat).
     function cellAt(pos) {
         const r = editor.positionToRectangle(pos);
         const h = lineHeight;
-        const line = Math.round((r.y + r.height / 2 - editor.topPadding - h / 2) / h);
-        return Qt.rect(r.x, editor.topPadding + line * h, r.width, h);
+        const line = Math.round((r.y + r.height / 2 - textTop - h / 2) / h);
+        return Qt.rect(r.x, textTop + line * h, r.width, h);
     }
 
-    // Where to draw a cursor at pos: { cell, character, main }, where
+    // The part [start, end) of a line in view, as { start, end, rect } for
+    // each row it's on (one, unless the line wraps there), where `rect` is
+    // as tall as the row, from the part's first character in it to the
+    // row's end (or the part's). Of a line that wraps, only the rows in
+    // view.
+    function rowSpans(start, end) {
+        const a = cellAt(start), b = cellAt(end);
+        if (!wrapping || b.y === a.y)
+            return [{ start: start, end: end, rect: Qt.rect(a.x, a.y, b.x - a.x, a.height) }];
+        // As far as the rows in view (a long line can have thousands).
+        const f = flickable, t = editor.text;
+        const from = Math.max(start, editor.positionAt(0, f.contentY));
+        const to = Math.min(end, editor.positionAt(0, f.contentY + f.height + lineHeight));
+        if (from > to)
+            return [];
+        const spans = [], z = cellAt(to);
+        let s = from, c = cellAt(s);
+        while (s < to && c.y < z.y) {
+            // Where the next row starts: positions go down the rows.
+            let lo = s + 1, hi = to;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (cellAt(mid).y > c.y)
+                    hi = mid;
+                else
+                    lo = mid + 1;
+            }
+            // The row ends past its last character.
+            const right = cellAt(Txt.charStart(t, lo - 1)).x + charWidth;
+            spans.push({ start: s, end: lo, rect: Qt.rect(c.x, c.y, right - c.x, c.height) });
+            s = lo;
+            c = cellAt(s);
+        }
+        // The part in the last row, if there's any (or it ends the line).
+        if (s < to || s === end)
+            spans.push({ start: s, end: to, rect: Qt.rect(c.x, c.y, z.x - c.x, c.height) });
+        return spans;
+    }
+
+    // Where to draw a cursor at pos: { cell, character, main, line }, where
     // character is the whole character there (an emoji, say), or "" for
-    // none (at a line's end or on a tab).
+    // none (at a line's end or on a tab), and `line` its line's rows.
     function spotAt(pos, main) {
         const t = editor.text, p = Math.min(pos, editor.length);
         const ch = t.slice(p, Txt.charEnd(t, p));
+        const cell = cellAt(p);
+        let line = cell;
+        if (wrapping) {
+            const top = cellAt(Txt.lineStart(t, p)).y;
+            line = Qt.rect(cell.x, top, cell.width, cellAt(Txt.lineEnd(t, p)).y + lineHeight - top);
+        }
         return {
-            cell: cellAt(p),
+            cell: cell,
             character: ch === "\t" || ch === "\n" || ch === "\u2029" ? "" : ch,
-            main: main
+            main: main,
+            line: line
         };
     }
 
@@ -328,7 +427,14 @@ Item {
     // (bottom can be past the last line), as vim's visibleLines would give
     // them if it edited this editor.
     function visibleLines() {
-        const y = flickable.contentY - editor.topPadding;
+        if (wrapping) {
+            const t = editor.text, f = flickable;
+            return {
+                top: Txt.lineOf(t, editor.positionAt(0, f.contentY)) - 1,
+                bottom: Txt.lineOf(t, editor.positionAt(0, f.contentY + f.height)) - 1
+            };
+        }
+        const y = flickable.contentY - textTop;
         return {
             top: Math.max(0, Math.floor(y / lineHeight)),
             bottom: Math.max(0, Math.ceil((y + flickable.height) / lineHeight))
@@ -350,10 +456,51 @@ Item {
         return diagnostics.messageUnder(p);
     }
 
+    // How wide a note or a message after a line is drawn, at x, `width`
+    // wide: cut off at the view's edge while lines wrap, as the view
+    // doesn't scroll sideways then (the hover box shows a message whole).
+    function asideWidth(x, width) {
+        return wrapping ? Math.max(0, Math.min(width, editor.width - editor.rightPadding - x)) : width;
+    }
+
     onLineHeightChanged: fixLineFormat()
     onTextBaselineChanged: fixLineFormat()
+    onCharWidthChanged: Qt.callLater(fixLineFormat)
+    onNoteRoomChanged: Qt.callLater(fixLineFormat) // after the listing it's for
+    onWrappingChanged: {
+        fixLineFormat();
+        applyWrapMode();
+        flickable.contentX = 0;
+    }
+
+    // How the text wraps while lines do: at a word's start where it can,
+    // but anywhere in the listing, as vim wraps oil.nvim's: a name of one
+    // word too long for a row would leave its icon alone on the row before.
+    function wrapModeOf(listing) {
+        return !wrapping ? TextEdit.NoWrap : listing ? TextEdit.WrapAnywhere : TextEdit.Wrap;
+    }
+
+    // Gives the TextArea the wrap mode for what it shows, which lays out
+    // all its text again. Not a binding: the listing turns into a file
+    // before the file's text comes (see setText).
+    function applyWrapMode() {
+        const mode = wrapModeOf(listing);
+        if (editor.wrapMode === mode)
+            return;
+        editor.wrapMode = mode;
+        Qt.callLater(fitWidth);
+    }
+
+    // Qt fits a TextArea to its view's width while it wraps, but only as
+    // the view or the text's size changes, which a new wrap mode doesn't
+    // do (the text stayed as wide as it was unwrapped).
+    function fitWidth() {
+        if (wrapping)
+            editor.width = flickable.width;
+    }
     Component.onCompleted: {
         fixLineFormat();
+        applyWrapMode();
         applyColors();
     }
 
@@ -504,23 +651,35 @@ Item {
 
         target: view.flickable
         property: "bottomMargin"
-        value: Math.max(0, view.flickable.height - view.lineHeight - editor.bottomPadding)
+        value: Math.max(0, view.flickable.height - view.lineHeight - view.textBottom)
         when: !view.pathField
     }
 
     // Room right of the text for the view to scroll into, as far as the
     // notes and messages after the lines reach (see `aside`), so one that
     // ends past the view can be read. A margin, as `scrollRoom` is: padding
-    // would have Qt lay out all of the text again whenever it changed.
+    // would have Qt lay out all of the text again whenever it changed. None
+    // while lines wrap, when one that would end past the view is cut off.
     Binding {
         id: sideScrollRoom
 
         target: view.flickable
         property: "rightMargin"
-        value: Math.max(0, editor.leftPadding + aside.widest * view.charWidth + editor.rightPadding - view.flickable.contentWidth)
+        value: view.wrapping ? 0 : Math.max(0, editor.leftPadding + aside.widest * view.charWidth + editor.rightPadding - view.flickable.contentWidth)
     }
 
-    // A line with a cursor, a shade off the background as in other editors.
+    // While lines wrap, the view doesn't scroll sideways, though its
+    // content is as wide as the text unwrapped (the TextArea makes it its
+    // implicit width).
+    Binding {
+        target: view.flickable
+        property: "flickableDirection"
+        value: Flickable.VerticalFlick
+        when: view.wrapping
+    }
+
+    // A line with a cursor (all its rows, while lines wrap), a shade off
+    // the background as in other editors.
     component Band: Rectangle {
         required property rect row
 
@@ -542,9 +701,11 @@ Item {
         // bar's size too, which follows the room, and as the bars there
         // take room from each other's view, that made a binding loop.
         // Fusion draws them over the text, where AlwaysOn wouldn't fade.
-        ScrollBar.horizontal.policy: view.pathField ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
-        ScrollBar.vertical.policy: view.pathField || view.flickable.contentHeight <= view.flickable.height
-            ? ScrollBar.AlwaysOff : Qt.platform.os === "osx" ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+        ScrollBar.horizontal.policy: view.pathField || view.wrapping ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
+        ScrollBar.vertical.policy: view.pathField ? ScrollBar.AlwaysOff
+            : view.wrapping && Qt.platform.os === "osx" ? ScrollBar.AlwaysOn
+            : view.flickable.contentHeight <= view.flickable.height ? ScrollBar.AlwaysOff
+            : Qt.platform.os === "osx" ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
 
         TextArea {
             id: editor
@@ -556,7 +717,7 @@ Item {
             font.family: view.vim.fontFamily
             font.pointSize: view.vim.fontSize
             textFormat: TextEdit.PlainText
-            wrapMode: TextEdit.NoWrap
+            wrapMode: TextEdit.NoWrap // see applyWrapMode
             selectByMouse: true
             // The selection is drawn below (see `selection`), not by Qt.
             selectionColor: "transparent"
@@ -615,6 +776,8 @@ Item {
                     // text field, which doesn't suit a full-window editor.
                     background = plainBackground.createObject(editor);
                 }
+                view.paddingTop = topPadding;
+                view.paddingBottom = bottomPadding;
             }
             Keys.onPressed: event => {
                 // Cmd (Ctrl elsewhere) shows the link under the pointer
@@ -741,10 +904,7 @@ Item {
                 inputs: [view.link, view.layout, view.viewport]
                 compute: () => {
                     const l = view.link;
-                    if (!l)
-                        return [];
-                    const a = view.cellAt(l.start), b = view.cellAt(l.end);
-                    return [Qt.rect(a.x, a.y, b.x - a.x, a.height)];
+                    return l ? view.rowSpans(l.start, l.end).map(s => s.rect) : [];
                 }
 
                 Repeater {
@@ -774,7 +934,7 @@ Item {
                     Band {
                         required property var modelData
 
-                        row: modelData.cell
+                        row: modelData.line
                     }
                 }
             }
@@ -821,21 +981,28 @@ Item {
 
                 z: -0.5
                 inputs: [view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.vim.visualShown, view.layout, view.viewport]
-                compute: () => view.selectionSpans()
+                // A rectangle a row, the last with the line break, if it's
+                // selected.
+                compute: () => {
+                    const list = [];
+                    for (const s of view.selectionSpans()) {
+                        for (const r of view.rowSpans(s.start, s.end))
+                            list.push({ rect: r.rect, eol: s.eol && r.end === s.end });
+                    }
+                    return list;
+                }
 
                 Repeater {
                     model: selection.model
 
                     Rectangle {
                         required property var modelData
-                        readonly property rect startRect: view.cellAt(modelData.start)
-                        readonly property rect endRect: view.cellAt(modelData.end)
 
-                        x: startRect.x
-                        y: startRect.y
+                        x: modelData.rect.x
+                        y: modelData.rect.y
                         // A selected line break shows as a space, as in Qt.
-                        width: endRect.x - startRect.x + (modelData.eol ? spaceMetrics.advanceWidth : 0)
-                        height: startRect.height
+                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
+                        height: modelData.rect.height
                         color: view.theme.highlight
                     }
                 }
@@ -847,7 +1014,19 @@ Item {
                 id: highlights
 
                 inputs: [view.active, view.vim.commandLine, view.vim.substitution, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
-                compute: () => !view.active ? [] : view.vim.typedSearch() === null && !view.vim.substitution && view.findBar.active ? view.findBar.highlightSpans() : view.vim.searchHighlights()
+                compute: () => {
+                    if (!view.active)
+                        return [];
+                    const spans = view.vim.typedSearch() === null && !view.vim.substitution && view.findBar.active
+                        ? view.findBar.highlightSpans() : view.vim.searchHighlights();
+                    // A match that goes on to the next row, in a part a row.
+                    const list = [];
+                    for (const s of spans) {
+                        for (const r of view.rowSpans(s.start, s.end))
+                            list.push({ start: r.start, end: r.end, rect: r.rect, current: s.current });
+                    }
+                    return list;
+                }
 
                 Repeater {
                     model: highlights.model
@@ -856,13 +1035,11 @@ Item {
                         id: match
 
                         required property var modelData
-                        readonly property rect startRect: view.cellAt(modelData.start)
-                        readonly property rect endRect: view.cellAt(modelData.end)
 
-                        x: startRect.x
-                        y: startRect.y
-                        width: endRect.x - startRect.x
-                        height: startRect.height
+                        x: modelData.rect.x
+                        y: modelData.rect.y
+                        width: modelData.rect.width
+                        height: modelData.rect.height
                         color: modelData.current ? view.theme.currentMatch : view.theme.searchMatch
 
                         // Redraw the matched text on top, dark on the highlight.
@@ -912,6 +1089,9 @@ Item {
             // that would end past the view. The columns are worked out for
             // all the text, so they stay put as it scrolls, but only when
             // it changes, or what's drawn after it, or the view's width.
+            // While lines wrap, they go after a line's last row, counting
+            // columns from the rows' left edge, and one that would end past
+            // the view is cut off there.
             QtObject {
                 id: aside
 
@@ -924,14 +1104,14 @@ Item {
                 property int messageColumn: -1
                 // The column the last of them ends at (see sideScrollRoom).
                 property int widest: 0
-                readonly property var inputs: [view.infos, view.hidden, view.problems, editor.revision, room]
+                readonly property var inputs: [view.infos, view.hidden, view.problems, view.layout, room, view.wrapping]
 
                 function refresh() {
                     const t = editor.text, lines = new Map();
                     // The line starting at ls, as { end, note, message, error }.
                     const line = ls => {
                         if (!lines.has(ls))
-                            lines.set(ls, { end: Txt.columns(t, ls, Txt.lineEnd(t, ls)), note: "", message: "", error: false });
+                            lines.set(ls, { end: endColumn(t, ls, Txt.lineEnd(t, ls)), note: "", message: "", error: false });
                         return lines.get(ls);
                     };
                     let notes = false;
@@ -964,6 +1144,15 @@ Item {
                     widest = end;
                 }
 
+                // The column the line of t from ls to le ends at: in its
+                // last row, while lines wrap. Only a line longer than a
+                // row can, which saves asking Qt where all of them end.
+                function endColumn(t, ls, le) {
+                    const n = Txt.columns(t, ls, le);
+                    return !view.wrapping || n <= room - view.noteRoom ? n
+                        : Math.round((view.cellAt(le).x - editor.leftPadding) / view.charWidth);
+                }
+
                 // The column a message goes at on a line ending at column
                 // `end`, after its `note`, if it isn't lined up.
                 function messageFrom(end, note) {
@@ -992,8 +1181,8 @@ Item {
                 // columns if they go there, but never over what's before
                 // them (a character wider than a column, like an emoji).
                 function spots(t, ls, le, note, message) {
-                    const cw = view.charWidth, x0 = view.cellAt(ls).x;
-                    let own = Txt.columns(t, ls, le) + gap, x = view.cellAt(le).x + gap * cw;
+                    const cw = view.charWidth, x0 = view.wrapping ? editor.leftPadding : view.cellAt(ls).x;
+                    let own = endColumn(t, ls, le) + gap, x = view.cellAt(le).x + gap * cw;
                     const spots = { note: x, message: x };
                     if (note) {
                         const column = Txt.cellColumn(own, note.length, noteColumn, room);
@@ -1012,7 +1201,7 @@ Item {
             Layer {
                 id: notes
 
-                inputs: [view.infos, view.busyInfos, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room]
+                inputs: [view.infos, view.busyInfos, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room, view.wrapping]
                 compute: () => {
                     const list = [], hidden = view.hidden, t = editor.text, v = view.visibleRange();
                     for (let i = view.vim.firstAt(hidden, v.from); i < hidden.length && hidden[i].at <= v.to; i++) {
@@ -1032,11 +1221,13 @@ Item {
 
                         x: modelData.x
                         y: modelData.y + view.textBaseline - baselineOffset
+                        width: view.asideWidth(x, implicitWidth)
                         // Its place is worked out with all three dots.
                         text: modelData.busy ? modelData.text.slice(0, modelData.text.length - 3 + view.infoDots) : modelData.text
                         font: editor.font
                         color: view.theme.faint
                         textFormat: Text.PlainText
+                        elide: Text.ElideRight
                     }
                 }
             }
@@ -1052,7 +1243,7 @@ Item {
                 // line in view.
                 readonly property var messages: {
                     const shown = [];
-                    for (const d of squiggles.model) {
+                    for (const d of squiggles.found) {
                         const prev = shown[shown.length - 1];
                         if (!prev || prev.lineEnd !== d.lineEnd)
                             shown.push(d);
@@ -1113,14 +1304,24 @@ Item {
                     return path;
                 }
 
-                // The ones in the visible lines.
+                // The ones in the visible lines (`found`, see find), whose
+                // underlines are the model, one for each row they're on.
                 Layer {
                     id: squiggles
 
-                    inputs: [view.problems, view.layout, view.viewport, view.infos, view.hidden, aside.noteColumn, aside.messageColumn, aside.room]
+                    property var found: []
+
+                    inputs: [view.problems, view.layout, view.viewport, view.infos, view.hidden, aside.noteColumn, aside.messageColumn, aside.room, view.wrapping]
                     compute: () => {
                         const v = view.visibleRange();
-                        return diagnostics.find(editor.text, v.from, v.to);
+                        found = []; // as Layer empties its model
+                        found = diagnostics.find(editor.text, v.from, v.to);
+                        const waves = [];
+                        for (const d of found) {
+                            for (const r of view.rowSpans(d.start, d.end))
+                                waves.push({ rect: r.rect, severity: d.severity });
+                        }
+                        return waves;
                     }
 
                     // Centered on the bottom of the font's descent.
@@ -1131,11 +1332,10 @@ Item {
                             id: squiggle
 
                             required property var modelData
-                            readonly property rect startRect: view.cellAt(modelData.start)
 
-                            x: startRect.x
-                            y: startRect.y + view.textBaseline + metrics.descent - height / 2
-                            width: view.cellAt(modelData.end).x - startRect.x
+                            x: modelData.rect.x
+                            y: modelData.rect.y + view.textBaseline + metrics.descent - height / 2
+                            width: modelData.rect.width
                             height: 3 * view.theme.zoom
                             preferredRendererType: Shape.CurveRenderer
 
@@ -1165,19 +1365,22 @@ Item {
 
                         x: modelData.x
                         y: cell.y + view.textBaseline - baselineOffset
+                        width: view.asideWidth(x, implicitWidth)
                         text: modelData.message
                         font: editor.font
                         color: view.theme.severityColor(modelData.severity)
                         textFormat: Text.PlainText
+                        elide: Text.ElideRight
                     }
                 }
             }
 
             // Line numbers (:set number / relativenumber) for the visible
-            // lines, in the left padding, two spaces before the text. It
-            // stays put when the text scrolls sideways, and covers the text
-            // that scrolls under it. As in vim, with both options the
-            // cursor's line shows its own number, on the left.
+            // lines, in the left padding, two spaces before the text (its
+            // first row's, as in vim, while lines wrap). It stays put when
+            // the text scrolls sideways, and covers the text that scrolls
+            // under it. As in vim, with both options the cursor's line
+            // shows its own number, on the left.
             Rectangle {
                 id: gutter
 
@@ -1201,7 +1404,7 @@ Item {
                     for (let i = v.top; i <= Math.min(count - 1, v.bottom); i++) {
                         const own = i === current && view.vim.number;
                         list.push({
-                            line: i,
+                            y: view.wrapping ? view.cellAt(Txt.lineToPos(t, i + 1)).y : view.textTop + i * view.lineHeight,
                             current: i === current,
                             left: own && view.vim.relativeNumber,
                             label: String(view.vim.relativeNumber && !own ? Math.abs(i - current) : i + 1)
@@ -1237,7 +1440,7 @@ Item {
                         required property var modelData
 
                         x: editor.leftPadding - gutter.columnWidth
-                        y: editor.topPadding + modelData.line * view.lineHeight + view.textBaseline - baselineOffset
+                        y: modelData.y + view.textBaseline - baselineOffset
                         width: gutter.digits * digitMetrics.advanceWidth
                         horizontalAlignment: modelData.left ? Text.AlignLeft : Text.AlignRight
                         text: modelData.label

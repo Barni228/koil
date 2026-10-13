@@ -162,9 +162,16 @@ mod bridge {
         fn monospace_families() -> QStringList;
 
         /// Gives every line of a QQuickTextDocument the same height, plus a
-        /// margin below it.
+        /// margin below it, and the rows a wrapped line goes on to an indent
+        /// and a margin on their right.
         #[cxx_name = "setLineFormat"]
-        unsafe fn set_line_format(text_document: *mut QObject, height: f64, bottom_margin: f64);
+        unsafe fn set_line_format(
+            text_document: *mut QObject,
+            height: f64,
+            bottom_margin: f64,
+            indent: f64,
+            right_margin: f64,
+        );
 
         /// Sets a TextEdit's text with that line format, as one edit (see
         /// native.h).
@@ -174,6 +181,8 @@ mod bridge {
             text: &QString,
             height: f64,
             bottom_margin: f64,
+            indent: f64,
+            right_margin: f64,
         );
 
         /// Has a TextEdit build only the lines in view while its text is

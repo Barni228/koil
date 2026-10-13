@@ -20,6 +20,9 @@ QtObject {
     property real lineHeight: 16
     // How wide a column is (a character of the editor's font).
     property real charWidth: 8
+    // Where the first line's row starts in the editor: its top padding,
+    // unless the view puts the rows lower (Editor.qml's textShift).
+    property real textTop: editor ? editor.topPadding : 0
     readonly property int pageLines: flickable ? Math.max(2, Math.floor(flickable.height / lineHeight)) : 20
 
     // "normal", "insert", "replace", "visual", "visualLine" or "visualBlock"
@@ -44,6 +47,14 @@ QtObject {
     // syntax.rs), with its default. Vim's is the language to color as.
     property bool syntax: true
     property bool defaultSyntax: true
+    // :set wrap: a line too long for the view goes on in rows under it (at
+    // a word's start where it can), with its default. Vim's default is on.
+    // Not in a buffer of one line (`singleLine`). While lines wrap
+    // (`wrapping`), the view doesn't scroll sideways, and what it shows is
+    // counted in rows (screen lines), not lines (see View).
+    property bool wrap: false
+    property bool defaultWrap: false
+    readonly property bool wrapping: wrap && !singleLine && flickable !== null
     // :set fontsize, in points (the view sets the editor's font), with its
     // default and range.
     property int fontSize: 16
@@ -173,7 +184,7 @@ QtObject {
     readonly property bool isMac: Qt.platform.os === "osx"
     readonly property var operators: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!"]
     readonly property var motions: ["h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ",
-        "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G",
+        "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G", "gj", "gk",
         ";", ",", "%", "{", "}", "+", "-", "_", "<CR>", "<S-CR>", "|", "n", "N", "*", "#", "H", "M", "L",
         "<C-d>", "<C-u>", "<C-f>", "<C-b>", "<PageDown>", "<PageUp>"]
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
@@ -220,6 +231,9 @@ QtObject {
     property var redoStack: []
     property var change: null
     property var wantCol: 0
+    // Where gj and gk (and the page keys, while lines wrap) left the
+    // cursor, and the x in its row they keep to (see onRow), as { at, x }.
+    property var rowWant: null
     property var lastFind: null
     property var lastSearch: null
     property var lastVisual: null
@@ -354,6 +368,7 @@ QtObject {
         undoStack = [];
         redoStack = [];
         change = null;
+        rowWant = null;
         hidden = entries || [];
         trackedText = bufferText();
         insertSession = null;
@@ -685,6 +700,7 @@ QtObject {
     // and the cursor at 0.
     function enterBuffer(state) {
         const s = state || {}, t = bufferText();
+        rowWant = null;
         undoStack = s.undoStack || [];
         redoStack = s.redoStack || [];
         hidden = s.hidden || [];
@@ -4363,8 +4379,12 @@ QtObject {
     function previewWindow(t, found, target) {
         if (!flickable)
             return { from: 0, to: found.length };
-        const y = Math.max(0, (searchView ? searchView.y : flickable.contentY) - editor.topPadding);
-        const top = Math.floor(y / lineHeight) + 1, bottom = top + Math.ceil(flickable.height / lineHeight);
+        const y = Math.max(0, (searchView ? searchView.y : flickable.contentY) - textTop);
+        let top = Math.floor(y / lineHeight) + 1, bottom = top + Math.ceil(flickable.height / lineHeight);
+        if (wrapping) { // those are rows
+            top = Txt.lineOf(t, rowStart(t, top - 1));
+            bottom = Txt.lineOf(t, rowStart(t, bottom - 1));
+        }
         const line = Txt.lineOf(t, found[target].start);
         const inView = line >= top && line <= bottom;
         const from = Txt.lineToPos(t, Math.max(1, (inView ? top : line) - previewMargin));
@@ -4421,7 +4441,8 @@ QtObject {
     // Menlo:h14), and shell only the program (vim's can have arguments).
     // hidden, gitignore, regex, sort and sortreverse are Koil's (vim's hidden
     // is about buffers; its sr, shiftround, Koil hasn't), and syntax is
-    // on or off (vim's is the language, which :syntax off turns off).
+    // on or off (vim's is the language, which :syntax off turns off). wrap
+    // wraps at a word's start, as vim's does with linebreak on.
     readonly property var options: [
         { name: "fontsize", short: "fs", property: "fontSize", default: defaultFontSize,
             min: minFontSize, max: maxFontSize },
@@ -4429,6 +4450,7 @@ QtObject {
         { name: "number", short: "nu", property: "number", default: defaultNumber },
         { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber },
         { name: "syntax", short: "syn", property: "syntax", default: defaultSyntax },
+        { name: "wrap", property: "wrap", default: defaultWrap },
         { name: "sidescrolloff", short: "siso", property: "sideScrollOff", default: 4, min: 0, max: 999 },
         { name: "shell", short: "sh", property: "shell", default: defaultShell },
         { name: "hidden", short: "hid", property: "showHidden", default: false },
@@ -4571,6 +4593,15 @@ QtObject {
         case "k":
         case "<Up>":
             return lineMotion(t, p, -count);
+        case "gj":
+        case "gk": {
+            // Not linewise, as vim's.
+            const rows = m.name === "gj" ? count : -count;
+            if (wrapping)
+                return rowMotion(t, p, rows, quiet);
+            const r = lineMotion(t, p, rows);
+            return r && Object.assign(r, { type: "exclusive" });
+        }
         case "+":
         case "<CR>":
         case "<S-CR>":
@@ -4694,10 +4725,22 @@ QtObject {
                 return null;
             if (batch)
                 flush(); // for where the view is
-            const lines = Txt.countLines(t);
-            const top = Math.min(lines - 1, Math.max(0, Math.ceil((flickable.contentY - editor.topPadding) / lineHeight)));
-            const bottom = Math.max(top, Math.min(lines - 1,
-                Math.floor((flickable.contentY + flickable.height - editor.topPadding) / lineHeight) - 1));
+            // The first and last rows all in view, which are lines unless
+            // they wrap.
+            const lines = Txt.countLines(t), f = flickable;
+            const first = Math.max(0, Math.ceil((f.contentY - textTop) / lineHeight));
+            const last = Math.max(first, Math.floor((f.contentY + f.height - textTop) / lineHeight) - 1);
+            let top = Math.min(lines - 1, first), bottom = Math.max(top, Math.min(lines - 1, last));
+            // While they wrap, the lines that start and end in view, unless
+            // one line is all there is.
+            if (wrapping) {
+                top = Txt.lineOf(t, rowStart(t, first)) - 1;
+                bottom = Txt.lineOf(t, rowStart(t, last)) - 1;
+                if (top < bottom && rowOf(Txt.lineToPos(t, top + 1)) < first)
+                    top++;
+                if (bottom > top && rowOf(Txt.lineEnd(t, Txt.lineToPos(t, bottom + 1))) > last)
+                    bottom--;
+            }
             const line = m.name === "H" ? Math.min(top + count - 1, bottom)
                 : m.name === "L" ? Math.max(bottom - count + 1, top) : Math.floor((top + bottom) / 2);
             return { pos: firstNonBlank(t, Txt.lineToPos(t, line + 1)), type: "linewise" };
@@ -4708,8 +4751,11 @@ QtObject {
             const half = m.name === "<C-d>" || m.name === "<C-u>";
             const down = ["<C-d>", "<C-f>", "<PageDown>"].includes(m.name);
             const lines = (half ? Math.floor(pageLines / 2) : pageLines - 2) * (down ? 1 : -1);
-            if (!forOp && !quiet)
+            if (!forOp && !quiet) {
                 scrollLines(lines);
+                if (wrapping)
+                    return rowMotion(t, p, lines, false); // rows, as it scrolled
+            }
             return lineMotion(t, p, lines);
         }
         }
@@ -4718,11 +4764,12 @@ QtObject {
     // Ctrl-F, as vim's: `count` pages down, each leaving the last two
     // lines in view at the top, or, with the last line in view, as far as
     // that at the top (past the text's end). The cursor goes to the top
-    // line. With nothing left to scroll, it fails.
+    // line. With nothing left to scroll, it fails. While lines wrap, it
+    // counts rows.
     function pageForward(t, count) {
         if (batch)
             flush(); // for where the view is
-        const f = flickable, h = lineHeight, pad = editor.topPadding, n = Txt.countLines(t);
+        const f = flickable, h = lineHeight, pad = textTop, n = wrapping ? rowOf(t.length) + 1 : Txt.countLines(t);
         const from = Math.max(0, Math.ceil((f.contentY - pad) / h - 1e-6));
         // The first line not in view (as scrollText counts them).
         let below = Math.floor((f.contentY + f.height - pad) / h + 0.25), top = from;
@@ -4733,7 +4780,35 @@ QtObject {
         if (top === from)
             return null;
         f.contentY = Math.min(maxScroll(), top * h); // as zt puts it
+        if (wrapping)
+            return { pos: onRow(t, cursor, top, false), type: "linewise", keepCol: wantCol === Infinity };
         return { pos: Txt.atColumn(t, Txt.lineToPos(t, top + 1), wantCol), type: "linewise", keepCol: true };
+    }
+
+    // The row `rows` rows down from p's (up if negative), as far as there
+    // are, while lines wrap: gj and gk, and the page keys. Null if it
+    // can't go. `quiet` as for motion.
+    function rowMotion(t, p, rows, quiet) {
+        if (batch)
+            flush(); // the rows are the editor's
+        const from = rowOf(p), row = Math.max(0, Math.min(rowOf(t.length), from + rows));
+        if (row === from)
+            return null;
+        return { pos: onRow(t, p, row, quiet), type: "exclusive", keepCol: wantCol === Infinity };
+    }
+
+    // Where a cursor at p goes in row `row` (from 0): as far along it as
+    // the place it had in the row it last went to one (`rowWant`, if it
+    // hasn't moved since), as j and k keep wantCol, else as p, or to its
+    // end after $. `quiet` (an extra cursor) doesn't keep its place.
+    function onRow(t, p, row, quiet) {
+        // Not much further right than a row goes: Qt keeps an x in 64ths
+        // of a pixel, in 32 bits.
+        const x = rowWant && rowWant.at === p ? rowWant.x : wantCol === Infinity ? 1e6 : rowRect(p).x;
+        const q = Math.min(t.length, editor.positionAt(x, textTop + (row + 0.5) * lineHeight));
+        if (!quiet)
+            rowWant = { at: clampNormal(t, q), x: x };
+        return q;
     }
 
     function lineMotion(t, p, delta) {
@@ -4858,7 +4933,7 @@ QtObject {
             flickable.contentY = searchView.y;
             return;
         }
-        const r = editor.positionToRectangle(searchTarget);
+        const r = wrapping ? rowRect(searchTarget) : editor.positionToRectangle(searchTarget);
         const maxX = maxScrollX();
         // Text in the left padding is under the line numbers, if they're on.
         const x = r.x < searchView.x + editor.leftPadding || r.x + r.width > searchView.x + flickable.width
@@ -4921,8 +4996,32 @@ QtObject {
     function visibleLines() {
         if (!flickable)
             return { top: 0, bottom: Txt.countLines(bufferText()) - 1 };
-        const y = flickable.contentY - editor.topPadding;
+        if (wrapping) {
+            const t = editor.text, f = flickable;
+            return { top: Txt.lineOf(t, editor.positionAt(0, f.contentY)) - 1,
+                bottom: Txt.lineOf(t, editor.positionAt(0, f.contentY + f.height)) - 1 };
+        }
+        const y = flickable.contentY - textTop;
         return { top: Math.max(0, Math.floor(y / lineHeight)), bottom: Math.max(0, Math.ceil((y + flickable.height) / lineHeight)) };
+    }
+
+    // The row (screen line) the character at p is on, as a rectangle as
+    // tall as the row, at p's x: as Editor's cellAt gives it, from the
+    // editor's text.
+    function rowRect(p) {
+        const r = editor.positionToRectangle(Math.min(p, editor.length));
+        const row = Math.max(0, Math.round((r.y + r.height / 2 - textTop) / lineHeight - 0.5));
+        return Qt.rect(r.x, textTop + row * lineHeight, r.width, lineHeight);
+    }
+
+    // The row of the character at p, counted from 0.
+    function rowOf(p) {
+        return Math.round((rowRect(p).y - textTop) / lineHeight);
+    }
+
+    // Where row `row` (from 0) starts in t, or t's end past its last.
+    function rowStart(t, row) {
+        return Math.min(t.length, editor.positionAt(0, textTop + (row + 0.5) * lineHeight));
     }
 
     // The part of the text [from, to] in the visible lines.
@@ -4957,9 +5056,10 @@ QtObject {
     function showCursor() {
         if (!flickable || batch)
             return; // after the chunk (see flush)
-        const f = flickable, top = editor.topPadding + (Txt.lineOf(bufferText(), cursor) - 1) * lineHeight;
+        const f = flickable;
+        const top = wrapping ? rowRect(cursor).y : textTop + (Txt.lineOf(bufferText(), cursor) - 1) * lineHeight;
         if (top < f.contentY)
-            f.contentY = top <= editor.topPadding ? 0 : top;
+            f.contentY = top <= textTop ? 0 : top;
         else if (top + lineHeight > f.contentY + f.height)
             f.contentY = Math.min(endScroll(), top + lineHeight - f.height);
         showColumn();
@@ -4969,6 +5069,8 @@ QtObject {
     // leaves right of the text (Editor.qml's `sideScrollRoom`), as far as the
     // notes and messages after the lines reach.
     function maxScrollX() {
+        if (wrapping)
+            return 0; // the content is as wide as the unwrapped text
         return Math.max(0, flickable.contentWidth + flickable.rightMargin - flickable.width);
     }
 
@@ -5002,6 +5104,13 @@ QtObject {
     function showColumn() {
         if (!flickable || batch)
             return; // as showCursor
+        // Qt scrolls to show its cursor past a row's end (on a space that
+        // goes past the view's edge, where the row breaks).
+        if (wrapping) {
+            if (flickable.contentX !== 0)
+                flickable.contentX = 0;
+            return;
+        }
         const f = flickable, span = cursorSpan();
         // If both sides can't be in view, the left one is.
         let x = f.contentX;
@@ -5019,9 +5128,10 @@ QtObject {
     // keeps it in view (sideScrollOff columns from the edge), as vim's do.
     // Unless its line ends before the view: then the view shows past it
     // (a long line's note or message, which vim can't), until the cursor
-    // moves. zs and ze scroll the cursor to the left or right edge.
+    // moves. zs and ze scroll the cursor to the left or right edge. Not
+    // while lines wrap, as in vim.
     function scrollSideways(how, count) {
-        if (!flickable)
+        if (!flickable || wrapping)
             return;
         if (batch)
             flush(); // as scrollLines
@@ -5052,23 +5162,24 @@ QtObject {
 
     // Ctrl-E and Ctrl-Y: scrolls the view `lines` whole lines (down if
     // positive), and moves the cursor only as far as keeps it in view.
+    // While lines wrap, rows.
     function scrollText(lines) {
         if (!flickable)
             return;
         if (batch)
             flush(); // as scrollLines
-        const f = flickable, h = lineHeight, pad = editor.topPadding;
+        const f = flickable, h = lineHeight, pad = textTop;
         const at = Math.max(0, (f.contentY - pad) / h); // the top line, maybe partly hidden
         const top = Math.max(0, lines > 0 ? Math.floor(at + 1e-6) + lines : Math.ceil(at - 1e-6) + lines);
         f.contentY = top === 0 ? 0 : Math.min(maxScroll(), pad + top * h);
-        const t = bufferText(), n = Txt.countLines(t);
+        const t = bufferText(), n = wrapping ? rowOf(t.length) + 1 : Txt.countLines(t);
         const first = Math.min(n - 1, Math.max(0, Math.ceil((f.contentY - pad) / h - 1e-6)));
         // A line counts as shown with the space below its text cut off.
         const last = Math.max(first, Math.min(n - 1, Math.floor((f.contentY + f.height - pad) / h + 0.25) - 1));
-        const line = Txt.lineOf(t, cursor) - 1;
+        const line = wrapping ? rowOf(cursor) : Txt.lineOf(t, cursor) - 1;
         const d = line < first ? first - line : line > last ? last - line : 0;
         if (d)
-            moveBy({ count: Math.abs(d), motion: { name: d > 0 ? "j" : "k" } });
+            moveBy({ count: Math.abs(d), motion: { name: (wrapping ? "g" : "") + (d > 0 ? "j" : "k") } });
     }
 
     function scrollToCursor(where) {
@@ -5076,9 +5187,11 @@ QtObject {
             return;
         if (batch)
             flush(); // as scrollLines
-        const r = editor.positionToRectangle(cursor);
-        const y = where === "t" ? r.y - editor.topPadding
-            : where === "b" ? r.y + r.height + editor.bottomPadding - flickable.height
+        // The cursor's row, while lines wrap. The room below the rows is
+        // less than the padding by as much as they start lower (textTop).
+        const r = wrapping ? rowRect(cursor) : editor.positionToRectangle(cursor);
+        const y = where === "t" ? r.y - textTop
+            : where === "b" ? r.y + r.height + editor.bottomPadding - (textTop - editor.topPadding) - flickable.height
             : r.y + r.height / 2 - flickable.height / 2;
         flickable.contentY = Math.max(0, Math.min(y, maxScroll()));
     }

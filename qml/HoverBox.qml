@@ -12,9 +12,9 @@ import "text.js" as Txt
 Item {
     id: hover
 
-    // The Editor it shows things in: its textArea, cellAt, lineHeight and
-    // metrics, its hidden text, and the warnings and errors. Untyped, since
-    // Editor.qml can't name its own type.
+    // The Editor it shows things in: its textArea, cellAt, rowSpans,
+    // lineHeight and metrics, its hidden text, and the warnings and errors.
+    // Untyped, since Editor.qml can't name its own type.
     required property var editor
     required property Theme theme
     readonly property TextArea textArea: editor.textArea
@@ -38,8 +38,9 @@ Item {
             return;
         severity = target.severity;
         text = target.text;
-        const a = editor.cellAt(target.start), b = editor.cellAt(target.end);
-        const r = rect || Qt.rect(a.x, a.y, b.x - a.x, a.height);
+        // Its first row in view, if it wraps.
+        const rows = editor.rowSpans(target.start, target.end);
+        const r = rect || (rows.length ? rows[0].rect : editor.cellAt(target.start));
         anchorRect = textArea.mapToItem(parent, r.x, r.y, r.width, r.height);
         scroller.contentY = 0;
         byMouse = mouse;
@@ -94,12 +95,14 @@ Item {
             const target = c >= 0 ? targetAt(c) : null;
             if (!target)
                 continue;
-            const a = editor.cellAt(target.start), b = editor.cellAt(target.end);
-            if (p.x >= a.x && p.x < b.x && p.y >= a.y && p.y < a.y + a.height)
-                return {
-                    start: target.start,
-                    rect: Qt.rect(a.x, a.y, b.x - a.x, a.height)
-                };
+            for (const row of editor.rowSpans(target.start, target.end)) {
+                const r = row.rect;
+                if (p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height)
+                    return {
+                        start: target.start,
+                        rect: r
+                    };
+            }
         }
         return editor.messageUnder(p);
     }

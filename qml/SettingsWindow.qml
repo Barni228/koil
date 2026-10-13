@@ -7,8 +7,8 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 
 // The Settings window (Cmd+,): font, font size, line numbers, syntax
-// colors, theme, when applying asks first, the dir Koil starts in, and the
-// shell :! runs commands in; and on macOS, the
+// colors, word wrap, theme, when applying asks first, the dir Koil starts
+// in, and the shell :! runs commands in; and on macOS, the
 // shortcut that opens the folder selected in Finder, which System Settings
 // changes, and the `koil` command, which it installs. It
 // shows the saved settings, which Koil starts with; changes here are saved
@@ -23,7 +23,7 @@ Window {
     // changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // syntax, colorScheme, confirmChanges, startDir, shell.
+    // syntax, wrap, colorScheme, confirmChanges, startDir, shell.
     required property var settings
     required property Theme theme
     // main.qml's Document, for the folder picked (a var, so this file needs
@@ -48,6 +48,11 @@ Window {
     readonly property var syntaxModes: [
         { label: qsTr("On"), value: true },
         { label: qsTr("Off"), value: false }
+    ]
+    // Long lines (:set wrap), wrapped or not.
+    readonly property var wrapModes: [
+        { label: qsTr("Off"), value: false },
+        { label: qsTr("On"), value: true }
     ]
     readonly property var colorSchemes: [
         { label: qsTr("System"), value: "system" },
@@ -76,6 +81,7 @@ Window {
     readonly property bool customFontSize: settings.fontSize !== app.defaultFontSize
     readonly property bool customLineNumbers: lineNumberMode !== 0
     readonly property bool customSyntax: !settings.syntax
+    readonly property bool customWrap: settings.wrap
     readonly property bool customColorScheme: settings.colorScheme !== "system"
     readonly property bool customConfirm: settings.confirmChanges !== "always"
     readonly property bool customStartDir: settings.startDir !== ""
@@ -105,6 +111,7 @@ Window {
         setFontSize(app.defaultFontSize);
         setLineNumberMode(0);
         app.changeSetting("syntax", true);
+        app.changeSetting("wrap", false);
         app.changeSetting("colorScheme", "system");
         app.changeSetting("confirmChanges", "always");
         settings.startDir = "";
@@ -517,6 +524,20 @@ Window {
             ResetButton {
                 enabled: win.customSyntax
                 onClicked: win.app.changeSetting("syntax", true)
+            }
+
+            SettingLabel {
+                text: qsTr("Word wrap")
+            }
+            Segmented {
+                theme: win.theme
+                options: win.wrapModes
+                current: win.wrapModes.findIndex(m => m.value === win.settings.wrap)
+                onPicked: index => win.app.changeSetting("wrap", win.wrapModes[index].value)
+            }
+            ResetButton {
+                enabled: win.customWrap
+                onClicked: win.app.changeSetting("wrap", false)
             }
 
             SettingLabel {

@@ -107,13 +107,16 @@ pub mod qobject {
         fn shell_done(self: Pin<&mut System>, result: QString);
 
         /// Gives every line of a TextEdit's `textDocument` the same height,
-        /// plus a margin below it.
+        /// plus a margin below it, and the rows a wrapped line goes on to an
+        /// indent and a margin on their right.
         #[qinvokable]
         unsafe fn set_line_format(
             self: &System,
             text_document: *mut QObject,
             height: f64,
             bottom_margin: f64,
+            indent: f64,
+            right_margin: f64,
         );
 
         /// Sets a TextEdit's text, every line with the format
@@ -125,6 +128,8 @@ pub mod qobject {
             text: &QString,
             height: f64,
             bottom_margin: f64,
+            indent: f64,
+            right_margin: f64,
         );
 
         /// Call after each change to a TextEdit's text: has it build only
@@ -312,8 +317,18 @@ impl qobject::System {
         text_document: *mut qobject::QObject,
         height: f64,
         bottom_margin: f64,
+        indent: f64,
+        right_margin: f64,
     ) {
-        unsafe { ffi::set_line_format(text_document.cast(), height, bottom_margin) };
+        unsafe {
+            ffi::set_line_format(
+                text_document.cast(),
+                height,
+                bottom_margin,
+                indent,
+                right_margin,
+            );
+        };
     }
 
     /// # Safety
@@ -325,8 +340,19 @@ impl qobject::System {
         text: &QString,
         height: f64,
         bottom_margin: f64,
+        indent: f64,
+        right_margin: f64,
     ) {
-        unsafe { ffi::set_text(text_edit.cast(), text, height, bottom_margin) };
+        unsafe {
+            ffi::set_text(
+                text_edit.cast(),
+                text,
+                height,
+                bottom_margin,
+                indent,
+                right_margin,
+            );
+        };
     }
 
     /// # Safety

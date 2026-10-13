@@ -60,6 +60,10 @@ until you apply, and your edits stay while you go through other dirs.
   or a URL in the browser, and `gx` opens it in its default app. Hold
   `Cmd` and click a path or URL to open it as `gf` does. In the listing,
   they open the entry on the line.
+- **Word wrap** (_View → Word Wrap_, `⌥Z`, or `:set wrap`; Settings turns
+  it on for good): a line too long for the window goes on in rows under
+  it, at a word's start in a file, and anywhere in the listing, where a
+  long name goes on under itself. `gj` and `gk` go a row down or up.
 - **Changes on disk** show in the listing as they happen, keeping your
   edits. If one goes against them (a file you deleted was renamed), Koil
   asks.

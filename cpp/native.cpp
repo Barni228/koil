@@ -303,11 +303,15 @@ recolor(QSyntaxHighlighter* highlighter, const std::optional<QSet<int>>& lines =
 
 // The format setLineFormat gives every line.
 QTextBlockFormat
-lineFormat(double height, double bottomMargin)
+lineFormat(double height, double bottomMargin, double indent, double rightMargin)
 {
   QTextBlockFormat format;
   format.setLineHeight(height, QTextBlockFormat::FixedHeight);
   format.setBottomMargin(bottomMargin);
+  // A hanging indent: the first row at the margin less the indent.
+  format.setLeftMargin(indent);
+  format.setTextIndent(-indent);
+  format.setRightMargin(rightMargin);
   return format;
 }
 
@@ -403,18 +407,33 @@ setClipboardText(const QString& text, const QString& data)
 }
 
 void
-setLineFormat(QObject* textDocument, double height, double bottomMargin)
+setLineFormat(QObject* textDocument,
+              double height,
+              double bottomMargin,
+              double indent,
+              double rightMargin)
 {
   auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
   if (!quickDocument)
     return;
-  QTextCursor cursor(quickDocument->textDocument());
+  // A highlighter colors every line again, and lays the document out after
+  // each one it has colors for, as recolor says: turning wrapping off took
+  // minutes in a colored file of 100,000 lines. So the layout waits.
+  auto* document = quickDocument->textDocument();
+  document->setLayoutEnabled(false);
+  QTextCursor cursor(document);
   cursor.select(QTextCursor::Document);
-  cursor.mergeBlockFormat(lineFormat(height, bottomMargin));
+  cursor.mergeBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
+  document->setLayoutEnabled(true);
 }
 
 void
-setText(QObject* textEdit, const QString& text, double height, double bottomMargin)
+setText(QObject* textEdit,
+        const QString& text,
+        double height,
+        double bottomMargin,
+        double indent,
+        double rightMargin)
 {
   auto* item = qobject_cast<QQuickItem*>(textEdit);
   if (!item)
@@ -438,7 +457,7 @@ setText(QObject* textEdit, const QString& text, double height, double bottomMarg
   cursor.beginEditBlock();
   cursor.select(QTextCursor::Document);
   cursor.removeSelectedText();
-  cursor.setBlockFormat(lineFormat(height, bottomMargin));
+  cursor.setBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
   cursor.insertText(text);
   cursor.endEditBlock();
   document->setUndoRedoEnabled(false); // which lets the old text go

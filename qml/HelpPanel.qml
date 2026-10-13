@@ -103,7 +103,7 @@ Popup {
         {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
-                "number", "nu", "relativenumber", "rnu", "syntax", "syn", "sidescrolloff", "siso", "hidden", "hid",
+                "number", "nu", "relativenumber", "rnu", "syntax", "syn", "wrap", "sidescrolloff", "siso", "hidden", "hid",
                 "gitignore", "ignore", "regex", "re", "sortreverse", "sr", "colors"],
             intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
                 + "once: `:set nu rnu fs=18`.",
@@ -115,6 +115,9 @@ Popup {
                 ["`relativenumber`  `rnu`", "Line numbers counted from the cursor's line."],
                 ["`syntax`  `syn`", "Color files and the scratchpad: strings, numbers, comments, paths and URLs. "
                     + "`:syntax off` and `:syntax on` turn it off and on too."],
+                ["`wrap`", "Wrap a line too long for the window: at a word's start, but anywhere in the listing. "
+                    + "View > Word Wrap (`" + altKey + "Z`) toggles it too. Then `gj` and `gk` go "
+                    + "a row down or up, the page keys and `Ctrl-E` count rows, and nothing scrolls sideways."],
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
                 ["`shell`  `sh`", "The shell `:!` runs commands in: a path, or a name on the PATH, like "
                     + "`:set sh=bash`. Default: the one in Settings, else `" + systemShell + "`."],
@@ -327,22 +330,23 @@ Popup {
         {
             title: "Other keys",
             tags: ["keys", "other", "ctrl-a", "ctrl-x", "g?", "rot13", "ctrl-e", "ctrl-y", "scroll", "zoom",
-                "settings", "undo", "gv", "zz", "zl", "zh", "sideways"],
+                "settings", "undo", "gv", "zz", "zl", "zh", "sideways", "gj", "gk", "word"],
             rows: [
                 ["`Ctrl-A`  `Ctrl-X`", "Add to or subtract from the number at or after the cursor."],
                 ["`g?`  `g~`  `gu`  `gU`", "ROT13, toggle case, lowercase, uppercase (e.g. `g?w`)."],
-                ["`Ctrl-E`  `Ctrl-Y`", "Scroll a line down or up."],
+                ["`Ctrl-E`  `Ctrl-Y`", "Scroll a line down or up (a row, while lines wrap)."],
+                ["`gj`  `gk`", "Down or up a row of a line that wraps (see `:set wrap`)."],
                 ["`zz`  `zt`  `zb`", "Scroll the cursor's line to the middle, top or bottom."],
                 ["`zl`  `zh`  `zL`  `zH`", "Scroll sideways a column or half the view, as far as the sizes "
-                    + "and messages after the lines."],
+                    + "and messages after the lines (not while lines wrap)."],
                 ["`zs`  `ze`", "Scroll sideways to put the cursor at the left or right edge."],
                 ["`gv`", "Select the last visual selection again."],
                 [isMac ? "`⌘Z`  `⇧⌘Z`" : "`Ctrl+Z`  `Ctrl+Shift+Z`",
                     "Undo and redo, like `u` and `Ctrl-R`."],
                 [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",
                     "Zoom in, out, or back to the Settings size."],
-                ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, theme, when applying asks, "
-                    + "start dir."]
+                ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, word wrap, theme, when "
+                    + "applying asks, start dir."]
             ]
         }
     ]

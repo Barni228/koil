@@ -138,7 +138,7 @@ ApplicationWindow {
     // "never". The other settings in use are vim's.
     property string confirmChanges: settings.confirmChanges
     // The settings vim keeps, which :set changes (see changeSetting).
-    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "shell"]
+    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "wrap", "shell"]
     // The shell :! runs commands in when the shell setting is empty: $SHELL,
     // or cmd.exe on Windows.
     readonly property string systemShell: system.defaultShell()
@@ -305,14 +305,13 @@ ApplicationWindow {
         const i = from ? r.names.indexOf(from) : -1;
         const line = i >= 0 ? i : keep ? keep.line : 0;
         const column = keep ? keep.column : 0; // 0: jumpTo puts it after the icon and two spaces
-        const f = editorView.flickable;
-        const y = !keep ? f.contentY : resorted ? keep.contentY : keep.contentY + (line - keep.line) * editorView.lineHeight;
+        const f = editorView.flickable, t = editorView.textArea.text;
+        const ls = Txt.lineToPos(t, Math.min(line + 1, Txt.countLines(t)));
+        const y = !keep ? f.contentY : resorted ? keep.contentY : editorView.cellAt(ls).y - keep.offset;
         // Before jumpTo, which then scrolls only if the line is out of view.
         // Entries that came or went above it don't move it.
         if (y !== f.contentY)
             f.contentY = Math.max(0, Math.min(y, f.contentHeight + f.bottomMargin - f.height));
-        const t = editorView.textArea.text;
-        const ls = Txt.lineToPos(t, Math.min(line + 1, Txt.countLines(t)));
         vim.jumpTo(Txt.atColumn(t, ls, column));
         showPath(r.path);
         modified = koil.hasChanges();
@@ -1087,15 +1086,18 @@ ApplicationWindow {
 
     // Where the cursor is in the listing (its line and column) and how far
     // it's scrolled, for showListing to keep when it shows the listing from
-    // scratch (an apply, its undo, back from a file). The listing's cursor,
-    // also while vim is in the path field.
+    // scratch (an apply, its undo, back from a file), with how far down the
+    // view its line starts (`offset`). The listing's cursor, also while vim
+    // is in the path field.
     function listingSpot() {
         const t = editorView.textArea.text;
         const p = activeView === editorView ? vim.cursor : editorView.saved?.cursor ?? 0;
+        const contentY = editorView.flickable.contentY;
         return {
             line: Txt.lineOf(t, p) - 1,
             column: Txt.column(t, p),
-            contentY: editorView.flickable.contentY
+            contentY: contentY,
+            offset: editorView.cellAt(Txt.lineStart(t, p)).y - contentY
         };
     }
 
@@ -1348,6 +1350,8 @@ ApplicationWindow {
         property bool relativeNumber: false
         // Whether files and the scratchpad are colored (:set syntax).
         property bool syntax: true
+        // Whether long lines wrap (:set wrap).
+        property bool wrap: false
         // The shell :! runs commands in: a path, or a name on the PATH;
         // empty for the system's (root.systemShell).
         property string shell: ""
@@ -1466,12 +1470,15 @@ ApplicationWindow {
         fileName: root.listing ? root.location : root.filePath
         lineHeight: editorView.lineHeight
         charWidth: editorView.charWidth
+        textTop: root.activeView.textTop
         number: settings.number
         defaultNumber: settings.number
         relativeNumber: settings.relativeNumber
         defaultRelativeNumber: settings.relativeNumber
         syntax: settings.syntax
         defaultSyntax: settings.syntax
+        wrap: settings.wrap
+        defaultWrap: settings.wrap
         fontSize: settings.fontSize
         defaultFontSize: settings.fontSize
         minFontSize: root.minFontSize
@@ -2067,6 +2074,19 @@ ApplicationWindow {
                     shortcut: "Ctrl+0" // no StandardKey; Qt maps Ctrl to Cmd
                     onTriggered: vim.fontSize = settings.fontSize
                 }
+                Platform.MenuSeparator {}
+                // :set wrap, until Koil quits, as :set is. It toggles itself
+                // before it's triggered, which unbinds it.
+                Platform.MenuItem {
+                    text: qsTr("Word Wrap")
+                    shortcut: "Alt+Z" // Option+Z, as in VS Code
+                    checkable: true
+                    checked: vim.wrap
+                    onTriggered: {
+                        vim.wrap = checked;
+                        checked = Qt.binding(() => vim.wrap);
+                    }
+                }
             }
         }
     }
@@ -2175,6 +2195,18 @@ ApplicationWindow {
                     text: qsTr("&Actual Size")
                     shortcut: "Ctrl+0" // no StandardKey for this
                     onTriggered: vim.fontSize = settings.fontSize
+                }
+                MenuSeparator {}
+                // As on macOS.
+                Action {
+                    text: qsTr("&Word Wrap")
+                    shortcut: "Alt+Z"
+                    checkable: true
+                    checked: vim.wrap
+                    onTriggered: {
+                        vim.wrap = checked;
+                        checked = Qt.binding(() => vim.wrap);
+                    }
                 }
             }
         }
