@@ -6,9 +6,9 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Templates as T
 
-// The Settings window (Cmd+,): font, font size, line numbers, theme, when
-// applying asks first, the dir Koil starts in, and the shell :! runs
-// commands in; and on macOS, the
+// The Settings window (Cmd+,): font, font size, line numbers, syntax
+// colors, theme, when applying asks first, the dir Koil starts in, and the
+// shell :! runs commands in; and on macOS, the
 // shortcut that opens the folder selected in Finder, which System Settings
 // changes, and the `koil` command, which it installs. It
 // shows the saved settings, which Koil starts with; changes here are saved
@@ -23,7 +23,7 @@ Window {
     // changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // colorScheme, confirmChanges, startDir, shell.
+    // syntax, colorScheme, confirmChanges, startDir, shell.
     required property var settings
     required property Theme theme
     // main.qml's Document, for the folder picked (a var, so this file needs
@@ -44,6 +44,11 @@ Window {
     ]
     readonly property int lineNumberMode: lineNumberModes.findIndex(
         m => m.number === settings.number && m.relative === settings.relativeNumber)
+    // Files' colors (:set syntax), on or off.
+    readonly property var syntaxModes: [
+        { label: qsTr("On"), value: true },
+        { label: qsTr("Off"), value: false }
+    ]
     readonly property var colorSchemes: [
         { label: qsTr("System"), value: "system" },
         { label: qsTr("Light"), value: "light" },
@@ -70,6 +75,7 @@ Window {
     readonly property bool customFontFamily: settings.fontFamily !== app.defaultFontFamily
     readonly property bool customFontSize: settings.fontSize !== app.defaultFontSize
     readonly property bool customLineNumbers: lineNumberMode !== 0
+    readonly property bool customSyntax: !settings.syntax
     readonly property bool customColorScheme: settings.colorScheme !== "system"
     readonly property bool customConfirm: settings.confirmChanges !== "always"
     readonly property bool customStartDir: settings.startDir !== ""
@@ -98,6 +104,7 @@ Window {
         app.changeSetting("fontFamily", app.defaultFontFamily);
         setFontSize(app.defaultFontSize);
         setLineNumberMode(0);
+        app.changeSetting("syntax", true);
         app.changeSetting("colorScheme", "system");
         app.changeSetting("confirmChanges", "always");
         settings.startDir = "";
@@ -496,6 +503,20 @@ Window {
             ResetButton {
                 enabled: win.customLineNumbers
                 onClicked: win.setLineNumberMode(0)
+            }
+
+            SettingLabel {
+                text: qsTr("Syntax colors")
+            }
+            Segmented {
+                theme: win.theme
+                options: win.syntaxModes
+                current: win.syntaxModes.findIndex(m => m.value === win.settings.syntax)
+                onPicked: index => win.app.changeSetting("syntax", win.syntaxModes[index].value)
+            }
+            ResetButton {
+                enabled: win.customSyntax
+                onClicked: win.app.changeSetting("syntax", true)
             }
 
             SettingLabel {

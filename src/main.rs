@@ -8,6 +8,7 @@ mod history;
 #[cfg(target_os = "macos")]
 mod install;
 mod koil;
+mod link;
 mod listing;
 mod shell;
 mod sizes;

@@ -249,6 +249,13 @@ TestCase {
         signalName: "stopRequested"
     }
 
+    SignalSpy {
+        id: links
+
+        target: vim
+        signalName: "linkRequested"
+    }
+
     FindBar {
         id: findBar
 
@@ -889,6 +896,43 @@ TestCase {
         compare(vim.sort, "size");
         keys(":set sort= nosortreverse<CR>");
         compare([vim.sort, vim.sortReverse], ["name", false]);
+    }
+
+    // :set syntax, and vim's :syntax on and off.
+    function test_syntax() {
+        load("a");
+        keys(":set nosyn<CR>");
+        verify(!vim.syntax);
+        keys(":syntax on<CR>");
+        verify(vim.syntax);
+        keys(":sy off<CR>:syntax<CR>");
+        verify(!vim.syntax);
+        compare(vim.message, "nosyntax");
+        keys(":syntax maybe<CR>");
+        verify(vim.messageIsError);
+        keys(":set syn&<CR>");
+        verify(vim.syntax);
+    }
+
+    // gf and gx ask Koil to open the link at the cursor, and in visual
+    // mode what's selected, then leave it.
+    function test_links() {
+        load("see a.txt or https://x.org\nnext");
+        links.clear();
+        keys("wgf2Wgx");
+        compare(links.signalArguments.map(a => [a[0], a[1], a[2]]), [[4, "", false], [13, "", true]]);
+        links.clear();
+        keys("0wvEgx");
+        compare(links.signalArguments.map(a => [a[1], a[2]]), [["a.txt", true]]);
+        compare(vim.mode, "normal");
+        compare(vim.cursor, 8);
+        links.clear();
+        keys("jVgf");
+        compare(links.signalArguments.map(a => a[1]), ["next"]);
+        // none of them a change
+        nothingToUndo.clear();
+        keys("u");
+        compare(nothingToUndo.count, 1);
     }
 
     // What the quit commands ask for: quitRequested's force, confirm and

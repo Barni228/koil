@@ -138,7 +138,7 @@ ApplicationWindow {
     // "never". The other settings in use are vim's.
     property string confirmChanges: settings.confirmChanges
     // The settings vim keeps, which :set changes (see changeSetting).
-    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "shell"]
+    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "shell"]
     // The shell :! runs commands in when the shell setting is empty: $SHELL,
     // or cmd.exe on Windows.
     readonly property string systemShell: system.defaultShell()
@@ -629,10 +629,17 @@ ApplicationWindow {
     // Enter in the listing: opens the dir or file on the cursor's line. On a
     // line without an entry it's vim's Enter.
     function openLine(count) {
+        if (!openEntry())
+            vim.runMotion("<CR>", count);
+    }
+
+    // Opens the dir or file on the cursor's line in the listing (Enter, gf),
+    // creating a new file first. False if the line has no entry.
+    function openEntry() {
         const t = editorView.textArea.text, line = Txt.lineOf(t, vim.cursor) - 1;
         const target = JSON.parse(koil.targetOnLine(t, JSON.stringify(vim.hidden), line));
         if (!target) {
-            vim.runMotion("<CR>", count);
+            return false;
         } else if (target.dir !== undefined) {
             updateListing(target.dir);
         } else if (target.new !== undefined) {
@@ -643,6 +650,57 @@ ApplicationWindow {
             openedFrom = target.file.name;
             readFile(target.file.path);
         }
+        return true;
+    }
+
+    // gf and gx (see Vim.linkRequested), and a click with Cmd on a link
+    // (see clickLink). In the listing, the entry on the cursor's line: gf
+    // opens it as Enter does, and gx as Space o (from the path field, gf
+    // opens the path, and gx the open dir). In a file or the scratchpad,
+    // the link at `at` (a URL or a path, or else the file name there or
+    // after it on the line, as vim's gf takes it), or `text`, what visual
+    // mode selected (see link.rs): gf opens a file or dir in Koil, as a
+    // drop does, and gx in its default app, and either opens a URL in the
+    // browser. A relative path is the file's dir's, or else the open dir's.
+    function openLink(at, text, external) {
+        if (listing) {
+            if (external)
+                openInApp();
+            else if (activeView === pathView)
+                openPath();
+            else if (!openEntry())
+                vim.showError("No entry on this line");
+            return;
+        }
+        const t = editorView.textArea.text;
+        if (!text) {
+            const ls = Txt.lineStart(t, at);
+            const span = JSON.parse(system.linkAt(t.slice(ls, Txt.lineEnd(t, at)), at - ls, true));
+            text = span ? t.slice(ls + span.start, ls + span.end) : "";
+        }
+        const dirs = (filePath ? [doc.dirOf(filePath)] : []).concat([koil.currentDir()]);
+        const target = JSON.parse(system.linkTarget(text, dirs));
+        if (target.error !== undefined) {
+            vim.showError(target.error);
+        } else if (target.url !== undefined) {
+            if (!Qt.openUrlExternally(target.url))
+                vim.showError("Can't open “" + target.url + "”");
+        } else if (external) {
+            const why = system.openInApp(target.path);
+            if (why)
+                vim.showError(why);
+        } else {
+            openDropped(target.path);
+        }
+    }
+
+    // A click with Cmd on a link in the editor (see Editor.link), on the
+    // character `at`: the cursor goes there, and it opens as gf opens it.
+    function clickLink(at) {
+        if (boxOpen)
+            return;
+        vim.jumpTo(at);
+        openLink(at, "", false);
     }
 
     // Space r and Space o: where the entry on the cursor's line is on disk,
@@ -1288,6 +1346,8 @@ ApplicationWindow {
         property string confirmChanges: "always"
         property bool number: false
         property bool relativeNumber: false
+        // Whether files and the scratchpad are colored (:set syntax).
+        property bool syntax: true
         // The shell :! runs commands in: a path, or a name on the PATH;
         // empty for the system's (root.systemShell).
         property string shell: ""
@@ -1410,6 +1470,8 @@ ApplicationWindow {
         defaultNumber: settings.number
         relativeNumber: settings.relativeNumber
         defaultRelativeNumber: settings.relativeNumber
+        syntax: settings.syntax
+        defaultSyntax: settings.syntax
         fontSize: settings.fontSize
         defaultFontSize: settings.fontSize
         minFontSize: root.minFontSize
@@ -1476,6 +1538,7 @@ ApplicationWindow {
             }
         }
         onKeyCommand: (name, count) => root.runKeyCommand(name, count)
+        onLinkRequested: (at, text, external) => root.openLink(at, text, external)
         onShellRequested: (command, range, scratchpad) => root.runShell(command, range, scratchpad)
         onStopRequested: system.stopShell()
         onNothingToUndo: {
@@ -1630,6 +1693,7 @@ ApplicationWindow {
         infoDots: root.infoDots
         onActivated: root.activate(editorView)
         onKeyReleased: root.keyReleased()
+        onLinkClicked: at => root.clickLink(at)
         onEdited: {
             // The scratchpad is never saved, so there's nothing to ask
             // about, and a :s's preview isn't a change.

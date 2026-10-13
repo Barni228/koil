@@ -55,6 +55,18 @@ Item {
     // Vim's state for this editor while it edits another one (see
     // Vim.leaveBuffer), kept here for main.qml to give back.
     property var saved: null
+    // While Cmd (Ctrl elsewhere) is held with the pointer on a link, the
+    // link, as { start, end }, drawn underlined, with a pointing hand: a
+    // URL or a path (see link.rs), or in the listing, the name on the line.
+    // A click on it opens it (see linkClicked). `linkKey` is whether Cmd is
+    // held, and `pointer` where the pointer is in the editor (null if it's
+    // off it), which `link` follows.
+    property var link: null
+    property bool linkKey: false
+    property var pointer: null
+    // The link a press with Cmd was on, which its release opens if it's
+    // still on it.
+    property var pressedLink: null
 
     // Whether vim edits this editor. The other one keeps its cursor where
     // vim left it (`cursorPos`), and its hidden text.
@@ -91,6 +103,8 @@ Item {
     // A key was let go (not one repeating), which main.qml waits for to
     // open a window (see openShortcuts).
     signal keyReleased
+    // A click with Cmd on a link (see `link`), on the character `at`.
+    signal linkClicked(int at)
 
     // Replaces the text (a file or a listing was opened); not an edit. Qt
     // lays out all of a text again when its format or the editor's padding
@@ -126,7 +140,7 @@ Item {
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
         system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1], listing ? String(theme.directory) : "");
         if (!listing)
-            system.setTextColors(editor.textDocument, theme.syntaxColors(), filePath);
+            system.setTextColors(editor.textDocument, vim.syntax ? theme.syntaxColors() : [], filePath);
         applyPendingLines();
     }
 
@@ -149,6 +163,48 @@ Item {
             vim.clearCursors();
             editor.cursorPosition = p;
         }
+    }
+
+    // The character under point p in the editor (rather than the gap
+    // nearest it, which positionAt gives), or -1 if there's none: past
+    // its line's end, or under the text.
+    function charUnder(p) {
+        const t = editor.text, pos = editor.positionAt(p.x, p.y);
+        const c = pos > 0 && editor.positionToRectangle(pos).x > p.x ? Txt.charStart(t, pos - 1) : pos;
+        const cell = cellAt(c);
+        return c < t.length && t[c] !== "\n" && p.y >= cell.y && p.y < cell.y + cell.height ? c : -1;
+    }
+
+    // The link under point p in the editor (see `link`), or null.
+    function linkUnder(p) {
+        if (!p || pathField)
+            return null;
+        const t = editor.text, c = charUnder(p);
+        if (c < 0)
+            return null;
+        const ls = Txt.lineStart(t, c), le = Txt.lineEnd(t, c);
+        if (listing) {
+            const start = ls + vim.prefixLength(t, ls, hiddenAt);
+            return t.slice(start, le).trim() ? { start: start, end: le } : null;
+        }
+        const span = JSON.parse(system.linkAt(t.slice(ls, le), c - ls, false));
+        return span && { start: ls + span.start, end: ls + span.end };
+    }
+
+    // `link` again, for where the pointer is and whether Cmd is held.
+    function updateLink() {
+        const l = linkKey ? linkUnder(pointer) : null;
+        if (!l !== !link || l && (l.start !== link.start || l.end !== link.end))
+            link = l;
+    }
+
+    // The pointer moved to p in the editor (null: off it), with the
+    // modifier keys held.
+    function pointerAt(p, modifiers) {
+        hover.pointerAt(p);
+        pointer = p;
+        linkKey = (modifiers & Qt.ControlModifier) !== 0;
+        updateLink();
     }
 
     onListingChanged: applyColors()
@@ -337,13 +393,23 @@ Item {
     }
 
     Connections {
+        target: view.vim
+
+        function onSyntaxChanged() {
+            view.applyColors();
+        }
+    }
+
+    Connections {
         target: view.flickable
 
         function onContentXChanged() {
             hover.hide();
+            view.link = null; // until the pointer moves
         }
         function onContentYChanged() {
             hover.hide();
+            view.link = null;
         }
         // Qt's TextArea clips its text to the view as it was when it last
         // drew, which a resize doesn't make it do when the text overflows
@@ -516,14 +582,22 @@ Item {
                 if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
             }
-            onRevisionChanged: hover.hide()
+            onRevisionChanged: {
+                hover.hide();
+                if (view.link)
+                    Qt.callLater(view.updateLink); // once the edit is done
+            }
             // Given the keyboard some other way than a click (see the
-            // MouseArea), it switches too.
+            // MouseArea), it switches too. Cmd let go elsewhere (after
+            // Cmd+Tab) never comes, so it's taken as let go.
             onActiveFocusChanged: {
-                if (!activeFocus)
+                if (!activeFocus) {
                     hover.hide();
-                else if (!view.active)
+                    view.linkKey = false;
+                    view.updateLink();
+                } else if (!view.active) {
                     view.activated();
+                }
             }
             Component.onCompleted: {
                 // Make room for the line numbers beside the style's padding.
@@ -543,6 +617,12 @@ Item {
                 }
             }
             Keys.onPressed: event => {
+                // Cmd (Ctrl elsewhere) shows the link under the pointer
+                // (see `link`), which the pointer resting there doesn't.
+                if (event.key === Qt.Key_Control) {
+                    view.linkKey = true;
+                    view.updateLink();
+                }
                 if (event.matches(StandardKey.Copy) && hover.copySelection()) {
                     event.accepted = true;
                     return;
@@ -555,6 +635,10 @@ Item {
                 event.accepted = !view.active || view.vim.handleKey(event);
             }
             Keys.onReleased: event => {
+                if (event.key === Qt.Key_Control) {
+                    view.linkKey = false;
+                    view.updateLink();
+                }
                 if (!event.isAutoRepeat)
                     view.keyReleased();
             }
@@ -569,10 +653,10 @@ Item {
 
             // The pointer resting on an icon that hides text shows the
             // text, and on a warning or error (or its message after the
-            // line) the message.
+            // line) the message. With Cmd held, it's on a link or not.
             HoverHandler {
-                onPointChanged: hover.pointerAt(hovered ? point.position : null)
-                onHoveredChanged: hover.pointerAt(hovered ? point.position : null)
+                onPointChanged: view.pointerAt(hovered ? point.position : null, point.modifiers)
+                onHoveredChanged: view.pointerAt(hovered ? point.position : null, point.modifiers)
             }
 
             // Insert mode: a bar, which doesn't blink. The editor puts the delegate at its
@@ -591,23 +675,34 @@ Item {
                 }
             }
 
-            // Alt+click adds a cursor (or removes one). A plain click goes
-            // back to one cursor and then does what it always does. Either
-            // one on the editor vim doesn't edit switches to it first, so
-            // the click moves its cursor.
+            // Alt+click adds a cursor (or removes one). Cmd+click on a link
+            // (see `link`) opens it, once it's let go on it. A plain click
+            // goes back to one cursor and then does what it always does.
+            // Any one on the editor vim doesn't edit switches to it first,
+            // so the click moves its cursor.
             MouseArea {
                 anchors.fill: parent
-                cursorShape: Qt.IBeamCursor
+                cursorShape: view.link ? Qt.PointingHandCursor : Qt.IBeamCursor
                 onPressed: mouse => {
                     if (!view.active)
                         view.activated();
-                    if (mouse.modifiers & Qt.AltModifier) {
+                    view.pressedLink = mouse.modifiers & Qt.ControlModifier ? view.linkUnder(Qt.point(mouse.x, mouse.y)) : null;
+                    if (view.pressedLink) {
+                        editor.forceActiveFocus();
+                    } else if (mouse.modifiers & Qt.AltModifier) {
                         editor.forceActiveFocus();
                         view.vim.toggleCursor(editor.positionAt(mouse.x, mouse.y));
                     } else {
                         view.vim.clearCursors();
                         mouse.accepted = false;
                     }
+                }
+                onReleased: mouse => {
+                    const pressed = view.pressedLink, p = Qt.point(mouse.x, mouse.y);
+                    view.pressedLink = null;
+                    const l = pressed && view.linkUnder(p);
+                    if (l && l.start === pressed.start && l.end === pressed.end)
+                        view.linkClicked(view.charUnder(p));
                 }
             }
 
@@ -636,6 +731,34 @@ Item {
                 HoverHandler {
                     onPointChanged: hover.pointerAt(hovered ? Qt.point(editor.width + point.position.x, point.position.y) : null)
                     onHoveredChanged: hover.pointerAt(hovered ? Qt.point(editor.width + point.position.x, point.position.y) : null)
+                }
+            }
+
+            // The link under the pointer while Cmd is held, underlined.
+            Layer {
+                id: linkLine
+
+                inputs: [view.link, view.layout, view.viewport]
+                compute: () => {
+                    const l = view.link;
+                    if (!l)
+                        return [];
+                    const a = view.cellAt(l.start), b = view.cellAt(l.end);
+                    return [Qt.rect(a.x, a.y, b.x - a.x, a.height)];
+                }
+
+                Repeater {
+                    model: linkLine.model
+
+                    Rectangle {
+                        required property rect modelData
+
+                        x: modelData.x
+                        y: modelData.y + view.textBaseline + Math.max(1, Math.round(view.metrics.underlinePosition))
+                        width: modelData.width
+                        height: Math.max(1, Math.round(view.metrics.lineWidth))
+                        color: view.theme.directory
+                    }
                 }
             }
 

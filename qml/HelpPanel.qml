@@ -103,8 +103,8 @@ Popup {
         {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
-                "number", "nu", "relativenumber", "rnu", "sidescrolloff", "siso", "hidden", "hid", "gitignore",
-                "ignore", "regex", "re", "sortreverse", "sr"],
+                "number", "nu", "relativenumber", "rnu", "syntax", "syn", "sidescrolloff", "siso", "hidden", "hid",
+                "gitignore", "ignore", "regex", "re", "sortreverse", "sr", "colors"],
             intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
                 + "once: `:set nu rnu fs=18`.",
             rows: [
@@ -113,6 +113,8 @@ Popup {
                     + "` (comes with Koil). Icons show in any font."],
                 ["`number`  `nu`", "Line numbers."],
                 ["`relativenumber`  `rnu`", "Line numbers counted from the cursor's line."],
+                ["`syntax`  `syn`", "Color files and the scratchpad: strings, numbers, comments, paths and URLs. "
+                    + "`:syntax off` and `:syntax on` turn it off and on too."],
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
                 ["`shell`  `sh`", "The shell `:!` runs commands in: a path, or a name on the PATH, like "
                     + "`:set sh=bash`. Default: the one in Settings, else `" + systemShell + "`."],
@@ -180,6 +182,22 @@ Popup {
                 ["`↑`  `↓`", "In the command line: earlier and later commands (or searches)."],
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
                 ["`@:`", "Run the last command again."]
+            ]
+        },
+        {
+            title: "Links",
+            tags: ["gf", "gx", "link", "links", "url", "urls", "cmd-click", "ctrl-click", "open", "browser"],
+            intro: "A URL or a path in a file (or the scratchpad) opens from where it's written. A relative path is "
+                + "looked for in the file's dir, then in the open dir.",
+            rows: [
+                ["`gf`", "Open the file or dir under the cursor in Koil (a dir is listed), or a URL in the browser. "
+                    + "Not on a URL or a path, it takes the file name there or after it, like vim's. In the "
+                    + "listing: the entry on the line, as `Enter`."],
+                ["`gx`", "Open the file, dir or URL under the cursor in its default app. In the listing: the entry "
+                    + "on the line, as `Space o`."],
+                ["`" + cmdKey + "click`", "Open the URL or path under the pointer, as `gf`. Holding `" + cmdKey.replace("+", "")
+                    + "` underlines the one under the pointer. In the listing: the entry."],
+                ["visual", "In visual mode, `gf` and `gx` open what's selected."]
             ]
         },
         {
@@ -323,7 +341,8 @@ Popup {
                     "Undo and redo, like `u` and `Ctrl-R`."],
                 [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",
                     "Zoom in, out, or back to the Settings size."],
-                ["`" + cmdKey + ",`", "Settings: font, line numbers, theme, when applying asks, start dir."]
+                ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, theme, when applying asks, "
+                    + "start dir."]
             ]
         }
     ]

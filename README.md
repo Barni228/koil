@@ -53,7 +53,13 @@ until you apply, and your edits stay while you go through other dirs.
 - **Colors in a file** (and the scratchpad) suit any file rather than its
   language: strings, numbers, comments, paths and URLs, and the bracket
   that matches the one at the cursor. In Markdown, `#` starts a heading,
-  not a comment, and in Python `//` divides.
+  not a comment, and in Python `//` divides. `:syntax off` (or Settings)
+  turns them off.
+- **Links**: in a file, `gf` opens the file or dir under the cursor in Koil
+  (a relative path is looked for next to the file, then in the open dir),
+  or a URL in the browser, and `gx` opens it in its default app. Hold
+  `Cmd` and click a path or URL to open it as `gf` does. In the listing,
+  they open the entry on the line.
 - **Changes on disk** show in the listing as they happen, keeping your
   edits. If one goes against them (a file you deleted was renamed), Koil
   asks.

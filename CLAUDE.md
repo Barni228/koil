@@ -38,7 +38,11 @@ the scratchpad (see Scratchpad).
   (`src/sizes/tests.rs`) use a temp dir.
 - `src/syntax.rs`: a file's colors, found without knowing its language
   (`spans`, see Syntax), which native.cpp's highlighter asks for a line at
-  a time through ffi.rs. Its tests (`src/syntax/tests.rs`) take lines.
+  a time through ffi.rs, and the URL or path at a place (`link_at`). Its
+  tests (`src/syntax/tests.rs`) take lines.
+- `src/link.rs`: what gf, gx and Cmd+click open (see Links): the link at a
+  place in a line (`link_at`) and what its text stands for (`target`). Its
+  tests (`src/link/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore`, `regex`,
   `sort` and `sortReverse` are properties, bound to vim's `:set` options.
@@ -49,8 +53,9 @@ the scratchpad (see Scratchpad).
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, the editor's
   text, line format and colors, showing a path in Finder or Explorer
-  (`reveal`) or opening it in its default app (`openInApp`), and running
-  shell commands (`runShell`, `stopShell`, `shellDone`).
+  (`reveal`) or opening it in its default app (`openInApp`), links
+  (`linkAt`, `linkTarget`), and running shell commands (`runShell`,
+  `stopShell`, `shellDone`).
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
@@ -67,7 +72,8 @@ the scratchpad (see Scratchpad).
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
   with it: cursors, selection, search highlights, the bracket matching the
   cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
-  warnings and errors, line numbers, the `HoverBox` and the
+  warnings and errors, line numbers, the link under the pointer with Cmd
+  held (`link`, see Links), the `HoverBox` and the
   `CompletionList`. Both the listing (or
   file) and the path field are one (`pathField`).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
@@ -859,7 +865,10 @@ the scratchpad (see Scratchpad).
   dir, at the first part with a special character that isn't quoted),
   drawn over that in `theme.regexColors`.
 - **Syntax** (syntax.rs, `setTextColors` in native.cpp): a file (and the
-  scratchpad) is colored by what most files share, not by its language:
+  scratchpad) is colored by what most files share, not by its language
+  (unless `:set nosyntax`, a vim setting, `vim.syntax`, which `:syntax
+  off` and `on` set too; the Settings window saves it; off, `applyColors`
+  gives no colors, which takes the highlighter away):
   strings (`"`, `` ` ``, and `'` only where no word goes on from its end,
   so neither `it's` nor Rust's `&'a` starts one; Python's `f'…'` does),
   with their escapes; numbers (not a unit after them, `10px`, nor a hash,
@@ -887,6 +896,36 @@ the scratchpad (see Scratchpad).
   isn't colored as the old text first. What colors cost is Qt's layout,
   which splits lines where the colors change: a 105,000-line file opened
   in 4.4 s rather than 3.5 (the Rust took 60 ms of that).
+- **Links** (link.rs, `openLink` in main.qml): in a file or the
+  scratchpad, gf (vim's `linkRequested`) opens the link under the cursor
+  in Koil, as a drop does (`openDropped`: a dir is listed, a file opened,
+  unsaved changes asked about first), gx in its default app
+  (`System.openInApp`), and either a URL in the browser
+  (`Qt.openUrlExternally`; `www.` gets `https://`). The link is a URL or a
+  path as syntax.rs colors them (`syntax::link_at`), or else the file name
+  there or the first one after it on the line, as vim's `<cfile>` (its
+  default `isfname`, `\ ` going on, a sentence's `.` or `,` off its end:
+  `Cargo.toml` works, which isn't colored as a path). In visual mode it's
+  what's selected. `link::target` reads its text: a `file://` URL is its
+  file, `~` the home dir, `\ ` a space (not on Windows), and a relative
+  path is looked for in the file's dir, then in Koil's (`currentDir`), as
+  vim's `path` (`.,,`), and must be on disk (vim's E447 otherwise); its
+  `..`s are taken away as written (`normalized`), so the title shows
+  `README.md`, not `src/../README.md`. In the listing, gf opens the entry
+  on the cursor's line as Enter does (`openEntry`, but with no vim's Enter
+  on a line without one), gx as Space o, and from the path field gf opens
+  the path and gx the open dir. Cmd (Ctrl elsewhere) held with the pointer
+  on a link (Editor's `link`: in the listing, the name on the line; not
+  the path field) underlines it in `theme.directory` and makes the pointer
+  a hand; a press there and a release on the same link moves the cursor
+  to the character clicked (`vim.jumpTo`) and opens it as gf does
+  (`linkClicked`, `clickLink`; not while `boxOpen`). Whether Cmd is held
+  comes from the `HoverHandler`'s `point.modifiers` as the pointer moves,
+  and from Cmd's own key events (`Qt.Key_Control`, which is Cmd on macOS)
+  for one pressed while the pointer rests; the editor losing the keys
+  takes it as let go, as one let go after Cmd+Tab never comes. A scroll
+  drops the link until the pointer moves, as its place in the editor
+  changed.
 - **Matching brackets** (`brackets` in Editor.qml, `Txt.bracketPair`): as
   vim's matchparen does, the bracket at the cursor (or before it, in
   insert mode) and the one it matches are boxed, in every buffer, but
@@ -1407,7 +1446,8 @@ the scratchpad (see Scratchpad).
   gutter width (the digits and two spaces) to it. Only visible lines get a row.
 - **Settings**: `settings` (a QtCore `Settings` in main.qml) holds the saved
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
-  `relativeNumber`, `shell`, which `:set` changes: `root.vimSettings`),
+  `relativeNumber`, `syntax`, `shell`, which `:set` changes:
+  `root.vimSettings`),
   `root.colorScheme` and `root.confirmChanges`, bound to the saved ones at
   startup. The Settings window
   shows the saved ones and changes both (`changeSetting`). The zoom and `:set`

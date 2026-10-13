@@ -40,6 +40,10 @@ QtObject {
     property bool defaultNumber: false
     property bool relativeNumber: false
     property bool defaultRelativeNumber: false
+    // :set syntax: color files and the scratchpad (the view does, see
+    // syntax.rs), with its default. Vim's is the language to color as.
+    property bool syntax: true
+    property bool defaultSyntax: true
     // :set fontsize, in points (the view sets the editor's font), with its
     // default and range.
     property int fontSize: 16
@@ -142,6 +146,9 @@ QtObject {
     // gh: show what's under the cursor at `at` (the text an icon hides, or a
     // warning or error), if anything.
     signal hoverRequested(int at)
+    // gf (or gx, `external`): open the link at `at` in Koil (or in its
+    // default app), or in visual mode `text`, what was selected.
+    signal linkRequested(int at, string text, bool external)
     // Esc in normal mode, or :noh: search highlights should go.
     signal highlightsCleared()
     // :help, or :help topic.
@@ -172,10 +179,10 @@ QtObject {
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
-        "<C-x>", "q", "@", "<C-v>", "<Esc>", "&", "g&"]
+        "<C-x>", "q", "@", "<C-v>", "<Esc>", "&", "g&", "gf", "gx"]
     readonly property var visualActions: ["<Esc>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D", "s",
         "C", "S", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>",
-        "zh", "zl", "zH", "zL", "zs", "ze"]
+        "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx"]
     // Scroll the view sideways (see scrollSideways).
     readonly property var sideScrolls: ["zh", "zl", "zH", "zL", "zs", "ze"]
     // Normal-mode commands that run at every cursor (as do operators and
@@ -1183,7 +1190,7 @@ QtObject {
     function isChange(cmd) {
         if (isVisual)
             return !cmd.motion && !cmd.textObj
-                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "!"].includes(cmd.action);
+                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "!", "gf", "gx"].includes(cmd.action);
         // ! only types a command line, whose command may change the text.
         return cmd.op ? cmd.op !== "y" && cmd.op !== "!" : changeActions.includes(cmd.action);
     }
@@ -1527,6 +1534,10 @@ QtObject {
         case "gh":
             outside(() => hoverRequested(p));
             break;
+        case "gf":
+        case "gx":
+            outside(() => linkRequested(p, "", cmd.action === "gx"));
+            break;
         case "<C-a>":
         case "<C-x>":
             addToNumber(cmd.action === "<C-a>" ? count : -count);
@@ -1604,6 +1615,14 @@ QtObject {
         }
         if (a === "q") {
             startRecording(cmd.ch);
+            return;
+        }
+        // gf and gx open what's selected (a block's corners, as characters).
+        if (a === "gf" || a === "gx") {
+            const r = selectedRange(t, mode === "visualLine" ? mode : "visual", anchor, cursor);
+            setMode("normal");
+            setCursor(clampNormal(t, cursor));
+            outside(() => linkRequested(cursor, t.slice(r.start, r.end), a === "gx"));
             return;
         }
         if (a === "<C-e>" || a === "<C-y>") {
@@ -3929,6 +3948,8 @@ QtObject {
         }
         else if (/^se(t)?(\s|$)/.test(c))
             setOptions(c.replace(/^\S+\s*/, ""));
+        else if (/^sy(n|nt|nta|ntax)?(\s|$)/.test(c))
+            syntaxCommand(c.replace(/^\S+\s*/, ""));
         else if (/^h(elp)?(\s|$)/.test(c))
             outside(() => helpRequested(c.replace(/^\S+\s*/, "")));
         else if (/^(reg(i|is|ist|iste|ister|isters)?|di(s|sp|spl|spla|splay)?)(\s|$)/.test(c))
@@ -4399,13 +4420,15 @@ QtObject {
     // hasn't. guifont is only the family (gvim's also takes a size, like
     // Menlo:h14), and shell only the program (vim's can have arguments).
     // hidden, gitignore, regex, sort and sortreverse are Koil's (vim's hidden
-    // is about buffers; its sr, shiftround, Koil hasn't).
+    // is about buffers; its sr, shiftround, Koil hasn't), and syntax is
+    // on or off (vim's is the language, which :syntax off turns off).
     readonly property var options: [
         { name: "fontsize", short: "fs", property: "fontSize", default: defaultFontSize,
             min: minFontSize, max: maxFontSize },
         { name: "guifont", short: "gfn", property: "fontFamily", default: defaultFontFamily },
         { name: "number", short: "nu", property: "number", default: defaultNumber },
         { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber },
+        { name: "syntax", short: "syn", property: "syntax", default: defaultSyntax },
         { name: "sidescrolloff", short: "siso", property: "sideScrollOff", default: 4, min: 0, max: 999 },
         { name: "shell", short: "sh", property: "shell", default: defaultShell },
         { name: "hidden", short: "hid", property: "showHidden", default: false },
@@ -4492,6 +4515,19 @@ QtObject {
         }
         if (shown.length)
             showMessage(shown.join(" "));
+    }
+
+    // :syntax on (or enable) and :syntax off, which set the syntax option,
+    // and :syntax alone, which shows it.
+    function syntaxCommand(arg) {
+        if (arg === "")
+            setOptions("syntax?");
+        else if (arg === "on" || arg === "enable")
+            syntax = true;
+        else if (arg === "off")
+            syntax = false;
+        else
+            showError("E475: Invalid argument: " + arg);
     }
 
     // ---- Motions -----------------------------------------------------------

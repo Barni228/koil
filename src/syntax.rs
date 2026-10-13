@@ -374,6 +374,15 @@ fn number_at(line: &[u16], i: usize, spans: &mut Vec<Span>) -> usize {
     end
 }
 
+/// The URL or path in `line` (as `spans` colors it) with the character at
+/// `at` in it, if any: what gf, gx and a click with Cmd open (see link.rs).
+pub fn link_at(line: &[u16], at: usize) -> Option<Span> {
+    let line = &line[..line.len().min(MAX_LENGTH)];
+    let mut spans = Vec::new();
+    links(line, &mut spans);
+    spans.into_iter().find(|s| s.start <= at && at < s.end)
+}
+
 /// The URLs and paths in `line`, which go over whatever they're in.
 fn links(line: &[u16], spans: &mut Vec<Span>) {
     let mut i = 0;

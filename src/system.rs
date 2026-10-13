@@ -9,14 +9,16 @@ use cxx_qt_lib::{QString, QStringList};
 use serde_json::json;
 
 use crate::ffi;
+use crate::link;
 use crate::listing;
 use crate::shell;
 
 /// What the QML needs from the system, mostly through Qt's C++ side: the
 /// clipboard, the installed fonts and the one Koil ships, the editor's line
 /// height and the listing's and path field's colors, showing a path in
-/// Finder (or Explorer) or opening it in its default app, and running shell
-/// commands (see shell.rs).
+/// Finder (or Explorer) or opening it in its default app, the links gf,
+/// gx and a click with Cmd open (see link.rs), and running shell commands
+/// (see shell.rs).
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -65,6 +67,18 @@ pub mod qobject {
         /// Emitted when `open_in_app` failed after it returned, with why.
         #[qsignal]
         fn open_failed(self: Pin<&mut System>, message: QString);
+
+        /// The link with the character at `column` (a UTF-16 index) in
+        /// `line`, as `{ start, end }`, or `null` (see `link::link_at`:
+        /// `names` takes a file name too, for gf and gx).
+        #[qinvokable]
+        fn link_at(self: &System, line: &QString, column: i32, names: bool) -> QString;
+
+        /// What the link `text` opens, a relative path looked for in each
+        /// of `dirs` in turn (see `link::target`): `{ url }`, `{ path }` or
+        /// `{ error }`.
+        #[qinvokable]
+        fn link_target(self: &System, text: &QString, dirs: &QStringList) -> QString;
 
         /// The shell commands run in when the setting names none (see
         /// `shell::default_shell`).
@@ -241,6 +255,20 @@ impl qobject::System {
             }
         });
         QString::default()
+    }
+
+    fn link_at(&self, line: &QString, column: i32, names: bool) -> QString {
+        let found = usize::try_from(column)
+            .ok()
+            .and_then(|at| link::link_at(line.as_slice(), at, names));
+        let span = found.map(|r| json!({ "start": r.start, "end": r.end }));
+        QString::from(json!(span).to_string().as_str())
+    }
+
+    fn link_target(&self, text: &QString, dirs: &QStringList) -> QString {
+        let dirs: Vec<PathBuf> = dirs.iter().map(|d| PathBuf::from(d.to_string())).collect();
+        let target = link::target(&text.to_string(), &dirs);
+        QString::from(serde_json::to_string(&target).unwrap_or_default().as_str())
     }
 
     fn default_shell(&self) -> QString {
