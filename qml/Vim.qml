@@ -86,6 +86,11 @@ QtObject {
     // of `sorts`, see SortBy in koil-core), and whether the other way round.
     property string sort: "name"
     property bool sortReverse: false
+    // :set dirsfirst: the listing's dirs before its files, else sorted with
+    // them (Sort::dirs_first in koil-core). Saved in Settings, which
+    // defaultDirsFirst is.
+    property bool dirsFirst: true
+    property bool defaultDirsFirst: true
     readonly property var sorts: ["name", "natural", "extension", "size", "disk", "modified", "created", "accessed"]
     // Keys that run one of Koil's commands in normal mode instead of what
     // they do in vim, as { keys: name }, like { "-": "parent" }: " " is
@@ -4482,10 +4487,10 @@ QtObject {
     // (gvim has guifont); its short name is vim's for fsync, which Koil
     // hasn't. guifont is only the family (gvim's also takes a size, like
     // Menlo:h14), and shell only the program (vim's can have arguments).
-    // hidden, gitignore, regex, sort and sortreverse are Koil's (vim's hidden
-    // is about buffers; its sr, shiftround, Koil hasn't), and syntax is
-    // on or off (vim's is the language, which :syntax off turns off). wrap
-    // wraps at a word's start, as vim's does with linebreak on.
+    // hidden, gitignore, regex, sort, sortreverse and dirsfirst are Koil's
+    // (vim's hidden is about buffers; its sr, shiftround, Koil hasn't), and
+    // syntax is on or off (vim's is the language, which :syntax off turns
+    // off). wrap wraps at a word's start, as vim's does with linebreak on.
     readonly property var options: [
         { name: "fontsize", short: "fs", property: "fontSize", default: defaultFontSize,
             min: minFontSize, max: maxFontSize },
@@ -4500,7 +4505,8 @@ QtObject {
         { name: "gitignore", short: "ignore", property: "gitignore", default: false },
         { name: "regex", short: "re", property: "regex", default: false },
         { name: "sort", property: "sort", default: "name", values: sorts },
-        { name: "sortreverse", short: "sr", property: "sortReverse", default: false }
+        { name: "sortreverse", short: "sr", property: "sortReverse", default: false },
+        { name: "dirsfirst", short: "df", property: "dirsFirst", default: defaultDirsFirst }
     ]
 
     // An option as :set shows it: "  nu", "nonu", "  fs=16" or

@@ -138,7 +138,8 @@ ApplicationWindow {
     // "never". The other settings in use are vim's.
     property string confirmChanges: settings.confirmChanges
     // The settings vim keeps, which :set changes (see changeSetting).
-    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "wrap", "shell"]
+    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "wrap", "shell",
+        "dirsFirst"]
     // The shell :! runs commands in when the shell setting is empty: $SHELL,
     // or cmd.exe on Windows.
     readonly property string systemShell: system.defaultShell()
@@ -286,7 +287,7 @@ ApplicationWindow {
         const r = JSON.parse(koil.render());
         if (listing && !keep && (!moved || r.path === location))
             keep = listingSpot();
-        const sort = vim.sort + (vim.sortReverse ? " reversed" : "");
+        const sort = vim.sort + (vim.sortReverse ? " reversed" : "") + (vim.dirsFirst ? "" : " mixed");
         const resorted = sort !== shownSort || sortedCounting && !r.busy.length;
         shownSort = sort;
         sortedCounting = r.busy.length > 0;
@@ -1109,9 +1110,9 @@ ApplicationWindow {
             vim.showError(r.message);
     }
 
-    // :set hidden, gitignore, regex, sort or sortreverse. As in koil-cli,
-    // the listing is read with the settings it was shown with, and then
-    // shown with the new ones.
+    // :set hidden, gitignore, regex, sort, sortreverse or dirsfirst. As in
+    // koil-cli, the listing is read with the settings it was shown with, and
+    // then shown with the new ones.
     function settingChanged() {
         if (listing)
             Qt.callLater(updateListing);
@@ -1352,6 +1353,9 @@ ApplicationWindow {
         property bool syntax: true
         // Whether long lines wrap (:set wrap).
         property bool wrap: false
+        // Whether the listing has its dirs before its files, else sorted
+        // with them (:set dirsfirst).
+        property bool dirsFirst: true
         // The shell :! runs commands in: a path, or a name on the PATH;
         // empty for the system's (root.systemShell).
         property string shell: ""
@@ -1419,6 +1423,7 @@ ApplicationWindow {
         regex: vim.regex
         sort: vim.sort
         sortReverse: vim.sortReverse
+        dirsFirst: vim.dirsFirst
 
         onChangedOnDisk: {
             root.diskChanged = true;
@@ -1479,6 +1484,8 @@ ApplicationWindow {
         defaultSyntax: settings.syntax
         wrap: settings.wrap
         defaultWrap: settings.wrap
+        dirsFirst: settings.dirsFirst
+        defaultDirsFirst: settings.dirsFirst
         fontSize: settings.fontSize
         defaultFontSize: settings.fontSize
         minFontSize: root.minFontSize
@@ -1557,6 +1564,7 @@ ApplicationWindow {
         onRegexChanged: root.settingChanged()
         onSortChanged: root.settingChanged()
         onSortReverseChanged: root.settingChanged()
+        onDirsFirstChanged: root.settingChanged()
         onHelpRequested: topic => {
             if (!help.show(topic))
                 vim.showError("E149: Sorry, no help for " + topic);

@@ -7,8 +7,9 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 
 // The Settings window (Cmd+,): font, font size, line numbers, syntax
-// colors, word wrap, theme, when applying asks first, the dir Koil starts
-// in, and the shell :! runs commands in; and on macOS, the
+// colors, word wrap, theme, whether folders come first, when applying asks
+// first, the dir Koil starts in, and the shell :! runs commands in; and on
+// macOS, the
 // shortcut that opens the folder selected in Finder, which System Settings
 // changes, and the `koil` command, which it installs. It
 // shows the saved settings, which Koil starts with; changes here are saved
@@ -23,7 +24,7 @@ Window {
     // changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // syntax, wrap, colorScheme, confirmChanges, startDir, shell.
+    // syntax, wrap, colorScheme, dirsFirst, confirmChanges, startDir, shell.
     required property var settings
     required property Theme theme
     // main.qml's Document, for the folder picked (a var, so this file needs
@@ -54,6 +55,12 @@ Window {
         { label: qsTr("Off"), value: false },
         { label: qsTr("On"), value: true }
     ]
+    // The listing's dirs before its files (:set dirsfirst), or sorted with
+    // them.
+    readonly property var dirsFirstModes: [
+        { label: qsTr("On"), value: true },
+        { label: qsTr("Off"), value: false }
+    ]
     readonly property var colorSchemes: [
         { label: qsTr("System"), value: "system" },
         { label: qsTr("Light"), value: "light" },
@@ -83,6 +90,7 @@ Window {
     readonly property bool customSyntax: !settings.syntax
     readonly property bool customWrap: settings.wrap
     readonly property bool customColorScheme: settings.colorScheme !== "system"
+    readonly property bool customDirsFirst: !settings.dirsFirst
     readonly property bool customConfirm: settings.confirmChanges !== "always"
     readonly property bool customStartDir: settings.startDir !== ""
     readonly property bool customShell: settings.shell !== ""
@@ -113,6 +121,7 @@ Window {
         app.changeSetting("syntax", true);
         app.changeSetting("wrap", false);
         app.changeSetting("colorScheme", "system");
+        app.changeSetting("dirsFirst", true);
         app.changeSetting("confirmChanges", "always");
         settings.startDir = "";
         app.changeSetting("shell", "");
@@ -552,6 +561,20 @@ Window {
             ResetButton {
                 enabled: win.customColorScheme
                 onClicked: win.app.changeSetting("colorScheme", "system")
+            }
+
+            SettingLabel {
+                text: qsTr("Folders first")
+            }
+            Segmented {
+                theme: win.theme
+                options: win.dirsFirstModes
+                current: win.dirsFirstModes.findIndex(m => m.value === win.settings.dirsFirst)
+                onPicked: index => win.app.changeSetting("dirsFirst", win.dirsFirstModes[index].value)
+            }
+            ResetButton {
+                enabled: win.customDirsFirst
+                onClicked: win.app.changeSetting("dirsFirst", true)
             }
 
             SettingLabel {

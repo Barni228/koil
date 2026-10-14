@@ -16,7 +16,7 @@ use devicons::Theme;
 use koil_core::apply::{Blocked, Undo};
 use koil_core::{
     Action, Applied, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil,
-    KoilError, Metadata, OpenError, Pattern, Settings, SortBy, UpdateError, UpdateOpenError,
+    KoilError, Metadata, OpenError, Pattern, Settings, Sort, SortBy, UpdateError, UpdateOpenError,
     Warning, with_slashes,
 };
 use serde::{Deserialize, Serialize};
@@ -123,52 +123,73 @@ pub fn measure(by: SortBy) -> Option<Measure> {
 /// their sizes as far as they're counted (see [`compare`]).
 fn listing(koil: &Koil, sizes: &dyn SizeOf) -> Vec<Entry> {
     let mut entries = koil.listing();
-    if measure(koil.settings().sort.by).is_some() {
+    let sort = koil.settings().sort;
+    if let Some(measure) = measure(sort.by) {
         // Koil lists them together, and its order stays for the ones that
-        // compare equal.
-        let start = entries.iter().position(is_dir_with_id).unwrap_or(0);
-        let dirs = entries[start..].iter().take_while(|e| is_dir_with_id(e));
-        let end = start + dirs.count();
-        entries[start..end].sort_by(|a, b| by_dir_size(koil, sizes, a, b));
+        // compare equal. Each size is looked up once, not at each comparison.
+        let start = entries.iter().position(|e| together(sort, e)).unwrap_or(0);
+        let together = entries[start..].iter().take_while(|e| together(sort, e));
+        let end = start + together.count();
+        let mut sized: Vec<(Option<u64>, Entry)> = (entries.drain(start..end))
+            .map(|e| (size(koil, sizes, measure, &e), e))
+            .collect();
+        sized.sort_by(|(a, _), (b, _)| by_size(sort, *a, *b));
+        entries.splice(start..start, sized.into_iter().map(|(_, e)| e));
     }
     entries
 }
 
 /// Where `render` lists `a` against `b`: as `Koil::compare` does, but
 /// sorted by a size, dirs go by their sizes as far as they're counted (see
-/// [`by_dir_size`]).
+/// [`by_size`]).
 fn compare(koil: &Koil, sizes: &dyn SizeOf, a: &Entry, b: &Entry) -> Ordering {
-    let by_size = match is_dir_with_id(a) && is_dir_with_id(b) {
-        true => by_dir_size(koil, sizes, a, b),
-        false => Ordering::Equal,
+    let sort = koil.settings().sort;
+    let by_size = match measure(sort.by) {
+        Some(measure) if together(sort, a) && together(sort, b) => {
+            let size = |entry| size(koil, sizes, measure, entry);
+            by_size(sort, size(a), size(b))
+        }
+        _ => Ordering::Equal,
     };
     by_size.then_with(|| koil.compare(a, b))
 }
 
-/// Where the dir `a` goes against the dir `b` (both with IDs) when the
-/// listing is sorted by size or size on disk: the ones counted (see
-/// sizes.rs) by their sizes, the biggest first, and the others after them
-/// (the other way round with `reverse`, as Koil sorts what it can't read).
-/// Equal where Koil's own order (how many entries each has) decides.
-fn by_dir_size(koil: &Koil, sizes: &dyn SizeOf, a: &Entry, b: &Entry) -> Ordering {
-    let sort = koil.settings().sort;
-    if measure(sort.by).is_none() {
-        return Ordering::Equal;
+/// Whether Koil lists `entry` with the ones sorted by a size here: its
+/// dirs with IDs, and its files with IDs too unless dirs go first (then
+/// Koil puts the dirs after the files, as it doesn't know their sizes).
+fn together(sort: Sort, entry: &Entry) -> bool {
+    entry.id.is_some() && (entry.is_dir || !sort.dirs_first)
+}
+
+/// What `entry` (with an ID) is sorted by when the listing is sorted by
+/// `measure`: a file's own size, or a dir's as far as it's counted (see
+/// sizes.rs), None until then.
+fn size(koil: &Koil, sizes: &dyn SizeOf, measure: Measure, entry: &Entry) -> Option<u64> {
+    if entry.is_dir {
+        return match sizes.size_of(koil.path_of(entry.id?)?) {
+            // Counted again, it stays where it was until it's done.
+            Some(DirSize::Counted(bytes) | DirSize::Stale(bytes)) => Some(bytes),
+            _ => None,
+        };
     }
-    let counted = |entry: &Entry| match sizes.size_of(koil.path_of(entry.id?)?) {
-        // Counted again, it stays where it was until it's done.
-        Some(DirSize::Counted(bytes) | DirSize::Stale(bytes)) => Some(bytes),
-        _ => None,
-    };
-    let order = counted(b).cmp(&counted(a));
+    let meta = koil.metadata(entry.id?)?;
+    match measure {
+        Measure::Size => Some(meta.size),
+        Measure::Disk => meta.disk_size,
+    }
+}
+
+/// Where an entry of size `a` goes against one of size `b` (see [`size`])
+/// when the listing is sorted by size or size on disk: the biggest first,
+/// and the dirs not counted after them (the other way round with
+/// `reverse`, as Koil sorts what it can't read). Equal where Koil's own
+/// order (how many entries a dir has) decides.
+fn by_size(sort: Sort, a: Option<u64>, b: Option<u64>) -> Ordering {
+    let order = b.cmp(&a);
     match sort.reverse {
         true => order.reverse(),
         false => order,
     }
-}
-
-fn is_dir_with_id(entry: &Entry) -> bool {
-    entry.is_dir && entry.id.is_some()
 }
 
 /// A line of the listing, and the ID its icon hides (at its start).

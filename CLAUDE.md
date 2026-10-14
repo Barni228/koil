@@ -465,7 +465,13 @@ the scratchpad (see Scratchpad).
   them, the watcher doesn't skip writes to files (`DiskWatcher::writes`),
   so a file written shows its new size or time; its line stays where it is
   until the next update sorts it again. The sort isn't saved, like Koil's
-  other options.
+  other options. Whether dirs go before files is a setting the Settings
+  window saves (Folders first, `:set dirsfirst`, koil-core's
+  `Sort::dirs_first`); off, they're sorted together (`1/`, `2.txt`, `3/`),
+  and by a size, koil-core puts the dirs after the files, as it knows
+  only how many entries each has, so here a dir counted goes among the
+  files by its size (`listing::together`, `size`), and one not counted
+  yet stays after them.
 - **Dir sizes** (sizes.rs): sorted by size or size on disk, a dir's size
   is everything in it, counted on other threads (koil-core's `entries`,
   how many it has, is only the order until then). By size (`Measure::Size`)
@@ -504,8 +510,9 @@ the scratchpad (see Scratchpad).
   300 ms while any is, and Editor.qml shows `infoDots` of the three dots,
   the note's place worked out with all of them (so nothing moves as they
   come and go). The dirs counted go first, by size (`listing::listing`,
-  `compare`, which `merge` uses too), and the others after, in koil's
-  order. Once they're all counted, `sortCounted` updates (`sortedCounting`:
+  `compare`, which `merge` uses too, through `by_size`), and the others
+  after, in koil's order (with Folders first off, among the files: see
+  Sorting). Once they're all counted, `sortCounted` updates (`sortedCounting`:
   it was sorted before they were), keeping the view as for `gs`; not while
   the user is halfway through something (it waits), nor if the update
   would fail on errors or open a path typed in the field (the next update
@@ -1560,8 +1567,8 @@ the scratchpad (see Scratchpad).
   gutter width (the digits and two spaces) to it. Only visible lines get a row.
 - **Settings**: `settings` (a QtCore `Settings` in main.qml) holds the saved
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
-  `relativeNumber`, `syntax`, `wrap`, `shell`, which `:set` changes, as
-  View > Word Wrap does `wrap`: `root.vimSettings`),
+  `relativeNumber`, `syntax`, `wrap`, `shell`, `dirsFirst`, which `:set`
+  changes, as View > Word Wrap does `wrap`: `root.vimSettings`),
   `root.colorScheme` and `root.confirmChanges`, bound to the saved ones at
   startup. The Settings window
   shows the saved ones and changes both (`changeSetting`). The zoom and `:set`

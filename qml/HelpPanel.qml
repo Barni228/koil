@@ -104,7 +104,7 @@ Popup {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
                 "number", "nu", "relativenumber", "rnu", "syntax", "syn", "wrap", "sidescrolloff", "siso", "hidden", "hid",
-                "gitignore", "ignore", "regex", "re", "sortreverse", "sr", "colors"],
+                "gitignore", "ignore", "regex", "re", "sortreverse", "sr", "dirsfirst", "df", "colors"],
             intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
                 + "once: `:set nu rnu fs=18`.",
             rows: [
@@ -127,7 +127,9 @@ Popup {
                 ["`sort`", "What the listing is sorted by (see `gs`), like `:set sort=size`: `name`, "
                     + "`natural`, `extension`, `size`, `disk`, `modified`, `created` or `accessed`. Default "
                     + "`name`."],
-                ["`sortreverse`  `sr`", "Sort the other way round."]
+                ["`sortreverse`  `sr`", "Sort the other way round."],
+                ["`dirsfirst`  `df`", "Folders before files, else sorted with them. Sorted by size, a folder "
+                    + "goes after the files until its size is counted. Default: the one in Settings (on)."]
             ],
             note: "An entry with changes is shown even if it's hidden or ignored."
         },
@@ -345,8 +347,8 @@ Popup {
                     "Undo and redo, like `u` and `Ctrl-R`."],
                 [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",
                     "Zoom in, out, or back to the Settings size."],
-                ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, word wrap, theme, when "
-                    + "applying asks, start dir."]
+                ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, word wrap, theme, folders "
+                    + "first, when applying asks, start dir."]
             ]
         }
     ]

@@ -36,6 +36,7 @@ pub mod qobject {
         #[qproperty(bool, regex)]
         #[qproperty(QString, sort)]
         #[qproperty(bool, sort_reverse)]
+        #[qproperty(bool, dirs_first)]
         type Koil = super::KoilRust;
 
         /// Emitted when something changed on disk that can change what
@@ -214,9 +215,11 @@ pub struct KoilRust {
     gitignore: bool,
     regex: bool,
     /// What the listing is sorted by, as `koil_core::SortBy` names it (like
-    /// "size"), and whether the other way round.
+    /// "size"), whether the other way round, and whether dirs go before
+    /// files (false here, but main.qml binds it).
     sort: QString,
     sort_reverse: bool,
+    dirs_first: bool,
     koil: koil_core::Koil,
     /// What `actions` showed, which `apply` picks from: what the user saw,
     /// so a change they didn't see is never applied.
@@ -405,6 +408,7 @@ impl KoilRust {
             sort: Sort {
                 by: serde_json::from_value(by).unwrap_or_default(),
                 reverse: self.sort_reverse,
+                dirs_first: self.dirs_first,
             },
         }
     }

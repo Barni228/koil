@@ -594,6 +594,7 @@ fn test_settings() {
         sort: Sort {
             by: SortBy::Name,
             reverse: true,
+            ..Sort::default()
         },
         ..settings
     };
@@ -612,7 +613,10 @@ fn test_settings() {
 /// The settings with the listing sorted by `by`.
 fn sorted_by(by: SortBy) -> Settings {
     Settings {
-        sort: Sort { by, reverse: false },
+        sort: Sort {
+            by,
+            ..Sort::default()
+        },
         ..Settings::default()
     }
 }
@@ -772,6 +776,7 @@ fn test_dir_sizes() {
         sort: Sort {
             by: SortBy::Size,
             reverse: true,
+            ..Sort::default()
         },
         ..Settings::default()
     })
@@ -798,6 +803,46 @@ fn test_dir_sizes() {
         ]
     );
     assert_eq!(synced.notes.infos[&id_text(&koil, "huge")], "9.0 KB");
+}
+
+#[test]
+fn test_dir_sizes_with_files() {
+    let (_temp, mut koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    fs::create_dir(root.join("big")).unwrap();
+    fs::write(root.join("notes"), "x".repeat(100)).unwrap();
+    fs::write(root.join("file.rs"), "x".repeat(10)).unwrap();
+    let mixed = |reverse| Settings {
+        sort: Sort {
+            by: SortBy::Size,
+            reverse,
+            dirs_first: false,
+        },
+        ..Settings::default()
+    };
+    koil.set_settings(mixed(false)).unwrap();
+    // Koil puts the dirs after the files, as it doesn't know their sizes
+    assert_eq!(render(&koil).names, ["notes", "file.rs", "big/", "dir/"]);
+    // the ones counted go among the files, by size
+    let mut sizes = DirSizes::from([(root.join("big"), DirSize::Counted(50))]);
+    let rendered = super::render(&koil, &sizes);
+    assert_eq!(rendered.names, ["notes", "big/", "file.rs", "dir/"]);
+    // and so do a dir and a file made on disk
+    fs::create_dir(root.join("huge")).unwrap();
+    sizes.insert(root.join("huge"), DirSize::Counted(1000));
+    fs::write(root.join("mid"), "x".repeat(20)).unwrap();
+    let synced = super::sync(&mut koil, &sizes, &rendered.text, &rendered.hidden);
+    let (text, _) = merged(&rendered.text, &rendered.hidden, &synced.merge.edits);
+    assert_eq!(
+        names(&text),
+        ["huge/", "notes", "big/", "mid", "file.rs", "dir/"]
+    );
+    // the other way round, the ones not counted first
+    koil.set_settings(mixed(true)).unwrap();
+    assert_eq!(
+        super::render(&koil, &sizes).names,
+        ["dir/", "file.rs", "mid", "big/", "notes", "huge/"]
+    );
 }
 
 #[test]
