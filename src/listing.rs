@@ -427,7 +427,6 @@ pub fn parse(text: &str, hidden: &[Hidden]) -> Parsed {
         let name = rest.trim();
         let column = utf16_len(&line[..line.len() - rest.trim_start().len()]);
         let entry = match name.strip_suffix('/') {
-            Some("..") if id.is_none() => Entry::parent(),
             Some(dir) => Entry {
                 id,
                 name: dir.trim_end_matches('/').into(),
@@ -507,9 +506,9 @@ fn problem(parsed: &Parsed, entry: usize, severity: Severity, message: String) -
 }
 
 /// The lines (from 0) of entries that aren't on disk as the listing shows
-/// them yet, which applying would change (`Koil::is_pending`): new ones (but
-/// `../`), and ones whose path isn't their ID's (renamed, copied, or moved
-/// here from another dir). Their icons get `PENDING_COLOR`.
+/// them yet, which applying would change (`Koil::is_pending`): new ones, and
+/// ones whose path isn't their ID's (renamed, copied, or moved here from
+/// another dir). Their icons get `PENDING_COLOR`.
 pub fn pending_lines(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
     let parsed = parse(text, hidden);
     let entries = parsed.entries.iter().zip(&parsed.spots);
@@ -1134,9 +1133,8 @@ pub enum OnDisk {
 }
 
 /// Where the entry on `line` is on disk, for Space r to show: where its ID
-/// points, even if the line renames it (as Enter opens it), or the open
-/// dir's parent for `../`. None on a line without an entry, or with an ID
-/// koil doesn't know.
+/// points, even if the line renames it (as Enter opens it). None on a line
+/// without an entry, or with an ID koil doesn't know.
 pub fn path_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> Option<OnDisk> {
     let parsed = parse(text, hidden);
     let i = parsed.spots.iter().position(|&(l, _)| l == line)?;
@@ -1179,10 +1177,6 @@ pub fn paths_on_lines(
 fn on_disk(koil: &Koil, entry: &Entry) -> Option<OnDisk> {
     let path = match entry.id {
         Some(id) => koil.path_of(id)?,
-        None if entry.is_parent() => {
-            let dir = koil.current_dir();
-            dir.parent().unwrap_or(dir)
-        }
         None => {
             let slash = if entry.is_dir { "/" } else { "" };
             let name = entry.name.to_string_lossy();

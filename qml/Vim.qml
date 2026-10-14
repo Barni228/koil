@@ -76,9 +76,9 @@ QtObject {
     property string shell: ""
     property string defaultShell: ""
     property string systemShell: ""
-    // Koil's :set hidden, gitignore and regex: show hidden entries (and
-    // ../), hide what git ignores, and read the path to open as a regex
-    // (see Settings in koil-core). The view applies them to the listing.
+    // Koil's :set hidden, gitignore and regex: show hidden entries, hide
+    // what git ignores, and read the path to open as a regex (see Settings
+    // in koil-core). The view applies them to the listing.
     property bool showHidden: false
     property bool gitignore: false
     property bool regex: false

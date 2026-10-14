@@ -838,9 +838,9 @@ the scratchpad (see Scratchpad).
   and a name up to its last `/` (`theme.directory`: a dir's whole name,
   and the dirs of a pattern's path, `src/` of `src/main.rs`). It's
   text-based, so it follows
-  edits. A pending entry's icon (one applying would change: new, but not
-  `../`, or at a path that isn't its ID's on disk, so renamed, copied or
-  moved here; `listing::pending_lines`, from `Koil::is_pending`) is pure white in a dark theme and
+  edits. A pending entry's icon (one applying would change: new, or at a
+  path that isn't its ID's on disk, so renamed, copied or moved here;
+  `listing::pending_lines`, from `Koil::is_pending`) is pure white in a dark theme and
   pure black in a light one (`PENDING_COLOR`, sent as `pendingColor`), and
   `listing::apart` moves devicons' colors that come within `APART` of those
   (its white icons, like `vercel.json`'s) a fifth away. main.qml finds the

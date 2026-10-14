@@ -134,7 +134,7 @@ fn test_pending_lines() {
     let rendered = render(&koil);
     assert!(pending_lines(&koil, &rendered.text, &rendered.hidden).is_empty());
 
-    // file.rs renamed, notes copied as notes2, a new file, and `../`
+    // file.rs renamed, notes copied as notes2, and a new file
     let lines: Vec<&str> = rendered.text.split('\n').collect();
     let text = [
         lines[0].to_string(),
@@ -142,11 +142,10 @@ fn test_pending_lines() {
         lines[2].to_string(),
         lines[2].replace("notes", "notes2"),
         "new.txt".to_string(),
-        "../".to_string(),
     ]
     .join("\n");
     // Each line's icon keeps the ID of the line it came from.
-    let ids = [Some(0), Some(1), Some(2), Some(2), None, None];
+    let ids = [Some(0), Some(1), Some(2), Some(2), None];
     let mut hidden = Vec::new();
     let mut at = 0;
     for (line, id) in text.split('\n').zip(ids) {
@@ -215,7 +214,7 @@ fn test_render_empty() {
 
 #[test]
 fn test_parse_new_entries() {
-    let text = "  new.txt  \n\n\u{f016}  icon but no ID\nsub/dir/\n../";
+    let text = "  new.txt  \n\n\u{f016}  icon but no ID\nsub/dir/";
     let parsed = parse(text, &[]);
     assert_eq!(parsed.problems, []);
     let new = |name: &str, is_dir| Entry {
@@ -229,10 +228,9 @@ fn test_parse_new_entries() {
             new("new.txt", false),
             new("icon but no ID", false),
             new("sub/dir", true),
-            Entry::parent()
         ]
     );
-    assert_eq!(parsed.spots, [(0, 2), (2, 3), (3, 0), (4, 0)]);
+    assert_eq!(parsed.spots, [(0, 2), (2, 3), (3, 0)]);
 }
 
 #[test]
@@ -436,15 +434,15 @@ fn test_target_on_line() {
         })
     );
     assert_eq!(target(4), None);
-    // `..`, a blank line, and a dir whose `/` was taken off
-    let text = format!("../\n\n{}dir", rendered.hidden[0].icon);
+    // a new dir, a blank line, and a dir whose `/` was taken off
+    let text = format!("new/\n\n{}dir", rendered.hidden[0].icon);
     let hidden = [Hidden {
-        at: 5,
+        at: 6,
         ..rendered.hidden[0].clone()
     }];
     assert_eq!(
         target_on_line(&koil, &text, &hidden, 0),
-        Some(Target::Dir("..".into()))
+        Some(Target::Dir("new".into()))
     );
     assert_eq!(target_on_line(&koil, &text, &hidden, 1), None);
     assert_eq!(
@@ -472,14 +470,8 @@ fn test_path_on_line() {
     assert_eq!(path(2), Some(OnDisk::New("new/".into())));
     assert_eq!(path(3), Some(OnDisk::Path(root.join("file.rs"))));
     assert_eq!(path(5), None);
-    // `..`, and a blank line
-    let text = "../\n";
-    let parent = root.parent().unwrap().to_path_buf();
-    assert_eq!(
-        path_on_line(&koil, text, &[], 0),
-        Some(OnDisk::Path(parent))
-    );
-    assert_eq!(path_on_line(&koil, text, &[], 1), None);
+    // a blank line
+    assert_eq!(path_on_line(&koil, "\n", &[], 0), None);
 }
 
 #[test]
@@ -557,10 +549,7 @@ fn test_failed_open_keeps_settings() {
         assert_eq!(updated.ok, path == rendered.path, "{path}: {updated:?}");
     }
     assert_eq!(koil.compute_actions(), []);
-    assert_eq!(
-        render(&koil).names,
-        ["../", "dir/", ".hidden", "file.rs", "notes"]
-    );
+    assert_eq!(render(&koil).names, ["dir/", ".hidden", "file.rs", "notes"]);
 }
 
 #[test]
@@ -580,10 +569,7 @@ fn test_settings() {
         None,
     );
     assert!(updated.ok && updated.moved);
-    assert_eq!(
-        render(&koil).names,
-        ["../", "dir/", ".hidden", "file.rs", "notes"]
-    );
+    assert_eq!(render(&koil).names, ["dir/", ".hidden", "file.rs", "notes"]);
 
     // regex changes how the path is read, not what's shown
     let rendered = render(&koil);
@@ -620,10 +606,7 @@ fn test_settings() {
         None,
     );
     assert!(updated.ok && !updated.moved);
-    assert_eq!(
-        render(&koil).names,
-        ["../", "dir/", "notes", "file.rs", ".hidden"]
-    );
+    assert_eq!(render(&koil).names, ["dir/", "notes", "file.rs", ".hidden"]);
 }
 
 /// The settings with the listing sorted by `by`.

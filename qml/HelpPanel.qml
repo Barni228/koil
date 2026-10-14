@@ -121,7 +121,7 @@ Popup {
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
                 ["`shell`  `sh`", "The shell `:!` runs commands in: a path, or a name on the PATH, like "
                     + "`:set sh=bash`. Default: the one in Settings, else `" + systemShell + "`."],
-                ["`hidden`  `hid`", "Show entries starting with `.`, and `../`."],
+                ["`hidden`  `hid`", "Show entries starting with `.`."],
                 ["`gitignore`  `ignore`", "Hide what git ignores, and `.git`."],
                 ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."],
                 ["`sort`", "What the listing is sorted by (see `gs`), like `:set sort=size`: `name`, "
