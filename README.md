@@ -22,6 +22,7 @@ until you apply, and your edits stay while you go through other dirs.
 | `Space o`      | Open the entry in its default app                                                 |
 | `Space q`      | Your shortcuts: run one, edit them or make one                                    |
 | `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
+| `m`            | Mark lines anywhere, then `d`, `y`, `!` or `A` act on all of them at once         |
 | `:h`           | Show help page                                                                    |
 
 `Cmd` is `Ctrl` on Windows.
@@ -48,6 +49,12 @@ until you apply, and your edits stay while you go through other dirs.
   it's pasted, so a pasted line is a copy or a move, never a new empty file.
   `gh` (or hovering the mouse on the icon) shows the path an ID stands for.
   `Backspace` at the start of a name drops its ID, making the entry new.
+- **Marked lines**: `m` marks a line (in visual mode, the selected lines),
+  and the cursor moves on as usual, so lines far apart can be marked. Then
+  the keys of visual mode act on all of them, as if they were together:
+  `d` or `y` takes them in one register (`p` in another dir then moves or
+  copies them there), `!git add` runs on all of them, `A.bak<Esc>` types
+  after each, and `:s` changes only them. `Esc` unmarks them.
 - **The scratchpad** (`_`, or `koil -s`) is a text that's never saved, kept
   until Koil quits. Lines pasted there keep their IDs, so you can put
   entries aside and paste them into a listing later.
@@ -74,8 +81,9 @@ until you apply, and your edits stay while you go through other dirs.
   counted in the background (the `...` animation), then sorted.
 - **Shell commands** run in the open dir, in the shell from Settings (Git
   Bash, say, on Windows). `%` is the entry on the line (or the open file),
-  quoted, like vim's: `:!mv % old/`. `!` in visual mode runs one on every
-  selected entry, and in a file, `:%!sort` filters the lines as in vim.
+  quoted, like vim's: `:!mv % old/`. `!` in visual mode (or with lines
+  marked) runs one on every selected entry, and in a file, `:%!sort`
+  filters the lines as in vim.
   `:_!cmd` puts what it writes in the scratchpad, like `:_!git log`.
 - **Shortcuts** (`Space q`, _Koil → Shortcuts…_, or Settings): `Space` and
   a key of yours run keys as a macro does, like `:!echo %:p | pbcopy<CR>` to

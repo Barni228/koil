@@ -72,10 +72,11 @@ Item {
     property int dragFrom: -1
 
     // Whether vim edits this editor. The other one keeps its cursor where
-    // vim left it (`cursorPos`), and its hidden text.
+    // vim left it (`cursorPos`), its hidden text and its marked lines.
     readonly property bool active: vim.editor === editor
     readonly property int cursorPos: active ? vim.cursor : saved && saved.cursor || 0
     readonly property var hidden: active ? vim.hidden : saved && saved.hidden || []
+    readonly property var marked: active ? vim.marked : saved && saved.marked || []
 
     readonly property alias textArea: editor
     readonly property Flickable flickable: scrollView.contentItem as Flickable
@@ -481,9 +482,9 @@ Item {
     // isn't the editor's selection, so vim gives it, and so it does the one
     // : left visual mode with, while the command line is open.
     function selectionSpans() {
-        if (!active)
-            return [];
         const shown = vim.visualShown;
+        if (!active || shown && shown.mode === "marked")
+            return [];
         const t = editor.latest.text, v = visibleRange();
         if (shown ? shown.mode === "visualBlock" : vim.mode === "visualBlock")
             return vim.blockSpans(v.from, v.to, shown || undefined);
@@ -504,6 +505,29 @@ Item {
             });
             p = le + 1;
         }
+        return spans;
+    }
+
+    // The marked lines in the visible lines (see Vim's `marked`), or those
+    // : left with while the command line is open, as { start, end } spans
+    // (a line, without its line break). They're sorted, so they're found
+    // by binary search, as there can be thousands.
+    function markedSpans() {
+        const shown = active && vim.visualShown && vim.visualShown.mode === "marked" ? vim.visualShown.marked : marked;
+        if (!shown.length)
+            return [];
+        const t = editor.latest.text, v = visibleRange(), to = Math.min(v.to, t.length);
+        let lo = 0, hi = shown.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (shown[mid] < v.from)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        const spans = [];
+        for (let i = lo; i < shown.length && shown[i] <= to; i++)
+            spans.push({ start: shown[i], end: Txt.lineEnd(t, shown[i]) });
         return spans;
     }
 
@@ -1181,6 +1205,39 @@ Item {
                         color: view.theme.bracketMatch
                         border.color: view.theme.bracketBorder
                         border.width: 1
+                    }
+                }
+            }
+
+            // The marked lines, as a selection of lines is drawn, a shade
+            // paler: not what the cursor selects, which goes over them. Also
+            // while vim edits the other editor, as they stay marked.
+            Layer {
+                id: markedLines
+
+                z: -0.52
+                inputs: [view.marked, view.active, view.vim.visualShown, view.layout, view.viewport]
+                // A rectangle a row, the last with the line break.
+                compute: () => {
+                    const list = [];
+                    for (const s of view.markedSpans()) {
+                        for (const r of view.rowSpans(s.start, s.end))
+                            list.push({ rect: r.rect, eol: r.end === s.end });
+                    }
+                    return list;
+                }
+
+                Repeater {
+                    model: markedLines.model
+
+                    Rectangle {
+                        required property var modelData
+
+                        x: modelData.rect.x
+                        y: modelData.rect.y
+                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
+                        height: modelData.rect.height
+                        color: view.theme.marked
                     }
                 }
             }

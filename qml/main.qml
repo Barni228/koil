@@ -315,8 +315,9 @@ ApplicationWindow {
     // gitignore), or sorted another way. With `from` too (back from a file),
     // it goes to `from`'s line, which stays where the cursor was in the
     // view, unless it's sorted another way: everything moved, and the view
-    // stays instead (scrolling only to show the cursor). Vim stays in the
-    // path field if it was there.
+    // stays instead (scrolling only to show the cursor). Then the entries
+    // that were marked stay marked (see Vim.markTexts), wherever they go.
+    // Vim stays in the path field if it was there.
     function showListing(moved, from, keep) {
         // Before it's the listing, whose prefixes vim would keep out of.
         keepScratch();
@@ -339,6 +340,7 @@ ApplicationWindow {
             listing = true;
             load(r.text, r.hidden, "");
         }
+        vim.markTexts(keep?.marks ?? []);
         const i = from ? r.names.indexOf(from) : -1;
         const line = i >= 0 ? i : keep ? keep.line : 0;
         const column = keep ? keep.column : 0; // 0: jumpTo puts it after the icon and two spaces
@@ -649,9 +651,13 @@ ApplicationWindow {
 
     // ! in the listing (or the path field): the command line for a shell
     // command on the entry on the cursor's line, or with a count, on as
-    // many lines from there as there are (see runShell). In the scratchpad,
-    // a filter of those lines.
+    // many lines from there as there are, or on the marked lines (see
+    // runShell). In the scratchpad, a filter of those lines.
     function bangLines(count) {
+        if (vim.marked.length) {
+            vim.commandOnMarked(true);
+            return;
+        }
         const t = activeView.textArea.text;
         const more = Math.min(Math.max(count, 1) - 1, Txt.countLines(t) - Txt.lineOf(t, vim.cursor));
         vim.openCommandLine(":", (more ? ".,.+" + more : ".") + "!");
@@ -791,7 +797,8 @@ ApplicationWindow {
     // them. With `scratch` (:_!), the output goes in the scratchpad instead
     // (see showInScratch), and a file's lines only go through it. As the
     // scratchpad is shown in the file's place, its unsaved changes are
-    // asked about first (unless `asked`), as for File > Open.
+    // asked about first (unless `asked`), as for File > Open. A range of
+    // marked lines (with `lines`) is only those, as if they were together.
     function runShell(command, range, scratch, asked) {
         if (scratch && !listing && !scratchpad && modified && !asked) {
             askToSave(() => runShell(command, range, scratch, true));
@@ -800,13 +807,19 @@ ApplicationWindow {
         const t = activeView.textArea.text, filter = !!range && !listing;
         // A file's last line break ends its last line, as in vim: the empty
         // line after it isn't one to filter (:%!sort would sort it first).
-        const last = filter && range.last > range.first && range.last === Txt.countLines(t) && t.endsWith("\n")
-            ? range.last - 1 : range && range.last;
+        const end = Txt.countLines(t), past = l => l === end && t.endsWith("\n");
+        const last = filter && range.last > range.first && past(range.last) ? range.last - 1 : range && range.last;
+        // The marked lines it's for (see Vim.exRange), from 1.
+        const lines = range && range.lines ? range.lines.filter((l, i) => i === 0 || !filter || !past(l)) : null;
+        const lineText = l => t.slice(Txt.lineToPos(t, l), Txt.lineEnd(t, Txt.lineToPos(t, l)));
         let files = [], why = "";
         if (listing) {
+            // The lines' entries, as spans of lines from 0 (none for the
+            // path field: the open dir).
             const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
-            const from = range && line >= 0 ? range.first - 1 : line, to = range && line >= 0 ? range.last - 1 : line;
-            const r = JSON.parse(koil.pathsOnLines(editorView.textArea.text, JSON.stringify(editorView.hidden), from, to));
+            const spans = line < 0 ? [] : lines ? lineSpans(lines) : range ? [[range.first - 1, range.last - 1]]
+                : [[line, line]];
+            const r = JSON.parse(koil.pathsOnLines(editorView.textArea.text, JSON.stringify(editorView.hidden), JSON.stringify(spans)));
             files = r.paths;
             why = r.message;
         } else if (filePath) {
@@ -819,7 +832,8 @@ ApplicationWindow {
             files: files,
             why: why,
             append: listing && !!range,
-            input: filter ? t.slice(Txt.lineToPos(t, range.first), Txt.lineEnd(t, Txt.lineToPos(t, last))) + "\n" : null,
+            input: !filter ? null : lines ? lines.map(lineText).join("\n") + "\n"
+                : t.slice(Txt.lineToPos(t, range.first), Txt.lineEnd(t, Txt.lineToPos(t, last))) + "\n",
             scratchpad: scratch
         });
         // Koil takes the listing's edits before leaving it for the
@@ -834,11 +848,26 @@ ApplicationWindow {
         }
         shellRun = {
             line: r.line,
-            filter: filter && !scratch ? { first: range.first, last: last, text: t, path: filePath, scratchpad: scratchpad } : null,
+            filter: filter && !scratch ? { first: range.first, last: last, lines: lines, text: t, path: filePath,
+                scratchpad: scratchpad } : null,
             scratch: scratch
         };
         vim.showMessage((scratch ? ":_!" : ":!") + r.line);
         vim.waiting = "Running";
+    }
+
+    // Line numbers (from 1, in order) as spans of lines from 0, [first,
+    // last], of those next to each other.
+    function lineSpans(lines) {
+        const spans = [];
+        for (const l of lines) {
+            const last = spans[spans.length - 1];
+            if (last && last[1] === l - 2)
+                last[1] = l - 1;
+            else
+                spans.push([l - 1, l - 1]);
+        }
+        return spans;
     }
 
     // The command runShell started is done: `ran` is what it did (see
@@ -865,7 +894,7 @@ ApplicationWindow {
         } else if (listing || filePath !== f.path || scratchpad !== f.scratchpad || editorView.textArea.text !== f.text) {
             vim.showError("The text changed while the command ran, so its output wasn't put in");
         } else {
-            vim.filterLines(f.first, f.last, ran.output);
+            vim.filterLines(f.first, f.last, ran.output, f.lines);
             if (ran.errors)
                 showOutput(title, ran.errors, ran.cut, "");
         }
@@ -1133,17 +1162,19 @@ ApplicationWindow {
     // Where the cursor is in the listing (its line and column) and how far
     // it's scrolled, for showListing to keep when it shows the listing from
     // scratch (an apply, its undo, back from a file), with how far down the
-    // view its line starts (`offset`). The listing's cursor, also while vim
-    // is in the path field.
+    // view its line starts (`offset`), and the IDs of the entries marked
+    // (`marks`, see Vim.markedTexts). The listing's, also while vim is in
+    // the path field.
     function listingSpot() {
-        const t = editorView.textArea.text;
-        const p = activeView === editorView ? vim.cursor : editorView.saved?.cursor ?? 0;
+        const t = editorView.textArea.text, inListing = activeView === editorView;
+        const p = inListing ? vim.cursor : editorView.saved?.cursor ?? 0;
         const contentY = editorView.flickable.contentY;
         return {
             line: Txt.lineOf(t, p) - 1,
             column: Txt.column(t, p),
             contentY: contentY,
-            offset: editorView.cellAt(Txt.lineStart(t, p)).y - contentY
+            offset: editorView.cellAt(Txt.lineStart(t, p)).y - contentY,
+            marks: vim.markedTexts(inListing ? null : editorView.saved)
         };
     }
 

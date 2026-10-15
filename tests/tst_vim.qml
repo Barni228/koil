@@ -2880,6 +2880,266 @@ TestCase {
         findBar.close();
     }
 
+    // ---- Marked lines --------------------------------------------------------
+
+    // m marks the cursor's line (with a count, as many), or unmarks them if
+    // they're all marked, and in visual mode, its lines. Esc unmarks them
+    // all, and gv marks them again.
+    function test_markLines() {
+        load("a\nb\nc\nd");
+        keys("m");
+        compare(vim.marked, [0]);
+        keys("jjm");
+        compare(vim.marked, [0, 4]);
+        compare(vim.modeLabel, "2 MARKED");
+        keys("m");
+        compare(vim.marked, [0]);
+        keys("k2m");
+        compare(vim.marked, [0, 2, 4]);
+        keys("2m");
+        compare(vim.marked, [0]);
+        keys("<Esc>");
+        compare(vim.marked, []);
+        compare(vim.modeLabel, "");
+        keys("gv");
+        compare(vim.marked, [0]);
+        compare(vim.mode, "normal");
+        keys("jVjm");
+        compare(vim.mode, "normal");
+        compare(vim.marked, [0, 4, 6]);
+        keys("ggVGm");
+        compare(vim.marked, [0, 2, 4, 6]);
+        keys("ggVGm");
+        compare(vim.marked, []);
+        // Not in a buffer of one line.
+        vim.singleLine = true;
+        load("a");
+        keys("m");
+        compare(vim.marked, []);
+    }
+
+    // d puts the marked lines in its register together, as if they were,
+    // and p puts them back so. The cursor stays on its line, or goes to
+    // the one after it if that's deleted.
+    function test_markedDelete() {
+        load("a\nb\nc\nd\ne");
+        keys("mjjmj");
+        keys("d");
+        compare(render(), "b\nd\ne");
+        compare(vim.registers["\""].text, "a\nc\n");
+        verify(vim.registers["\""].linewise);
+        compare(vim.registers["1"].text, "a\nc\n");
+        compare(vim.marked, []);
+        compare(cursorLine(), 2);
+        keys("Gp");
+        compare(render(), "b\nd\ne\na\nc");
+        keys("uu");
+        compare(render(), "a\nb\nc\nd\ne");
+        // Where they were, which u brought them back to.
+        keys("gv");
+        compare(vim.marked, [0, 4]);
+        // With the cursor's own, and the last line (with the line break
+        // before it).
+        keys("Gmx");
+        compare(render(), "b\nd");
+        compare(vim.registers["\""].text, "a\nc\ne\n");
+        compare(cursorLine(), 2);
+        compare(vim.message, "3 fewer lines");
+    }
+
+    function test_markedYank() {
+        load("a\nb\nc");
+        keys("mjjm\"ay");
+        compare(vim.registers["a"].text, "a\nc\n");
+        compare(render(), "a\nb\nc");
+        compare(vim.marked, []);
+        compare(cursorLine(), 3);
+        keys("km\"AY");
+        compare(vim.registers["a"].text, "a\nc\nb\n");
+    }
+
+    // c changes them into one line, where the first one was. In the
+    // listing, that one keeps its icon (it's renamed).
+    function test_markedChange() {
+        load("a\nb\nc\nd");
+        keys("mjjmcx<Esc>");
+        compare(render(), "x\nb\nd");
+        compare(vim.registers["\""].text, "a\nc\n");
+        keys("u");
+        compare(render(), "a\nb\nc\nd");
+        loadListing("M  a\nC  b\nM  c");
+        keys("mGmSx<Esc>");
+        compare(render(), "<M:h1>  x\n<C:h2>  b");
+        compare(vim.registers["\""].hidden.map(h => h.text), ["h1", "h3"]);
+    }
+
+    // >, case changes and r change each marked line where it is, and gv
+    // then marks the same lines.
+    function test_markedInPlace() {
+        load("a\nb\nc");
+        keys("mjjm>");
+        compare(render(), "    a\nb\n    c");
+        compare(vim.marked, []);
+        keys("gvgU");
+        compare(render(), "    A\nb\n    C");
+        keys("gv~");
+        compare(render(), "    a\nb\n    c");
+        keys("gvrx");
+        compare(render(), "xxxxx\nb\nxxxxx");
+        keys("ugv2<");
+        compare(render(), "a\nb\nc");
+        keys("u");
+        compare(render(), "    a\nb\n    c");
+    }
+
+    // J joins them to the first one; one line joins the next.
+    function test_markedJoin() {
+        load("a\nb\n  c\nd");
+        keys("mjjmjmJ");
+        compare(render(), "a c d\nb");
+        compare(vim.cursor, 3);
+        keys("ugvgJ");
+        compare(render(), "a  cd\nb");
+        load("a\nb");
+        keys("mJ");
+        compare(render(), "a b");
+    }
+
+    // p puts the register where the first one was, and the marked lines in
+    // the register; P leaves it.
+    function test_markedPut() {
+        load("a\nb\nc\nd");
+        keys("jyykmjjmp");
+        compare(render(), "b\nb\nd");
+        compare(vim.registers["\""].text, "a\nc\n");
+        compare(cursorLine(), 1);
+        load("a\nb\nc");
+        keys("ylmGmP");
+        compare(render(), "a\nb");
+        compare(vim.registers["\""].text, "a");
+    }
+
+    // I and A type on every marked line, which stay marked while they do.
+    function test_markedInsert() {
+        load("ab\ncd\nef");
+        keys("mGmA!");
+        compare(vim.marked, [0, 7]);
+        keys("<Esc>");
+        compare(render(), "ab!\ncd\nef!");
+        compare(vim.marked, []);
+        compare(vim.cursors, []);
+        keys("gvI-<Esc>");
+        compare(render(), "-ab!\ncd\n-ef!");
+        keys("u");
+        compare(render(), "ab!\ncd\nef!");
+        // In the listing, after the prefix.
+        loadListing("M  a\nC  b\nM  c");
+        keys("mGmgIx<Esc>");
+        compare(render(), "<M:h1>  xa\n<C:h2>  b\n<M:h3>  xc");
+    }
+
+    // Edits move the marks with their lines: a line deleted is unmarked,
+    // and one joined to the line above goes with it.
+    function test_marksMove() {
+        load("a\nb\nc");
+        keys("Gm");
+        compare(vim.marked, [4]);
+        keys("ggOx<Esc>");
+        compare(vim.marked, [6]);
+        keys("u");
+        compare(vim.marked, [4]);
+        keys("ji12<CR><Esc>"); // typed by the editor
+        compare(render(), "a\n12\nb\nc");
+        compare(vim.marked, [7]);
+        load("a\nb");
+        keys("Gox<Esc>m");
+        compare(vim.marked, [4]);
+        keys("u");
+        compare(render(), "a\nb");
+        compare(vim.marked, []);
+        load("a\nb");
+        keys("jmi<BS><Esc>");
+        compare(render(), "ab");
+        compare(vim.marked, [0]);
+        // A change within lines keeps each where it is.
+        load("aa\naa\naa\naa");
+        keys(":%s/a/bb/g<CR>ujmjjmg&");
+        compare(render(), "bbbb\nbbbb\nbbbb\nbbbb");
+        compare(vim.marked, [5, 15]);
+        // As do edits from outside, and u, which marks nothing again.
+        load("a\nb\nc");
+        keys("Gm");
+        vim.mergeEdits([{ start: 0, end: 2, text: "", hidden: [] }], false);
+        compare(vim.marked, [2]);
+        load("ab\ncd");
+        keys("xjm.");
+        compare(render(), "b\nd");
+        keys("u");
+        compare(render(), "b\ncd");
+        compare(vim.marked, [2]);
+    }
+
+    // : and ! give a command line for the marked lines, '<,'> standing for
+    // them, which stay drawn while it's typed.
+    function test_markedCommandLine() {
+        load("one\ntwo\nthree\nfour");
+        shells.clear();
+        keys("mjjm:");
+        compare(vim.commandLine, ":'<,'>");
+        compare(vim.marked, []);
+        compare(vim.visualShown.marked, [0, 8]);
+        keys("!sort<CR>");
+        compare(shells.count, 1);
+        const range = shells.signalArguments[0][1];
+        compare([range.first, range.last, range.lines], [1, 3, [1, 3]]);
+        compare(vim.visualShown, null);
+        // ! is an operator in a file, which they take at once.
+        keys("gv!");
+        compare(vim.commandLine, ":'<,'>!");
+        keys("<Esc>");
+        // Only '<,'> as a whole is them.
+        keys(":'");
+        keyClick("<");
+        keys(",'>+1!x<CR>");
+        compare(shells.signalArguments[1][1].lines, undefined);
+        compare(shellCalls()[1], ["x", "1-4"]);
+        // :s changes only them.
+        load("aa\naa\naa");
+        keys("mGm:s/a/bb/g");
+        compare(editor.text, "bbbb\naa\nbbbb");
+        compare(vim.visualShown.marked, [0, 8]);
+        keys("<CR>");
+        compare(editor.text, "bbbb\naa\nbbbb");
+    }
+
+    // A filter's output goes where the first marked line was, and the
+    // others go.
+    function test_filterMarked() {
+        load("c\nx\na\ny\nb");
+        vim.filterLines(1, 5, "a\nb\nc", [1, 3, 5]);
+        compare(render(), "a\nb\nc\nx\ny");
+        load("c\nx\na\ny\nb");
+        vim.filterLines(1, 5, "", [1, 3, 5]);
+        compare(render(), "x\ny");
+    }
+
+    // Each buffer has its own, and the listing's entries are found again
+    // by what their icons hide (Koil's IDs).
+    function test_markedBuffers() {
+        load("a\nb");
+        keys("m");
+        const left = switchTo(other, null);
+        compare(vim.marked, []);
+        compare(left.marked, [0]);
+        switchTo(editor, left);
+        compare(vim.marked, [0]);
+        loadListing("M  a\nC  b\nM  c");
+        keys("mGm");
+        compare(vim.markedTexts(), ["h1", "h3"]);
+        vim.markTexts(["h2"]);
+        compare(vim.marked, [editor.text.indexOf(chair)]);
+    }
+
     // ---- Find bar ------------------------------------------------------------
 
     function test_replaceAllKeepsHidden() {

@@ -131,18 +131,17 @@ pub mod qobject {
         #[qinvokable]
         fn path_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
-        /// Where the entries on lines `first` to `last` (from 0) are on
-        /// disk, for a shell command run on them (see
-        /// `listing::paths_on_lines`): `{ paths, message }`, where `message`
-        /// says why there are none. With a negative `first` (the path
-        /// field), the open dir.
+        /// Where the entries on `lines` are on disk, for a shell command
+        /// run on them (see `listing::paths_on_lines`), `lines` being a
+        /// list of `[first, last]` spans of lines (from 0), in order and
+        /// apart: `{ paths, message }`, where `message` says why there are
+        /// none. With no lines (the path field), the open dir.
         #[qinvokable]
         fn paths_on_lines(
             self: &Koil,
             text: &QString,
             hidden: &QString,
-            first: i32,
-            last: i32,
+            lines: &QString,
         ) -> QString;
 
         /// The dir that's open (a pattern's base dir), where shell commands
@@ -595,13 +594,14 @@ impl qobject::Koil {
         to_json(&on_disk)
     }
 
-    fn paths_on_lines(&self, text: &QString, hidden: &QString, first: i32, last: i32) -> QString {
-        let paths = match (usize::try_from(first), usize::try_from(last)) {
-            (Ok(first), Ok(last)) => {
-                let text = text.to_string();
-                listing::paths_on_lines(&self.koil, &text, &read_hidden(hidden), first, last)
-            }
-            _ => Ok(vec![self.koil.current_dir().to_path_buf()]),
+    fn paths_on_lines(&self, text: &QString, hidden: &QString, lines: &QString) -> QString {
+        let lines: Vec<(usize, usize)> =
+            serde_json::from_str(&lines.to_string()).unwrap_or_default();
+        let paths = if lines.is_empty() {
+            Ok(vec![self.koil.current_dir().to_path_buf()])
+        } else {
+            let text = text.to_string();
+            listing::paths_on_lines(&self.koil, &text, &read_hidden(hidden), &lines)
         };
         let (paths, message) = match paths {
             Ok(paths) => (paths, String::new()),

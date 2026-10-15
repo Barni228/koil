@@ -484,18 +484,27 @@ fn test_paths_on_lines() {
         "dir/" => Some(format!("{}\n\nnew.txt", line.replace("dir/", "renamed/"))),
         _ => Some(line.to_string()),
     });
-    let paths = |first, last| paths_on_lines(&koil, &text, &hidden, first, last);
-    assert_eq!(paths(0, 1), Ok(vec![root.join("dir")]));
+    let paths = |lines: &[(usize, usize)]| paths_on_lines(&koil, &text, &hidden, lines);
+    assert_eq!(paths(&[(0, 1)]), Ok(vec![root.join("dir")]));
     assert_eq!(
-        paths(3, 4),
+        paths(&[(3, 4)]),
         Ok(vec![root.join("file.rs"), root.join("notes")])
     );
     assert_eq!(
-        paths(0, 2),
+        paths(&[(0, 2)]),
         Err("“new.txt” isn't on disk until the changes are applied".into())
     );
-    assert_eq!(paths(1, 1), Err("No entry on this line".into()));
-    assert_eq!(paths(7, 9), Err("No entries on these lines".into()));
+    assert_eq!(paths(&[(1, 1)]), Err("No entry on this line".into()));
+    assert_eq!(paths(&[(7, 9)]), Err("No entries on these lines".into()));
+    // marked lines, apart: not the new file and file.rs between them
+    assert_eq!(
+        paths(&[(0, 0), (4, 4)]),
+        Ok(vec![root.join("dir"), root.join("notes")])
+    );
+    assert_eq!(
+        paths(&[(1, 1), (7, 7)]),
+        Err("No entries on these lines".into())
+    );
 }
 
 #[test]

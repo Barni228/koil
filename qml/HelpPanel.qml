@@ -7,7 +7,8 @@ import "text.js" as Txt
 
 // :help, a box over the editor with what isn't obvious: Koil's listing,
 // :set and its forms, the commands, shell commands, search, registers and
-// macros, visual block and multiple cursors, hidden text and other keys.
+// macros, visual block and multiple cursors, marked lines, hidden text and
+// other keys.
 // :help topic scrolls to a section. :reg shows the registers in it too
 // (showList), and :! what a command wrote (showText).
 // Keys scroll it as in a vim help buffer, / and ? search it (see Search);
@@ -70,8 +71,8 @@ Popup {
                     + "open dir)."],
                 ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
                     + fileManager + " does (from the path field, the open dir)."],
-                ["`!`", "Run a shell command on the entry on the line: `!git add` or `!rm`, then `Enter` "
-                    + "(see `:h !`)."],
+                ["`!`", "Run a shell command on the entry on the line (or the marked ones: see `:h m`): "
+                    + "`!git add` or `!rm`, then `Enter` (see `:h !`)."],
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
                 ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing."],
                 ["`_`", "The scratchpad: text of your own, never saved, kept as you left it until Koil "
@@ -216,8 +217,8 @@ Popup {
             rows: [
                 ["`!`", "In the listing: a command for the entry on the line, like `!git add` or `!rm`, then "
                     + "`Enter`. The entry goes at the end, or where `%` is (`!mv % old/`). With a count "
-                    + "(`3!`) or in visual mode, the entries on those lines. In the scratchpad, `:.!`: the "
-                    + "line goes through it."],
+                    + "(`3!`), in visual mode or with lines marked (`m`), the entries on those lines. In the "
+                    + "scratchpad, `:.!`: the line goes through it."],
                 ["`%`", "The entry on the line (from the path field, the open dir), or in a file, the file, "
                     + "quoted for the shell. `\\%` is a `%`, as in `:!date +\\%F`."],
                 ["`%:p`  `%:h`  `%:t`", "Its full path, the dir it's in, its name."],
@@ -310,6 +311,28 @@ Popup {
                 ["", "Motions and edits happen at every cursor, each with its own registers. `Esc` goes "
                     + "back to one."]
             ]
+        },
+        {
+            title: "Marked lines",
+            tags: ["m", "mark", "marks", "marked", "select", "selection", "lines", "move", "gather"],
+            intro: "`m` marks lines, which can be far apart, as the cursor moves as in normal mode. Then the "
+                + "keys that act on a visual selection act on all of them at once, as on lines selected "
+                + "with `V` if they were together. Using them unmarks them.",
+            rows: [
+                ["`m`  `3m`", "Mark the line (or 3 lines from it), or unmark it if it's marked. In visual mode: "
+                    + "its lines."],
+                ["`d`  `y`", "Delete or yank them, all in one register (`\"ay` too). `p` then puts them "
+                    + "together: in the listing, mark entries in a dir, `d`, and `p` in another to move them."],
+                ["`!`", "In the listing: run a command on their entries (`!git add`). In a file: put them "
+                    + "through it, its output where the first one was."],
+                ["`I`  `A`", "Type at the start or end of each one, like `A.bak<Esc>`."],
+                ["`c`  `p`  `J`", "Change them into one line, put a register in their place, or join them, "
+                    + "where the first one is."],
+                ["`>`  `gU`  `r`", "Indent, change case or replace characters on each one."],
+                ["`:`", "`:'<,'>` is them: `:s/a/b/` changes only them."],
+                ["`Esc`", "Unmark them all. `gv` marks them again (also after using them)."]
+            ],
+            note: "Other keys work as in normal mode: `u` undoes, `i` and `o` type at the cursor."
         },
         {
             title: "Hidden text",

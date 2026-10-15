@@ -52,6 +52,14 @@ function lineEnd(t, p) {
     return i < 0 ? t.length : i;
 }
 
+// Where the line breaks in [from, to) of t are, in order.
+function lineBreaks(t, from, to) {
+    const r = [];
+    for (let i = t.indexOf("\n", from); i >= 0 && i < to; i = t.indexOf("\n", i + 1))
+        r.push(i);
+    return r;
+}
+
 function firstNonBlank(t, p) {
     let q = lineStart(t, p);
     while (q < t.length && isBlank(t[q]))

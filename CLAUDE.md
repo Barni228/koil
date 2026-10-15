@@ -72,7 +72,8 @@ the scratchpad (see Scratchpad).
   the scratchpad (`openScratch`), and which of the two editors vim edits (`activate`). It wires the pieces
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
-  with it: cursors, selection, search highlights, the bracket matching the
+  with it: cursors, selection, the marked lines (`markedLines`, see Marked
+  lines), search highlights, the bracket matching the
   cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
   warnings and errors, line numbers, the link under the pointer with Cmd
   held (`link`, see Links), the long lines Qt doesn't draw (`longText`,
@@ -87,9 +88,9 @@ the scratchpad (see Scratchpad).
 - `qml/SortMenu.qml`: what `gs` and a key sort the listing by, in a box
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
-  undo, macros, visual block, multiple cursors, hidden text, the listing's
-  prefixes, `:` and its ranges, `/`, `:s`, buffers). It drives the `TextArea`
-  through `insert`/`remove`/`select`.
+  undo, macros, visual block, multiple cursors, marked lines, hidden text,
+  the listing's prefixes, `:` and its ranges, `/`, `:s`, buffers). It drives
+  the `TextArea` through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects,
   `:s`'s arguments and replacement), imported as `Txt` by Vim.qml and the
   views. The only state it keeps is
@@ -699,13 +700,15 @@ the scratchpad (see Scratchpad).
   (`shell::Kind`, by its name: cmd.exe, PowerShell, else sh), only if it
   must be, and escaped instead where the `%` is in quotes (`"%"` works);
   one starting with `-` gets `./`. With a range (`:.,+2!`, `:'<,'>!`), in
-  the listing it runs on the entries of its lines (blank lines left out),
-  which go after a command without `%` (`!git add`); in a file (or the
-  scratchpad) it's vim's filter: the lines go to its stdin, and its stdout
-  replaces them (`Vim.filterLines`, one undo step; no output deletes them;
-  a failure, or the text changed meanwhile, leaves them), without the
-  empty line after a file's last line break, which `:%!sort` would sort
-  first. `!` in the listing, the path field and the scratchpad is one of
+  the listing it runs on the entries of its lines (blank lines left out;
+  `listing::paths_on_lines` takes spans of lines, as `'<,'>` after marked
+  lines is only those: see Marked lines), which go after a command without
+  `%` (`!git add`); in a file (or the scratchpad) it's vim's filter: the
+  lines go to its stdin, and its stdout replaces them (`Vim.filterLines`,
+  one undo step; no output deletes them; a failure, or the text changed
+  meanwhile, leaves them; marked lines go to it together, and its output
+  goes where the first one was), without the empty line after a file's
+  last line break, which `:%!sort` would sort first. `!` in the listing, the path field and the scratchpad is one of
   `commandKeys` (`bangLines`), typing `:.!` (`3!`: `:.,.+2!`); in a file
   it's vim's operator, typing the range of the lines `!{motion}` covers,
   and in visual mode `:'<,'>!` (`:` types `'<,'>` too, leaving visual
@@ -1279,6 +1282,40 @@ the scratchpad (see Scratchpad).
   extra cursor's own `registers`. They're drawn like the main one (no cursor
   blinks), but only those in view
   (`visibleCursors`): drawing a block insert's 100,000 took minutes a key.
+- **Marked lines** (Marked lines in Vim.qml): `m` marks the cursor's line
+  (`3m` three; in visual mode, the selection's lines, back in normal
+  mode), or unmarks them if they're all marked (`toggleMarks`), so lines
+  far apart can be used together, as the cursor still moves as in normal
+  mode. `vim.marked` is their starts, sorted. While there are any, the
+  keys of `markedActions` act on them as on a `V` selection of them all
+  together (`executeMarked`; `parse`'s `marking` makes an operator act at
+  once, as in visual mode): `d` and `y` put them in one register, `c`, `p`
+  and `J` put what takes their place where the first one is, `>`, case
+  changes and `r` change each one where it is (`markedBlocks`, as one edit
+  through `replaceRanges`), `I`, `A` and `gI` type on each one (extra
+  cursors; they stay marked meanwhile: `markedInsert`), and `:` (and `!`,
+  Koil's in the listing too: `bangLines`) types `'<,'>`, which then stands
+  for them (`exRange` gives their `lines`: `:s` keeps to them through
+  `selectionRegion`, `:!` runs on their entries, `pathsOnLines` taking
+  spans of lines, and a filter takes them together). Other keys are normal
+  mode's (`u` undoes, `i` types at the cursor), and `.` repeating a change
+  isn't on them. A command (or `Esc`) unmarks them (`unmark`), and
+  `lastVisual` (mode `"marked"`) keeps them for `gv`: where they are after
+  the command if it kept them all (`>gv>`), else where they were, which `u`
+  brings back. Edits move them with their lines (`movedMarks`, in
+  `replaceRange` and `trackEdit`): an edit with as many line breaks as it
+  took away (`:s`, `>`) leaves each after the same one, else a line taken
+  away with a line break is unmarked, and one joined to the line before
+  goes with it. `replaceRanges` moves them edit by edit (`placingMarks`),
+  as one edit from its first to its last would take away the lines
+  between. Each buffer has its own (`leaveBuffer`), the listing's drawn
+  also while vim is in the path field. In the listing they follow the
+  entries' IDs when it's shown again (`listingSpot`'s `marks`, which
+  `showListing` gives `Vim.markTexts`): a sort or `:set hidden` moves
+  every line, and a file or the scratchpad shows something else in the
+  editor. They're drawn like a selection of lines in `theme.marked` (the
+  selection's color, paler: they aren't what the cursor selects), under
+  visual mode's selection, and from `visualShown` while `:` is typed.
 - **Hidden text**: an icon (any one character; in the listing, a file's
   icon, hiding its ID) can hide some text. The document holds the plain
   icon, and `vim.hidden` keeps the text as `{ at, icon, text }` entries

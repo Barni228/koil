@@ -149,7 +149,8 @@ QtObject {
             visual: "-- VISUAL --",
             visualLine: "-- VISUAL LINE --",
             visualBlock: "-- VISUAL BLOCK --"
-        })[mode] || "", cursors.length ? "MULTI CURSOR" : "", recording ? "recording @" + recording : ""]
+        })[mode] || "", marked.length ? marked.length + " MARKED" : "", cursors.length ? "MULTI CURSOR" : "",
+        recording ? "recording @" + recording : ""]
         .filter(s => s).join(" ")
 
     signal fontFamiliesNeeded
@@ -195,10 +196,16 @@ QtObject {
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
-        "<C-x>", "q", "@", "<C-v>", "<Esc>", "&", "g&", "gf", "gx"]
+        "<C-x>", "q", "@", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m"]
     readonly property var visualActions: ["<Esc>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D", "s",
         "C", "S", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>",
-        "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx"]
+        "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m"]
+    // While lines are marked, the keys that act on them, as they act on a
+    // linewise selection in visual mode (see Marked lines): an operator at
+    // once. The others are normal mode's, so u still undoes, and i and o
+    // type at the cursor.
+    readonly property var markedActions: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!", "x", "<Del>",
+        "X", "D", "s", "S", "C", "R", "Y", "~", "r", "J", "gJ", "p", "P", "I", "A", "gI", ":"]
     // Scroll the view sideways (see scrollSideways).
     readonly property var sideScrolls: ["zh", "zl", "zH", "zL", "zs", "ze"]
     // Normal-mode commands that run at every cursor (as do operators and
@@ -252,6 +259,17 @@ QtObject {
     // replaceRange). Replaced, never changed in place, so the view sees
     // every change.
     property var cursors: []
+    // The marked lines (m), as their starts, sorted: while there are any,
+    // the keys of markedActions act on them as on a linewise selection of
+    // them all together, and motions only move the cursor (see Marked
+    // lines). Edits move them with their lines (see movedMarks).
+    // Replaced, never changed in place, as `cursors` is.
+    property var marked: []
+    // While replaceRanges makes its edits as one, having moved the marked
+    // lines itself; and while I or A types on the marked lines, which stay
+    // marked until it ends (see endInsert).
+    property bool placingMarks: false
+    property bool markedInsert: false
     // While editAll runs: every cursor, the main one too, for edits to move
     // (none while editAtOnce runs, which places them itself).
     property var shifting: null
@@ -378,6 +396,8 @@ QtObject {
         trackedText = bufferText();
         insertSession = null;
         cursors = [];
+        marked = [];
+        markedInsert = false;
         blockHome = null;
         setMode("normal");
         setCursor(0);
@@ -655,17 +675,17 @@ QtObject {
     // Koil's path field and its listing. To switch, leaveBuffer the one it
     // edits, give vim the other one's `editor` and `flickable`, and
     // enterBuffer it. Registers, searches, macros, the command line and the
-    // options are shared; each buffer has its own cursor, undo history and
-    // hidden text, which leaveBuffer gives back.
+    // options are shared; each buffer has its own cursor, undo history,
+    // hidden text and marked lines, which leaveBuffer gives back.
 
     // Leaves the buffer vim edits in normal mode, and returns its state for
     // enterBuffer: { cursor, wantCol, undoStack, redoStack, hidden,
-    // lastVisual }.
+    // lastVisual, marked }.
     function leaveBuffer() {
         toNormal();
         commitChange(true); // even in a macro: the step is this buffer's
         return { cursor: cursor, wantCol: wantCol, undoStack: undoStack, redoStack: redoStack,
-            hidden: hidden, lastVisual: lastVisual };
+            hidden: hidden, lastVisual: lastVisual, marked: marked };
     }
 
     // Ends the mode vim is in (back to normal), the command line, a run and
@@ -710,6 +730,7 @@ QtObject {
         redoStack = s.redoStack || [];
         hidden = s.hidden || [];
         lastVisual = s.lastVisual || null;
+        marked = s.marked || [];
         trackedText = t;
         cursor = clampNormal(t, s.cursor || 0);
         setMode("normal");
@@ -1003,7 +1024,7 @@ QtObject {
             return;
         }
         keys.push(tok);
-        const r = parse(keys, isVisual);
+        const r = parse(keys, isVisual, !isVisual && marked.length > 0);
         if (r.status === "more") {
             pendingKeys = keys.join("");
             awaitingReplaceChar = tok === "r" && keys[keys.length - 2] !== "\"";
@@ -1023,8 +1044,10 @@ QtObject {
     // Parses a key sequence into a command:
     //   ["x] [count] operator [count] (motion | text object | operator again)
     //   ["x] [count] (motion | action)
+    // In visual mode, or while lines are marked (`marking`), an operator
+    // is an action of its own, on what's selected or marked.
     // Returns { status: "more" | "bad" | "ok", cmd }.
-    function parse(keys, visual) {
+    function parse(keys, visual, marking) {
         const more = { status: "more" }, bad = { status: "bad" };
         const cmd = { reg: null, count: 0 };
         let i = 0;
@@ -1062,7 +1085,7 @@ QtObject {
             return more;
 
         if (operators.includes(w.name)) {
-            if (visual) {
+            if (visual || marking) {
                 cmd.action = w.name;
                 return { status: "ok", cmd };
             }
@@ -1225,19 +1248,24 @@ QtObject {
             runKeys(macroKeys(cmd.shortcut.macro), Math.max(cmd.count, 1), cmd.shortcut.label);
             return;
         }
+        // On the marked lines, but not for "." repeating a change (made at
+        // the cursor: a marked line's isn't repeated).
+        const marking = !isVisual && !replaying && marked.length > 0 && markedActions.includes(cmd.action);
         // ". ": "/ and "% can only be pasted.
         if (readOnlyRegisters.includes(cmd.reg) && (cmd.op || writingActions.includes(cmd.action)
-                || isVisual && cmd.action === "R")) {
+                || (isVisual || marking) && cmd.action === "R")) {
             typeahead = [];
             return;
         }
-        const changing = isChange(cmd);
+        const changing = marking ? !["y", "Y", ":", "!"].includes(cmd.action) : isChange(cmd);
         if (changing) {
             beginChange();
-            if (!isVisual && !replaying)
+            if (!isVisual && !replaying && !marking)
                 dot = { cmd: Object.assign({}, cmd), insertKeys: [] };
         }
-        if (isVisual)
+        if (marking)
+            executeMarked(cmd);
+        else if (isVisual)
             executeVisual(cmd);
         else if (cmd.op && cursors.length && cmd.op !== "!")
             atEveryCursor(() => executeOperator(cmd));
@@ -1541,12 +1569,23 @@ QtObject {
             scrollSideways(cmd.action, count);
             break;
         case "<Esc>":
+            // The marked lines too, which gv marks again.
+            if (marked.length) {
+                lastVisual = markedVisual(marked);
+                setMarked([]);
+            }
             highlightPattern = "";
             cursors = [];
             highlightsCleared();
             break;
+        case "m":
+            if (!singleLine)
+                toggleMarks(lineStarts(t, p, count));
+            break;
         case "gv":
-            if (lastVisual) {
+            if (lastVisual && lastVisual.mode === "marked") {
+                setMarked(validStarts(t, lastVisual.marked));
+            } else if (lastVisual) {
                 anchor = Math.min(lastVisual.anchor, t.length);
                 setMode(lastVisual.mode);
                 setCursor(Math.min(lastVisual.cursor, t.length));
@@ -1599,6 +1638,15 @@ QtObject {
         if (a === "<Esc>" || visualModes[a] === mode) {
             setMode("normal");
             setCursor(clampNormal(t, cursor));
+            return;
+        }
+        // m marks its lines (see toggleMarks), leaving visual mode.
+        if (a === "m") {
+            const lo = Math.min(anchor, cursor), hi = Math.max(anchor, cursor);
+            setMode("normal");
+            setCursor(clampNormal(t, cursor));
+            if (!singleLine)
+                toggleMarks(lineStarts(t, lo, Txt.lineOf(t, hi) - Txt.lineOf(t, lo) + 1));
             return;
         }
         if (visualModes[a]) {
@@ -1812,6 +1860,12 @@ QtObject {
 
     function endInsert() {
         replaceStack = [];
+        // I or A on marked lines (see executeMarked) is done with them.
+        if (markedInsert) {
+            markedInsert = false;
+            if (marked.length)
+                unmark(marked);
+        }
         // Back to one cursor. After a block insert it goes back to where the
         // insert started (unless the cursors moved), otherwise it steps back
         // onto what was typed, as in vim.
@@ -1991,10 +2045,20 @@ QtObject {
             ends.push(first + length);
             at = e.end;
         }
+        // The marked lines move as they would edit by edit (from the last,
+        // so each goes by the text as it was before it), not as for one
+        // edit from the first to the last (see movedMarks).
+        let marks = marked;
+        for (let i = edits.length - 1; i >= 0 && marks.length; i--)
+            marks = movedMarks(marks, t, edits[i].start, edits[i].end, edits[i].text);
         // The editor's cursor moves to the end of the new text, and the view
         // follows it: keep the view where it was.
         const view = flickable && { x: flickable.contentX, y: flickable.contentY };
+        placingMarks = true;
         replaceRange(first, last, parts.join(""), entries);
+        placingMarks = false;
+        if (marks !== marked)
+            marked = marks;
         if (view) {
             flickable.contentX = view.x;
             flickable.contentY = view.y;
@@ -2480,6 +2544,367 @@ QtObject {
         }
     }
 
+    // ---- Marked lines ------------------------------------------------------
+    // m marks the cursor's line (3m: three lines from it; in visual mode,
+    // the selection's lines), or unmarks them if they're all marked. While
+    // lines are marked, the keys of markedActions act on them as they act
+    // on a linewise selection in visual mode, as if the lines were together
+    // (see executeMarked): d puts them all in its register, and c, p and J
+    // put what takes their place where the first one is. Motions only move
+    // the cursor, so lines far apart can be marked one by one. Using them,
+    // or Esc, unmarks them, and gv marks them again (lastVisual, whose mode
+    // is "marked").
+
+    // Whether the sorted `list` has v.
+    function has(list, v) {
+        const i = lastAtMost(list, v);
+        return i >= 0 && list[i] === v;
+    }
+
+    // Sets the marked lines (see `marked`).
+    function setMarked(list) {
+        marked = list;
+        if (list.length)
+            trackedText = bufferText();
+    }
+
+    // Marks the lines that start at `starts` (sorted), or unmarks them if
+    // they're all marked.
+    function toggleMarks(starts) {
+        if (starts.every(ls => has(marked, ls))) {
+            const gone = new Set(starts);
+            setMarked(marked.filter(ls => !gone.has(ls)));
+        } else {
+            setMarked(marked.concat(starts).sort((a, b) => a - b).filter((ls, i, all) => i === 0 || ls !== all[i - 1]));
+        }
+    }
+
+    // The starts of `count` lines of t from p's on, as far as there are.
+    function lineStarts(t, p, count) {
+        const starts = [];
+        let ls = Txt.lineStart(t, p);
+        for (let i = 0; i < count; i++) {
+            starts.push(ls);
+            const le = Txt.lineEnd(t, ls);
+            if (le >= t.length)
+                break;
+            ls = le + 1;
+        }
+        return starts;
+    }
+
+    // `starts` (sorted) as the starts of the lines of t they're on, once
+    // each: lastVisual's may be from before an edit.
+    function validStarts(t, starts) {
+        const r = [];
+        for (const p of starts) {
+            const ls = Txt.lineStart(t, Math.min(p, t.length));
+            if (!r.length || r[r.length - 1] !== ls)
+                r.push(ls);
+        }
+        return r;
+    }
+
+    // lastVisual for the marked lines `starts`: its anchor and cursor are
+    // the first and the last one, which '< and '> are (see exRange).
+    function markedVisual(starts) {
+        return { mode: "marked", marked: starts, anchor: starts[0], cursor: starts[starts.length - 1],
+            wantCol: wantCol };
+    }
+
+    // The marked lines (`starts`) as spans of those next to each other, {
+    // start, end }: from the first one's start to the last one's end
+    // (before its line break).
+    function markedBlocks(t, starts) {
+        const blocks = [];
+        for (const ls of starts) {
+            const le = Txt.lineEnd(t, ls), last = blocks[blocks.length - 1];
+            if (last && last.end + 1 === ls)
+                last.end = le;
+            else
+                blocks.push({ start: ls, end: le });
+        }
+        return blocks;
+    }
+
+    // The edits that take `blocks` (see markedBlocks) away, each with a
+    // line break: the one after it, or after the text's last line, the one
+    // before it.
+    function removals(t, blocks) {
+        return blocks.map(b => b.end < t.length ? { start: b.start, end: b.end + 1, text: "" }
+            : { start: Math.max(0, b.start - 1), end: b.end, text: "" });
+    }
+
+    // The lines of `blocks` together, as a linewise register holds them: {
+    // text, entries }, with their hidden text.
+    function linesText(t, blocks) {
+        let text = "";
+        const entries = [];
+        for (const b of blocks) {
+            for (const h of shifted(hiddenIn(hidden, b.start, b.end), text.length))
+                entries.push(h);
+            text += t.slice(b.start, b.end) + "\n";
+        }
+        return { text: text, entries: entries };
+    }
+
+    // : (and Koil's ! in the listing) while lines are marked: a command
+    // line for them, as : in visual mode, with the range '<,'>, which
+    // stands for them (see exRange), and a ! if `bang`. They stay drawn
+    // while it's typed (visualShown).
+    function commandOnMarked(bang) {
+        lastVisual = markedVisual(marked);
+        visualShown = lastVisual;
+        setMarked([]);
+        openCommandLine(":", "'<,'>" + (bang ? "!" : ""));
+    }
+
+    // Runs one of markedActions on the marked lines, which it unmarks (see
+    // unmark). The cursor stays on its character (on the line after its
+    // own, if that's deleted), but goes where c, I and A type, and where p
+    // and J put what takes the lines' place.
+    function executeMarked(cmd) {
+        const t = bufferText(), a = cmd.action, starts = marked;
+        if (a === ":" || a === "!") {
+            commandOnMarked(a === "!");
+            return;
+        }
+        const blocks = markedBlocks(t, starts), lines = linesText(t, blocks), n = starts.length;
+        switch (a) {
+        case "y":
+        case "Y":
+            setRegister(cmd.reg, lines.text, true, true, lines.entries);
+            if (n > 2)
+                showMessage(n + " lines yanked");
+            break;
+        case "d":
+        case "x":
+        case "<Del>":
+        case "X":
+        case "D": {
+            setRegister(cmd.reg, lines.text, true, false, lines.entries);
+            const edits = removals(t, blocks), gone = has(starts, Txt.lineStart(t, cursor));
+            const p = movedPast(cursor, edits);
+            replaceRanges(edits);
+            const u = bufferText();
+            setCursor(clampNormal(u, gone ? firstNonBlank(u, Math.min(p, u.length)) : p));
+            if (n > 2)
+                showMessage(n + " fewer lines");
+            break;
+        }
+        case "c":
+        case "s":
+        case "S":
+        case "C":
+        case "R": {
+            // As c on lines: the first one's prefix stays (its icon and
+            // all), and an empty line to type on.
+            setRegister(cmd.reg, lines.text, true, false, lines.entries);
+            const first = blocks[0], from = Math.min(prefixEnd(t, first.start), first.end);
+            replaceRanges([{ start: from, end: first.end, text: "" }].concat(removals(t, blocks.slice(1))));
+            startInsert(1, from, null);
+            insertSession.dot = null;
+            break;
+        }
+        case ">":
+        case "<":
+            editMarked(t, starts, blocks.map(b => {
+                const text = shiftedLines(t, b.start, b.end, a === ">" ? 1 : -1, Math.max(cmd.count, 1));
+                return { start: b.start, end: b.end, text: text, entries: carriedHidden(b.start, b.end, text) };
+            }), true);
+            break;
+        case "~":
+        case "g~":
+        case "gu":
+        case "gU":
+        case "g?":
+            editMarked(t, starts, blocks.map(b => {
+                const text = caseChanged(t.slice(b.start, b.end), a === "~" ? "~" : a[1]);
+                return { start: b.start, end: b.end, text: text, entries: carriedHidden(b.start, b.end, text) };
+            }), false);
+            break;
+        case "r":
+            // Line breaks and prefixes stay as they are.
+            if (cmd.ch !== "\n") {
+                editMarked(t, starts, blocks.map(b => {
+                    let s = "";
+                    for (let q = b.start; q < b.end; q = Txt.charEnd(t, q))
+                        s += t[q] === "\n" || inPrefix(t, q) ? t.slice(q, Txt.charEnd(t, q)) : cmd.ch;
+                    return { start: b.start, end: b.end, text: s, entries: carriedHidden(b.start, b.end, s) };
+                }), false);
+            }
+            break;
+        case "J":
+        case "gJ":
+            // One line joins the next, as J on one line selected does.
+            if (n === 1) {
+                setCursor(clampNormal(t, starts[0]));
+                joinLines(2, a === "J");
+            } else {
+                joinMarked(t, starts, a === "J");
+            }
+            break;
+        case "p":
+        case "P": {
+            // The register goes where the first block is, the others go,
+            // and p puts them in the register.
+            const r = registerToPaste(cmd.reg);
+            if (!r)
+                break;
+            const first = blocks[0], end = Math.min(first.end + 1, t.length);
+            let text = r.linewise ? r.text : r.text + "\n";
+            if (end === first.end && text.endsWith("\n"))
+                text = text.slice(0, -1); // the text's last line: none after it
+            const x = prefixLines(first.start, end, text, r.hidden);
+            replaceRanges([{ start: first.start, end: end, text: x.text, entries: x.entries }]
+                .concat(removals(t, blocks.slice(1))));
+            if (a === "p")
+                setRegister(null, lines.text, true, false, lines.entries);
+            const u = bufferText();
+            setCursor(clampNormal(u, r.linewise ? firstNonBlank(u, first.start)
+                : Txt.charStart(u, Math.max(first.start, first.start + x.text.length - 1))));
+            break;
+        }
+        case "I":
+        case "A":
+        case "gI": {
+            // A cursor on each line, at its first non-blank, its end, or
+            // its start (after its prefix), the first one the main one.
+            const at = starts.map(ls => a === "A" ? Txt.lineEnd(t, ls) : a === "I" ? firstNonBlank(t, ls)
+                : prefixEnd(t, ls));
+            // Before the insert, which may put a prefix on the first line
+            // (an empty one in the listing), moving them.
+            setCursors(at.slice(1).map(p => ({ pos: p })), at[0]);
+            startInsert(1, at[0], null);
+            insertSession.dot = null;
+            // They stay marked while it types on them.
+            markedInsert = true;
+            return;
+        }
+        }
+        unmark(starts);
+    }
+
+    // Unmarks the lines a command used, which were marked at `starts`
+    // before it: gv marks them again where they are after it, if they're
+    // all still there, else where they were, which u brings them back to.
+    function unmark(starts) {
+        lastVisual = markedVisual(marked.length === starts.length ? marked : starts);
+        setMarked([]);
+    }
+
+    // Makes `edits` of the marked lines (`starts`) that leave them where
+    // they are (a case change): the cursor stays on its character, or with
+    // `toFirst` (> and <, which move it), goes to its line's first
+    // non-blank if its line is marked.
+    function editMarked(t, starts, edits, toFirst) {
+        const line = Txt.lineOf(t, cursor), p = movedPast(cursor, edits);
+        replaceRanges(edits);
+        const u = bufferText();
+        setCursor(clampNormal(u, toFirst && has(starts, Txt.lineStart(t, cursor))
+            ? firstNonBlank(u, Txt.lineToPos(u, line)) : p));
+    }
+
+    // J and gJ on two or more marked lines (`starts`): the others are
+    // joined to the first one, in order, as J joins lines (see joinLines),
+    // and go. The cursor goes where the last one was joined.
+    function joinMarked(t, starts, spaces) {
+        const le = Txt.lineEnd(t, starts[0]), entries = [];
+        // The line joined so far: whether there's more than its prefix,
+        // and its last character.
+        let filled = le > prefixEnd(t, starts[0]), last = t[le - 1], tail = "", joined = 0;
+        for (const ls of starts.slice(1)) {
+            const end = Txt.lineEnd(t, ls);
+            // Not its prefix, which goes with it.
+            let s = prefixEnd(t, ls), sep = "";
+            if (spaces) {
+                while (s < end && (t[s] === " " || t[s] === "\t"))
+                    s++;
+                if (filled && s < end && t[s] !== ")" && last !== " " && last !== "\t")
+                    sep = " ";
+            }
+            joined = tail.length;
+            tail += sep;
+            for (const h of shifted(hiddenIn(hidden, s, end), tail.length))
+                entries.push(h);
+            tail += t.slice(s, end);
+            if (end > s) {
+                filled = true;
+                last = t[end - 1];
+            } else if (sep) {
+                filled = true;
+                last = sep;
+            }
+        }
+        replaceRanges([{ start: le, end: le, text: tail, entries: entries }]
+            .concat(removals(t, markedBlocks(t, starts.slice(1)))));
+        setCursor(clampNormal(bufferText(), le + joined));
+    }
+
+    // The marked lines `list` after an edit of t that put `text` in place
+    // of [start, end), as their lines move (`list` itself if none moves).
+    // An edit with as many line breaks as it takes away (a change within
+    // lines, like :s or >) leaves each line where it starts after the same
+    // one. Otherwise, a line it takes away (all of it, and the line break
+    // after it, or before the text's last line) is unmarked, and one whose
+    // start it takes, but not all of it, is where the rest of it is, which
+    // may be joined to the line before. Only the line it ends in can be
+    // that, so lines that start in it can only go there.
+    function movedMarks(list, t, start, end, text) {
+        const d = text.length - (end - start);
+        const i = lastAtMost(list, start - 1) + 1, j = lastAtMost(list, end) + 1;
+        if (i === j && (d === 0 || j === list.length))
+            return list;
+        const kept = list.slice(0, i), keep = q => {
+            if (!kept.length || kept[kept.length - 1] !== q)
+                kept.push(q);
+        };
+        if (i < j) {
+            const was = Txt.lineBreaks(t, start, end), now = Txt.lineBreaks(text, 0, text.length);
+            for (let k = i; k < j; k++) {
+                const ls = list[k];
+                if (was.length === now.length) {
+                    // After its line break, the n-th the edit takes away.
+                    const n = ls > start ? lastAtMost(was, ls - 1) : -1;
+                    keep(n < 0 ? start : start + now[n] + 1);
+                    continue;
+                }
+                const le = Txt.lineEnd(t, ls);
+                if (end >= le && (le < t.length ? end > le : start < ls))
+                    continue;
+                // What's left of it starts where the edit's text ends.
+                const before = text.length ? text[text.length - 1] : start > 0 ? t[start - 1] : "\n";
+                keep(before === "\n" ? start + text.length : now.length ? start + now[now.length - 1] + 1
+                    : Txt.lineStart(t, start));
+            }
+        }
+        for (let k = j; k < list.length; k++)
+            kept.push(list[k] + d);
+        return kept;
+    }
+
+    // The texts hidden by the icons the marked lines start with (in Koil's
+    // listing, their entries' IDs), for markTexts: this buffer's, or the
+    // one's whose state is `state` (see leaveBuffer).
+    function markedTexts(state) {
+        const list = state ? state.hidden || [] : hidden, texts = [];
+        for (const ls of state ? state.marked || [] : marked) {
+            const i = firstAt(list, ls);
+            if (i < list.length && list[i].at === ls)
+                texts.push(list[i].text);
+        }
+        return texts;
+    }
+
+    // Marks the lines that start with an icon that hides one of `texts`,
+    // and only those: Koil's listing shown again marks the entries that
+    // were marked, wherever they are now (see markedTexts).
+    function markTexts(texts) {
+        const want = new Set(texts), t = bufferText();
+        setMarked(texts.length ? hidden.filter(h => want.has(h.text) && (h.at === 0 || t[h.at - 1] === "\n"))
+            .map(h => h.at) : []);
+    }
+
     // ---- Macros ------------------------------------------------------------
     // A register holds a macro as text, with keys like Esc written "<Esc>".
     // A recorded one also keeps its keys, so typed text like "<CR>" stays text.
@@ -2885,7 +3310,7 @@ QtObject {
         b.cursor = cursor;
         b.anchor = anchor;
         b.mode = mode;
-        if (hidden.length || cursors.length)
+        if (tracking())
             trackedText = b.text;
         batch = b;
     }
@@ -2919,7 +3344,7 @@ QtObject {
         // A space is as long as a line break, so positions stay right.
         if (singleLine)
             text = text.replace(new RegExp("[\\r\\n\\u2028\\u2029]", "g"), " ");
-        const length = bufferText().length;
+        const old = bufferText(), length = old.length;
         for (const same of [batch && batch.same, change && change.same]) {
             if (same) {
                 same.prefix = Math.min(same.prefix, start);
@@ -2942,8 +3367,19 @@ QtObject {
         if (hidden.length || entries && entries.length)
             shiftHidden(start, end, text.length, entries || []);
         shiftCursors(start, end, text.length);
-        if (!batch && (hidden.length || cursors.length))
+        if (marked.length && !placingMarks) {
+            const m = movedMarks(marked, old, start, end, text);
+            if (m !== marked)
+                marked = m;
+        }
+        if (!batch && tracking())
             trackedText = editorText();
+    }
+
+    // Whether the editor's own edits must be followed (see trackEdit): they
+    // move the hidden text, the extra cursors and the marked lines.
+    function tracking() {
+        return hidden.length > 0 || cursors.length > 0 || marked.length > 0;
     }
 
     function setMode(m) {
@@ -3398,7 +3834,7 @@ QtObject {
 
     // Edits made by the editor itself, rather than through replaceRange.
     function trackEdit() {
-        if (editing || !hidden.length && !cursors.length)
+        if (editing || !tracking())
             return;
         const before = trackedText, after = editor.text;
         if (after.length === before.length && after === before)
@@ -3409,6 +3845,11 @@ QtObject {
             if (hidden.length)
                 shiftHidden(d.start, d.end1, d.end2 - d.start, []);
             shiftCursors(d.start, d.end1, d.end2 - d.start);
+            if (marked.length) {
+                const m = movedMarks(marked, before, d.start, d.end1, after.slice(d.start, d.end2));
+                if (m !== marked)
+                    marked = m;
+            }
         }
     }
 
@@ -3529,8 +3970,11 @@ QtObject {
                 redoStack = movedSteps(redoStack, edits, false);
             }
             if (lastVisual) {
-                lastVisual = { mode: lastVisual.mode, anchor: movedPast(lastVisual.anchor, edits),
-                    cursor: movedPast(lastVisual.cursor, edits), wantCol: lastVisual.wantCol };
+                const v = lastVisual;
+                lastVisual = { mode: v.mode, anchor: movedPast(v.anchor, edits), cursor: movedPast(v.cursor, edits),
+                    wantCol: v.wantCol };
+                if (v.marked)
+                    lastVisual.marked = v.marked.map(p => movedPast(p, edits));
                 if (visualShown) // there's no preview while the listing syncs
                     visualShown = lastVisual;
             }
@@ -3905,8 +4349,16 @@ QtObject {
         const t = bufferText();
         const s = Txt.lineStart(t, range.start);
         const e = Txt.lineEnd(t, Math.max(range.start, range.end - 1));
+        const text = shiftedLines(t, s, e, dir, times);
+        replaceRange(s, e, text, carriedHidden(s, e, text));
+        setCursor(clampNormal(bufferText(), firstNonBlank(bufferText(), s)));
+    }
+
+    // The lines of t from s (a line's start) to e (a line's end) indented
+    // `times` times more (dir 1) or less (-1), after their prefixes.
+    function shiftedLines(t, s, e, dir, times) {
         let ls = s;
-        const lines = t.slice(s, e).split("\n").map(whole => {
+        return t.slice(s, e).split("\n").map(whole => {
             // After the prefix, which stays first.
             const head = whole.slice(0, prefixEnd(t, ls) - ls), line = whole.slice(head.length);
             ls += whole.length + 1;
@@ -3918,10 +4370,7 @@ QtObject {
                 k++;
             }
             return head + line.slice(k);
-        });
-        const text = lines.join("\n");
-        replaceRange(s, e, text, carriedHidden(s, e, text));
-        setCursor(clampNormal(bufferText(), firstNonBlank(bufferText(), s)));
+        }).join("\n");
     }
 
     // how: "~" toggles the case, "u" lowers it, "U" raises it, and "?" (g?)
@@ -4028,7 +4477,8 @@ QtObject {
     // line. An address is a line number, . (the cursor's), $ (the last), or
     // '< or '> (the first or last of the last visual selection), with +N
     // or -N after it (+ is +1), or those alone, from the cursor's line. A
-    // range backwards is turned round.
+    // range backwards is turned round. '<,'> after lines were marked is
+    // those lines, which `lines` has too (from 1, in order).
     function exRange(c) {
         const t = bufferText(), here = Txt.lineOf(t, cursor);
         if (c[0] === "%")
@@ -4067,6 +4517,10 @@ QtObject {
         if (error)
             return { error: error };
         const a = first === null ? here : first, b = second === null ? here : second;
+        if (lastVisual && lastVisual.mode === "marked" && /^\s*'<\s*,\s*'>\s*$/.test(c.slice(0, i))) {
+            const lines = validStarts(t, lastVisual.marked).map(p => Txt.lineOf(t, p));
+            return { first: lines[0], last: lines[lines.length - 1], lines: lines, rest: c.slice(i) };
+        }
         return { first: Math.min(a, b), last: Math.max(a, b), rest: c.slice(i) };
     }
 
@@ -4099,22 +4553,32 @@ QtObject {
 
     // Puts `text` in place of lines first to last (from 1), as a change of
     // its own: a filter's output (see shellRequested). Without text, the
-    // lines go, as with dd. The cursor goes to the first of them.
-    function filterLines(first, last, text) {
+    // lines go, as with dd. The cursor goes to the first of them. With
+    // `lines` (from 1, in order: marked ones), only those, as if they were
+    // together: the text goes where the first one is, and the others go.
+    function filterLines(first, last, text, lines) {
         batched(() => {
             beginChange();
             const t = bufferText();
-            let s = Txt.lineToPos(t, first), e = Txt.lineEnd(t, Txt.lineToPos(t, last));
-            if (text === "" && e < t.length)
-                e++;
-            else if (text === "" && s > 0)
-                s--;
-            replaceRange(s, e, text);
+            let s = Txt.lineToPos(t, first);
+            if (lines) {
+                const starts = lines.map(l => Txt.lineToPos(t, l));
+                const gone = removals(t, markedBlocks(t, text === "" ? starts : starts.slice(1)));
+                replaceRanges(text === "" ? gone : [{ start: s, end: Txt.lineEnd(t, s), text: text }].concat(gone));
+            } else {
+                let e = Txt.lineEnd(t, Txt.lineToPos(t, last));
+                if (text === "" && e < t.length)
+                    e++;
+                else if (text === "" && s > 0)
+                    s--;
+                replaceRange(s, e, text);
+            }
             const u = bufferText();
             setCursor(clampNormal(u, firstNonBlank(u, Math.min(s, u.length))));
             commitChange(); // during a run, with it (see commitChange)
-            if (last > first + 1)
-                showMessage((last - first + 1) + " lines filtered");
+            const n = lines ? lines.length : last - first + 1;
+            if (n > 2)
+                showMessage(n + " lines filtered");
         });
     }
 
@@ -4190,12 +4654,15 @@ QtObject {
     }
 
     // The last visual selection as the spans :'<,'>s keeps to, in order and
-    // apart: its characters, or its block's part of each line. Null for
-    // lines, which its range is.
+    // apart: its characters, its block's part of each line, or the marked
+    // lines (those next to each other together). Null for lines, which its
+    // range is.
     function selectionRegion(t) {
         const v = lastVisual;
         if (!v || v.mode === "visualLine")
             return null;
+        if (v.mode === "marked")
+            return markedBlocks(t, validStarts(t, v.marked));
         if (v.mode === "visualBlock") {
             return blockShape(t, undefined, undefined, v).lines.filter(l => l.end > l.start)
                 .map(l => ({ start: l.start, end: l.end }));
@@ -4364,6 +4831,7 @@ QtObject {
                     replaceRange(d.start, d.end1, before.text.slice(d.start, d.end2));
                 hidden = before.hidden;
                 cursors = before.cursors;
+                marked = before.marked;
                 setCursor(before.cursor);
                 if (visualShown)
                     visualShown = lastVisual;
@@ -4398,7 +4866,7 @@ QtObject {
         const target = next < 0 ? 0 : next;
         if (s.replacement === null || s.flags.includes("n"))
             return { spans: found.map(f => ({ start: f.start, end: f.end })), target: target, before: null };
-        const before = { text: t, hidden: hidden, cursors: cursors, cursor: cursor };
+        const before = { text: t, hidden: hidden, cursors: cursors, cursor: cursor, marked: marked };
         const near = previewWindow(t, found, target), replaced = found.slice(near.from, near.to);
         const done = substituted(t, replaced, s.replacement);
         const shift = done.text.length - (done.end - done.start);
@@ -4412,6 +4880,8 @@ QtObject {
             const v = lastVisual, forward = v.anchor <= v.cursor;
             visualShown = { mode: v.mode, anchor: at(v.anchor, !forward), cursor: at(v.cursor, forward),
                 wantCol: v.wantCol };
+            if (v.marked)
+                visualShown.marked = validStarts(u, v.marked.map(p => at(p, false)));
         }
         const spans = found.slice(0, near.from).map(f => ({ start: f.start, end: f.end })).concat(done.spans,
             found.slice(near.to).map(f => ({ start: f.start + shift, end: f.end + shift })));

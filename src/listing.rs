@@ -1162,22 +1162,26 @@ pub fn path_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> 
     on_disk(koil, &parsed.entries[i])
 }
 
-/// Where the entries on lines `first` to `last` are on disk, as
-/// [`path_on_line`] finds each, leaving out lines without one, for a shell
-/// command run on them; or else why it can't be: one of them is new, or
-/// there are none.
+/// Where the entries on `lines` are on disk, as [`path_on_line`] finds
+/// each, leaving out lines without one, for a shell command run on them; or
+/// else why it can't be: one of them is new, or there are none. `lines` are
+/// spans of lines, `(first, last)`, in order and apart: a range's, or the
+/// marked lines (see Marked lines in Vim.qml).
 pub fn paths_on_lines(
     koil: &Koil,
     text: &str,
     hidden: &[Hidden],
-    first: usize,
-    last: usize,
+    lines: &[(usize, usize)],
 ) -> Result<Vec<PathBuf>, String> {
     let parsed = parse(text, hidden);
+    let on = |line| {
+        let i = lines.partition_point(|&(_, last)| last < line);
+        lines.get(i).is_some_and(|&(first, _)| first <= line)
+    };
     let mut paths = Vec::new();
     for (&(line, _), entry) in parsed.spots.iter().zip(&parsed.entries) {
         match on_disk(koil, entry) {
-            _ if line < first || line > last => {}
+            _ if !on(line) => {}
             Some(OnDisk::Path(path)) => paths.push(path),
             Some(OnDisk::New(name)) => {
                 return Err(format!(
@@ -1187,10 +1191,10 @@ pub fn paths_on_lines(
             None => {}
         }
     }
-    match (paths.is_empty(), first == last) {
+    match (paths.is_empty(), lines) {
         (false, _) => Ok(paths),
-        (true, true) => Err("No entry on this line".to_string()),
-        (true, false) => Err("No entries on these lines".to_string()),
+        (true, [(first, last)]) if first == last => Err("No entry on this line".to_string()),
+        (true, _) => Err("No entries on these lines".to_string()),
     }
 }
 

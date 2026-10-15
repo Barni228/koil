@@ -49,6 +49,9 @@ QtObject {
     }
 
     readonly property bool dark: base.hslLightness < 0.5
+    // Behind the marked lines (see Vim's `marked`): the selection's color,
+    // paler, as they're like a selection, but not what the cursor selects.
+    readonly property color marked: Qt.rgba(highlight.r, highlight.g, highlight.b, 0.6)
     // Behind a hovered button, and a checked one.
     readonly property color hover: dark ? "#26ffffff" : "#1a000000"
     readonly property color checked: Qt.rgba(accent.r, accent.g, accent.b, 0.25)
