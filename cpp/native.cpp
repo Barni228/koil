@@ -2,6 +2,7 @@
 #include "koil/src/ffi.cxx.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 #include <QtCore/QCoreApplication>
@@ -670,11 +671,16 @@ public:
         break; // the first line after the edits
     }
     if (!block.isValid()) {
+      // Qt adds a line's bottom margin only before the next line it lays
+      // out, so the end's has it too, else a long last line ended past the
+      // text, and the view didn't scroll to it. In whole pixels, as Qt
+      // rounds a frame's margins: up, so the text reaches the grid's end.
+      const double bottom = rows ? std::ceil((after ? bottomMargin : 0) + rows * lineHeight) : 0;
       auto* root = doc->rootFrame();
       QTextFrameFormat format = root->frameFormat();
-      if (format.bottomMargin() != rows * lineHeight) {
+      if (format.bottomMargin() != bottom) {
         change();
-        format.setBottomMargin(rows * lineHeight);
+        format.setBottomMargin(bottom);
         root->setFrameFormat(format);
       }
     }

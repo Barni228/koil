@@ -1538,7 +1538,11 @@ the scratchpad (see Scratchpad).
   out or draws it, and the line after hidden ones gets a top margin as tall
   as their rows (the text's end, a bottom margin of the root frame), so the
   lines Qt lays out stay on the grid (`placeLongLines`, after each change,
-  around it). Koil places a hidden line's characters, a column a UTF-16
+  around it). Each has the bottom margin of the line Qt laid out before
+  them too, which Qt adds only before a next line it lays out: without it
+  at the text's end, a long last line ended past the text, and Qt's guard
+  in `ensureCursorVisible` (as far as the content goes) didn't scroll to
+  it. Koil places a hidden line's characters, a column a UTF-16
   unit, `rowLength` a row while lines wrap (anywhere): `longLineSpot` and
   `longLinePosition`, which the TextArea's `rectAt` and `posAt` give in
   place of `positionToRectangle` and `positionAt` (vim's and the overlays'
