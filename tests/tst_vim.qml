@@ -419,6 +419,42 @@ TestCase {
         compare(Txt.lineOf(t, 8), 2); // the first text again
     }
 
+    // The line starts of a long text carried past an edit (Txt.carryLines)
+    // are those going through the edited text finds, however far they
+    // were found before it.
+    function test_carryLines() {
+        const plainStarts = t => {
+            const r = [0];
+            for (let i = t.indexOf("\n"); i >= 0; i = t.indexOf("\n", i + 1))
+                r.push(i + 1);
+            return r;
+        };
+        let t = "";
+        for (let i = 0; i < 3000; i++)
+            t += "line " + i + "\n";
+        // [start, end, text]: [100, 200) is lines 15 to 30.
+        const edits = [[5, 5, "x"], [100, 200, ""], [100, 200, "a\nb\n"], [8000, 8010, "\n\n"], [t.length - 3, t.length, "z"], [0, t.length, "short"]];
+        let k = 0;
+        for (const [start, end, text] of edits) {
+            for (const found of [1, 30, 2000, Infinity]) {
+                // A text of its own, which no other lookup found lines in.
+                const before = t + "#" + k++;
+                if (found === Infinity)
+                    Txt.countLines(before);
+                else
+                    Txt.lineToPos(before, found);
+                const after = before.slice(0, start) + text + before.slice(end);
+                Txt.carryLines(before, after, start, end, text);
+                const plain = plainStarts(after), got = [];
+                for (let n = 1; n <= plain.length; n++)
+                    got.push(Txt.lineToPos(after, n));
+                const what = JSON.stringify([start, end, text, found]);
+                compare(JSON.stringify(got), JSON.stringify(plain), what);
+                compare(Txt.countLines(after), plain.length, what);
+            }
+        }
+    }
+
     // As in vim, u undoes a whole run, which is one change.
     function test_macroUndo() {
         load("1\n1\n1\n1");

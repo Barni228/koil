@@ -142,6 +142,30 @@ pub mod qobject {
         #[qinvokable]
         unsafe fn redraw_text(self: &System, text_edit: *mut QObject);
 
+        /// Replaces [start, end) of a TextEdit's text with `text`, as its
+        /// remove and insert would, but as one edit (see native.h).
+        #[qinvokable]
+        unsafe fn replace_text(
+            self: &System,
+            text_edit: *mut QObject,
+            start: i32,
+            end: i32,
+            text: &QString,
+        );
+
+        /// Whether `a` and `b` are the same string, not only the same text:
+        /// the same QString's, as QML gives a string it keeps. In O(1),
+        /// where QML's `===` hashes all of two strings that are long (a
+        /// second for a gigabyte), unless they're the same one.
+        #[qinvokable]
+        fn same_string(self: &System, a: &QString, b: &QString) -> bool;
+
+        /// Whether `a` and `b` are the same text, going through them only
+        /// as far as they're the same, rather than hashing both, as QML's
+        /// `===` does.
+        #[qinvokable]
+        fn same_text(self: &System, a: &QString, b: &QString) -> bool;
+
         /// Hides the lines of a TextEdit's `textDocument` longer than
         /// `long_length` from Qt, as they're edited, which Koil places and
         /// draws itself (see native.h).
@@ -204,9 +228,21 @@ pub mod qobject {
 
         /// What changed in the text of `textDocument` since this was last
         /// called, as from, removed and text: the text from `from`,
-        /// `removed` long, became `text`. Empty if nothing did.
+        /// `removed` long, became `text`. Empty if nothing did, or if not
+        /// `with_text` (a change whose text is known).
         #[qinvokable]
-        unsafe fn take_text_change(self: &System, text_document: *mut QObject) -> QStringList;
+        unsafe fn take_text_change(
+            self: &System,
+            text_document: *mut QObject,
+            with_text: bool,
+        ) -> QStringList;
+
+        /// Whether a TextEdit's text is `text` as it is once it's put in:
+        /// Qt makes a `\r` a line break, and its text gives a no-break
+        /// space as a space, and the separators it keeps as `\n`s (see
+        /// takeTextChange in native.h).
+        #[qinvokable]
+        fn kept_as_is(self: &System, text: &QString) -> bool;
 
         /// Has a TextEdit build all its lines in view again, after its
         /// selection changed in a text with long lines (see native.h).
@@ -447,6 +483,28 @@ impl qobject::System {
 
     /// # Safety
     ///
+    /// `text_edit` must be null or point to a live QObject.
+    unsafe fn replace_text(
+        &self,
+        text_edit: *mut qobject::QObject,
+        start: i32,
+        end: i32,
+        text: &QString,
+    ) {
+        unsafe { ffi::replace_text(text_edit.cast(), start, end, text) };
+    }
+
+    fn same_string(&self, a: &QString, b: &QString) -> bool {
+        let (a, b) = (a.as_slice(), b.as_slice());
+        a.len() == b.len() && a.as_ptr() == b.as_ptr()
+    }
+
+    fn same_text(&self, a: &QString, b: &QString) -> bool {
+        self.same_string(a, b) || a.as_slice() == b.as_slice()
+    }
+
+    /// # Safety
+    ///
     /// `text_document` must be null or point to a live QObject.
     unsafe fn watch_long_lines(&self, text_document: *mut qobject::QObject, long_length: i32) {
         unsafe { ffi::watch_long_lines(text_document.cast(), long_length) };
@@ -529,8 +587,29 @@ impl qobject::System {
     /// # Safety
     ///
     /// `text_document` must be null or point to a live QObject.
-    unsafe fn take_text_change(&self, text_document: *mut qobject::QObject) -> QStringList {
-        unsafe { ffi::take_text_change(text_document.cast()) }
+    unsafe fn take_text_change(
+        &self,
+        text_document: *mut qobject::QObject,
+        with_text: bool,
+    ) -> QStringList {
+        unsafe { ffi::take_text_change(text_document.cast(), with_text) }
+    }
+
+    fn kept_as_is(&self, text: &QString) -> bool {
+        // \r, a no-break space, the line and paragraph separators (U+2028
+        // and U+2029) and the frame's start and end (U+FDD0 and U+FDD1). A
+        // chunk at a time, each gone through whole, which the compiler does
+        // many characters at once: a character at a time, a gigabyte took a
+        // second.
+        !text.as_slice().chunks(1 << 16).any(|chunk| {
+            chunk.iter().fold(0u16, |found, &c| {
+                found
+                    | u16::from(c == 0x0d)
+                    | u16::from(c == 0xa0)
+                    | u16::from((c | 1) == 0x2029)
+                    | u16::from((c | 1) == 0xfdd1)
+            }) != 0
+        })
     }
 
     /// # Safety

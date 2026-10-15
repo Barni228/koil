@@ -3257,7 +3257,9 @@ QtObject {
     // what had been below). If none of them changed, the view stays where
     // it is, even if the mouse scrolled the cursor out of it.
     function flush() {
-        const b = batch, old = editorText(), edited = b.text.length !== old.length || b.text !== old;
+        // Compared only where vim edited it (see unchanged): `!==` hashes
+        // all of two texts that aren't the same string.
+        const b = batch, old = editorText(), d = diff(old, b.text, [], [], b.same), edited = !!d;
         if (!edited && b.cursor === cursor && b.anchor === anchor && b.mode === mode)
             return;
         batch = null;
@@ -3272,7 +3274,7 @@ QtObject {
         };
         syncing = true;
         if (edited) {
-            const d = diff(old, b.text, [], [], b.same), inserted = b.text.slice(d.start, d.end2);
+            const inserted = b.text.slice(d.start, d.end2);
             // The editor's text will be vim's, unless Qt changes what goes
             // in (a line break other than \n, a no-break space: see
             // takeTextChange in native.h), so it can take vim's string
@@ -3282,10 +3284,7 @@ QtObject {
             if (latest && !/[\r\u00a0\u2028\u2029\ufdd0\ufdd1]/.test(inserted))
                 latest.expected = b.text;
             editing = true;
-            if (d.end1 > d.start)
-                editor.remove(d.start, d.end1);
-            if (inserted)
-                editor.insert(d.start, inserted);
+            replaceInEditor(d.start, d.end1, inserted);
             editing = false;
             if (editor.latest)
                 editor.latest.expected = null;
@@ -3354,13 +3353,11 @@ QtObject {
         if (batch) {
             const t = batch.text;
             batch.text = t.slice(0, start) + text + t.slice(end);
+            Txt.carryLines(t, batch.text, start, end, text);
         } else {
             syncing = true;
             editing = true;
-            if (end > start)
-                editor.remove(start, end);
-            if (text.length)
-                editor.insert(start, text);
+            replaceInEditor(start, end, text);
             editing = false;
             syncing = false;
         }
@@ -3374,6 +3371,21 @@ QtObject {
         }
         if (!batch && tracking())
             trackedText = editorText();
+    }
+
+    // Replaces [start, end) of the editor's text with `text`: as one edit
+    // if the editor can (Editor.qml's), else as its remove and its insert,
+    // two changes, between which QML has the text made again (all of a
+    // long one).
+    function replaceInEditor(start, end, text) {
+        if (editor.replace) {
+            editor.replace(start, end, text);
+            return;
+        }
+        if (end > start)
+            editor.remove(start, end);
+        if (text)
+            editor.insert(start, text);
     }
 
     // Whether the editor's own edits must be followed (see trackEdit): they

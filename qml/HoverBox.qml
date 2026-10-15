@@ -89,7 +89,7 @@ Item {
     function targetUnder(p) {
         if (!p)
             return null;
-        const t = textArea.text, pos = editor.positionAt(p.x, p.y);
+        const t = editor.textArea.latest.text, pos = editor.positionAt(p.x, p.y);
         // positionAt gives the nearest gap, which is after the character on its right half.
         for (const c of [pos, pos > 0 ? Txt.charStart(t, pos - 1) : -1]) {
             const target = c >= 0 ? targetAt(c) : null;

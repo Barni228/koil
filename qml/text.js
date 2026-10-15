@@ -17,17 +17,62 @@
 const indexedLength = 10000;
 let lineIndexes = [];
 
+// Whether a and b are the same string, not only the same text: Koil's
+// System.sameString, given by compareStringsWith, as V4's `===` hashes all
+// of two strings unless they're the same one (a second for a gigabyte,
+// many times a key). Without Koil (the tests), `===`.
+let sameString = (a, b) => a === b;
+
+function compareStringsWith(f) {
+    sameString = f;
+}
+
 function lineIndex(t) {
     const fresh = { text: t, starts: [0], done: false };
     if (t.length < indexedLength)
         return fresh;
-    // The lengths first: V4 compares two strings by hashing all of both
-    // (and then going through both), unless they're the same one, which
-    // `t` is from then on.
-    const x = lineIndexes.find(x => x.text.length === t.length && x.text === t) || fresh;
+    // The same string, not only the same text, which is looked through
+    // again (comparing them took longer).
+    const x = lineIndexes.find(x => x.text.length === t.length && sameString(x.text, t)) || fresh;
     x.text = t;
     lineIndexes = [x].concat(lineIndexes.filter(y => y !== x)).slice(0, 2);
     return x;
+}
+
+// `after` is `before` with [start, end) replaced by `text`: the line starts
+// found in `before` go to `after`, moved past the edit, so a long text
+// isn't looked through again after each edit (a gigabyte took a second).
+function carryLines(before, after, start, end, text) {
+    if (after.length < indexedLength)
+        return;
+    const x = lineIndexes.find(x => x.text.length === before.length && sameString(x.text, before));
+    if (!x)
+        return;
+    const s = x.starts, d = text.length - (end - start);
+    // Only as far as they were found, from where findLines goes on, so
+    // none of the edit's if they weren't found as far as its start.
+    if (!x.done && s[s.length - 1] <= start) {
+        lineIndexes = [{ text: after, starts: s.slice(), done: false }, x];
+        return;
+    }
+    // Those at the edit's start or before it stay, those past its end move,
+    // and the line breaks it puts in start lines of their own.
+    let lo = 0, hi = s.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (s[mid] <= start)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    const starts = s.slice(0, lo);
+    for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1))
+        starts.push(start + i + 1);
+    let k = lo;
+    while (k < s.length && s[k] <= end)
+        k++;
+    const moved = s.slice(k).map(p => p + d);
+    lineIndexes = [{ text: after, starts: starts.concat(moved), done: x.done }, x];
 }
 
 // Finds line starts in x until it has `count` of them and one past p (or

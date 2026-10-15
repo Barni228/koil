@@ -165,7 +165,10 @@ impl qobject::Document {
         match read(&path.to_string()) {
             Ok((text, encoding)) => {
                 self.as_mut().rust_mut().encoding = encoding;
-                self.loaded(path.clone(), QString::from(text.as_str()));
+                // Not kept while QML shows it: a long file's is a gigabyte.
+                let shown = QString::from(text.as_str());
+                drop(text);
+                self.loaded(path.clone(), shown);
                 QString::default()
             }
             Err(message) => QString::from(message.as_str()),

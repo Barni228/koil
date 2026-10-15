@@ -53,7 +53,7 @@ FocusScope {
             replaceShown = false;
         if (withReplace)
             replaceShown = true;
-        const t = editor.text;
+        const t = vim.editorText();
         let seed = null;
         if (vim.mode === "visual" || vim.mode === "visualLine") {
             const s = editor.selectionStart, e = editor.selectionEnd;
@@ -153,7 +153,7 @@ FocusScope {
     function refresh() {
         if (!active)
             return;
-        matches = scan(editor.text).map(m => ({ start: m.start, end: m.end }));
+        matches = scan(vim.editorText()).map(m => ({ start: m.start, end: m.end }));
         current = currentStart < 0 ? -1 : matches.findIndex(m => m.start === currentStart);
     }
 
@@ -293,7 +293,7 @@ FocusScope {
             return;
         }
         const start = matches[current].start;
-        const m = scan(editor.text).find(m => m.start === start);
+        const m = scan(vim.editorText()).find(m => m.start === start);
         if (!m) {
             next();
             return;
@@ -322,7 +322,7 @@ FocusScope {
     function replaceAll() {
         findField.remember();
         replaceField.remember();
-        const t = editor.text, found = scan(t);
+        const t = vim.editorText(), found = scan(t);
         if (!found.length)
             return;
         const first = found[0].start;

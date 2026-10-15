@@ -204,11 +204,11 @@ ApplicationWindow {
     }
 
     // Whether the editor's text isn't `unedited`'s. The texts are compared
-    // only if they're as long (V4 hashes all of both), and the hidden text
-    // only if they're the same.
+    // only if they're as long, and by System (V4's `===` hashes all of
+    // both), and the hidden text only if they're the same.
     function isEdited() {
         const u = unedited, t = editorView.textArea.latest.text;
-        if (!u || t.length !== u.text.length || t !== u.text)
+        if (!u || t.length !== u.text.length || !system.sameText(t, u.text))
             return true;
         const h = editorView.hidden, was = u.hidden;
         return !!was && h !== was && (h.length !== was.length
@@ -272,7 +272,7 @@ ApplicationWindow {
         if (!scratchpad)
             return;
         scratchState = {
-            text: editorView.textArea.text,
+            text: editorView.textArea.latest.text,
             buffer: vim.leaveBuffer(),
             contentY: editorView.flickable.contentY
         };
@@ -658,7 +658,7 @@ ApplicationWindow {
             vim.commandOnMarked(true);
             return;
         }
-        const t = activeView.textArea.text;
+        const t = activeView.textArea.latest.text;
         const more = Math.min(Math.max(count, 1) - 1, Txt.countLines(t) - Txt.lineOf(t, vim.cursor));
         vim.openCommandLine(":", (more ? ".,.+" + more : ".") + "!");
     }
@@ -804,7 +804,7 @@ ApplicationWindow {
             askToSave(() => runShell(command, range, scratch, true));
             return;
         }
-        const t = activeView.textArea.text, filter = !!range && !listing;
+        const t = activeView.textArea.latest.text, filter = !!range && !listing;
         // A file's last line break ends its last line, as in vim: the empty
         // line after it isn't one to filter (:%!sort would sort it first).
         const end = Txt.countLines(t), past = l => l === end && t.endsWith("\n");
@@ -891,7 +891,7 @@ ApplicationWindow {
         } else if (exit) {
             // The lines stay.
             showOutput(title, ran.errors, ran.cut, exit);
-        } else if (listing || filePath !== f.path || scratchpad !== f.scratchpad || editorView.textArea.text !== f.text) {
+        } else if (listing || filePath !== f.path || scratchpad !== f.scratchpad || editorView.textArea.latest.text !== f.text) {
             vim.showError("The text changed while the command ran, so its output wasn't put in");
         } else {
             vim.filterLines(f.first, f.last, ran.output, f.lines);
@@ -1234,7 +1234,7 @@ ApplicationWindow {
             return;
         }
         confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => {
-            if (!doc.saveFile(filePath, editorView.textArea.text))
+            if (!doc.saveFile(filePath, editorView.textArea.latest.text))
                 return;
             // Saved, even if what's opened next can't be.
             markUnedited();
@@ -1277,7 +1277,7 @@ ApplicationWindow {
             quitAfterSave = !!quit;
             return;
         }
-        if (doc.saveFile(filePath, editorView.textArea.text)) {
+        if (doc.saveFile(filePath, editorView.textArea.latest.text)) {
             markUnedited();
             if (quit)
                 quitApp(orQuit);
@@ -1293,7 +1293,7 @@ ApplicationWindow {
     // opens that in its place, as File > Open would, with the cursor and
     // the view where they were. The scratchpad keeps its text.
     function saveScratch(path) {
-        if (!doc.saveNewFile(path, editorView.textArea.text))
+        if (!doc.saveNewFile(path, editorView.textArea.latest.text))
             return;
         const cursor = vim.cursor;
         const contentY = editorView.flickable.contentY;
@@ -2043,7 +2043,7 @@ ApplicationWindow {
                 root.saveScratch(path);
                 return;
             }
-            if (doc.saveFile(path, editorView.textArea.text)) {
+            if (doc.saveFile(path, editorView.textArea.latest.text)) {
                 root.filePath = path;
                 root.markUnedited();
                 if (root.quitAfterSave)
@@ -2331,6 +2331,8 @@ ApplicationWindow {
             root.menuBar = windowMenuBar.createObject(root);
 
         applyColorScheme();
+        // Before any text is looked through (see Txt.lineIndex).
+        Txt.compareStringsWith((a, b) => system.sameString(a, b));
         startUp();
         // The editor sits in a ScrollView, which is its own focus scope, so
         // `focus: true` alone doesn't give it the keyboard.

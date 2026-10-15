@@ -617,9 +617,10 @@ the scratchpad (see Scratchpad).
   makes it only if the text isn't what it was (`unedited`, as the file
   was opened or saved, or the listing shown, with its hidden text;
   `checkModified`), so `a` typed and deleted, or undone, leaves it off.
-  The texts are compared only when they're as long. A sync merged into an
-  edited listing makes that unknown (null) until it's shown again. `:q`
-  updates first (`unsaved`); `:confirm q` (and `ZZ` in the listing) asks to
+  The texts are compared only when they're as long (`System.sameText`).
+  A sync merged into an edited listing makes that unknown (null) until
+  it's shown again. `:q` updates first (`unsaved`); `:confirm q` (and
+  `ZZ` in the listing) asks to
   apply the changes, where No quits without them; if the listing can't be
   read (errors, or a path that can't be opened), they ask instead whether
   to quit without them, under the update's error. `:wq` applies, then
@@ -919,7 +920,12 @@ the scratchpad (see Scratchpad).
   block's user state, as a highlighter's. Only one highlighter may color a
   document (each would take the other's colors away), so Editor.qml takes
   the listing's
-  away before giving a file's, and the file's before the listing's. A new
+  away before giving a file's, and the file's before the listing's. Which
+  it gives follows `listing` only as the text is replaced
+  (`listingColors`, set in `setText` with no text in, as the wrap mode
+  is): `listing` comes before the text, and the listing's highlighter
+  went through every character of a gigabyte's file (QSyntaxHighlighter
+  makes a format for each) before the listing replaced it, 4 s of `-`. A new
   one colors at once (else Qt colors it all again once the event loop
   runs, without `recolor`'s batching, and colors no edit until then); new
   colors or comments color again a moment later (`stale`), which `setText`
@@ -1521,11 +1527,29 @@ the scratchpad (see Scratchpad).
   what changed in it (`System.takeTextChange`, what `TextChanges` saw of
   `contentsChange` since, as `toPlainText` gives it), or vim's text after
   its edit (`latest.expected`, unless Qt changes what goes in: a `\r`, a
-  no-break space), or `text` if that doesn't add up. Changes only to the
-  format (`formatting` in Editor.qml, `FormatOnly` in native.cpp: the line
-  format, the colors, Koil's margins) leave it alone. Txt's line index takes
-  the string it's asked with (`lineIndex`), after comparing lengths first,
-  and `Txt.column` and `atColumn` count a code unit a character up to the
+  no-break space), or `text` if that doesn't add up. `setText` gives its
+  string as `expected` too, if Qt keeps it as it is (`System.keptAsIs`),
+  and then the change's text isn't made at all (`takeTextChange`'s
+  `withText`): making it, and then comparing the copy with the string
+  `setText` had indexed, took 5 s of opening a gigabyte. Vim's edit is
+  one Qt edit (`replaceInEditor`, `System.replaceText`), not a remove and
+  an insert, between which the text was made for QML too. Whatever reads
+  all the text reads `latest.text` (the hover, saves, the find bar through
+  `vim.editorText`): reading `text` on every move of the pointer took 2 s
+  in a gigabyte. Changes only to the format (`formatting` in Editor.qml,
+  `FormatOnly` in native.cpp: the line format, the colors, Koil's
+  margins) leave it alone. Txt's line index takes
+  the string it's asked with (`lineIndex`), if it's the same string, not
+  only the same text, which `System.sameString` tells by its data in O(1)
+  (`Txt.compareStringsWith`; `===` in the tests): vim's text during a key
+  and the editor's are as long after `r`, and `===` hashed both, seconds a
+  key. An edit carries the line starts found past it (`Txt.carryLines`),
+  so the text isn't looked through again (0.5 s a key at the end of a
+  gigabyte). `isEdited` compares texts with `System.sameText`, which stops
+  at the first difference. A gigabyte still takes a second or two an edit:
+  V4 copies all of the string to make the new one (slices and their
+  concatenation), which only a text that isn't one JS string would avoid.
+  `Txt.column` and `atColumn` count a code unit a character up to the
   first that may not be one (`mayAttach`, found by a regex), as a long line
   took seconds.
 - **Long lines** (`LongLines` in native.cpp, `longText` in Editor.qml): a

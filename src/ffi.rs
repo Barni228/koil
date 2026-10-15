@@ -190,6 +190,10 @@ mod bridge {
         #[cxx_name = "followTextLength"]
         unsafe fn follow_text_length(text_edit: *mut QObject);
 
+        /// Replaces part of a TextEdit's text, as one edit (see native.h).
+        #[cxx_name = "replaceText"]
+        unsafe fn replace_text(text_edit: *mut QObject, start: i32, end: i32, text: &QString);
+
         /// Has a TextEdit build the lines in view from scratch, around a Qt
         /// bug; call it before setting its text (see native.h).
         #[cxx_name = "redrawText"]
@@ -242,7 +246,7 @@ mod bridge {
         /// What changed in the text since it was last asked, as from,
         /// removed and text, or nothing (see native.h).
         #[cxx_name = "takeTextChange"]
-        unsafe fn take_text_change(text_document: *mut QObject) -> QStringList;
+        unsafe fn take_text_change(text_document: *mut QObject, with_text: bool) -> QStringList;
 
         /// Has a TextEdit build all its lines in view again (see
         /// native.h).

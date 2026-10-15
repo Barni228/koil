@@ -84,6 +84,12 @@ void setText(QObject* textEdit,
 // the text's length after an edit too.
 void followTextLength(QObject* textEdit);
 
+// Replaces [start, end) of a TextEdit's text with `text`, as its remove and
+// insert would, but as one edit: Qt changes the text once, so the text in
+// between (all of a long one, less what's removed) isn't made for QML,
+// which took seconds for a gigabyte.
+void replaceText(QObject* textEdit, int start, int end, const QString& text);
+
 // Call before setting a TextEdit's text. With over 10,000 characters, a
 // TextEdit builds only the lines in view, and after a change it builds again
 // from where those started, so it skips all of a new text that ends before
@@ -138,8 +144,11 @@ void watchTextChanges(QObject* textDocument);
 // this was last called, as one change, from, removed and text: the text
 // from `from`, `removed` long, became `text` (as toPlainText would give
 // it). Empty if nothing changed. So the text needn't be read whole after
-// each change (toPlainText took 100 ms for a long one).
-QStringList takeTextChange(QObject* textDocument);
+// each change (toPlainText took 100 ms for a long one). Without
+// `withText`, it's taken but not given, also empty: for a change whose
+// text is known (see System::kept_as_is), as making it took seconds for a
+// text of a gigabyte.
+QStringList takeTextChange(QObject* textDocument, bool withText);
 
 // Has a TextEdit build all its lines in view again when it next draws,
 // rather than those a change of its selection touched: past a line Qt

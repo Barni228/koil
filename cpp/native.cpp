@@ -746,13 +746,14 @@ public:
   }
 
   // The change, as from, removed and the text added (as toPlainText gives
-  // it), or nothing if there's none, and starts over.
-  QStringList take()
+  // it), or nothing if there's none (or it's not `withText`), and starts
+  // over.
+  QStringList take(bool withText)
   {
     auto* doc = static_cast<QTextDocument*>(parent());
     const int now = doc->characterCount() - 1;
     QStringList change;
-    if (from >= 0) {
+    if (from >= 0 && withText) {
       // Not the paragraph separator Qt keeps after the text.
       const int start = qMin(from, now);
       QString text = textBetween(doc, start, qMin(from + added, now));
@@ -943,6 +944,28 @@ setText(QObject* textEdit,
 }
 
 void
+replaceText(QObject* textEdit, int start, int end, const QString& text)
+{
+  auto* item = qobject_cast<QQuickItem*>(textEdit);
+  if (!item)
+    return;
+  auto* quickDocument =
+    qobject_cast<QQuickTextDocument*>(item->property("textDocument").value<QObject*>());
+  if (!quickDocument)
+    return;
+  // As TextEdit's remove does, which is in bounds, and its insert, which a
+  // cursor's insertText does after it removes the selection, in one edit
+  // block. Both then update the cursor's rectangle only if the character
+  // format there changed, which plain text's doesn't.
+  auto* document = quickDocument->textDocument();
+  const int last = document->characterCount() - 1;
+  QTextCursor cursor(document);
+  cursor.setPosition(qBound(0, start, last));
+  cursor.setPosition(qBound(0, end, last), QTextCursor::KeepAnchor);
+  cursor.insertText(text);
+}
+
+void
 followTextLength(QObject* textEdit)
 {
   auto* item = qobject_cast<QQuickItem*>(textEdit);
@@ -1119,7 +1142,7 @@ watchTextChanges(QObject* textDocument)
 }
 
 QStringList
-takeTextChange(QObject* textDocument)
+takeTextChange(QObject* textDocument, bool withText)
 {
   auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
   if (!quickDocument)
@@ -1127,7 +1150,7 @@ takeTextChange(QObject* textDocument)
   // No Q_OBJECT (so no moc), so it's found by name rather than by type.
   auto* changes = static_cast<TextChanges*>(quickDocument->textDocument()->findChild<QObject*>(
     textChangesName, Qt::FindDirectChildrenOnly));
-  return changes ? changes->take() : QStringList();
+  return changes ? changes->take(withText) : QStringList();
 }
 
 void

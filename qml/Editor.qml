@@ -24,6 +24,11 @@ Item {
     // `pendingIconColor` on `pendingLines`, the lines whose entries applying
     // would change: see listing::pending_lines), and its dirs'.
     property bool listing: false
+    // Whether the text has the listing's colors, else a file's: `listing`
+    // once the text is replaced (see setText), as the old text would be
+    // colored first (the listing's colors went through every character of
+    // a long file, for seconds).
+    property bool listingColors: false
     property var iconColors: ({})
     property var pendingIconColor: ["", ""]
     property var pendingLines: []
@@ -158,13 +163,21 @@ Item {
         const f = lineFormat();
         formatted = JSON.stringify(f);
         quiet = true;
-        // A new wrap mode (a file after the listing) goes in with no text,
-        // which it would lay out again.
-        if (editor.wrapMode !== wrapModeOf(listing)) {
+        // A new wrap mode and new colors (a file after the listing) go in
+        // with no text, which they would lay out or color again.
+        if (editor.wrapMode !== wrapModeOf(listing) || listingColors !== listing) {
             system.setText(editor, "", f.height, f.bottomMargin, f.indent, f.rightMargin);
             applyWrapMode();
+            listingColors = listing;
         }
+        // The editor's text will be this string (see `latest`), unless Qt
+        // changes it as it goes in: then it isn't made again from Qt's,
+        // nor compared with this one (each took seconds for a gigabyte).
+        if (editor.latest && system.keptAsIs(text))
+            editor.latest.expected = text;
         system.setText(editor, text, f.height, f.bottomMargin, f.indent, f.rightMargin);
+        if (editor.latest)
+            editor.latest.expected = null;
         quiet = false;
     }
 
@@ -187,19 +200,25 @@ Item {
         }
         // The file's colors go before the listing's come, as two
         // highlighters would each take the other's away.
-        if (listing)
+        if (listingColors)
             system.setTextColors(editor.textDocument, [], "");
         const colors = [];
         for (const icon in iconColors)
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
-        system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1], listing ? String(theme.directory) : "");
-        if (!listing)
+        system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1], listingColors ? String(theme.directory) : "");
+        if (!listingColors)
             system.setTextColors(editor.textDocument, vim.syntax ? theme.syntaxColors() : [], filePath);
         applyPendingLines();
     }
 
+    // Colors the text as the listing or as a file, as it is (see
+    // listingColors).
+    function colorAsShown() {
+        listingColors = listing;
+    }
+
     function applyPendingLines() {
-        if (!listing)
+        if (!listingColors)
             return;
         const was = formatting;
         formatting = true;
@@ -266,13 +285,15 @@ Item {
     }
 
     // The listing's names are indented where they wrap (see lineFormat),
-    // and wrap anywhere (see wrapModeOf), once the text is replaced, which
-    // takes the format and the wrap mode with it (see setText).
+    // wrap anywhere (see wrapModeOf) and get its colors, once the text is
+    // replaced, which takes the format, the wrap mode and the colors with
+    // it (see setText).
     onListingChanged: {
-        applyColors();
         Qt.callLater(fixLineFormat);
         Qt.callLater(applyWrapMode);
+        Qt.callLater(colorAsShown);
     }
+    onListingColorsChanged: applyColors()
     onIconColorsChanged: applyColors()
     onPendingIconColorChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
@@ -360,7 +381,10 @@ Item {
                 f.contentX = cr.x + cr.width - w + rp;
         }
         if (cr.y <= cy + tp) {
-            f.contentY = cr.y - tp;
+            // On the first row, all the way up, as vim's showCursor does:
+            // Qt's rectangle is lower in its row than the row's top, which
+            // left the padding above it out of view.
+            f.contentY = cellAt(p).y <= textTop ? 0 : cr.y - tp;
         } else {
             const bp = editor.bottomPadding;
             if (cr.y + cr.height >= cy + tp + h - bp && cr.y + cr.height <= f.contentHeight)
@@ -842,9 +866,9 @@ Item {
             // times a key), unless they're the same one. In an object, as
             // writing a long string to a property took as long. Also tells
             // edits from changes to the text's format (fixLineFormat,
-            // colors), which Qt reports as text changes too. Vim's edit
-            // gives the text it makes as `expected`, which is the text once
-            // it's as long.
+            // colors), which Qt reports as text changes too. Vim's edit (and
+            // setText) gives the text it makes as `expected`, which is the
+            // text once it's as long.
             property var latest: null
 
             font.family: view.vim.fontFamily
@@ -858,7 +882,11 @@ Item {
             readOnly: true // vim starts in normal mode
             focus: true
             onTextChanged: {
-                const change = view.system.takeTextChange(textDocument);
+                let expected = latest && latest.expected;
+                const known = !!expected && expected.length === length;
+                // Not the change's text when it's known: made of Qt's, a
+                // text of a gigabyte took seconds.
+                const change = view.system.takeTextChange(textDocument, !view.formatting && !known);
                 if (view.formatting) {
                     revision++;
                     return;
@@ -868,8 +896,8 @@ Item {
                 // as before if nothing did (only its colors). As Qt has it
                 // only if that doesn't add up.
                 const old = latest ? latest.text : "";
-                let expected = latest && latest.expected, t = null, changed = false;
-                if (expected && expected.length === length) {
+                let t = null, changed = false;
+                if (known) {
                     t = expected;
                     changed = true;
                     expected = null;
@@ -878,6 +906,8 @@ Item {
                     if (from >= 0 && removed >= 0 && old.length - removed + added.length === length) {
                         changed = removed !== added.length || added !== old.slice(from, from + removed);
                         t = changed ? old.slice(0, from) + added + old.slice(from + removed) : old;
+                        if (changed)
+                            Txt.carryLines(old, t, from, from + removed, added);
                     }
                 } else if (old.length === length) {
                     t = old;
@@ -990,6 +1020,10 @@ Item {
             function posAt(x, y) {
                 const p = view.longPositionAt(x, y);
                 return p < 0 ? positionAt(x, y) : p;
+            }
+            // remove and insert as one edit (see Vim.replaceInEditor).
+            function replace(start, end, text) {
+                view.system.replaceText(editor, start, end, text);
             }
             Keys.onPressed: event => {
                 // Cmd (Ctrl elsewhere) shows the link under the pointer
