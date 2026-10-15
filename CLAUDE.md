@@ -610,8 +610,14 @@ the scratchpad (see Scratchpad).
   which also runs when it's closed by a click outside). Until answered it
   stays the safe way; Yes resolves it (`Koil.resolve`), as an edit undo
   can take back.
-- **Quitting**: `modified` is the file's unsaved changes, or in the listing,
-  edits or pending changes (`koil.hasChanges()` after each update). `:q`
+- **Quitting**: `modified` (the title's dot) is the file's unsaved
+  changes, or in the listing, edits or pending changes
+  (`pendingChanges`: `koil.hasChanges()` after each update). An edit
+  makes it only if the text isn't what it was (`unedited`, as the file
+  was opened or saved, or the listing shown, with its hidden text;
+  `checkModified`), so `a` typed and deleted, or undone, leaves it off.
+  The texts are compared only when they're as long. A sync merged into an
+  edited listing makes that unknown (null) until it's shown again. `:q`
   updates first (`unsaved`); `:confirm q` (and `ZZ` in the listing) asks to
   apply the changes, where No quits without them; if the listing can't be
   read (errors, or a path that can't be opened), they ask instead whether

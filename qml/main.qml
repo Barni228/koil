@@ -104,8 +104,18 @@ ApplicationWindow {
     property var scratchState: null
     property bool scratchFromPath: false
     // A file's unsaved changes, or the listing's edits and changes that
-    // aren't applied.
+    // aren't applied: only while the text isn't what it was (see
+    // checkModified), so not once an edit is taken back (`a` typed and
+    // deleted).
     property bool modified: false
+    // The text of a file as it was opened or last saved, or of the listing
+    // (with its hidden text) as it was last shown, as { text, hidden },
+    // which `modified` compares the editor's with. Null when that isn't
+    // known (see mergeListing).
+    property var unedited: null
+    // Whether the listing had changes that aren't applied when it was last
+    // shown (koil.hasChanges()), which make it modified whatever its text.
+    property bool pendingChanges: false
     // Whether something changed on disk that the listing may not show yet
     // (see syncListing), and whether what goes against the user's edits is
     // being asked about.
@@ -182,8 +192,34 @@ ApplicationWindow {
         filePath = path;
         editorView.setText(text);
         vim.reset(entries);
-        modified = false;
+        markUnedited();
         editorView.textArea.forceActiveFocus();
+    }
+
+    // Takes what the editor has as unedited (see `unedited`): a file opened
+    // or saved, or the listing shown.
+    function markUnedited() {
+        unedited = { text: editorView.textArea.latest.text, hidden: listing ? editorView.hidden : null };
+        modified = listing && pendingChanges;
+    }
+
+    // Whether the editor's text isn't `unedited`'s. The texts are compared
+    // only if they're as long (V4 hashes all of both), and the hidden text
+    // only if they're the same.
+    function isEdited() {
+        const u = unedited, t = editorView.textArea.latest.text;
+        if (!u || t.length !== u.text.length || t !== u.text)
+            return true;
+        const h = editorView.hidden, was = u.hidden;
+        return !!was && h !== was && (h.length !== was.length
+            || h.some((e, i) => e.at !== was[i].at || e.icon !== was[i].icon || e.text !== was[i].text));
+    }
+
+    // Works out `modified` after an edit. The scratchpad is never saved, so
+    // there's nothing to ask about, and a :s's preview isn't a change.
+    function checkModified() {
+        if (!scratchpad && !vim.previewing)
+            modified = listing && pendingChanges || isEdited();
     }
 
     // Shows a file that was read, leaving the listing (whose edits Koil
@@ -315,7 +351,8 @@ ApplicationWindow {
             f.contentY = Math.max(0, Math.min(y, f.contentHeight + f.bottomMargin - f.height));
         vim.jumpTo(Txt.atColumn(t, ls, column));
         showPath(r.path);
-        modified = koil.hasChanges();
+        pendingChanges = koil.hasChanges();
+        markUnedited();
         checkListing();
         updatePendingLines();
         updatePathSyntax(true);
@@ -456,17 +493,24 @@ ApplicationWindow {
     // Puts `merge`'s edits (see Koil.sync) in the listing, while vim edits
     // it (back in the path field after, if it was there). Undo takes them
     // back only if `undoable`; else they aren't the user's, and don't make
-    // the listing modified.
+    // the listing modified: unedited, it's still unedited, but edited, what
+    // it would be without the edits isn't known, so it stays modified until
+    // it's shown again.
     function mergeListing(merge, undoable) {
         if (!merge.edits.length)
             return;
         iconColors = Object.assign({}, iconColors, merge.colors);
-        const inPath = activeView === pathView, wasModified = modified;
+        const inPath = activeView === pathView, wasEdited = isEdited();
         activate(editorView);
         vim.mergeEdits(merge.edits, undoable);
         if (inPath)
             activate(pathView);
-        modified = undoable || wasModified;
+        if (undoable)
+            checkModified();
+        else if (wasEdited)
+            unedited = null;
+        else
+            markUnedited();
         checkListing();
         updatePendingLines();
     }
@@ -481,7 +525,8 @@ ApplicationWindow {
         confirmDialog.ask(q.text, q.details, () => {
             const r = JSON.parse(koil.resolve(editorView.textArea.text, JSON.stringify(editorView.hidden), JSON.stringify(q.conflicts)));
             mergeListing(r, true);
-            modified = modified || koil.hasChanges();
+            pendingChanges = pendingChanges || koil.hasChanges();
+            checkModified();
             koil.watch();
         }, null, () => Qt.callLater(askConflicts, questions.slice(1)));
     }
@@ -1161,7 +1206,7 @@ ApplicationWindow {
             if (!doc.saveFile(filePath, editorView.textArea.text))
                 return;
             // Saved, even if what's opened next can't be.
-            modified = false;
+            markUnedited();
             open();
         }, open);
     }
@@ -1202,7 +1247,7 @@ ApplicationWindow {
             return;
         }
         if (doc.saveFile(filePath, editorView.textArea.text)) {
-            modified = false;
+            markUnedited();
             if (quit)
                 quitApp(orQuit);
         }
@@ -1710,13 +1755,14 @@ ApplicationWindow {
         onKeyReleased: root.keyReleased()
         onLinkClicked: at => root.clickLink(at)
         onEdited: {
-            // The scratchpad is never saved, so there's nothing to ask
-            // about, and a :s's preview isn't a change.
-            if (!root.scratchpad && !vim.previewing)
-                root.modified = true;
             if (root.listing) {
                 checkTimer.restart();
                 Qt.callLater(root.updatePendingLines);
+                // Once vim has the hidden text of the editor's own edits
+                // (typing: see trackEdit), which come after this.
+                Qt.callLater(root.checkModified);
+            } else {
+                root.checkModified();
             }
         }
     }
@@ -1968,7 +2014,7 @@ ApplicationWindow {
             }
             if (doc.saveFile(path, editorView.textArea.text)) {
                 root.filePath = path;
-                root.modified = false;
+                root.markUnedited();
                 if (root.quitAfterSave)
                     root.quitApp(false);
             }
