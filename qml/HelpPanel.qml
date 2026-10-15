@@ -87,8 +87,9 @@ Popup {
                     + "stay."],
                 ["`k`  `j`", "In the path field: the dirs listed before (`↑` and `↓` while typing)."],
                 ["`Tab`", "Go between the listing and the path field (so does a click)."],
-                ["`Tab`  `Shift+Tab`", "While typing a path: complete the dir, like a shell. With several to "
-                    + "pick from, they go through them, and `Enter` takes one."],
+                ["`Tab`  `Shift+Tab`", "While typing a path: complete the dir, like a shell (if none starts "
+                    + "with what's typed, one with its letters in order: `myt` gives `my_tools`). With "
+                    + "several to pick from, they go through them, and `Enter` takes one."],
                 ["`g.`  `gi`  `gr`", "Toggle `:set hidden`, `gitignore` and `regex`, like the buttons beside "
                     + "the path."],
                 ["`gs`", "Sort: shows by what, then a key picks it, like `gss` by size (biggest first) and "

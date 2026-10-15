@@ -1108,11 +1108,14 @@ fn test_home_path() {
 }
 
 /// What Tab completes in the path field `line`, at its end, in a temp dir
-/// with `src/`, `src-old/`, `Abc/`, `aBd/`, `🍄/sub/` and the file `script`:
-/// where the options start, what it fills in, and the options.
+/// with `src/`, `src-old/`, `Abc/`, `aBd/`, `my_tests/`, `my_tools/`,
+/// `🍄/sub/` and the file `script`: where the options start, what it fills
+/// in, and the options.
 fn completed(line: &str) -> (usize, String, Vec<String>) {
     let temp = tempfile::tempdir().unwrap();
-    for dir in ["src", "src-old", "Abc", "aBd", "🍄/sub"] {
+    for dir in [
+        "src", "src-old", "Abc", "aBd", "my_tests", "my_tools", "🍄/sub",
+    ] {
         fs::create_dir_all(temp.path().join(dir)).unwrap();
     }
     fs::write(temp.path().join("script"), "").unwrap();
@@ -1151,6 +1154,12 @@ fn test_complete() {
     assert_eq!(fill("abc"), "Abc/");
     assert_eq!(fill("A"), "Abc/");
     assert_eq!(completed("AB"), (0, String::new(), vec![]));
+    // with no dir starting with it, the ones with its characters in order,
+    // and what they all start with only if it keeps them
+    let tools = || vec!["my_tests/".to_string(), "my_tools/".into()];
+    assert_eq!(fill("myto"), "my_tools/");
+    assert_eq!(completed("myt"), (0, "my_t".into(), tools()));
+    assert_eq!(completed("ts"), (0, String::new(), tools()));
     // after the spaces before the path, and in UTF-16
     assert_eq!(
         completed("  src-"),

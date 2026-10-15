@@ -278,13 +278,17 @@ the scratchpad (see Scratchpad).
   `Koil::complete`): Tab while typing in the path field (`vim.completer`,
   set only there) completes the dir being written, like a shell. koil-core
   reads the path up to the cursor and gives the dirs its last part (after
-  its last `/`) can be, in the dir before it, read as `open` reads it: not
+  its last `/`) can be the start of, or if none, those that have its
+  characters in order, as zsh's fuzzy matcher (Zim's `r:|?=**`: `myt`
+  gives `my_tools`), in the dir before it, read as `open` reads it: not
   hidden ones unless the part starts with `.` or `:set hidden` is on, not
   ignored ones with `gitignore`, new dirs in the diff too, `..` for `.`, and
   ignoring case unless the part has an uppercase letter (smart case, as
   search does: `k` gives `Koil` too). Tab fills in the only one
   (with its `/`, which steps over a `/` right after the cursor), or else the
-  longest start they share, if that's longer than the part (`fill`).
+  longest start they share, if that's longer than the part and has its
+  characters in order (`fill`, `has_in_order`: `myt` fills in `my_t` of
+  `my_tests` and `my_tools`, but `ts` nothing, which would lose its `s`).
   Otherwise vim shows them (`vim.completion`, drawn by `CompletionList` in
   the window's overlay, a row per dir as its listing line, the names under
   the part): Tab and Shift+Tab (`<S-Tab>`, which does nothing elsewhere;

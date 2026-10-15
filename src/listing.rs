@@ -1430,9 +1430,12 @@ pub fn complete(koil: &Koil, line: &str, cursor: usize, settings: &Settings) -> 
         }
     });
     let shared = shared_start(&completion.names);
+    let part = &completion.part;
     let fill = match completion.names.as_slice() {
         [name] => name.clone(),
-        _ if shared.chars().count() > completion.part.chars().count() => shared.to_string(),
+        _ if shared.chars().count() > part.chars().count() && has_in_order(shared, part) => {
+            shared.to_string()
+        }
         _ => String::new(),
     };
     Completion {
@@ -1440,6 +1443,21 @@ pub fn complete(koil: &Koil, line: &str, cursor: usize, settings: &Settings) -> 
         fill,
         options: options.collect(),
     }
+}
+
+/// Whether `text` has the characters of `part` in order, with case ignored
+/// unless `part` has an uppercase letter, as `Koil::complete` matches a part
+/// no dir starts with: what all of the dirs `ts` gives start with
+/// (`my_t`, of `my_tests/` and `my_tools/`) mustn't fill in without its `s`.
+fn has_in_order(text: &str, part: &str) -> bool {
+    let ignore_case = !part.chars().any(char::is_uppercase);
+    let as_matched = |s: &str| match ignore_case {
+        true => s.to_lowercase(),
+        false => s.to_string(),
+    };
+    let text = as_matched(text);
+    let mut rest = text.chars();
+    as_matched(part).chars().all(|c| rest.any(|t| t == c))
 }
 
 /// The longest text all of `names` start with.

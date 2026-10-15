@@ -31,7 +31,8 @@ until you apply, and your edits stay while you go through other dirs.
 - **The path field** takes a path relative to the open dir (`src`,
   `../docs`), `~`, one pasted from a terminal (`"my dir"`, `my\ dir`), or a
   glob (`**/*.rs`). Write `/`, also on Windows. `Tab` while typing completes
-  a dir like a shell, and `k` and `j` go through the dirs you listed before.
+  a dir like a shell (and like zsh, `myt` gives `my_tools` if no dir starts
+  with `myt`), and `k` and `j` go through the dirs you listed before.
 - **Regex paths** (`gr`) must match the whole path below the dir they start
   in. For convenience, `,` is same as `.` except it does not match `/`, which
   is useful to list things without going into subdirectories
