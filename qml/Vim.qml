@@ -270,6 +270,11 @@ QtObject {
     // marked until it ends (see endInsert).
     property bool placingMarks: false
     property bool markedInsert: false
+    // What the find bar finds in, while its Find in Selection is on: spans
+    // of the text, as { start, end }, in order and apart (see
+    // selectionScope). Null otherwise. Edits move them (see moveScope),
+    // and they're this buffer's only. Replaced, never changed in place.
+    property var findScope: null
     // While editAll runs: every cursor, the main one too, for edits to move
     // (none while editAtOnce runs, which places them itself).
     property var shifting: null
@@ -398,6 +403,7 @@ QtObject {
         cursors = [];
         marked = [];
         markedInsert = false;
+        findScope = null;
         blockHome = null;
         setMode("normal");
         setCursor(0);
@@ -585,8 +591,12 @@ QtObject {
             }
             return;
         }
-        if (isVisual)
+        // Left for gv, as jumpTo does: a click, or the editor losing the
+        // keys to the find bar, which drops its selection.
+        if (isVisual) {
+            lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
             mode = "normal";
+        }
         const c = clampNormal(t, p);
         wantCol = Txt.column(t, c);
         if (c !== p)
@@ -636,8 +646,12 @@ QtObject {
         pendingKeys = "";
         awaitingReplaceChar = false;
         clearCursors();
-        if (isVisual)
+        // Leaving the selection for gv (and Find in Selection), as vim
+        // does whichever way visual mode ends.
+        if (isVisual) {
+            lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
             setMode("normal");
+        }
         if (inserting) {
             breakInsert();
             replaceStack = [];
@@ -683,10 +697,12 @@ QtObject {
 
     // Leaves the buffer vim edits in normal mode, and returns its state for
     // enterBuffer: { cursor, wantCol, undoStack, redoStack, hidden,
-    // lastVisual, marked }.
+    // lastVisual, marked }. Not the find bar's scope, which the next one
+    // doesn't have.
     function leaveBuffer() {
         toNormal();
         commitChange(true); // even in a macro: the step is this buffer's
+        findScope = null;
         return { cursor: cursor, wantCol: wantCol, undoStack: undoStack, redoStack: redoStack,
             hidden: hidden, lastVisual: lastVisual, marked: marked };
     }
@@ -734,6 +750,7 @@ QtObject {
         hidden = s.hidden || [];
         lastVisual = s.lastVisual || null;
         marked = s.marked || [];
+        findScope = null;
         trackedText = t;
         cursor = clampNormal(t, s.cursor || 0);
         setMode("normal");
@@ -3377,6 +3394,8 @@ QtObject {
             if (m !== marked)
                 marked = m;
         }
+        if (findScope)
+            moveScope(start, end, text.length);
         if (!batch && tracking())
             trackedText = editorText();
     }
@@ -3397,9 +3416,10 @@ QtObject {
     }
 
     // Whether the editor's own edits must be followed (see trackEdit): they
-    // move the hidden text, the extra cursors and the marked lines.
+    // move the hidden text, the extra cursors, the marked lines and the
+    // find bar's scope.
     function tracking() {
-        return hidden.length > 0 || cursors.length > 0 || marked.length > 0;
+        return hidden.length > 0 || cursors.length > 0 || marked.length > 0 || findScope !== null;
     }
 
     function setMode(m) {
@@ -3872,6 +3892,8 @@ QtObject {
                 if (m !== marked)
                     marked = m;
             }
+            if (findScope)
+                moveScope(d.start, d.end1, d.end2 - d.start);
         }
     }
 
@@ -4675,12 +4697,12 @@ QtObject {
         return { first: r.first, last: r.last, region: region };
     }
 
-    // The last visual selection as the spans :'<,'>s keeps to, in order and
-    // apart: its characters, its block's part of each line, or the marked
-    // lines (those next to each other together). Null for lines, which its
-    // range is.
-    function selectionRegion(t) {
-        const v = lastVisual;
+    // The last visual selection (or `v`, one like it) as the spans :'<,'>s
+    // keeps to, in order and apart: its characters, its block's part of
+    // each line, or the marked lines (those next to each other together).
+    // Null for lines, which its range is.
+    function selectionRegion(t, v) {
+        v = v || lastVisual;
         if (!v || v.mode === "visualLine")
             return null;
         if (v.mode === "marked")
@@ -4704,6 +4726,66 @@ QtObject {
                 hi = mid;
         }
         return lo < region.length && region[lo].start <= m.start && m.end <= region[lo].end;
+    }
+
+    // ---- Find in Selection -------------------------------------------------
+    // The find bar can keep to a selection (findScope), which it takes as
+    // it opens with one that isn't its query, or when it's turned on.
+
+    // What Find in Selection keeps to: the selection, or else the marked
+    // lines, or else the last selection (gv's), as spans (see
+    // selectionRegion), with lines from the first one's start to the last
+    // one's end. Null if there's none.
+    function selectionScope() {
+        const t = bufferText();
+        const v = isVisual ? { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol }
+            : marked.length ? markedVisual(marked) : lastVisual;
+        if (!v)
+            return null;
+        if (v.mode === "visualLine") {
+            const a = Math.min(v.anchor, v.cursor, t.length), b = Math.min(Math.max(v.anchor, v.cursor), t.length);
+            return [{ start: Txt.lineStart(t, a), end: Txt.lineEnd(t, b) }];
+        }
+        const region = selectionRegion(t, v);
+        return region.length ? region : null; // a block of empty lines
+    }
+
+    // Sets findScope (null for none). The marked lines it's made of are
+    // used, as by a command: unmarked, for gv to mark again.
+    function setFindScope(spans) {
+        if (spans && marked.length && !isVisual) {
+            lastVisual = markedVisual(marked);
+            setMarked([]);
+        }
+        findScope = spans;
+        if (spans)
+            trackedText = bufferText();
+    }
+
+    // Moves findScope past an edit that put `length` characters in place of
+    // [start, end). Text put in at a span's edge goes in it, so undoing a
+    // replacement there puts it back in.
+    function moveScope(start, end, length) {
+        const list = findScope, d = length - (end - start);
+        let lo = 0, hi = list.length;
+        while (lo < hi) { // the first span that ends at the edit or after
+            const mid = (lo + hi) >> 1;
+            if (list[mid].end < start)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        if (lo === list.length)
+            return;
+        const moved = list.slice(0, lo);
+        for (let i = lo; i < list.length; i++) {
+            const s = list[i];
+            moved.push({
+                start: s.start <= start ? s.start : s.start >= end ? s.start + d : start,
+                end: s.end >= end ? s.end + d : s.end <= start ? s.end : start + length
+            });
+        }
+        findScope = moved;
     }
 
     // What :s with these flags looks for: smart case, unless i or I says

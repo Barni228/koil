@@ -7,9 +7,9 @@ import QtQuick.Layouts
 import "text.js" as Txt
 
 // A find and replace bar like VS Code's: at the top right of the editor,
-// with Match Case, Match Whole Word and regular expressions. Moving to a
-// match moves vim's cursor to its start; the view draws `matches` (see
-// highlightSpans).
+// with Match Case, Match Whole Word, regular expressions and Find in
+// Selection. Moving to a match moves vim's cursor to its start; the view
+// draws `matches` (see highlightSpans).
 FocusScope {
     id: bar
 
@@ -25,6 +25,10 @@ FocusScope {
     property bool matchCase: false
     property bool wholeWord: false
     property bool useRegex: true
+    // Find in Selection: it finds only in what was selected (Vim's
+    // findScope, which edits move), until it's turned off or the bar
+    // closes.
+    readonly property bool inSelection: vim.findScope !== null
 
     // Every match, as { start, end }, and the index of the one at the
     // cursor (-1 if the cursor isn't at the start of one).
@@ -43,12 +47,16 @@ FocusScope {
 
     readonly property bool isMac: Qt.platform.os === "osx"
     readonly property real zoom: theme.zoom
-    // Room left beside the chevron, the count and three buttons.
-    readonly property real fieldWidth: width - (25 + 4 + 72 + 3 * 22 + 4 * 2) * zoom
+    // Room left beside the chevron, the count and four buttons.
+    readonly property real fieldWidth: width - (25 + 4 + 72 + 4 * 22 + 5 * 2) * zoom
 
     // Opens the bar (with the replace field for Replace) and puts the
     // selected text, or else the word under the cursor, in the find field.
+    // A selection that can't be the query (over lines, a block, the marked
+    // lines) is what it finds in instead (see inSelection), as VS Code's
+    // does with autoFindInSelection set to multiline.
     function open(withReplace) {
+        const wasOpen = active;
         if (!active)
             replaceShown = false;
         if (withReplace)
@@ -59,14 +67,18 @@ FocusScope {
             const s = editor.selectionStart, e = editor.selectionEnd;
             if (e > s && t.slice(s, e).indexOf("\n") < 0)
                 seed = { start: s, text: t.slice(s, e) };
-        } else if (vim.mode !== "visualBlock" && Txt.charClass(t[vim.cursor], false) === 2) {
+        } else if (vim.mode !== "visualBlock" && !vim.marked.length && Txt.charClass(t[vim.cursor], false) === 2) {
             seed = Txt.wordAt(t, vim.cursor);
         }
+        const scope = !seed && (vim.isVisual || vim.marked.length) ? vim.selectionScope() : null;
+        if (scope)
+            vim.setFindScope(scope);
         active = true;
-        searchStart = seed ? seed.start : vim.cursor;
-        const field = withReplace ? replaceField : findField;
+        searchStart = scope ? scope[0].start : seed ? seed.start : vim.cursor;
+        // The find field has the keys, for Replace too (Tab goes on to the
+        // replace field), but Replace while the bar is open goes to it.
+        const field = withReplace && wasOpen ? replaceField : findField;
         field.input.forceActiveFocus();
-        field.selectAll();
         const seeded = seed ? (useRegex ? Txt.escapeRegExp(seed.text) : seed.text) : query;
         if (seeded !== query) {
             findField.remember();
@@ -74,15 +86,32 @@ FocusScope {
         } else {
             search();
         }
-        if (!withReplace)
-            findField.selectAll();
+        field.selectAll();
     }
 
     function close() {
         findField.remember();
         replaceField.remember();
+        vim.setFindScope(null);
         active = false;
         editor.forceActiveFocus();
+    }
+
+    // Turns Find in Selection on, keeping to the selection (see
+    // Vim.selectionScope), or off.
+    function toggleInSelection() {
+        if (inSelection) {
+            vim.setFindScope(null);
+        } else {
+            const scope = vim.selectionScope();
+            if (!scope) {
+                vim.showError("Nothing selected to find in");
+                return;
+            }
+            vim.setFindScope(scope);
+            searchStart = scope[0].start;
+        }
+        search();
     }
 
     // Find Next / Find Previous: from the menu, which also opens the bar.
@@ -129,21 +158,28 @@ FocusScope {
     // The matches in t, as { start, end, match }: where each is in t, and
     // the regular expression's result. In the listing it searches the text
     // without the lines' prefixes (see Prefixes in Vim.qml), so `^` is
-    // where a name starts.
+    // where a name starts. With Find in Selection, only those all in it,
+    // as :'<,'>s finds them, so `^` is still only where a line starts.
     function scan(t) {
         const re = regExp();
         const found = [];
         if (!re)
             return found;
-        const u = vim.withoutPrefixes(t), s = u.text;
+        const u = vim.withoutPrefixes(t), s = u.text, scope = vim.findScope;
+        let to = s.length;
+        if (scope) {
+            re.lastIndex = vim.unprefixedAt(u, scope[0].start);
+            to = vim.unprefixedAt(u, scope[scope.length - 1].end);
+        }
         let m;
-        while (found.length < maxMatches && (m = re.exec(s)) !== null) {
+        while (found.length < maxMatches && (m = re.exec(s)) !== null && m.index <= to) {
             const e = m.index + m[0].length;
             if (m[0] === "") // step over a whole code point
                 re.lastIndex = m.index + (Txt.isLowSurrogate(s, m.index + 1) ? 2 : 1);
             if (!wholeWord || isWholeWord(s, m.index, e)) {
                 const r = vim.prefixedSpan(u, m.index, e);
-                found.push({ start: r.start, end: r.end, match: m });
+                if (!scope || vim.inRegion(scope, r))
+                    found.push({ start: r.start, end: r.end, match: m });
             }
         }
         return found;
@@ -441,6 +477,13 @@ FocusScope {
         sequence: bar.isMac ? "Ctrl+Alt+R" : "Alt+R"
         onActivated: bar.useRegex = !bar.useRegex
     }
+    Shortcut {
+        id: selectionShortcut
+
+        enabled: bar.active
+        sequence: bar.isMac ? "Ctrl+Alt+L" : "Alt+L"
+        onActivated: bar.toggleInSelection()
+    }
 
     component BarButton: IconButton {
         theme: bar.theme
@@ -666,6 +709,18 @@ FocusScope {
                     tip: qsTr("Next Match")
                     shortcuts: bar.isMac ? ["Enter", "⌘G"] : ["Enter", "F3", "Ctrl+G"]
                     onClicked: bar.next()
+                }
+                BarButton {
+                    iconPath: "M2.5 3.5 H13.5 V12.5 H2.5 Z M5 6.5 H11 M5 9.5 H9"
+                    checkable: true
+                    checked: bar.inSelection
+                    tip: qsTr("Find in Selection")
+                    shortcuts: [selectionShortcut.nativeText]
+                    onToggled: {
+                        bar.toggleInSelection();
+                        // Off again if there was nothing to find in.
+                        checked = Qt.binding(() => bar.inSelection);
+                    }
                 }
                 BarButton {
                     iconPath: "M4.5 4.5 L11.5 11.5 M11.5 4.5 L4.5 11.5"

@@ -520,14 +520,39 @@ Item {
             return vim.blockSpans(v.from, v.to, shown || undefined);
         const r = shown ? vim.selectedRange(t, shown.mode, shown.anchor, shown.cursor)
             : { start: editor.selectionStart, end: editor.selectionEnd };
-        const s = r.start, e = r.end;
-        if (s === e)
-            return [];
         const spans = [];
-        for (let p = Math.max(s, v.from); p <= Math.min(e, v.to); ) {
+        lineSpans(t, r.start, r.end, v, spans);
+        return spans;
+    }
+
+    // What the find bar finds in (Find in Selection, see Vim's findScope)
+    // in the visible lines, as selectionSpans gives the selection. Its
+    // spans are sorted, so the first in view is found by binary search.
+    function scopeSpans() {
+        const scope = active && findBar.active ? vim.findScope : null;
+        if (!scope)
+            return [];
+        const t = editor.latest.text, v = visibleRange();
+        let lo = 0, hi = scope.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (scope[mid].end < v.from)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        const spans = [];
+        for (let i = lo; i < scope.length && scope[i].start <= v.to; i++)
+            lineSpans(t, scope[i].start, scope[i].end, v, spans);
+        return spans;
+    }
+
+    // Adds [s, e) of t to `spans`, as far as it's in v (see visibleRange),
+    // as one { start, end, eol } span per line, where eol means it includes
+    // the line break.
+    function lineSpans(t, s, e, v, spans) {
+        for (let p = Math.max(s, v.from); p < e && p <= v.to; ) {
             const le = Txt.lineEnd(t, p);
-            if (p === e)
-                break;
             spans.push({
                 start: p,
                 end: Math.min(le, e),
@@ -535,7 +560,6 @@ Item {
             });
             p = le + 1;
         }
-        return spans;
     }
 
     // The marked lines in the visible lines (see Vim's `marked`), or those
@@ -1245,6 +1269,40 @@ Item {
                         color: view.theme.bracketMatch
                         border.color: view.theme.bracketBorder
                         border.width: 1
+                    }
+                }
+            }
+
+            // What the find bar finds in (Find in Selection), a shade behind
+            // it, as VS Code draws it: under the marked lines and the
+            // selection.
+            Layer {
+                id: scopeShade
+
+                z: -0.55
+                inputs: [view.active, view.findBar.active, view.vim.findScope, view.layout, view.viewport]
+                // A rectangle a row, the last with the line break, if it's
+                // in it.
+                compute: () => {
+                    const list = [];
+                    for (const s of view.scopeSpans()) {
+                        for (const r of view.rowSpans(s.start, s.end))
+                            list.push({ rect: r.rect, eol: s.eol && r.end === s.end });
+                    }
+                    return list;
+                }
+
+                Repeater {
+                    model: scopeShade.model
+
+                    Rectangle {
+                        required property var modelData
+
+                        x: modelData.rect.x
+                        y: modelData.rect.y
+                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
+                        height: modelData.rect.height
+                        color: view.theme.findScope
                     }
                 }
             }

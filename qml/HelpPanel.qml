@@ -245,8 +245,11 @@ Popup {
                 [isMac ? "`⌘G`  `⇧⌘G`" : "`F3`  `Shift+F3`  `Ctrl+G`  `Ctrl+Shift+G`",
                     "Next or previous find bar match."],
                 [isMac ? "`⌘⌥F`" : "`Ctrl+H`", "Find and replace."],
-                [isMac ? "`⌃⌥C`  `⌃⌥W`  `⌃⌥R`" : "`Alt+C`  `Alt+W`  `Alt+R`",
+                [isMac ? "`⌘⌥C`  `⌘⌥W`  `⌘⌥R`" : "`Alt+C`  `Alt+W`  `Alt+R`",
                     "In the find bar: match case, whole word, regular expression."],
+                [isMac ? "`⌘⌥L`" : "`Alt+L`",
+                    "In the find bar: find only in the selection (or the marked lines, or else the last "
+                    + "selection). On at once for one over lines, a block or marked lines."],
                 ["`↑`  `↓`", "In the find bar: earlier and later finds (or replacements)."]
             ]
         },

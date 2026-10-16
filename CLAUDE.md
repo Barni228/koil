@@ -1441,7 +1441,23 @@ the scratchpad (see Scratchpad).
   100, until Koil quits) of what it had when it was used (a match moved to,
   a replace, the bar closed, or a query replaced by Find's seed), and Up
   and Down put those back (`browse`) as the path history does, apart from
-  vim's `/` history (the bar's query isn't a vim pattern).
+  vim's `/` history (the bar's query isn't a vim pattern). Find in
+  Selection (Cmd+Option+L, Alt+L elsewhere, as in VS Code) keeps it to
+  `vim.findScope`, spans as `:'<,'>s` keeps to (`selectionScope`: the
+  selection, else the marked lines, which it unmarks as a command does,
+  else `lastVisual`; a `V` selection's lines from the first's start to the
+  last's end), and finds as `:'<,'>s` does too (`inRegion`), so `^` is
+  only where a line starts. It's on at once when the bar opens with a
+  selection that can't be the query (over lines, a block, marked lines),
+  as VS Code's `autoFindInSelection: multiline`, and off when it closes.
+  Opening the bar takes the editor's keys, which drops its selection, so
+  leaving visual mode that way (`syncFromEditor`), as by `jumpTo`, keeps
+  it in `lastVisual`, as vim does whichever way visual mode ends. Edits
+  move the spans (`moveScope`, from `replaceRange` and `trackEdit`), and
+  text put in at their edges goes in them, so undoing a Replace All puts
+  its first and last matches back in. They're the buffer's only
+  (`leaveBuffer` drops them), and drawn in `theme.findScope`, under the
+  marked lines.
 - **Theme and zoom**: `Theme` (one, in main.qml, passed to every control)
   takes its colors from the editor's palette, so they follow the light or dark
   theme. When the theme changes, a `Palette` emits only `changed`, not its

@@ -3212,6 +3212,91 @@ TestCase {
         findBar.close();
     }
 
+    function test_findInSelection() {
+        // Lines: opened with them, it finds only in them.
+        load("a a\na a\na a\na a");
+        keys("jVj");
+        findBar.open(true);
+        compare(findBar.inSelection, true);
+        compare(vim.findScope, [{ start: 4, end: 11 }]);
+        // Typed in the find field, over what it had.
+        keyClick("a");
+        compare(findBar.query, "a");
+        compare(findBar.matches.map(m => m.start), [4, 6, 8, 10]);
+        compare(vim.cursor, 4);
+        compare(vim.mode, "normal");
+        findBar.replacement = "bb";
+        findBar.replaceAll();
+        compare(editor.text, "a a\nbb bb\nbb bb\na a");
+        // Edits move it, and undo takes them back.
+        compare(vim.findScope, [{ start: 4, end: 15 }]);
+        vim.nativeUndo(false);
+        compare(editor.text, "a a\na a\na a\na a");
+        compare(vim.findScope, [{ start: 4, end: 11 }]);
+        findBar.toggleInSelection();
+        compare(findBar.inSelection, false);
+        compare(findBar.matches.length, 8);
+        // On again: the last selection, which the bar left.
+        findBar.toggleInSelection();
+        compare(findBar.matches.map(m => m.start), [4, 6, 8, 10]);
+        findBar.close();
+        compare(vim.findScope, null);
+
+        // Marked lines, which it unmarks, as a command does.
+        load("a\na\na\na");
+        keys("mjjm");
+        findBar.open(false);
+        compare(vim.marked, []);
+        compare(vim.findScope, [{ start: 0, end: 1 }, { start: 4, end: 5 }]);
+        findBar.query = "a";
+        compare(findBar.matches.map(m => m.start), [0, 4]);
+        findBar.close();
+
+        // A block: its part of each line.
+        load("abc\nabc\nabc");
+        keys("l<C-v>jl");
+        findBar.open(false);
+        findBar.query = "[ab]";
+        compare(findBar.matches.map(m => m.start), [1, 5]);
+        findBar.close();
+
+        // A selection in a line is the query, but can be turned on after.
+        load("ab ab\nab");
+        keys("vl");
+        findBar.open(false);
+        compare(findBar.query, "ab");
+        compare(findBar.inSelection, false);
+        compare(findBar.matches.length, 3);
+        findBar.toggleInSelection();
+        compare(findBar.matches.map(m => m.start), [0]);
+        findBar.close();
+
+        // With nothing selected, it stays off.
+        load("ab");
+        vim.lastVisual = null;
+        findBar.open(false);
+        findBar.toggleInSelection();
+        compare(findBar.inSelection, false);
+        compare(vim.messageIsError, true);
+        findBar.close();
+    }
+
+    // In the listing, lines selected start at their names, as for a search.
+    function test_findInSelectionListing() {
+        loadListing("M  a\nC  b\nM  a");
+        keys("Vj");
+        findBar.open(true);
+        findBar.useRegex = true;
+        findBar.query = "^a";
+        compare(findBar.matches.length, 1);
+        findBar.replacement = "xyz";
+        findBar.replaceAll();
+        compare(render(), "<M:h1>  xyz\n<C:h2>  b\n<M:h3>  a");
+        findBar.query = "\\w+";
+        compare(findBar.matches.map(m => editor.text.slice(m.start, m.end)), ["xyz", "b"]);
+        findBar.close();
+    }
+
     // Older entries come from other tests, so this stays among its own.
     function test_findHistory() {
         load("one two three");
@@ -3250,14 +3335,25 @@ TestCase {
         keyClick(Qt.Key_Up);
         compare(findBar.query, "three");
         findBar.close();
-        // The replace field has its own.
+        // The replace field has its own. Replace opens with the keys in
+        // the find field, as Find does, and Tab goes on to it.
         findBar.open(true);
         findBar.replacement = "3";
         findBar.replaceAll();
         findBar.replacement = "";
+        keyClick(Qt.Key_Tab);
         keyClick(Qt.Key_Up);
         compare(findBar.replacement, "3");
         compare(findBar.query, "three");
+        findBar.close();
+        // Replace while the bar is open goes to the replace field, with
+        // its text selected.
+        findBar.open(false);
+        const query = findBar.query;
+        findBar.open(true);
+        keyClick("x");
+        compare(findBar.replacement, "x");
+        compare(findBar.query, query);
         findBar.close();
     }
 
