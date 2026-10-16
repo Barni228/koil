@@ -1505,7 +1505,10 @@ the scratchpad (see Scratchpad).
   one makes it once: `System.setText` replaces the text and gives every
   line its format in one edit block (setting the text the `TextArea`'s way
   and then the format laid it out twice; emptying it first hid the scroll
-  bar, which changed the width), the gutter gets its width before the text
+  bar, which changed the width), clearing the document in it (a selection
+  removed stays in its buffer, where Qt's positions are ints: a gigabyte
+  opened again after the listing went past them and crashed), the gutter
+  gets its width before the text
   (`gutter.fit`), and a file on the command line opens after the editor's
   `onCompleted`, which adds the gutter's padding. A window resize still
   lays it out again, and so does the scroll bar showing up on macOS, whose

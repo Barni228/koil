@@ -373,6 +373,28 @@ TestCase {
         compare(render(), "xx three\nfour five\nfour five\nfour five");
     }
 
+    // j and k keep the column the cursor last went to, but not past a new
+    // text, nor an edit, a yank or an undo that left it in another (as vim).
+    function test_jkColumn() {
+        load("abcdef\nabcdef\nabcdef");
+        keys("4lj");
+        compare(vim.cursor, 11);
+        load("abcdef\nabcdef\nabcdef");
+        keys("j");
+        compare(vim.cursor, 7);
+        keys("4ld0j");
+        compare(vim.cursor, 10);
+        load("abcdef\nabcdef\nabcdef");
+        keys("4lyypj");
+        compare(vim.cursor, 14);
+        load("abcdef\nabcdef");
+        keys("4lx0uj");
+        compare(vim.cursor, 11);
+        load("abcdef\nabcdef");
+        keys("lvlllyj");
+        compare(vim.cursor, 8);
+    }
+
     function test_countsAndRepeat() {
         load("abcdef");
         keys("2x.");

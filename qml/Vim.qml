@@ -401,6 +401,9 @@ QtObject {
         blockHome = null;
         setMode("normal");
         setCursor(0);
+        // Not the column of the text before (the listing's, when a file
+        // opens), which j would go to.
+        wantCol = 0;
     }
 
     // Returns whether the key was consumed; unconsumed keys go to the editor.
@@ -1258,6 +1261,7 @@ QtObject {
             return;
         }
         const changing = marking ? !["y", "Y", ":", "!"].includes(cmd.action) : isChange(cmd);
+        const wasVisual = isVisual;
         if (changing) {
             beginChange();
             if (!isVisual && !replaying && !marking)
@@ -1285,6 +1289,10 @@ QtObject {
             insertSession.label = insertSession.count + cmd.action;
         if (changing && !inserting)
             commitChange();
+        // As in vim, j and k go on from the column an edit or a yank left
+        // the cursor in (d0, dd, p), not the one they had before it.
+        if ((changing || cmd.op || wasVisual && ["y", "Y"].includes(cmd.action)) && !inserting)
+            wantCol = Txt.column(bufferText(), cursor);
     }
 
     function moveBy(cmd) {
@@ -3516,6 +3524,7 @@ QtObject {
             }
             const p = Math.min(last.cursor, bufferText().length);
             setCursor(mode === "normal" ? clampNormal(bufferText(), p) : p);
+            wantCol = Txt.column(bufferText(), cursor);
         });
     }
 
@@ -3538,6 +3547,7 @@ QtObject {
             // Land on an inserted line rather than the end of the line above it.
             const p = last.start + (last.inserted[0] === "\n" ? 1 : 0);
             setCursor(mode === "normal" ? clampNormal(bufferText(), p) : p);
+            wantCol = Txt.column(bufferText(), cursor);
         });
     }
 

@@ -930,12 +930,15 @@ setText(QObject* textEdit,
   document->setUndoRedoEnabled(false);
   QTextCursor cursor(document);
   cursor.beginEditBlock();
-  cursor.select(QTextCursor::Document);
-  cursor.removeSelectedText();
+  // Cleared, as setting the text does, rather than the old text selected
+  // and removed: the document keeps the text it removes in its buffer
+  // (letting it go only once the buffer is nearly full), where Qt's
+  // positions are ints, so a gigabyte's file opened again after the
+  // listing went past them, and crashed.
+  document->clear();
   cursor.setBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
   cursor.insertText(text);
   cursor.endEditBlock();
-  document->setUndoRedoEnabled(false); // which lets the old text go
   document->setUndoRedoEnabled(undo);
   // As setting the text does: the cursor at the start, and for a long text,
   // only the lines in view built.
