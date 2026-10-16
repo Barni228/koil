@@ -446,71 +446,6 @@ Popup {
     // How far a code's shade reaches past its text, as in a Tip.
     readonly property real codePadding: 4 * zoom
 
-    // Text with `code` as the text it shows: each code without its
-    // backticks, and the spaces between collapsed, as rich text shows
-    // them; and where each code is in it. `plain` text is as it is.
-    function parseCode(text, plain) {
-        if (plain)
-            return { text: text, codes: [] };
-        const codes = [];
-        let shown = "";
-        text.split("`").forEach((part, i) => {
-            if (i % 2 === 1)
-                codes.push({ start: shown.length, text: part });
-            else
-                part = part.replace(/ +/g, " ");
-            shown += part;
-        });
-        return { text: shown, codes: codes };
-    }
-
-    // The rich text that shows parsed text (see parseCode): its codes in
-    // the editor's font, with letter spacing on the characters before and
-    // at the end of each, which makes room for its shade and copies as
-    // nothing, and the search matches in `marks` ([start, end, current])
-    // in black, as they're on a highlight. Spaces in a code (or in plain
-    // text) don't break or collapse, and copy as spaces.
-    function codeHtml(parsed, marks, plain) {
-        const t = parsed.text;
-        const inCode = 1, spaced = 2, marked = 4;
-        const flags = new Uint8Array(t.length);
-        // Letter spacing goes after a character, so on both of a pair of
-        // surrogates.
-        const space = i => {
-            flags[i] |= spaced;
-            if (i > 0 && /[\udc00-\udfff]/.test(t[i]))
-                flags[i - 1] |= spaced;
-        };
-        for (const code of parsed.codes) {
-            const end = code.start + code.text.length;
-            for (let i = code.start; i < end; i++)
-                flags[i] |= inCode;
-            if (code.start > 0)
-                space(code.start - 1);
-            space(end - 1);
-        }
-        for (const mark of marks) {
-            for (let i = mark[0]; i < mark[1]; i++)
-                flags[i] |= marked;
-        }
-        let html = "";
-        for (let i = 0, j; i < t.length; i = j) {
-            const f = flags[i];
-            for (j = i + 1; j < t.length && flags[j] === f;)
-                j++;
-            let run = t.slice(i, j).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            if (plain || f & inCode)
-                run = run.replace(/ /g, " ");
-            // One character in the document, as the line break is.
-            if (plain)
-                run = run.replace(/\n/g, "<br>");
-            const style = (f & inCode ? "font-family:'" + monoFamily + "';" : "")
-                + (f & spaced ? "letter-spacing:" + codePadding + "px;" : "") + (f & marked ? "color:black;" : "");
-            html += style ? "<span style=\"" + style + "\">" + run + "</span>" : run;
-        }
-        return html;
-    }
-
     // ---- Search ------------------------------------------------------------
     // As vim's: / and ? type a search (on the search line, at the bottom),
     // highlighting its matches and going to the one Enter goes to as it's
@@ -556,7 +491,7 @@ Popup {
                 if (!markup)
                     return;
                 order[s + "/" + part] = list.length;
-                list.push({ key: s + "/" + part, text: parseCode(markup, !!section.plain).text });
+                list.push({ key: s + "/" + part, text: Txt.parseCode(markup, !!section.plain).text });
             };
             add("title", section.title);
             add("intro", section.intro);
@@ -796,7 +731,7 @@ Popup {
         }
     }
 
-    // Text with `code` (see parseCode), each code on a shade of its own,
+    // Text with `code` (see Txt.parseCode), each code on a shade of its own,
     // drawn behind the text so it still selects and copies, and its search
     // matches highlighted. `plain` shows the text as it is (a :reg list).
     component CodeText: HelpText {
@@ -807,7 +742,7 @@ Popup {
         // Which text of shownSections it is ("" for none), which search
         // goes through (see searchTexts).
         property string key
-        readonly property var parsed: help.parseCode(markup, plain)
+        readonly property var parsed: Txt.parseCode(markup, plain)
         // Its search matches, if search went through its text: the
         // Repeater deletes the old texts some time after shownSections
         // changes, and those mustn't take the new ones' matches.
@@ -869,7 +804,7 @@ Popup {
 
         // Room for a shade at a line's start (so all text has it).
         leftPadding: help.codePadding
-        text: help.codeHtml(parsed, markList, plain)
+        text: Txt.codeHtml(parsed, markList, plain, help.monoFamily, help.codePadding)
         textFormat: TextEdit.RichText
         wrapMode: TextEdit.Wrap
         onLayoutChanged: Qt.callLater(place)

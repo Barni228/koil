@@ -82,6 +82,9 @@ the scratchpad (see Scratchpad).
   `CompletionList`, each in a part a row while lines wrap (`rowSpans`, see
   Wrapping). Both the listing (or
   file) and the path field are one (`pathField`).
+- `qml/CodeLabel.qml`: text with `code` in backquotes, each in the
+  editor's font on a shade, as the help shows them, for `Tip` and the
+  Settings window's notes (see Theme).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
 - `qml/CompletionList.qml`: the dirs Tab can complete the path field to, in
@@ -93,8 +96,8 @@ the scratchpad (see Scratchpad).
   the listing's prefixes, `:` and its ranges, `/`, `:s`, buffers). It drives
   the `TextArea` through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects,
-  `:s`'s arguments and replacement), imported as `Txt` by Vim.qml and the
-  views. The only state it keeps is
+  `:s`'s arguments and replacement, `code` in the help and tips), imported
+  as `Txt` by Vim.qml and the views. The only state it keeps is
   where the lines of the last two long texts start (`lineIndex`), so
   `lineOf`, `lineToPos` and `countLines` (the status line, line numbers,
   highlights) don't go through the text each time.
@@ -105,7 +108,8 @@ the scratchpad (see Scratchpad).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
   the question: `:confirm q`, applying and undoing (lists to pick from),
   and what changed on disk against the user's edits.
-- `qml/SettingsWindow.qml`: the Settings window (Cmd+,).
+- `qml/SettingsWindow.qml`: the Settings window (Cmd+,), which scrolls,
+  and shows what a setting does with the pointer on it (see Settings).
 - `qml/ShortcutsWindow.qml`: the user's shortcuts, listed and edited (see
   Shortcuts).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
@@ -1488,8 +1492,10 @@ the scratchpad (see Scratchpad).
   text in the editor's font uses `theme.font`, other UI scales its sizes by
   `theme.zoom`. New UI must do the same, and use `Panel` for a box over the
   editor, `Tip` for tooltips (keys that do the same go in its
-  `shortcuts`, each shown as code, not in the text) and `IconButton` for small
-  buttons.
+  `shortcuts`, each shown as code, not in the text; other keys, commands
+  like `:set wrap` and file names go in its text in backquotes, which
+  `CodeLabel` shows as the help does: `Txt.parseCode`, `Txt.codeHtml`, and
+  a shade a line behind each) and `IconButton` for small buttons.
 - **Overlays** (Editor.qml): the carets, selection, highlights and squiggles
   are each a `Layer`, which recomputes its model with Qt.callLater once its
   `inputs` change (`view.layout` for the text and its layout, `view.viewport`
@@ -1700,7 +1706,18 @@ the scratchpad (see Scratchpad).
   read from the home dir (`Document.startDir`), so it can't open a file;
   the folder button puts a picked one in with `~`. The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
   also switches the palette, title bar and menus; "system" unsets it. The
-  Settings window's size follows the zoom, so it isn't resizable. They're
+  Settings window's size follows the zoom, so it isn't resizable. Its
+  settings scroll (`scroller`, a `Flickable` that isn't interactive, as a
+  drag selects in a field, scrolled by a `WheelHandler`) past
+  `maxListHeight` (440 at zoom 1, and never past the screen), with Restore
+  Defaults under them, and Tab scrolls to what it goes to
+  (`onActiveFocusItemChanged`). The pointer anywhere on a setting's row (or
+  its note's) shows what it does after a moment, in a `Tip` under it (over
+  it, at the view's end), from its label's `about`, so its note (if any)
+  is a short line. One `HoverHandler` on the grid finds the row
+  (`settingAt`: GridLayout puts the children that show three to a row), as
+  it's hovered along with the controls, and the tip hides while a button
+  with a tip of its own is (`buttonsHovered`). They're
   stored in `~/Library/Preferences/com.koil.Koil.plist` on macOS, the registry
   (`HKEY_CURRENT_USER\Software\Koil\Koil`) on Windows.
 - **Fonts**: the editor offers only monospaced fonts

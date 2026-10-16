@@ -725,6 +725,75 @@ function searchRegExp(pattern, ignoreCase) {
     }
 }
 
+// ---- Code ------------------------------------------------------------------
+// `code` in the help's texts and tips, in the editor's font on a shade of
+// its own (see HelpPanel's CodeText and CodeLabel).
+
+// Text with `code` as the text it shows: each code without its
+// backticks, and the spaces between collapsed, as rich text shows
+// them; and where each code is in it. `plain` text is as it is.
+function parseCode(text, plain) {
+    if (plain)
+        return { text: text, codes: [] };
+    const codes = [];
+    let shown = "";
+    text.split("`").forEach((part, i) => {
+        if (i % 2 === 1)
+            codes.push({ start: shown.length, text: part });
+        else
+            part = part.replace(/ +/g, " ");
+        shown += part;
+    });
+    return { text: shown, codes: codes };
+}
+
+// The rich text that shows parsed text (see parseCode): its codes in
+// `family` (the editor's font), with letter spacing (`padding`) on the
+// characters before and at the end of each, which makes room for its
+// shade and copies as nothing, and the search matches in `marks` ([start,
+// end, current]) in black, as they're on a highlight. Spaces in a code (or
+// in plain text) don't break or collapse, and copy as spaces.
+function codeHtml(parsed, marks, plain, family, padding) {
+    const t = parsed.text;
+    const inCode = 1, spaced = 2, marked = 4;
+    const flags = new Uint8Array(t.length);
+    // Letter spacing goes after a character, so on both of a pair of
+    // surrogates.
+    const space = i => {
+        flags[i] |= spaced;
+        if (i > 0 && /[\udc00-\udfff]/.test(t[i]))
+            flags[i - 1] |= spaced;
+    };
+    for (const code of parsed.codes) {
+        const end = code.start + code.text.length;
+        for (let i = code.start; i < end; i++)
+            flags[i] |= inCode;
+        if (code.start > 0)
+            space(code.start - 1);
+        space(end - 1);
+    }
+    for (const mark of marks) {
+        for (let i = mark[0]; i < mark[1]; i++)
+            flags[i] |= marked;
+    }
+    let html = "";
+    for (let i = 0, j; i < t.length; i = j) {
+        const f = flags[i];
+        for (j = i + 1; j < t.length && flags[j] === f;)
+            j++;
+        let run = t.slice(i, j).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        if (plain || f & inCode)
+            run = run.replace(/ /g, " ");
+        // One character in the document, as the line break is.
+        if (plain)
+            run = run.replace(/\n/g, "<br>");
+        const style = (f & inCode ? "font-family:'" + family + "';" : "")
+            + (f & spaced ? "letter-spacing:" + padding + "px;" : "") + (f & marked ? "color:black;" : "");
+        html += style ? "<span style=\"" + style + "\">" + run + "</span>" : run;
+    }
+    return html;
+}
+
 // ---- Substitute ------------------------------------------------------------
 
 // :s's arguments, from the delimiter on (/pattern/replacement/flags, any

@@ -5,12 +5,15 @@ import QtQuick.Controls
 
 // A tooltip in the style of the hover box, with the keys that do the same
 // (`shortcuts`, if any) after its text, as code: each in the editor's font,
-// on a shade of its own. Whoever shows it places it.
+// on a shade of its own, as `code` in its text is (see CodeLabel). Whoever
+// shows it places it.
 ToolTip {
     id: tip
 
     required property Theme theme
     property list<string> shortcuts
+    // Past this width (if any), the text wraps.
+    property real wrapWidth: 0
 
     delay: 600
     leftPadding: 8 * theme.zoom
@@ -36,12 +39,13 @@ ToolTip {
     contentItem: Row {
         spacing: 6 * tip.theme.zoom
 
-        Text {
+        CodeLabel {
             anchors.verticalCenter: parent.verticalCenter
-            text: tip.text
+            width: tip.wrapWidth > 0 ? Math.min(implicitWidth, tip.wrapWidth) : implicitWidth
+            theme: tip.theme
+            markup: tip.text
             font.pixelSize: Math.round(12 * tip.theme.zoom)
             color: tip.theme.text
-            textFormat: Text.PlainText
         }
         Repeater {
             model: tip.shortcuts
