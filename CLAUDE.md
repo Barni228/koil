@@ -211,7 +211,9 @@ the scratchpad (see Scratchpad).
   `cursorPositionChanged` comes before `text` has the typed character, so
   it checks `length`). Lines get one where they start: `o`, `O` and Enter
   (`lineBreak`), typing on an empty line (`prefixEmptyLine`), and pasted
-  lines that have none (`prefixLines`); `J`, `gJ` and Delete at a line's
+  lines that have none (`prefixLines`), so in normal mode the cursor on
+  an empty line (an empty dir's listing) is drawn where its name would
+  start (`spotAt`), not under the icons; `J`, `gJ` and Delete at a line's
   end drop the next line's with the line break. In insert mode vim types
   Enter and the keys that would delete into a prefix (`prefixKey`, like
   Alt+Backspace at a name's start), as `typedEdit` says: Backspace at a

@@ -463,16 +463,22 @@ Item {
 
     // Where to draw a cursor at pos: { cell, character, main, line }, where
     // character is the whole character there (an emoji, say), or "" for
-    // none (at a line's end or on a tab), and `line` its line's rows.
+    // none (at a line's end or on a tab), and `line` its line's rows. In
+    // the listing, in normal mode, one on an empty line is where its name
+    // would start, as typing there puts a prefix first (see
+    // Vim.prefixEmptyLine): at the line's start, it was under the icons (an
+    // empty dir's listing).
     function spotAt(pos, main) {
         const t = editor.latest.text, p = Math.min(pos, editor.length);
         const ch = t.slice(p, Txt.charEnd(t, p));
-        const cell = cellAt(p);
+        let cell = cellAt(p);
         let line = cell;
         if (wrapping) {
             const top = cellAt(Txt.lineStart(t, p)).y;
             line = Qt.rect(cell.x, top, cell.width, cellAt(Txt.lineEnd(t, p)).y + lineHeight - top);
         }
+        if (vim.linePrefixes && vim.mode === "normal" && Txt.lineStart(t, p) === p && Txt.lineEnd(t, p) === p)
+            cell = Qt.rect(cell.x + vim.blankPrefix.length * charWidth, cell.y, cell.width, cell.height);
         return {
             cell: cell,
             character: ch === "\t" || ch === "\n" || ch === "\u2029" ? "" : ch,
@@ -1404,7 +1410,7 @@ Item {
             Layer {
                 id: carets
 
-                inputs: [view.active, view.vim.cursor, view.vim.cursors, editor.cursorRectangle, view.layout, view.viewport]
+                inputs: [view.active, view.vim.cursor, view.vim.cursors, view.vim.mode, editor.cursorRectangle, view.layout, view.viewport]
                 compute: () => !view.active ? [] : [view.spotAt(view.vim.cursor, true)].concat(view.visibleCursors().map(c => view.spotAt(c.pos, false)))
 
                 // Shaped like the main one. In insert mode the main one is
