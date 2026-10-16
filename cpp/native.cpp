@@ -1102,8 +1102,8 @@ longLineRuns(QObject* textDocument, int firstRow, int lastRow, int firstColumn, 
         if (to > from && to < length && doc->characterAt(position + to).isLowSurrogate())
           ++to;
         for (int at = from; at < to;) {
-          // The formats over `at`, each later one over the earlier ones
-          // (a URL in a string), as Qt merges them, until one starts or ends.
+          // The format over `at` (they're apart: syntax::apart), until one
+          // starts or ends.
           int next = to;
           QTextCharFormat format;
           for (const auto& range : formats) {

@@ -298,3 +298,37 @@ fn test_long_line() {
     let line = format!("\"{}\"", "x".repeat(MAX_LENGTH));
     assert!(parts(&line).is_empty());
 }
+
+#[test]
+fn test_apart() {
+    let drawn = |line: &str| {
+        let units: Vec<u16> = line.encode_utf16().collect();
+        apart(&spans(&units, State::Code, Comments::ALL).0)
+            .iter()
+            .map(|s| (String::from_utf16(&units[s.start..s.end]).unwrap(), s.kind))
+            .collect::<Vec<_>>()
+    };
+    let part = |text: &str, kind| (text.to_string(), kind);
+    assert_eq!(
+        drawn(r#"app="$root/target/Koil.app" # in ~/x now"#),
+        [
+            part(r#"""#, Kind::String),
+            part("$root/target/Koil.app", Kind::Path),
+            part(r#"""#, Kind::String),
+            part("# in ", Kind::Comment),
+            part("~/x", Kind::Path),
+            part(" now", Kind::Comment),
+        ]
+    );
+    // Escapes side by side are one part.
+    assert_eq!(
+        drawn(r#"s = "a\n\tb" + 12"#),
+        [
+            part(r#""a"#, Kind::String),
+            part(r"\n\t", Kind::Escape),
+            part(r#"b""#, Kind::String),
+            part("12", Kind::Number),
+        ]
+    );
+    assert_eq!(drawn("nothing here"), []);
+}

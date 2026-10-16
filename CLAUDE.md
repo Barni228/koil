@@ -914,7 +914,10 @@ the scratchpad (see Scratchpad).
   characters are colored, as with vim's `synmaxcol`. native.cpp's
   `TextColors` asks Rust for each line's spans (`syntaxSpans`, in UTF-16,
   as Qt has it, of the line's first `coloredLength` characters) and gives
-  them to the line's layout, as a `QSyntaxHighlighter` would, but without
+  them to the line's layout, apart (`syntax::apart`: Qt Quick drops the
+  end of a format that starts in another, so a path in a string lost its
+  last character and the string's closing quote), as a
+  `QSyntaxHighlighter` would, but without
   its format for each character of the line (5 ms for a line of a
   megabyte), and not again when only the text's format changed
   (`FormatOnly`: the line format, Koil's margins, see Long lines), which

@@ -50,8 +50,9 @@ mod bridge {
         fn syntax_comments(file_name: &QString) -> SyntaxComments;
 
         /// Puts the parts of a file's `line` to color in `spans` (see
-        /// `syntax::spans`), for a line that starts in `state`, and gives
-        /// the state it ends in (QSyntaxHighlighter's block states).
+        /// `syntax::spans`), apart (`syntax::apart`), for a line that
+        /// starts in `state`, and gives the state it ends in
+        /// (QSyntaxHighlighter's block states).
         #[cxx_name = "syntaxSpans"]
         fn syntax_spans(
             line: &[u16],
@@ -279,7 +280,7 @@ fn syntax_spans(
         slashes: comments.slashes,
     };
     let (found, state) = syntax::spans(line, syntax::State::from_number(state), comments);
-    spans.extend(found.iter().map(|span| SyntaxSpan {
+    spans.extend(syntax::apart(&found).iter().map(|span| SyntaxSpan {
         // A line is at most syntax::MAX_LENGTH long.
         start: span.start as i32,
         length: (span.end - span.start) as i32,

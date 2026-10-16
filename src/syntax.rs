@@ -121,6 +121,28 @@ pub fn spans(line: &[u16], state: State, comments: Comments) -> (Vec<Span>, Stat
     (spans, state)
 }
 
+/// `spans` (as `spans` gives them) as they're drawn, sorted and apart: each
+/// part the kind of the last one over it, so a path in a string splits it
+/// in three. Qt Quick draws a line's formats so, but one that starts in
+/// another lost its last character, and the other everything after it
+/// (`QQuickTextNodeEngine::mergeFormats`): `"~/a.txt"` ended in a plain
+/// `t"`, and `"a\nb"` in a plain `\nb"`.
+pub fn apart(spans: &[Span]) -> Vec<Span> {
+    let mut kinds = vec![None; spans.iter().map(|s| s.end).max().unwrap_or(0)];
+    for s in spans {
+        kinds[s.start..s.end].fill(Some(s.kind));
+    }
+    let mut parts: Vec<Span> = Vec::new();
+    for (i, kind) in kinds.into_iter().enumerate() {
+        let Some(kind) = kind else { continue };
+        match parts.last_mut() {
+            Some(last) if last.end == i && last.kind == kind => last.end = i + 1,
+            _ => parts.push(span(i, i + 1, kind)),
+        }
+    }
+    parts
+}
+
 const TAB: u16 = b'\t' as u16;
 const SPACE: u16 = b' ' as u16;
 const DOUBLE_QUOTE: u16 = b'"' as u16;
