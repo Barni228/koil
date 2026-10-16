@@ -11,7 +11,8 @@ import QtQuick.Templates as T
 // first, the dir Koil starts in, and the shell :! runs commands in; and on
 // macOS, the
 // shortcut that opens the folder selected in Finder, which System Settings
-// changes, and the `koil` command, which it installs. It
+// changes, the `koil` command, which it installs, and whether :! gets the
+// environment read from the user's shell. It
 // shows the saved settings, which Koil starts with; changes here are saved
 // and apply at once (app.changeSetting), but the dir only at the next start.
 // The zoom and :set change only the settings in use, so they don't show
@@ -24,7 +25,8 @@ Window {
     // changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // syntax, wrap, colorScheme, dirsFirst, confirmChanges, startDir, shell.
+    // syntax, wrap, colorScheme, dirsFirst, confirmChanges, startDir, shell,
+    // shellEnvironment.
     required property var settings
     required property Theme theme
     // main.qml's Document, for the folder picked (a var, so this file needs
@@ -72,6 +74,11 @@ Window {
         { label: qsTr("When deleting"), value: "deleting" },
         { label: qsTr("Never"), value: "never" }
     ]
+    // Whether :! gets the environment read from the user's shell.
+    readonly property var shellEnvironmentModes: [
+        { label: qsTr("On"), value: true },
+        { label: qsTr("Off"), value: false }
+    ]
 
     // The shortcut of "Open in Koil", the macOS service (see
     // Document.finderServiceShortcut), read again whenever this window is
@@ -94,6 +101,7 @@ Window {
     readonly property bool customConfirm: settings.confirmChanges !== "always"
     readonly property bool customStartDir: settings.startDir !== ""
     readonly property bool customShell: settings.shell !== ""
+    readonly property bool customShellEnvironment: !settings.shellEnvironment
 
     function setFontSize(size) {
         app.changeSetting("fontSize", Math.max(app.minFontSize, Math.min(app.maxFontSize, size)));
@@ -125,6 +133,7 @@ Window {
         app.changeSetting("confirmChanges", "always");
         settings.startDir = "";
         app.changeSetting("shell", "");
+        app.changeSetting("shellEnvironment", true);
     }
 
     // Shows the window, centered near the top of the main window the first
@@ -936,6 +945,46 @@ Window {
             Item {
                 visible: win.app.isMac
             }
+
+            SettingLabel {
+                visible: win.app.isMac
+                text: qsTr("Shell environment")
+            }
+            // Whether :! gets the environment read from the user's shell
+            // (see shell.rs's `environment`), only on macOS, where an app
+            // opened from Finder has only the system's PATH.
+            Segmented {
+                visible: win.app.isMac
+                theme: win.theme
+                options: win.shellEnvironmentModes
+                current: win.shellEnvironmentModes.findIndex(m => m.value === win.settings.shellEnvironment)
+                onPicked: index => win.app.changeSetting("shellEnvironment", win.shellEnvironmentModes[index].value)
+            }
+            ResetButton {
+                visible: win.app.isMac
+                enabled: win.customShellEnvironment
+                onClicked: win.app.changeSetting("shellEnvironment", true)
+            }
+
+            Item {
+                visible: win.app.isMac
+            }
+            Text {
+                visible: win.app.isMac
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                Layout.topMargin: -4 * win.zoom
+                text: qsTr("Shell commands (:!) get the PATH your shell has in a terminal (.zshrc's too), read as Koil opens. Off, they get only the profile's (.zprofile), which may miss Homebrew.")
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+                font.pixelSize: Math.round(12 * win.zoom)
+                color: win.textColor
+                opacity: 0.6
+                wrapMode: Text.WordWrap
+            }
+            Item {
+                visible: win.app.isMac
+            }
         }
 
         TextButton {
@@ -943,7 +992,7 @@ Window {
             Layout.alignment: Qt.AlignRight
             text: qsTr("Restore Defaults")
             enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customColorScheme
-                || win.customConfirm || win.customStartDir || win.customShell
+                || win.customConfirm || win.customStartDir || win.customShell || win.customShellEnvironment
             onClicked: win.restoreDefaults()
         }
     }

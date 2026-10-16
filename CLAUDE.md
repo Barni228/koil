@@ -30,8 +30,9 @@ the scratchpad (see Scratchpad).
   temp dir.
 - `src/shell.rs`: shell commands (see Shell commands): the shell's kind
   (`Kind`), `%` in a command (`expand`), running one (`start`, then
-  `Started::finish` on a thread) and stopping it (`Running::stop`), its
-  output as shown (`as_shown`), and the shells installed (`shells`). Its
+  `Started::finish` on a thread) and stopping it (`Running::stop`), the
+  environment it runs in (`environment`), its output as shown
+  (`as_shown`), and the shells installed (`shells`). Its
   tests (`src/shell/tests.rs`) run sh on Unix.
 - `src/sizes.rs`: `Sizes`, which counts the sizes of dirs on its own
   threads and keeps them (see Kept sizes). Its tests
@@ -731,9 +732,25 @@ the scratchpad (see Scratchpad).
   nothing changes. A macro running it goes on in the scratchpad:
   `endWait`'s `done` shows it as a step of the run (`inChunk`), which
   `vim.reset` would otherwise interrupt. It runs on a thread
-  (`System.runShell`, one at a time): sh and the like with `-c` (and on
-  macOS those in `LOGIN_SHELLS` with `-l`, as MacVim: an app opened from
-  Finder has only the system's PATH), cmd.exe
+  (`System.runShell`, one at a time), in the environment the user's shell
+  sets up (`environment`): on macOS, an app opened from Finder has only
+  launchd's (the system's PATH, not Homebrew's), so unless Koil was
+  started from a terminal (`TERM` set), it's read once, as VS Code and
+  Zed do, from `$SHELL -l -i -c`, interactive so it reads `.zshrc` too
+  (where Homebrew's PATH often is; `-l` alone, as MacVim's, missed it).
+  Running every command that way took 200 ms each, and the rc file
+  printed into the output, so it runs once (`read_environment`, started
+  on a thread from main.qml's `onCompleted`, or as the setting is turned
+  on: `System.loadShellEnvironment`; the first command waits for it),
+  prints the environment between marks (`env -0`), is killed after 10 s,
+  and has `KOIL_RESOLVING_ENVIRONMENT` set, for an rc file to skip what's
+  slow. Commands then get it (`env_clear`, so its PATH finds the shell
+  too) and no `-l`, which would run `path_helper` again and put
+  `/usr/bin` first. If it can't be read, or the Settings window's Shell
+  environment (`shellEnvironment`, on at first, the last row, macOS
+  only; `Request::environment`) is off, which doesn't run the user's shell
+  at all, those in `LOGIN_SHELLS` get `-l`, as before. Sh and the like run
+  with `-c`, cmd.exe
   with `/d /s /c "…"` as a raw argument, PowerShell with
   `-EncodedCommand`, and Git Bash with its command line always quoted (its
   runtime globs an argument that isn't), in a process group of its own
@@ -1668,8 +1685,9 @@ the scratchpad (see Scratchpad).
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
   `relativeNumber`, `syntax`, `wrap`, `shell`, `dirsFirst`, which `:set`
   changes, as View > Word Wrap does `wrap`: `root.vimSettings`),
-  `root.colorScheme` and `root.confirmChanges`, bound to the saved ones at
-  startup. The Settings window
+  `root.colorScheme`, `root.confirmChanges` and `root.shellEnvironment`
+  (see Shell commands), bound to the saved ones at startup. The Settings
+  window
   shows the saved ones and changes both (`changeSetting`). The zoom and `:set`
   change only the ones in use, until Koil quits, so the Settings window
   doesn't show them. Their defaults (Cmd+0, `:set fs&`) are the saved values

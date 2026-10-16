@@ -8,11 +8,12 @@
 //! thread, while Koil waits for it; `Running::stop` ends it.
 
 use std::env;
+use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -37,11 +38,22 @@ const AFTER_EXIT: Duration = Duration::from_millis(500);
 /// killed.
 const KILL_AFTER: Duration = Duration::from_secs(1);
 
-/// The shells that get `-l` on macOS, where an app opened from Finder has
-/// only the system's PATH (`/usr/bin:/bin:…`), not what the shell's profile
-/// adds (Homebrew's), as MacVim does. csh and tcsh take `-l` only on its
-/// own.
+/// The shells whose environment can be read (see `environment`), and that
+/// get `-l` if it couldn't be, so they read the profile at least, as
+/// MacVim's do. csh and tcsh take `-l` only on its own.
 const LOGIN_SHELLS: [&str; 6] = ["sh", "bash", "zsh", "fish", "dash", "ksh"];
+/// How long reading the user's shell's environment may take (as long as
+/// VS Code gives it), after which it's stopped.
+const ENVIRONMENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// What the environment is printed between, as a shell's profile may
+/// print something of its own.
+const MARK: &str = "__KOIL_ENVIRONMENT__";
+/// Set while the environment is read, so a profile can leave out what
+/// takes long, as VS Code's `VSCODE_RESOLVING_ENVIRONMENT`.
+const READING: &str = "KOIL_RESOLVING_ENVIRONMENT";
+/// What a shell prints that's its own, not the environment it sets up
+/// (where it was, how deep it is), or this read's.
+const NOT_ENVIRONMENT: [&str; 5] = ["PWD", "OLDPWD", "SHLVL", "_", READING];
 
 /// cmd.exe and the shells it starts get no console window.
 #[cfg(windows)]
@@ -204,6 +216,10 @@ pub struct Request {
     /// stderr together, as for one whose output is shown, but all of it,
     /// and with its tabs.
     pub scratchpad: bool,
+    /// Whether it runs in the environment read from the user's shell (see
+    /// `environment`), as the Settings window says; else, in Koil's, in a
+    /// login shell on macOS.
+    pub environment: bool,
 }
 
 /// What a command did.
@@ -341,7 +357,7 @@ pub fn start(request: &Request, running: &Running) -> Result<(String, Started), 
         return Err(format!("“{shown}” isn't there any more"));
     }
     let cant = |err: io::Error| format!("Can't run {}: {err}", request.shell);
-    let mut command = command(&request.shell, &line, &request.cwd);
+    let mut command = command(&request.shell, &line, &request.cwd, request.environment);
     let filter = request.input.is_some() && !request.scratchpad;
     let (sender, output) = mpsc::sync_channel(16);
     let mut child;
@@ -570,13 +586,157 @@ pub fn as_shown(bytes: Vec<u8>, tabs: bool) -> String {
     lines.join("\n")
 }
 
-/// The process that runs `line` in `shell` (of its kind), in `cwd`. It
-/// leads a process group of its own, so `stop` ends what it starts too.
-fn command(shell: &str, line: &str, cwd: &Path) -> Command {
+/// The environment commands run in (see `environment`).
+#[derive(Debug)]
+enum Environment {
+    /// Koil's own: it was started from a terminal (or isn't on macOS), so
+    /// it has what the user's shell set up.
+    Inherited,
+    /// What the user's shell set up, as `read_environment` read it.
+    Read(Vec<(OsString, OsString)>),
+    /// It couldn't be read (or the setting is off), so on macOS commands
+    /// run in a login shell, which reads the profile at least.
+    Unread,
+}
+
+static ENVIRONMENT: OnceLock<Environment> = OnceLock::new();
+
+/// Reads the environment commands run in, on another thread, so the first
+/// one needn't wait for it. Only while the setting is on, as it runs the
+/// user's shell.
+pub fn load_environment() {
+    thread::spawn(|| {
+        environment();
+    });
+}
+
+/// The environment commands run in. On macOS, an app opened from Finder
+/// (or the Dock, or `open`) has launchd's, whose PATH is the system's
+/// (`/usr/bin:/bin:…`), without what the user's shell adds (Homebrew's),
+/// so it's read from `$SHELL` once, as VS Code and Zed do. Not when Koil
+/// was started from a terminal (`TERM` is set), as it has it then, with
+/// what was set for it alone.
+fn environment() -> &'static Environment {
+    ENVIRONMENT.get_or_init(|| {
+        if !cfg!(target_os = "macos") || cfg!(test) || env::var_os("TERM").is_some() {
+            return Environment::Inherited;
+        }
+        let home = env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from);
+        match read_environment(&default_shell(), &home, ENVIRONMENT_TIMEOUT) {
+            Some(vars) => Environment::Read(vars),
+            None => Environment::Unread,
+        }
+    })
+}
+
+/// The environment `shell` (one of `LOGIN_SHELLS`) sets up, as in a
+/// terminal: a login shell that's interactive too, so it reads the rc file
+/// (`.zshrc`, where Homebrew's PATH often is) as well as the profile, run
+/// in `home`. What the rc file prints goes around it, so the environment
+/// is printed between `MARK`s (by `env -0`, as a value may have a line
+/// break). None if it can't run, has no PATH, or isn't done in `timeout`
+/// (then it's killed, with what it started).
+fn read_environment(
+    shell: &str,
+    home: &Path,
+    timeout: Duration,
+) -> Option<Vec<(OsString, OsString)>> {
+    if !LOGIN_SHELLS.contains(&program_name(shell).as_str()) {
+        return None;
+    }
+    let line = format!("printf {MARK}; /usr/bin/env -0; printf {MARK}");
     let mut command = Command::new(shell);
+    command
+        .args(["-l", "-i", "-c", &line])
+        .current_dir(home)
+        .env(READING, "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().ok()?;
+    let (sender, output) = mpsc::sync_channel(16);
+    read(child.stdout.take(), 0, sender);
+    let deadline = Instant::now() + timeout;
+    let mut bytes = Vec::new();
+    let vars = loop {
+        if let Some(vars) = between_marks(&bytes) {
+            break Some(vars);
+        }
+        match output.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok((_, Some(chunk))) => bytes.extend(chunk),
+            Ok((_, None)) | Err(RecvTimeoutError::Disconnected) => break None,
+            Err(RecvTimeoutError::Timeout) => {
+                signal(child.id(), true);
+                break None;
+            }
+        }
+    };
+    // It ends once it has printed them (unless it hangs), not waited for.
+    thread::spawn(move || child.wait());
+    vars.filter(|vars| vars.iter().any(|(name, _)| name == "PATH"))
+}
+
+/// The variables printed between two `MARK`s in `output`, once both are
+/// there, as `env -0` prints them, but `NOT_ENVIRONMENT`.
+fn between_marks(output: &[u8]) -> Option<Vec<(OsString, OsString)>> {
+    let mark = MARK.as_bytes();
+    let find = |from: usize| {
+        (output[from..].windows(mark.len()))
+            .position(|bytes| bytes == mark)
+            .map(|at| from + at)
+    };
+    let start = find(0)? + mark.len();
+    let end = find(start)?;
+    let vars = (output[start..end].split(|&b| b == 0))
+        .filter_map(|var| {
+            let eq = var.iter().position(|&b| b == b'=')?;
+            let (name, value) = (&var[..eq], &var[eq + 1..]);
+            let shells = NOT_ENVIRONMENT.iter().any(|n| n.as_bytes() == name);
+            (!name.is_empty() && !shells).then(|| (os_string(name), os_string(value)))
+        })
+        .collect();
+    Some(vars)
+}
+
+/// `bytes` as an OsString: as they are on Unix, where it's bytes.
+fn os_string(bytes: &[u8]) -> OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        std::ffi::OsStr::from_bytes(bytes).to_os_string()
+    }
+    #[cfg(not(unix))]
+    {
+        String::from_utf8_lossy(bytes).into_owned().into()
+    }
+}
+
+/// The process that runs `line` in `shell` (of its kind), in `cwd`, with
+/// `read`, in the environment the user's shell sets up (see
+/// `environment`). It leads a process group of its own, so `stop` ends
+/// what it starts too.
+fn command(shell: &str, line: &str, cwd: &Path, read: bool) -> Command {
+    let mut command = Command::new(shell);
+    let environment = match read {
+        true => environment(),
+        false => &Environment::Unread,
+    };
+    // Its PATH finds `shell` too.
+    if let Environment::Read(vars) = environment {
+        command.env_clear();
+        command.envs(vars.iter().map(|(name, value)| (name, value)));
+    }
     match Kind::of(shell) {
         Kind::Sh => {
-            if cfg!(target_os = "macos") && LOGIN_SHELLS.contains(&program_name(shell).as_str()) {
+            if cfg!(target_os = "macos")
+                && matches!(environment, Environment::Unread)
+                && LOGIN_SHELLS.contains(&program_name(shell).as_str())
+            {
                 command.arg("-l");
             }
             // Quoted, always: Git Bash's runtime reads its command line

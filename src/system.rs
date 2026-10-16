@@ -90,6 +90,11 @@ pub mod qobject {
         #[qinvokable]
         fn shells(self: &System) -> QString;
 
+        /// Reads the environment commands run in from the user's shell, on
+        /// another thread (see `shell::load_environment`).
+        #[qinvokable]
+        fn load_shell_environment(self: &System);
+
         /// Starts the shell command `request` (a `shell::Request`, as JSON)
         /// on another thread, and emits `shell_done` once it's done. Returns
         /// `{ line, error }`: the command line as it runs, or else why it
@@ -395,6 +400,10 @@ impl qobject::System {
     fn shells(&self) -> QString {
         let found = serde_json::to_string(&shell::shells()).unwrap_or_default();
         QString::from(found.as_str())
+    }
+
+    fn load_shell_environment(&self) {
+        shell::load_environment();
     }
 
     fn run_shell(self: Pin<&mut Self>, request: &QString) -> QString {

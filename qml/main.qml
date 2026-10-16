@@ -145,8 +145,17 @@ ApplicationWindow {
     // "system", "light" or "dark".
     property string colorScheme: settings.colorScheme
     // When applying asks first (see asksFirst): "always", "deleting" or
-    // "never". The other settings in use are vim's.
+    // "never". The other settings in use are vim's, and shellEnvironment.
     property string confirmChanges: settings.confirmChanges
+    // Whether :! runs commands in the environment read from the user's
+    // shell, on macOS (see shell.rs's `environment`), which is read once,
+    // as Koil starts or the setting is turned on.
+    property bool shellEnvironment: settings.shellEnvironment
+
+    onShellEnvironmentChanged: {
+        if (shellEnvironment)
+            system.loadShellEnvironment();
+    }
     // The settings vim keeps, which :set changes (see changeSetting).
     readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "wrap", "shell",
         "dirsFirst"]
@@ -834,7 +843,8 @@ ApplicationWindow {
             append: listing && !!range,
             input: !filter ? null : lines ? lines.map(lineText).join("\n") + "\n"
                 : t.slice(Txt.lineToPos(t, range.first), Txt.lineEnd(t, Txt.lineToPos(t, last))) + "\n",
-            scratchpad: scratch
+            scratchpad: scratch,
+            environment: shellEnvironment
         });
         // Koil takes the listing's edits before leaving it for the
         // scratchpad, as _ does: before the command runs, after which they
@@ -1326,8 +1336,8 @@ ApplicationWindow {
 
     onColorSchemeChanged: applyColorScheme()
 
-    // Saves a setting and uses it now: one of vimSettings, colorScheme or
-    // confirmChanges.
+    // Saves a setting and uses it now: one of vimSettings, colorScheme,
+    // confirmChanges or shellEnvironment.
     function changeSetting(name, value) {
         (vimSettings.includes(name) ? vim : root)[name] = value;
         settings[name] = value;
@@ -1435,6 +1445,9 @@ ApplicationWindow {
         // The shell :! runs commands in: a path, or a name on the PATH;
         // empty for the system's (root.systemShell).
         property string shell: ""
+        // Whether :! commands get the environment the user's shell sets
+        // up (root.shellEnvironment).
+        property bool shellEnvironment: true
         // The dir Koil lists when no path is given (see Document.startDir),
         // read only at startup; empty for the home dir.
         property string startDir: ""
@@ -2331,6 +2344,8 @@ ApplicationWindow {
             root.menuBar = windowMenuBar.createObject(root);
 
         applyColorScheme();
+        if (shellEnvironment)
+            system.loadShellEnvironment();
         // Before any text is looked through (see Txt.lineIndex).
         Txt.compareStringsWith((a, b) => system.sameString(a, b));
         startUp();

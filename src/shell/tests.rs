@@ -327,4 +327,60 @@ mod running {
         assert_eq!(ran.output, "done");
         assert!(begun.elapsed() < Duration::from_secs(3));
     }
+
+    /// A shell named `name` in `dir`, which runs `profile`, then the
+    /// command it's given (after `-l -i -c`) in sh.
+    fn fake_shell(dir: &Path, name: &str, profile: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        let script = format!("#!/bin/sh\n{profile}\nexec /bin/sh -c \"$4\"\n");
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    fn var<'a>(vars: &'a [(OsString, OsString)], name: &str) -> Option<&'a str> {
+        let mut found = vars.iter().filter(|(n, _)| n == name);
+        found.next().map(|(_, value)| value.to_str().unwrap())
+    }
+
+    #[test]
+    fn test_read_environment() {
+        let temp = tempfile::tempdir().unwrap();
+        let second = Duration::from_secs(5);
+        // what the profile prints goes around it
+        let profile = "echo hello; export FROM_RC='a\nb'; export SAW=$KOIL_RESOLVING_ENVIRONMENT";
+        let shell = fake_shell(temp.path(), "zsh", profile);
+        let vars = read_environment(&shell, temp.path(), second).unwrap();
+        assert_eq!(var(&vars, "FROM_RC"), Some("a\nb"));
+        assert_eq!(var(&vars, "SAW"), Some("1"));
+        assert!(var(&vars, "PATH").is_some());
+        for name in NOT_ENVIRONMENT {
+            assert_eq!(var(&vars, name), None);
+        }
+        // not a shell whose environment can be read
+        let shell = fake_shell(temp.path(), "nu", "");
+        assert_eq!(read_environment(&shell, temp.path(), second), None);
+        // one that fails, or has no PATH
+        let shell = fake_shell(temp.path(), "bash", "exit 1");
+        assert_eq!(read_environment(&shell, temp.path(), second), None);
+        let shell = fake_shell(temp.path(), "dash", "unset PATH");
+        assert_eq!(read_environment(&shell, temp.path(), second), None);
+        // one that hangs is stopped
+        let shell = fake_shell(temp.path(), "ksh", "sleep 30");
+        let begun = Instant::now();
+        let short = Duration::from_millis(300);
+        assert_eq!(read_environment(&shell, temp.path(), short), None);
+        assert!(begun.elapsed() < Duration::from_secs(3));
+    }
+}
+
+#[test]
+fn test_between_marks() {
+    let output = format!("noise{MARK}A=1\0B=x=y\0PWD=/\0\0{MARK}more");
+    let vars = between_marks(output.as_bytes()).unwrap();
+    let expected = [("A", "1"), ("B", "x=y")].map(|(n, v)| (n.into(), v.into()));
+    assert_eq!(vars, expected);
+    assert_eq!(between_marks(format!("noise{MARK}A=1\0").as_bytes()), None);
+    assert_eq!(between_marks(b"noise"), None);
 }
