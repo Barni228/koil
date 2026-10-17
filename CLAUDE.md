@@ -1460,19 +1460,24 @@ the scratchpad (see Scratchpad).
   `previewSearch`'s view use), and once the replacement's delimiter is
   typed, the buffer itself shows the result, made at each key from the
   text as it was (`substitution.before`, put back first in the same batch,
-  so the editor gets one edit). The cursor, and the selection `:` left
-  visual mode with (`visualShown`, drawn while the command line is open,
-  as in vim), stay on their characters through it (`previewedAt`). Qt lays
-  out again every line an edit changes (400 ms a key for 20,000 lines), so
-  only the matches `previewMargin` (500) lines or less from the view are
-  replaced (`previewWindow`), and the others are highlighted as they are.
+  so the editor gets one edit). A replacement that shows nothing (empty,
+  or only line breaks) is highlighted as a thin line where it is
+  (`addHighlight`'s `thin`: an empty span, which Editor.qml draws as
+  wide as the insert bar, a little shorter than the line, so ones above
+  each other stay apart), so it's still seen. The cursor, and the
+  selection `:` left visual mode with (`visualShown`, drawn while the
+  command line is open, as in vim), stay on their characters through it
+  (`previewedAt`). Qt lays out again every line an edit changes (400 ms a
+  key for 20,000 lines), so only the matches `previewMargin` (500) lines
+  or less from the view are replaced (`previewWindow`), and the others
+  are highlighted as they are.
   The command line closing puts the text back, and Enter then runs it, as
   one change. Not for a macro's keys (`inChunk`). The preview isn't the
-  user's text: `previewing` keeps main.qml's `onEdited` from making the
-  file modified, and is in `boxOpen` (nothing syncs, drops or saves
-  meanwhile); `updateListing` ends it first (`endPreview`: an option
-  button updates), and `reset` drops it without putting the text back, as
-  the new text replaced it.
+  user's text: main.qml works out `modified` from the text before it
+  (`usersText`, the substitution's `before`), and `previewing` is in
+  `boxOpen` (nothing syncs, drops or saves meanwhile); `updateListing`
+  ends it first (`endPreview`: an option button updates), and `reset`
+  drops it without putting the text back, as the new text replaced it.
 - **Find bar**: moving to a match moves vim's cursor to its start
   (`vim.jumpTo`, which leaves visual mode and breaks an insert); it doesn't
   select it. Its regex option (`useRegex`) is on at first, so Find's seed
@@ -1480,7 +1485,22 @@ the scratchpad (see Scratchpad).
   (`currentStart`), however the cursor got there. Its matches take over the
   search highlights while it's open; Esc in normal mode (`highlightsCleared`)
   closes it. Replace All is one `replaceRange` over the first to last match,
-  keeping the hidden text between matches. On Windows, Ctrl+F is Find, not
+  keeping the hidden text between matches (`vim.substituted`, as `:s`).
+  While the replace field has the keys (`previewShown`), the buffer shows
+  what Replace All would make of it, as `:s`'s preview does
+  (`vim.previewReplacements`, a `substitution` with `findBar` set), the
+  replacements highlighted; in the find field the matches are only
+  highlighted. Whatever the bar does (find, move, replace, undo, an
+  option) is done on the text without it (`unpreviewed`: put back first,
+  `endReplacements`, then shown again, in one batch, so the editor gets
+  one edit), and `matches` are that text's. Whatever else edits or moves
+  vim puts it back first (`toNormal`, `jumpTo`, `externalEdit`,
+  `nativeUndo`, and a press on the editor, whose `TextArea` moves its
+  cursor before it takes the keys), and the bar shows it again if the
+  field still has them (`onPreviewingChanged`). A Replace there can leave
+  the editor's text as it was (the preview showed it already), so
+  main.qml checks `modified` again as the substitution changes. On
+  Windows, Ctrl+F is Find, not
   vim's page down. Each field keeps a history (`Field.remember`: the newest
   100, until Koil quits) of what it had when it was used (a match moved to,
   a replace, the bar closed, or a query replaced by Find's seed), and Up

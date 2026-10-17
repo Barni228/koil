@@ -357,11 +357,14 @@ QtObject {
     // spans, target, before }, the matches it would replace, or once its
     // replacement is typed, what replaced them in the buffer, as { start,
     // end }; the index of the one to show; and the buffer before it was
-    // replaced, { text, hidden, cursors, cursor } (null if it wasn't).
-    // Null otherwise, and while it would replace nothing.
+    // replaced, { text, hidden, cursors, cursor, marked, findScope } (null
+    // if it wasn't). Likewise, with `findBar` set, what the find bar's
+    // Replace All would do (see previewReplacements). Null otherwise, and
+    // while it would replace nothing.
     property var substitution: null
-    // While the buffer shows what a :s would make of it, and the edits that
-    // show it (or put the text back): they aren't the user's (see main.qml).
+    // While the buffer shows what a :s or the find bar would make of it,
+    // and the edits that show it (or put the text back): they aren't the
+    // user's (see main.qml).
     property bool previewing: false
     // How many lines above and below the view a :s's preview replaces in
     // (see previewWindow).
@@ -609,9 +612,11 @@ QtObject {
             cursor = c;
     }
 
-    // Runs an edit made outside vim (e.g. from a menu) as its own undo step.
+    // Runs an edit made outside vim (e.g. from a menu) as its own undo step,
+    // on the text without the find bar's preview.
     function externalEdit(fn) {
         interrupt();
+        endReplacements();
         commitChange();
         beginChange();
         fn();
@@ -623,6 +628,7 @@ QtObject {
     // Cmd+Z / Cmd+Shift+Z, in any mode (also from the find bar).
     function nativeUndo(isRedo) {
         interrupt();
+        endReplacements();
         if (commandLine !== "")
             commandLineKey("<Esc>");
         const wasInserting = inserting;
@@ -641,9 +647,11 @@ QtObject {
     }
 
     // Moves the cursor to p from outside vim (the find bar): back to one
-    // cursor, out of visual mode, and a new undo step in insert mode.
+    // cursor, out of visual mode, and a new undo step in insert mode, in
+    // the text without the find bar's preview.
     function jumpTo(p) {
         interrupt();
+        endReplacements();
         if (commandLine !== "")
             commandLineKey("<Esc>");
         keys = [];
@@ -711,10 +719,12 @@ QtObject {
             hidden: hidden, lastVisual: lastVisual, marked: marked };
     }
 
-    // Ends the mode vim is in (back to normal), the command line, a run and
-    // the extra cursors, and forgets the keys typed so far.
+    // Ends the mode vim is in (back to normal), the command line, a run,
+    // the extra cursors and the find bar's preview, and forgets the keys
+    // typed so far.
     function toNormal() {
         interrupt();
+        endReplacements();
         if (commandLine !== "")
             commandLineKey("<Esc>");
         // Without the count's repeat, which would go on after (see Runs), as
@@ -4219,14 +4229,21 @@ QtObject {
     }
 
     // Txt.addHighlight, leaving out the prefixes of the lines a match goes
-    // on to.
-    function addHighlight(t, spans, start, end, current) {
-        const added = [];
+    // on to. With `thin`, one that shows nothing (a preview's replacement
+    // of nothing, or only of line breaks) is an empty span where it
+    // starts, which the view draws as a thin line, so it's seen where it
+    // is.
+    function addHighlight(t, spans, start, end, current, thin) {
+        const added = [], n = spans.length;
         Txt.addHighlight(t, added, start, end, current);
         for (const s of added) {
             s.start = outOfPrefix(t, s.start);
             if (s.end > s.start)
                 spans.push(s);
+        }
+        if (thin && spans.length === n) {
+            const p = outOfPrefix(t, start);
+            spans.push({ start: p, end: p, current: current });
         }
     }
 
@@ -4829,20 +4846,20 @@ QtObject {
     }
 
     // What t (the buffer's text) becomes with each of `found` (see
-    // substituteMatches) replaced as `replacement` says (see
+    // substituteMatches) replaced by what textFor gives it (for :s, see
     // Txt.substitution): { start, end, text, entries } to put in place of
     // [start, end) of t, from the first match to the end of the last (the
     // hidden text between them stays), and `spans`, where each replacement
     // is in the new text, as { start, end }. A line a replacement starts
     // gets a prefix (see prefixLines).
-    function substituted(t, found, replacement) {
+    function substituted(t, found, textFor) {
         const start = found[0].start, entries = [], spans = [];
         let text = "", i = start;
         for (const f of found) {
             for (const h of shifted(hiddenIn(hidden, i, f.start), text.length))
                 entries.push(h);
             text += t.slice(i, f.start);
-            const r = prefixLines(f.start, f.end, Txt.substitution(replacement, f.match), []).text;
+            const r = prefixLines(f.start, f.end, textFor(f), []).text;
             spans.push({ start: start + text.length, end: start + text.length + r.length });
             text += r;
             i = f.end;
@@ -4896,7 +4913,7 @@ QtObject {
         // In a batch, where prefixLines reads the text at each match as it's
         // kept, rather than as the editor gives it.
         batched(() => {
-            const r = substituted(t, found, replacement);
+            const r = substituted(t, found, f => Txt.substitution(replacement, f.match));
             beginChange();
             replaceRange(r.start, r.end, r.text, r.entries);
             const u = bufferText();
@@ -4933,19 +4950,7 @@ QtObject {
         if (!typing && !substitution)
             return;
         batched(() => {
-            const before = substitution && substitution.before;
-            if (before) {
-                previewing = true;
-                const d = diff(bufferText(), before.text, [], []);
-                if (d)
-                    replaceRange(d.start, d.end1, before.text.slice(d.start, d.end2));
-                hidden = before.hidden;
-                cursors = before.cursors;
-                marked = before.marked;
-                setCursor(before.cursor);
-                if (visualShown)
-                    visualShown = lastVisual;
-            }
+            putBack();
             substitution = typing ? typedSubstitution() : null;
             // Before the editor gets the preview, which may scroll it.
             if (substitution && !searchView && flickable)
@@ -4976,14 +4981,23 @@ QtObject {
         const target = next < 0 ? 0 : next;
         if (s.replacement === null || s.flags.includes("n"))
             return { spans: found.map(f => ({ start: f.start, end: f.end })), target: target, before: null };
-        const before = { text: t, hidden: hidden, cursors: cursors, cursor: cursor, marked: marked };
+        return previewed(t, found, target, f => Txt.substitution(s.replacement, f.match));
+    }
+
+    // Shows in the buffer what replacing `found` (see substituteMatches) in
+    // t, its text, by what textFor gives each makes of it, near the view
+    // (see previewWindow): the `substitution` that shows it, with `target`
+    // the index of the match to show as current. The cursor, the selection
+    // drawn and the find bar's scope stay on their characters, a
+    // selection's end on the last of a replacement.
+    function previewed(t, found, target, textFor) {
+        const before = { text: t, hidden: hidden, cursors: cursors, cursor: cursor, marked: marked,
+            findScope: findScope };
         const near = previewWindow(t, found, target), replaced = found.slice(near.from, near.to);
-        const done = substituted(t, replaced, s.replacement);
+        const done = substituted(t, replaced, textFor);
         const shift = done.text.length - (done.end - done.start);
         previewing = true;
         replaceRange(done.start, done.end, done.text, done.entries);
-        // The cursor and the selection drawn stay on their characters, the
-        // selection's end on the last of a replacement.
         const u = bufferText(), at = (p, last) => previewedAt(u, p, replaced, done.spans, last);
         setCursor(clampNormal(u, at(cursor, false)));
         if (visualShown) {
@@ -4993,9 +5007,61 @@ QtObject {
             if (v.marked)
                 visualShown.marked = validStarts(u, v.marked.map(p => at(p, false)));
         }
+        if (before.findScope)
+            findScope = before.findScope.map(s => ({ start: at(s.start, false), end: at(s.end, false) }));
         const spans = found.slice(0, near.from).map(f => ({ start: f.start, end: f.end })).concat(done.spans,
             found.slice(near.to).map(f => ({ start: f.start + shift, end: f.end + shift })));
         return { spans: spans, target: target, before: before };
+    }
+
+    // Puts back the text a preview replaced (see substitution), and what
+    // was on it, in the batch.
+    function putBack() {
+        const before = substitution && substitution.before;
+        if (!before)
+            return;
+        previewing = true;
+        const d = diff(bufferText(), before.text, [], []);
+        if (d)
+            replaceRange(d.start, d.end1, before.text.slice(d.start, d.end2));
+        hidden = before.hidden;
+        cursors = before.cursors;
+        marked = before.marked;
+        findScope = before.findScope;
+        setCursor(before.cursor);
+        if (visualShown)
+            visualShown = lastVisual;
+    }
+
+    // While the find bar's replace field has the keys, the buffer shows
+    // what its Replace All would make of it, as a :s's preview does (see
+    // FindBar.previewShown): `found`, the matches in it ({ start, end,
+    // match }, as substituteMatches gives them), each replaced by what
+    // textFor gives it, the one at the cursor (or after it) as the current
+    // one. The bar puts the text back first (endReplacements), in the same
+    // batch, so the editor gets one edit. Not while the command line is
+    // open, whose :s has the preview.
+    function previewReplacements(found, textFor) {
+        if (!found.length || commandLine !== "" || substitution)
+            return;
+        batched(() => {
+            const next = found.findIndex(f => f.start >= cursor);
+            const s = previewed(bufferText(), found, next < 0 ? 0 : next, textFor);
+            s.findBar = true;
+            substitution = s;
+        });
+    }
+
+    // Puts back the text the find bar's preview replaced (see
+    // previewReplacements), if the buffer shows it.
+    function endReplacements() {
+        if (!substitution || !substitution.findBar)
+            return;
+        batched(() => {
+            putBack();
+            substitution = null;
+            previewing = false;
+        });
     }
 
     // Which of `found` (see substituteMatches) the preview replaces, as
@@ -5053,11 +5119,15 @@ QtObject {
         return last && spans[k].end > spans[k].start ? Txt.charStart(u, spans[k].end - 1) : spans[k].start;
     }
 
-    // Closes the command line if the buffer shows what a :s being typed
-    // would make of it (see previewSubstitute), which puts the text back:
-    // for main.qml, before it reads the text as the user's.
+    // Puts the text back if the buffer shows what the find bar's Replace
+    // All would make of it (see previewReplacements), or closes the command
+    // line if it shows what a :s being typed would (see
+    // previewSubstitute), which puts it back: for main.qml, before it reads
+    // the text as the user's.
     function endPreview() {
-        if (previewing)
+        if (substitution && substitution.findBar)
+            endReplacements();
+        else if (previewing)
             commandLineKey("<Esc>");
     }
 
@@ -5575,10 +5645,11 @@ QtObject {
 
     // Matches of the search being typed (or else of the last search, until
     // it's cleared) that fall in the visible lines, as highlightSpans. While
-    // a :s is typed, what it would replace, or what replaced it.
+    // a :s is typed (or the find bar's replace field has the keys), what it
+    // would replace, or what replaced it, even with nothing.
     function searchHighlights() {
         if (substitution)
-            return highlightsIn(substitution.spans, substitution.target);
+            return highlightsIn(substitution.spans, substitution.target, true);
         const typed = typedSearch();
         const pattern = typed !== null ? typed : highlightPattern;
         if (!pattern)
@@ -5601,8 +5672,9 @@ QtObject {
     }
 
     // The spans of `list` (in order, as { start, end }) in the visible
-    // lines, as highlightSpans, the one at `current` as the current one.
-    function highlightsIn(list, current) {
+    // lines, as highlightSpans, the one at `current` as the current one,
+    // and with `thin`, an empty one as a thin line (see addHighlight).
+    function highlightsIn(list, current, thin) {
         const t = bufferText(), v = visibleRange(t);
         let lo = 0, hi = list.length;
         while (lo < hi) { // the first one that ends in view
@@ -5614,7 +5686,7 @@ QtObject {
         }
         const spans = [];
         for (let i = lo; i < list.length && list[i].start <= v.to && spans.length < 5000; i++)
-            addHighlight(t, spans, list[i].start, list[i].end, i === current);
+            addHighlight(t, spans, list[i].start, list[i].end, i === current, thin);
         return spans;
     }
 

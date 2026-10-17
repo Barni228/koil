@@ -230,6 +230,7 @@ Item {
     // scrolls into past the text (`scrollRoom`, `sideScrollRoom`), which
     // isn't the editor's: to the closest position, as in the editor.
     function pressBeside(x, y, modifiers) {
+        vim.endReplacements();
         if (!active)
             activated();
         editor.forceActiveFocus();
@@ -1122,11 +1123,15 @@ Item {
             // (see `link`) opens it, once it's let go on it. A plain click
             // goes back to one cursor and then does what it always does.
             // Any one on the editor vim doesn't edit switches to it first,
-            // so the click moves its cursor.
+            // so the click moves its cursor, and one while the find bar's
+            // replace field has the keys puts back the text its preview
+            // replaced (see Vim.previewReplacements), as the TextArea moves
+            // its cursor before it takes the keys.
             MouseArea {
                 anchors.fill: parent
                 cursorShape: view.link ? Qt.PointingHandCursor : Qt.IBeamCursor
                 onPressed: mouse => {
+                    view.vim.endReplacements();
                     if (!view.active)
                         view.activated();
                     view.pressedLink = mouse.modifiers & Qt.ControlModifier ? view.linkUnder(Qt.point(mouse.x, mouse.y)) : null;
@@ -1416,7 +1421,9 @@ Item {
             }
 
             // Search matches: the search (or :s) being typed, else the find
-            // bar's while it's open, else the last search until Esc.
+            // bar's while it's open, else the last search until Esc. An
+            // empty one (what a preview replaced with nothing) is a thin
+            // line, as wide as the insert bar, where it is.
             Layer {
                 id: highlights
 
@@ -1442,11 +1449,14 @@ Item {
                         id: match
 
                         required property var modelData
+                        readonly property bool thin: modelData.end === modelData.start
+                        // Apart from one on the line above or below.
+                        readonly property real inset: thin ? Math.round(modelData.rect.height / 8) : 0
 
-                        x: modelData.rect.x
-                        y: modelData.rect.y
-                        width: modelData.rect.width
-                        height: modelData.rect.height
+                        x: modelData.rect.x - (thin ? 1 : 0)
+                        y: modelData.rect.y + inset
+                        width: thin ? 2 : modelData.rect.width
+                        height: modelData.rect.height - 2 * inset
                         color: modelData.current ? view.theme.currentMatch : view.theme.searchMatch
 
                         // Redraw the matched text on top, dark on the highlight.

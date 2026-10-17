@@ -125,10 +125,10 @@ ApplicationWindow {
     // line, filter, scratch }, or null.
     property var shellRun: null
     // A box over the editor that has the keys (:help, or a question), a
-    // shell command vim waits for, or a :s showing what it would do in the
-    // buffer (see Vim.previewSubstitute), while which the menu can't open,
-    // save or edit anything, and the listing doesn't sync (see also
-    // keepHelpKeys).
+    // shell command vim waits for, or a :s or the find bar's replace field
+    // showing what it would do in the buffer (see Vim.previewSubstitute,
+    // Vim.previewReplacements), while which the menu can't open, save or
+    // edit anything, and the listing doesn't sync (see also keepHelpKeys).
     readonly property bool boxOpen: help.opened || confirmDialog.opened || shellRun !== null || vim.previewing
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
@@ -218,18 +218,27 @@ ApplicationWindow {
     // only if they're as long, and by System (V4's `===` hashes all of
     // both), and the hidden text only if they're the same.
     function isEdited() {
-        const u = unedited, t = editorView.textArea.latest.text;
+        const u = unedited, users = usersText(), t = users.text;
         if (!u || t.length !== u.text.length || !system.sameText(t, u.text))
             return true;
-        const h = editorView.hidden, was = u.hidden;
+        const h = users.hidden, was = u.hidden;
         return !!was && h !== was && (h.length !== was.length
             || h.some((e, i) => e.at !== was[i].at || e.icon !== was[i].icon || e.text !== was[i].text));
     }
 
+    // The editor's text and hidden text, as { text, hidden }, without a
+    // preview of what a :s or the find bar would make of it (see
+    // Vim.substitution), which isn't the user's change.
+    function usersText() {
+        const s = vim.substitution, before = s && s.before;
+        return before && activeView === editorView ? before
+            : { text: editorView.textArea.latest.text, hidden: editorView.hidden };
+    }
+
     // Works out `modified` after an edit. The scratchpad is never saved, so
-    // there's nothing to ask about, and a :s's preview isn't a change.
+    // there's nothing to ask about.
     function checkModified() {
-        if (!scratchpad && !vim.previewing)
+        if (!scratchpad)
             modified = listing && pendingChanges || isEdited();
     }
 
@@ -406,7 +415,7 @@ ApplicationWindow {
     // `from` if given. False if it can't (the problems and the status line
     // say why).
     function updateListing(open, from) {
-        // Not a :s's preview: the text as it was.
+        // Not a preview (a :s's, the find bar's): the text as it was.
         vim.endPreview();
         const r = JSON.parse(koil.update(pathView.textArea.text, editorView.textArea.text, JSON.stringify(editorView.hidden), open || ""));
         if (!r.ok) {
@@ -1715,6 +1724,9 @@ ApplicationWindow {
         onSortChanged: root.settingChanged()
         onSortReverseChanged: root.settingChanged()
         onDirsFirstChanged: root.settingChanged()
+        // The text without the preview can change while the editor's
+        // doesn't (the find bar's Replace from its replace field).
+        onSubstitutionChanged: Qt.callLater(root.checkModified)
         onHelpRequested: topic => {
             if (!help.show(topic))
                 vim.showError("E149: Sorry, no help for " + topic);
@@ -2492,4 +2504,5 @@ ApplicationWindow {
         if (line >= 0)
             vim.startCommand((line ? String(line).split("") : []).concat(["G", "z", "z"]));
     }
+
 }

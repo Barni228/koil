@@ -1423,6 +1423,31 @@ TestCase {
         keys("<Esc>");
     }
 
+    // A preview that replaces matches with nothing (or only with line
+    // breaks) still shows where they were: an empty span there, which the
+    // view draws as a thin line. In :s and the find bar's replace field.
+    function test_previewNothing() {
+        load("ab a\nb a");
+        const spans = () => vim.searchHighlights().map(s => [s.start, s.end]);
+        keys(":%s/a/");
+        compare(editor.text, "b a\nb ");
+        compare(spans(), [[0, 0], [6, 6]]);
+        keys("<Esc>:%s/ /\\r");
+        compare(editor.text, "ab\na\nb\na");
+        compare(spans(), [[2, 2], [6, 6]]);
+        keys("<Esc>");
+        compare(editor.text, "ab a\nb a");
+        load("a b a");
+        findBar.open(false); // the word under the cursor: a
+        findBar.replacement = "";
+        compare(findBar.highlightSpans().map(s => [s.start, s.end]), [[0, 1], [4, 5]]);
+        findBar.open(true);
+        compare(editor.text, " b ");
+        compare(spans(), [[0, 0], [3, 3]]);
+        findBar.close();
+        compare(editor.text, "a b a");
+    }
+
     // The cursor stays on its character while a preview changes the text
     // before it (or on what replaces its match), and goes back with it.
     function test_substitutePreviewCursor() {
@@ -3232,6 +3257,101 @@ TestCase {
         compare(render(), "b <M:h1> b <C:h2> b");
         vim.nativeUndo(false);
         compare(render(), "a <M:h1> a <C:h2> a");
+        findBar.close();
+    }
+
+    // While the replace field has the keys, the buffer shows what Replace
+    // All would make of it (hidden text and all), as a :s's preview does,
+    // with the replacements highlighted. In the find field, the matches are
+    // only highlighted. Whatever the bar does, it does to the text without
+    // the preview, which then shows again.
+    function test_replacePreview() {
+        load("a M a\nC a");
+        const before = render();
+        const shown = () => (vim.substitution ? vim.searchHighlights() : findBar.highlightSpans())
+            .map(s => editor.text.slice(s.start, s.end));
+        findBar.open(false); // the word under the cursor: a
+        findBar.replacement = "xy";
+        compare(render(), before);
+        verify(!vim.previewing);
+        compare(shown(), ["a", "a", "a"]);
+        findBar.open(true); // to the replace field
+        verify(findBar.previewShown);
+        compare(render(), "xy <M:h1> xy\n<C:h2> xy");
+        verify(vim.previewing);
+        compare(shown(), ["xy", "xy", "xy"]);
+        compare(editor.text[vim.cursor], "x");
+        // The matches are the text's, which the bar counts.
+        compare(findBar.matches.map(m => m.start), [0, 5, 10]);
+        compare(findBar.current, 0);
+        edits.clear();
+        findBar.replacement = "z";
+        compare(render(), "z <M:h1> z\n<C:h2> z");
+        verify(edits.count <= 2, edits.count + " edits");
+        compare(vim.undoStack.length, 0);
+        // The find field (or the editor) has the keys: the text is back.
+        editor.forceActiveFocus();
+        compare(render(), before);
+        verify(!vim.previewing);
+        compare(vim.substitution, null);
+        compare(vim.cursor, 0);
+        compare(shown(), ["a", "a", "a"]);
+        // Replace replaces the one at the cursor, and the others show.
+        findBar.open(true);
+        findBar.replaceOne();
+        compare(render(), "z <M:h1> z\n<C:h2> z");
+        compare(vim.undoStack.length, 1);
+        compare(findBar.matches.map(m => m.start), [5, 10]);
+        compare(findBar.current, 0);
+        editor.forceActiveFocus();
+        compare(render(), "z <M:h1> a\n<C:h2> a");
+        // Undo in the field undoes the text's change.
+        findBar.open(true);
+        findBar.undo(false);
+        compare(render(), "z <M:h1> z\n<C:h2> z");
+        compare(findBar.matches.length, 3);
+        editor.forceActiveFocus();
+        compare(render(), before);
+        compare(vim.undoStack.length, 0);
+        // Put back from outside (main.qml, before it reads the text), it
+        // shows again.
+        findBar.open(true);
+        vim.endPreview();
+        compare(render(), before);
+        tryVerify(() => vim.previewing);
+        compare(render(), "z <M:h1> z\n<C:h2> z");
+        // Replace All leaves nothing to preview.
+        findBar.replaceAll();
+        compare(render(), "z <M:h1> z\n<C:h2> z");
+        verify(!vim.previewing);
+        compare(vim.undoStack.length, 1);
+        vim.nativeUndo(false);
+        compare(render(), before);
+        // Closed, the text is back.
+        findBar.open(true);
+        verify(vim.previewing);
+        findBar.close();
+        compare(render(), before);
+        verify(!vim.previewing);
+        compare(vim.undoStack.length, 0);
+    }
+
+    // With Find in Selection, only the matches in it are replaced, and the
+    // selection stays on its characters.
+    function test_replacePreviewInSelection() {
+        load("a a\na a\na a");
+        keys("jVj");
+        findBar.open(true);
+        compare(findBar.inSelection, true);
+        findBar.query = "a";
+        findBar.replacement = "bbb";
+        findBar.open(true);
+        compare(editor.text, "a a\nbbb bbb\nbbb bbb");
+        const t = editor.text, scope = vim.findScope;
+        compare(t.slice(scope[0].start, scope[scope.length - 1].end), "bbb bbb\nbbb bbb");
+        editor.forceActiveFocus();
+        compare(editor.text, "a a\na a\na a");
+        compare(vim.findScope, [{ start: 4, end: 11 }]);
         findBar.close();
     }
 

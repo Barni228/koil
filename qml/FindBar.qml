@@ -9,7 +9,9 @@ import "text.js" as Txt
 // A find and replace bar like VS Code's: at the top right of the editor,
 // with Match Case, Match Whole Word, regular expressions and Find in
 // Selection. Moving to a match moves vim's cursor to its start; the view
-// draws `matches` (see highlightSpans).
+// draws `matches` (see highlightSpans), or while the replace field has the
+// keys, the buffer shows what Replace All would make of it (see
+// previewShown).
 FocusScope {
     id: bar
 
@@ -30,8 +32,9 @@ FocusScope {
     // closes.
     readonly property bool inSelection: vim.findScope !== null
 
-    // Every match, as { start, end }, and the index of the one at the
-    // cursor (-1 if the cursor isn't at the start of one).
+    // Every match, as { start, end, match } (see scan), and the index of
+    // the one at the cursor (-1 if the cursor isn't at the start of one).
+    // In the text without the preview (see previewShown).
     property var matches: []
     property int current: -1
     readonly property int maxMatches: 19999
@@ -43,7 +46,16 @@ FocusScope {
     // first match from.
     property int currentStart: -1
     property int searchStart: 0
+    // While the bar moves vim's cursor or changes the preview itself.
     property bool moving: false
+    // Whether the buffer shows what Replace All would make of it: while the
+    // replace field has the keys, as a :s's preview does (see
+    // Vim.previewReplacements). In the find field, the matches are only
+    // highlighted. Everything the bar does is done on the text without it
+    // (see unpreviewed).
+    readonly property bool previewShown: active && replaceShown && replaceField.input.activeFocus
+    // How deep in unpreviewed the bar is.
+    property int unpreviewing: 0
 
     readonly property bool isMac: Qt.platform.os === "osx"
     readonly property real zoom: theme.zoom
@@ -56,12 +68,16 @@ FocusScope {
     // lines) is what it finds in instead (see inSelection), as VS Code's
     // does with autoFindInSelection set to multiline.
     function open(withReplace) {
+        unpreviewed(() => openBar(withReplace));
+    }
+
+    function openBar(withReplace) {
         const wasOpen = active;
         if (!active)
             replaceShown = false;
         if (withReplace)
             replaceShown = true;
-        const t = vim.editorText();
+        const t = vim.bufferText();
         let seed = null;
         if (vim.mode === "visual" || vim.mode === "visualLine") {
             const s = editor.selectionStart, e = editor.selectionEnd;
@@ -92,26 +108,30 @@ FocusScope {
     function close() {
         findField.remember();
         replaceField.remember();
-        vim.setFindScope(null);
-        active = false;
+        unpreviewed(() => {
+            vim.setFindScope(null);
+            active = false;
+        });
         editor.forceActiveFocus();
     }
 
     // Turns Find in Selection on, keeping to the selection (see
     // Vim.selectionScope), or off.
     function toggleInSelection() {
-        if (inSelection) {
-            vim.setFindScope(null);
-        } else {
-            const scope = vim.selectionScope();
-            if (!scope) {
-                vim.showError("Nothing selected to find in");
-                return;
+        unpreviewed(() => {
+            if (inSelection) {
+                vim.setFindScope(null);
+            } else {
+                const scope = vim.selectionScope();
+                if (!scope) {
+                    vim.showError("Nothing selected to find in");
+                    return;
+                }
+                vim.setFindScope(scope);
+                searchStart = scope[0].start;
             }
-            vim.setFindScope(scope);
-            searchStart = scope[0].start;
-        }
-        search();
+            search();
+        });
     }
 
     // Find Next / Find Previous: from the menu, which also opens the bar.
@@ -120,8 +140,10 @@ FocusScope {
             open(false);
             return;
         }
-        active = true;
-        step > 0 ? next() : previous();
+        unpreviewed(() => {
+            active = true;
+            step > 0 ? next() : previous();
+        });
     }
 
     // The query as a regular expression, or null (with `error` set if the
@@ -185,22 +207,59 @@ FocusScope {
         return found;
     }
 
-    // Finds the matches again, e.g. after an edit.
-    function refresh() {
-        if (!active)
+    // Runs fn on the text without the preview (see previewShown), then
+    // shows the preview again, as one edit of the editor: fn finds the
+    // matches again (see find) if it edits or they may be out of date.
+    function unpreviewed(fn) {
+        vim.batched(() => {
+            if (unpreviewing++ === 0)
+                endPreview();
+            try {
+                fn();
+            } finally {
+                if (--unpreviewing === 0)
+                    showPreview();
+            }
+        });
+    }
+
+    function endPreview() {
+        moving = true;
+        vim.endReplacements();
+        moving = false;
+    }
+
+    function showPreview() {
+        if (!previewShown || !matches.length)
             return;
-        matches = scan(vim.editorText()).map(m => ({ start: m.start, end: m.end }));
+        moving = true;
+        vim.previewReplacements(matches, m => replacementFor(m.match));
+        moving = false;
+    }
+
+    // Finds the matches again, e.g. after an edit, and shows the preview
+    // again (or not, see previewShown).
+    function refresh() {
+        if (active)
+            unpreviewed(find);
+    }
+
+    // Finds the matches in the text (without the preview: see unpreviewed).
+    function find() {
+        matches = active ? scan(vim.bufferText()) : [];
         current = currentStart < 0 ? -1 : matches.findIndex(m => m.start === currentStart);
     }
 
     // After the query or an option changed: moves to the first match from
     // where the search started.
     function search() {
-        refresh();
-        if (!matches.length)
-            return;
-        const i = matches.findIndex(m => m.start >= searchStart);
-        moveTo(i < 0 ? 0 : i);
+        unpreviewed(() => {
+            find();
+            if (!matches.length)
+                return;
+            const i = matches.findIndex(m => m.start >= searchStart);
+            moveTo(i < 0 ? 0 : i);
+        });
     }
 
     function moveTo(i) {
@@ -214,29 +273,42 @@ FocusScope {
 
     function next() {
         findField.remember();
-        refresh();
-        const n = matches.length;
-        if (!n)
-            return;
-        let i = current >= 0 ? (current + 1) % n : matches.findIndex(m => m.start >= vim.cursor);
-        moveTo(i < 0 ? 0 : i);
-        searchStart = matches[current].start;
+        unpreviewed(() => {
+            find();
+            const n = matches.length;
+            if (!n)
+                return;
+            let i = current >= 0 ? (current + 1) % n : matches.findIndex(m => m.start >= vim.cursor);
+            moveTo(i < 0 ? 0 : i);
+            searchStart = matches[current].start;
+        });
     }
 
     function previous() {
         findField.remember();
-        refresh();
-        const n = matches.length;
-        if (!n)
-            return;
-        let i = current;
-        if (i < 0) {
-            i = matches.length;
-            while (i > 0 && matches[i - 1].start >= vim.cursor)
-                i--;
-        }
-        moveTo((i - 1 + n) % n);
-        searchStart = matches[current].start;
+        unpreviewed(() => {
+            find();
+            const n = matches.length;
+            if (!n)
+                return;
+            let i = current;
+            if (i < 0) {
+                i = matches.length;
+                while (i > 0 && matches[i - 1].start >= vim.cursor)
+                    i--;
+            }
+            moveTo((i - 1 + n) % n);
+            searchStart = matches[current].start;
+        });
+    }
+
+    // Cmd+Z and Cmd+Shift+Z in a field: the document's (a replace, say),
+    // not the field's.
+    function undo(isRedo) {
+        unpreviewed(() => {
+            vim.nativeUndo(isRedo);
+            find();
+        });
     }
 
     // The replacement for match m: with a regular expression, $1 or $<name>
@@ -323,34 +395,30 @@ FocusScope {
     function replaceOne() {
         findField.remember();
         replaceField.remember();
-        refresh();
-        if (current < 0) {
-            next();
-            return;
-        }
-        const start = matches[current].start;
-        const m = scan(vim.editorText()).find(m => m.start === start);
-        if (!m) {
-            next();
-            return;
-        }
-        const end = m.end, text = newText(m);
-        moving = true;
-        vim.jumpTo(start);
-        vim.externalEdit(() => vim.replaceRange(start, end, text));
-        moving = false;
-        currentStart = -1;
-        refresh();
-        // The next match after the replacement (after an empty match that
-        // stayed empty, after where it was).
-        const after = start + text.length + (text === "" && end === start ? 1 : 0);
-        if (matches.length) {
-            const i = matches.findIndex(m => m.start >= after);
-            moveTo(i < 0 ? 0 : i);
-        } else {
+        unpreviewed(() => {
+            find();
+            if (current < 0) {
+                next();
+                return;
+            }
+            const m = matches[current], start = m.start, end = m.end, text = newText(m);
+            moving = true;
             vim.jumpTo(start);
-        }
-        searchStart = vim.cursor;
+            vim.externalEdit(() => vim.replaceRange(start, end, text));
+            moving = false;
+            currentStart = -1;
+            find();
+            // The next match after the replacement (after an empty match
+            // that stayed empty, after where it was).
+            const after = start + text.length + (text === "" && end === start ? 1 : 0);
+            if (matches.length) {
+                const i = matches.findIndex(m => m.start >= after);
+                moveTo(i < 0 ? 0 : i);
+            } else {
+                vim.jumpTo(start);
+            }
+            searchStart = vim.cursor;
+        });
     }
 
     // Replaces every match, as one edit and one undo step. Hidden text
@@ -358,31 +426,27 @@ FocusScope {
     function replaceAll() {
         findField.remember();
         replaceField.remember();
-        const t = vim.editorText(), found = scan(t);
-        if (!found.length)
-            return;
-        const first = found[0].start;
-        let text = "", i = first;
-        const entries = [];
-        for (const m of found) {
-            for (const h of vim.shifted(vim.hiddenIn(vim.hidden, i, m.start), text.length))
-                entries.push(h);
-            text += t.slice(i, m.start) + newText(m);
-            i = m.end;
-        }
-        const cursor = Math.min(vim.cursor, first);
-        moving = true;
-        vim.jumpTo(cursor);
-        vim.externalEdit(() => vim.replaceRange(first, i, text, entries));
-        vim.jumpTo(cursor);
-        moving = false;
-        currentStart = -1;
-        searchStart = vim.cursor;
-        refresh();
-        vim.showMessage(found.length === 1 ? "Replaced 1 occurrence" : "Replaced " + found.length + " occurrences");
+        unpreviewed(() => {
+            find();
+            const n = matches.length;
+            if (!n)
+                return;
+            const r = vim.substituted(vim.bufferText(), matches, m => replacementFor(m.match));
+            const cursor = Math.min(vim.cursor, r.start);
+            moving = true;
+            vim.jumpTo(cursor);
+            vim.externalEdit(() => vim.replaceRange(r.start, r.end, r.text, r.entries));
+            vim.jumpTo(cursor);
+            moving = false;
+            currentStart = -1;
+            searchStart = vim.cursor;
+            find();
+            vim.showMessage(n === 1 ? "Replaced 1 occurrence" : "Replaced " + n + " occurrences");
+        });
     }
 
-    // The matches in the visible lines, for the view to highlight.
+    // The matches in the visible lines, for the view to highlight (but
+    // vim's, while the preview shows: see Vim.searchHighlights).
     function highlightSpans() {
         return active ? vim.highlightsIn(matches, current) : [];
     }
@@ -402,8 +466,15 @@ FocusScope {
     }
 
     onQueryChanged: search()
-    // Vim went to the other editor (the path field or the listing).
-    onEditorChanged: refresh()
+    onReplacementChanged: {
+        if (previewShown)
+            refresh();
+    }
+    onPreviewShownChanged: refresh()
+    // Vim went to the other editor (the path field or the listing): once
+    // vim has its buffer (see Vim.enterBuffer), to show no preview in the
+    // one it left.
+    onEditorChanged: Qt.callLater(refresh)
     onMatchCaseChanged: search()
     onWholeWordChanged: search()
     onUseRegexChanged: search()
@@ -431,8 +502,10 @@ FocusScope {
     Connections {
         target: bar.editor
 
+        // Not the preview's edits (nor a :s's).
         function onTextChanged() {
-            Qt.callLater(bar.refresh);
+            if (!bar.vim.previewing)
+                Qt.callLater(bar.refresh);
         }
     }
     Connections {
@@ -453,6 +526,12 @@ FocusScope {
         function onHighlightsCleared() {
             if (bar.active)
                 bar.close();
+        }
+        // Something else put the text back (see Vim.endPreview), which
+        // the buffer shows again while the replace field has the keys.
+        function onPreviewingChanged() {
+            if (!bar.moving && !bar.vim.previewing && bar.previewShown)
+                Qt.callLater(bar.refresh);
         }
     }
 
@@ -565,7 +644,7 @@ FocusScope {
             Keys.onPressed: event => {
                 // Undo and redo the document (a replace, say), not the field.
                 if (event.matches(StandardKey.Undo) || event.matches(StandardKey.Redo))
-                    bar.vim.nativeUndo(event.matches(StandardKey.Redo));
+                    bar.undo(event.matches(StandardKey.Redo));
                 else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                     field.enterPressed(event.modifiers);
                 else if (event.key === Qt.Key_Escape)
