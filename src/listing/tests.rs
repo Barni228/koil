@@ -452,6 +452,28 @@ fn test_target_on_line() {
 }
 
 #[test]
+fn test_file_at() {
+    let (_temp, koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    for name in ["my file.txt", "a[1].txt"] {
+        fs::write(root.join(name), "").unwrap();
+    }
+    let file = |location| file_at(&koil, location);
+    assert_eq!(file("file.rs"), Some(root.join("file.rs")));
+    assert_eq!(file(" notes "), Some(root.join("notes")));
+    assert_eq!(file("dir/../notes"), Some(root.join("notes")));
+    let absolute = root.join("file.rs");
+    assert_eq!(file(absolute.to_str().unwrap()), Some(absolute.clone()));
+    // read as the path field reads it, but as written first
+    assert_eq!(file("\"my file.txt\""), Some(root.join("my file.txt")));
+    assert_eq!(file("a[1].txt"), Some(root.join("a[1].txt")));
+    // listed, or not there
+    for location in ["dir", "dir/", ".", "*.rs", "missing.txt", "file.rs/x", ""] {
+        assert_eq!(file(location), None, "{location}");
+    }
+}
+
+#[test]
 fn test_path_on_line() {
     let (_temp, koil) = koil();
     let root = koil.current_dir().to_path_buf();

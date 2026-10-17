@@ -281,6 +281,13 @@ TestCase {
         signalName: "linkRequested"
     }
 
+    SignalSpy {
+        id: editCommands
+
+        target: vim
+        signalName: "editRequested"
+    }
+
     FindBar {
         id: findBar
 
@@ -1031,6 +1038,22 @@ TestCase {
         compare(quits.signalArguments.map(a => [a[0], a[1], a[2]]), [[false, false, false], [false, false, true], [true, false, false], [true, false, false], [true, false, true], [false, true, false]]);
         keys(":w<CR>:wq<CR>ZZ");
         compare(writes.signalArguments.map(a => [a[0], a[1]]), [[false, false], [true, false], [true, true]]);
+    }
+
+    // :e asks Koil to open a path as written (spaces and quotes too), or
+    // with none, to read what's shown again; :e! to drop unsaved changes.
+    function test_editCommand() {
+        load("a");
+        editCommands.clear();
+        keys(":e ~/src<CR>:edit \"my dir\"/x  <CR>:e<CR>:e!<CR>:edi! a b<CR>");
+        compare(editCommands.signalArguments.map(a => [a[0], a[1]]), [["~/src", false], ["\"my dir\"/x", false], ["", false],
+            ["", true], ["a b", true]]);
+        // Not another command, nor with a range.
+        keys(":ex<CR>");
+        compare(vim.message, "E492: Not an editor command: ex");
+        keys(":1e a<CR>");
+        compare(vim.message, "E481: No range allowed");
+        compare(editCommands.count, 5);
     }
 
     // ---- Ranges and shell commands -------------------------------------------

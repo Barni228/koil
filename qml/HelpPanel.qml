@@ -171,8 +171,14 @@ Popup {
         {
             title: "Commands",
             tags: ["commands", "command", "ex", "w", "write", "quit", "wq", "x", "confirm", "conf", "noh",
-                "nohlsearch", "help", "h", "history"],
+                "nohlsearch", "help", "h", "history", "e", "edit", "e!", "edit!", "reload", "favorite", "favorites",
+                "bookmark", "bookmarks"],
             rows: [
+                ["`:e path`", "Open a file, or list a dir or pattern, like `:e ~/src`, read as the path field "
+                    + "reads it, from the open dir. As a shortcut (`:e ~/src<CR>`: see `:h shortcuts`), a key "
+                    + "opens a dir from anywhere. `:e! path` drops a file's unsaved changes."],
+                ["`:e`  `:e!`", "Read the file again from disk (`:e!` dropping its unsaved changes, which `u` "
+                    + "brings back). In the listing: update."],
                 ["`:w`", "Save (in the listing: apply)."],
                 ["`:wq`  `:x`", "Save and quit."],
                 ["`ZZ`", "Save and quit (in the listing: `:confirm q`)."],

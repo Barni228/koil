@@ -149,6 +149,11 @@ pub mod qobject {
         #[qinvokable]
         fn current_dir(self: &Koil) -> QString;
 
+        /// The file `:e` opens for `location` (see `listing::file_at`), or
+        /// "" if it isn't one, which is then listed.
+        #[qinvokable]
+        fn file_at(self: &Koil, location: &QString) -> QString;
+
         /// The path the ID `id` (an icon's hidden text) stands for (see
         /// `listing::id_path`), or "" if koil doesn't know it.
         #[qinvokable]
@@ -612,6 +617,11 @@ impl qobject::Koil {
 
     fn current_dir(&self) -> QString {
         QString::from(self.koil.current_dir().to_string_lossy().as_ref())
+    }
+
+    fn file_at(&self, location: &QString) -> QString {
+        let file = listing::file_at(&self.koil, &location.to_string());
+        QString::from(file.unwrap_or_default().to_string_lossy().as_ref())
     }
 
     fn id_path(&self, id: &QString) -> QString {

@@ -133,6 +133,8 @@ ApplicationWindow {
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
     property bool quitAfterSave: false
+    // While :e reads the file again (see reloadFile).
+    property bool reloading: false
     readonly property int defaultFontSize: 16
     readonly property int minFontSize: 6
     readonly property int maxFontSize: 72
@@ -234,6 +236,16 @@ ApplicationWindow {
     // Shows a file that was read, leaving the listing (whose edits Koil
     // keeps, if they can be read).
     function loadFile(text, path) {
+        if (reloading) {
+            const t = editorView.textArea.latest.text, p = vim.cursor;
+            const line = Txt.lineOf(t, p), column = Txt.column(t, p);
+            vim.replaceText(text, []);
+            const u = editorView.textArea.latest.text;
+            vim.jumpTo(Txt.atColumn(u, Txt.lineToPos(u, line), column));
+            markUnedited();
+            vim.showMessage("“" + fileName + "” read again");
+            return;
+        }
         if (listing) {
             if (!updateListing())
                 return;
@@ -1265,6 +1277,54 @@ ApplicationWindow {
         });
     }
 
+    // :e path: opens the file at `path` (see Koil.fileAt), or else lists
+    // the dir or pattern, read as the path field reads it, from the open
+    // dir (vim's cwd), as a drop opens one: unsaved changes are asked about
+    // first, unless `force` (:e!) drops them. Vim then edits the listing,
+    // also from the path field, as Enter there goes to it, so a shortcut of
+    // `:e ~/src<CR>` ends in the same place wherever it's run. :e alone
+    // reads what's shown again: the listing (an update, which keeps its
+    // edits, as Koil does), or the file, unless it has unsaved changes,
+    // which :e! drops.
+    function edit(path, force) {
+        if (!path) {
+            if (listing)
+                updateListing();
+            else if (!filePath)
+                vim.showError("E32: No file name");
+            else if (modified && !force)
+                vim.showError("E37: No write since last change (add ! to override)");
+            else
+                reloadFile();
+            return;
+        }
+        const file = koil.fileAt(path);
+        const open = () => {
+            if (file) {
+                openedFrom = "";
+                readFile(file);
+            } else if (openFolder(path)) {
+                // From the path field too, as Enter there does.
+                activate(editorView);
+            }
+        };
+        if (force)
+            open();
+        else
+            askToSave(open);
+    }
+
+    // :e in a file: reads it from disk again, in place of its text as one
+    // change, so the cursor stays on its line, the view stays, and `u`
+    // brings back what it had.
+    function reloadFile() {
+        reloading = true;
+        const error = doc.openFile(filePath);
+        reloading = false;
+        if (error)
+            vim.showError(error);
+    }
+
     // Saves the file, asking for a path if it has none, then quits if
     // `quit` is set and the save worked (see quitApp, which `orQuit` is
     // passed to). The listing's changes are applied instead, once they're
@@ -1642,6 +1702,7 @@ ApplicationWindow {
         }
         onKeyCommand: (name, count) => root.runKeyCommand(name, count)
         onLinkRequested: (at, text, external) => root.openLink(at, text, external)
+        onEditRequested: (path, force) => root.edit(path, force)
         onShellRequested: (command, range, scratchpad) => root.runShell(command, range, scratchpad)
         onStopRequested: system.stopShell()
         onNothingToUndo: {

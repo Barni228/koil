@@ -16,8 +16,8 @@ use devicons::Theme;
 use koil_core::apply::{Blocked, Undo};
 use koil_core::{
     Action, Applied, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil,
-    KoilError, Metadata, OpenError, Pattern, Settings, Sort, SortBy, UpdateError, UpdateOpenError,
-    Warning, with_slashes,
+    KoilError, Location, Metadata, OpenError, Pattern, Settings, Sort, SortBy, UpdateError,
+    UpdateOpenError, Warning, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1139,6 +1139,31 @@ pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -
             name,
         },
     })
+}
+
+/// The file `:e` opens for `location`, if it's one on disk: read as the
+/// path field reads a location (quotes, `\`, `~`, from the open dir: see
+/// `Koil::read_location`), but as written first, as a dir is, so a name
+/// like `a[1].txt` isn't a pattern. None for anything else, which is
+/// listed (a dir or a pattern) or can't be opened, as the path field says.
+pub fn file_at(koil: &Koil, location: &str) -> Option<PathBuf> {
+    let location = location.trim();
+    let home = match location.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            std::env::home_dir().map(|home| home.join(rest.trim_start_matches('/')))
+        }
+        _ => None,
+    };
+    let written = home.unwrap_or_else(|| koil.current_dir().join(location));
+    if written.is_file() {
+        return Some(crate::link::normalized(&written));
+    }
+    match koil.read_location(location, false) {
+        Location {
+            dir, pattern: None, ..
+        } if dir.is_file() => Some(dir),
+        _ => None,
+    }
 }
 
 /// What Space r on a line of the listing shows in Finder (or Explorer)

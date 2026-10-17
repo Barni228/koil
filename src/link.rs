@@ -173,7 +173,7 @@ fn file_path(rest: &str) -> PathBuf {
 /// `path` without its `.` parts, and each `..` taking away the part before
 /// it, as it's written, not as the disk has it (a link stays a link): so
 /// a file opened as `src/../README.md` is shown as `README.md`.
-fn normalized(path: &Path) -> PathBuf {
+pub fn normalized(path: &Path) -> PathBuf {
     let mut parts = PathBuf::new();
     for part in path.components() {
         match (part, parts.components().next_back()) {

@@ -170,6 +170,10 @@ QtObject {
     signal highlightsCleared()
     // :help, or :help topic.
     signal helpRequested(string topic)
+    // :e path: Koil opens the file, or lists the dir or pattern, at `path`
+    // (as written, quotes and all). :e alone (`path` ""): what's shown, read
+    // again. `force` (:e!): unsaved changes are dropped, not asked about.
+    signal editRequested(string path, bool force)
     // :reg, with what registerList gives.
     signal registersRequested(var rows)
     // One of commandKeys was typed, with its count (0 if none).
@@ -4509,6 +4513,8 @@ QtObject {
             syntaxCommand(c.replace(/^\S+\s*/, ""));
         else if (/^h(elp)?(\s|$)/.test(c))
             outside(() => helpRequested(c.replace(/^\S+\s*/, "")));
+        else if (/^e(d|di|dit)?!?(\s|$)/.test(c))
+            outside(() => editRequested(c.replace(/^\S+\s*/, ""), /^\S*!/.test(c)));
         else if (/^(reg(i|is|ist|iste|ister|isters)?|di(s|sp|spl|spla|splay)?)(\s|$)/.test(c))
             showRegisters(c.replace(/^\S+\s*/, ""));
         else

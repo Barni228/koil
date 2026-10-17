@@ -20,7 +20,8 @@ the scratchpad (see Scratchpad).
 - `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
   `check`, `update` (read it into koil, then navigate), the confirmations'
   lines (`actions`, `history`), the path field's regex parts
-  (`path_syntax`), what Tab completes in it (`complete`), what's shown after
+  (`path_syntax`), what Tab completes in it (`complete`), the file `:e`
+  opens (`file_at`), what's shown after
   each line when sorted by size or a date (`notes`), what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`),
   and the entries a shell command runs on (`paths_on_lines`). Its tests
@@ -670,6 +671,25 @@ the scratchpad (see Scratchpad).
   be themed), naming only the file, so a long path doesn't push why out
   of view; one on the command line lists its dir instead, on its entry.
   A message too long for the status line loses its middle, not its end.
+- **`:e`** (`edit` in main.qml, vim's `editRequested`): `:e path` opens a
+  file, or lists a dir or pattern, from anywhere (the listing, the path
+  field, a file, the scratchpad), so a shortcut of `:e ~/src<CR>` is a
+  favorite dir that works wherever it's run (a macro of Tab and the path
+  went from the path field to the listing). The path is read as the path
+  field reads it (quotes, `\`, `~`, patterns), from the open dir
+  (`Koil.currentDir`, vim's cwd, also in a file). One that's a file on
+  disk opens (`listing::file_at`: as written first, as a dir is, so
+  `a[1].txt` isn't a pattern, then as koil-core's `read_location` reads
+  it, as a glob, so `main.rs` isn't a regex with `:set regex`); anything
+  else goes to `openFolder`, whose error says why it can't be opened.
+  Vim then edits the listing, from the path field too, as Enter there
+  does. Unsaved changes are asked about first (`askToSave`), as for a
+  drop, and `:e!` drops them. `:e` alone reads what's shown again: the
+  listing updates (keeping its edits, as Koil keeps them as changes, so
+  `:e!` has nothing to drop there), a file is read again in place
+  (`reloadFile`, `reloading`: `vim.replaceText`, one change `u` takes
+  back, with the cursor on its line and column), unless it has unsaved
+  changes (E37, which `:e!` drops), and the scratchpad has no file (E32).
 - **Scratchpad** (`openScratch`): `_` in the listing (or the path field)
   shows a text of the user's that's never saved, kept until Koil quits
   (`koil -s` starts in it, and text piped in starts it: see Command line).
