@@ -1,7 +1,7 @@
 //! Shell commands, as vim's `:!`: `:!cmd` runs `cmd` in the dir Koil has
-//! open, with `%` in it for the entries (or the paths on lines, or the
-//! file) it's run on, and `:_!cmd` puts what it writes in the scratchpad
-//! (see `Request`).
+//! open, with `%` in it for the entries (or the file) it's run on, and a
+//! filter (`:{range}!cmd`) puts lines through it, and `:_!cmd` puts what
+//! it writes in the scratchpad (see `Request`).
 //! It runs in the shell the `shell` setting names, else the system's (see
 //! `default_shell`), whose kind says how the command line is passed and how
 //! a path is quoted in it (see `Kind`). One runs at a time, on another
@@ -9,7 +9,7 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
@@ -26,9 +26,9 @@ use crate::{document, listing};
 /// what it shows at once (3000 lines took half a second).
 const SHOWN_BYTES: usize = 1 << 20;
 const SHOWN_LINES: usize = 1000;
-/// How much of the output of one for the scratchpad is kept: past that, it
-/// isn't put in, as the rest of it would be lost.
-const SCRATCHPAD_BYTES: usize = 256 << 20;
+/// How much of a filter's output (or one for the scratchpad) is kept: past
+/// that, it isn't put in, as the lines would be lost (or the rest of it).
+const FILTER_BYTES: usize = 256 << 20;
 /// How often a command that's running is checked for having ended.
 const POLL: Duration = Duration::from_millis(50);
 /// How long what a command started (`&`) may keep its output open after
@@ -205,9 +205,10 @@ pub struct Request {
     /// on, or the file, each an absolute path; or else, why there are none.
     pub files: Vec<PathBuf>,
     pub why: String,
-    /// Whether the files go after a command that has no `%` (one run on
-    /// lines).
-    pub append: bool,
+    /// The lines a filter (or one for the scratchpad) puts through it,
+    /// which it gets on its stdin; none for a command whose output is
+    /// shown, which gets nothing there.
+    pub input: Option<String>,
     /// Whether what it writes goes in the scratchpad (`:_!`): stdout and
     /// stderr together, as for one whose output is shown, but all of it,
     /// and with its tabs.
@@ -221,16 +222,20 @@ pub struct Request {
 /// What a command did.
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Ran {
-    /// What it wrote, stdout and stderr together, as shown (see
+    /// What it wrote: a filter's stdout as it is (but `\r\n`, and the line
+    /// break at its end), or else stdout and stderr together, as shown (see
     /// `as_shown`; all of it, with its tabs, for the scratchpad).
     pub output: String,
+    /// What a filter wrote to stderr, as shown.
+    pub errors: String,
     /// How many lines of what's shown were left out, as it was too long.
     pub cut: usize,
     /// Its exit code; none if a signal ended it.
     pub code: Option<i32>,
     /// Whether `Running::stop` ended it.
     pub stopped: bool,
-    /// Why the scratchpad's output can't be put in, or why waiting failed.
+    /// Why a filter's output (or the scratchpad's) can't be put in, or why
+    /// waiting failed.
     pub error: String,
 }
 
@@ -317,9 +322,10 @@ fn signal(pid: u32, kill: bool) {
 /// A command started (see `start`), whose output is being read.
 pub struct Started {
     child: Child,
-    /// What it writes (stdout and stderr together), as it comes, and `None`
-    /// once that's closed.
-    output: Receiver<Option<Vec<u8>>>,
+    /// What it writes, as it comes: from stdout (0; stderr too, unless it's
+    /// a filter) or stderr (1), and `None` once that's closed.
+    output: Receiver<(usize, Option<Vec<u8>>)>,
+    filter: bool,
     scratchpad: bool,
 }
 
@@ -335,52 +341,69 @@ pub fn start(request: &Request, running: &Running) -> Result<(String, Started), 
         "" => "E499: Empty file name for '%'",
         why => why,
     };
-    let line = expand(
-        &request.command,
-        kind,
-        &request.cwd,
-        &request.files,
-        why,
-        request.append,
-    )?;
+    let line = expand(&request.command, kind, &request.cwd, &request.files, why)?;
     if !request.cwd.is_dir() {
         let shown = listing::show_path(&request.cwd);
         return Err(format!("“{shown}” isn't there any more"));
     }
     let cant = |err: io::Error| format!("Can't run {}: {err}", request.shell);
     let mut command = command(&request.shell, &line, &request.cwd, request.environment);
+    let filter = request.input.is_some() && !request.scratchpad;
     let (sender, output) = mpsc::sync_channel(16);
-    // Stdout and stderr through one pipe, so they're in the order they
-    // were written.
-    let (reader, writer) = io::pipe().map_err(cant)?;
-    command
-        .stdin(Stdio::null())
-        .stdout(writer.try_clone().map_err(cant)?)
-        .stderr(writer);
-    let child = command.spawn().map_err(cant)?;
-    // Its ends of the pipe, without which reading would never end.
-    drop(command);
-    read(reader, sender);
+    let mut child;
+    command.stdin(if request.input.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
+    if filter {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        child = command.spawn().map_err(cant)?;
+        read(child.stdout.take(), 0, sender.clone());
+        read(child.stderr.take(), 1, sender);
+    } else {
+        // Both through one pipe, so they're in the order they were written.
+        let (reader, writer) = io::pipe().map_err(cant)?;
+        command
+            .stdout(writer.try_clone().map_err(cant)?)
+            .stderr(writer);
+        child = command.spawn().map_err(cant)?;
+        // Its ends of the pipe, without which reading would never end.
+        drop(command);
+        read(Some(reader), 0, sender);
+    }
     running.start(child.id());
+    if let (Some(input), Some(mut stdin)) = (request.input.clone(), child.stdin.take()) {
+        // A command that ends without reading all of it makes this fail,
+        // which doesn't matter.
+        thread::spawn(move || stdin.write_all(input.as_bytes()));
+    }
     let started = Started {
         child,
         output,
+        filter,
         scratchpad: request.scratchpad,
     };
     Ok((line, started))
 }
 
-/// Sends what `reader` reads to `sender`, from another thread, then
-/// `None` once it's done.
-fn read(mut reader: impl Read + Send + 'static, sender: SyncSender<Option<Vec<u8>>>) {
+/// Sends what `reader` reads to `sender`, as `stream`'s, from another
+/// thread, then `None` once it's done.
+fn read(
+    reader: Option<impl Read + Send + 'static>,
+    stream: usize,
+    sender: SyncSender<(usize, Option<Vec<u8>>)>,
+) {
     thread::spawn(move || {
-        let mut buffer = vec![0; 64 << 10];
-        while let Ok(n @ 1..) = reader.read(&mut buffer) {
-            if sender.send(Some(buffer[..n].to_vec())).is_err() {
-                return;
+        if let Some(mut reader) = reader {
+            let mut buffer = vec![0; 64 << 10];
+            while let Ok(n @ 1..) = reader.read(&mut buffer) {
+                if sender.send((stream, Some(buffer[..n].to_vec()))).is_err() {
+                    return;
+                }
             }
         }
-        let _ = sender.send(None);
+        let _ = sender.send((stream, None));
     });
 }
 
@@ -388,21 +411,23 @@ impl Started {
     /// Waits for the command to end, keeping what it writes, and a moment
     /// longer for what it started (`&`), if that still has its output open.
     pub fn finish(mut self, running: &Running) -> Ran {
-        let mut out = Kept::new(if self.scratchpad {
-            SCRATCHPAD_BYTES
+        let limit = if self.filter || self.scratchpad {
+            FILTER_BYTES
         } else {
             SHOWN_BYTES
-        });
+        };
+        let mut kept = [Kept::new(limit), Kept::new(SHOWN_BYTES)];
+        let mut open = if self.filter { 2 } else { 1 };
         let mut ended: Option<Instant> = None;
         let mut status = None;
-        loop {
+        while open > 0 {
             let wait = match ended {
                 Some(at) => AFTER_EXIT.saturating_sub(at.elapsed()),
                 None => POLL,
             };
             match self.output.recv_timeout(wait) {
-                Ok(Some(bytes)) => out.add(&bytes),
-                Ok(None) => break,
+                Ok((stream, Some(bytes))) => kept[stream].add(&bytes),
+                Ok((_, None)) => open -= 1,
                 Err(RecvTimeoutError::Timeout) if ended.is_some() => break,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -420,13 +445,24 @@ impl Started {
             None => self.child.wait(),
         };
         let stopped = running.end();
+        let [out, err] = kept;
         let mut ran = Ran {
             code: status.as_ref().ok().and_then(|s| s.code()),
             stopped,
             error: status.err().map(|e| e.to_string()).unwrap_or_default(),
             ..Ran::default()
         };
-        if self.scratchpad {
+        if self.filter {
+            if out.over {
+                ran.error = "The output is too long to put in".to_string();
+            }
+            let output = document::decode_lossy(out.bytes).replace("\r\n", "\n");
+            ran.output = match output.strip_suffix('\n') {
+                Some(output) => output.to_string(),
+                None => output,
+            };
+            (ran.errors, ran.cut) = shown_lines(as_shown(err.bytes, false), err.more_lines);
+        } else if self.scratchpad {
             if out.over {
                 ran.error = "The output is too long to put in".to_string();
             }
@@ -614,7 +650,7 @@ fn read_environment(
     }
     let mut child = command.spawn().ok()?;
     let (sender, output) = mpsc::sync_channel(16);
-    read(child.stdout.take()?, sender);
+    read(child.stdout.take(), 0, sender);
     let deadline = Instant::now() + timeout;
     let mut bytes = Vec::new();
     let vars = loop {
@@ -622,8 +658,8 @@ fn read_environment(
             break Some(vars);
         }
         match output.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-            Ok(Some(chunk)) => bytes.extend(chunk),
-            Ok(None) | Err(RecvTimeoutError::Disconnected) => break None,
+            Ok((_, Some(chunk))) => bytes.extend(chunk),
+            Ok((_, None)) | Err(RecvTimeoutError::Disconnected) => break None,
             Err(RecvTimeoutError::Timeout) => {
                 signal(child.id(), true);
                 break None;
@@ -800,15 +836,13 @@ enum Quote {
 /// The command line `command` (as typed after `:!`) is in `kind`'s shell,
 /// run in `cwd`: each `%` is `files` (as `written` has them, see `word`),
 /// quoted as they must be where it is (so `"%"` works too), and `\%` is a
-/// `%`. With `append`, they go after a command that has no `%`. If there
-/// are no files where they're wanted, the error is `why`.
+/// `%`. If there are no files where they're wanted, the error is `why`.
 pub fn expand(
     command: &str,
     kind: Kind,
     cwd: &Path,
     files: &[PathBuf],
     why: &str,
-    append: bool,
 ) -> Result<String, String> {
     let words = |modifiers: &[char]| match files.is_empty() {
         true => Err(why.to_string()),
@@ -819,7 +853,6 @@ pub fn expand(
     let chars: Vec<char> = command.chars().collect();
     let mut line = String::new();
     let mut quote = Quote::None;
-    let mut used = false;
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -840,7 +873,6 @@ pub fn expand(
                 i += 2;
             }
             line.push_str(&inserted(&words(&modifiers)?, kind, quote));
-            used = true;
             continue;
         }
         let escape = match (kind, quote) {
@@ -867,14 +899,6 @@ pub fn expand(
             (_, Quote::Double, '"') => Quote::None,
             (_, quote, _) => quote,
         };
-    }
-    if append && !used {
-        let words = words(&[])?;
-        line = format!(
-            "{} {}",
-            line.trim_end(),
-            inserted(&words, kind, Quote::None)
-        );
     }
     Ok(line)
 }

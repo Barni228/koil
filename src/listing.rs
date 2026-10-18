@@ -1224,8 +1224,8 @@ pub fn paths_on_lines(
     }
 }
 
-/// The paths written on `lines` of a file's text (or the scratchpad's),
-/// for a shell command run on them as on the listing's entries (see
+/// The paths written on `lines` of the scratchpad's text, for a shell
+/// command run on them as on the listing's entries (see
 /// [`paths_on_lines`]): each line is a path as gf reads it, a relative one
 /// looked for in each of `dirs` in turn (see `link::target`), or an entry
 /// pasted with its ID, where that is on disk. Blank lines are left out,

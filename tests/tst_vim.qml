@@ -343,6 +343,7 @@ TestCase {
         (narrow.contentItem as Flickable).rightMargin = 0;
         vim.singleLine = false;
         vim.linePrefixes = false;
+        vim.bangEntries = false;
         vim.commandKeys = {};
         vim.visualCommandKeys = {};
         vim.shortcuts = [];
@@ -1151,7 +1152,8 @@ TestCase {
     }
 
     // ! and a motion type the lines' range, as in vim, and change nothing
-    // (Koil's ! is one of its keys instead: see main.qml's bangLines).
+    // (Koil's ! is one of its keys instead: see main.qml's bangLines), and
+    // g! does too, for Koil.
     function test_bangOperator() {
         load("one\ntwo\nthree\nfour");
         keys("j!j");
@@ -1163,9 +1165,45 @@ TestCase {
         keys("<Esc>G!k");
         compare(vim.commandLine, ":.,.+1!");
         compare(cursorLine(), 3);
+        keys("<Esc>gg");
+        keys("g!j");
+        compare(vim.commandLine, ":.,.+1!");
+        keys("<Esc>g!!");
+        compare(vim.commandLine, ":.!");
+        keys("<Esc>2g!g!");
+        compare(vim.commandLine, ":.,.+1!");
         keys("<Esc>u");
         compare(editor.text, "one\ntwo\nthree\nfour");
         compare(vim.undoStack.length, 0);
+    }
+
+    // For Koil's listing and scratchpad, ! in visual mode and on marked
+    // lines types a % for their entries, with the cursor before it, and g!
+    // types vim's filter.
+    function test_bangEntries() {
+        load("one\ntwo\nthree");
+        vim.bangEntries = true;
+        keys("Vj!");
+        compare(vim.commandLine, ":'<,'>! %");
+        compare(vim.commandCursor, 7);
+        keys("ls");
+        compare(vim.commandLine, ":'<,'>!ls %");
+        keys("<Esc>gvg!");
+        compare(vim.commandLine, ":'<,'>!");
+        keys("<Esc>ggmjm!");
+        compare(vim.commandLine, ":'<,'>! %");
+        compare(vim.visualShown.marked, [0, 4]);
+        keys("<Esc>ggmjmg!");
+        compare(vim.commandLine, ":'<,'>!");
+        keys("<Esc>");
+        vim.openBang("", true);
+        compare(vim.commandLine, ":! %");
+        compare(vim.commandCursor, 2);
+        keys("<Esc>");
+        vim.bangEntries = false;
+        keys("Vj!");
+        compare(vim.commandLine, ":'<,'>!");
+        keys("<Esc>");
     }
 
     // While vim waits (for a shell command), keys do nothing, but Esc asks
@@ -1230,6 +1268,37 @@ TestCase {
         compare(editor.text, "p\n\nr");
         verify(vim.message !== "Interrupted");
         vim.shellRequested.disconnect(wait);
+    }
+
+    // A filter's output in place of its lines.
+    function test_filterLines() {
+        load("one\ntwo\nthree\nfour");
+        compare(vim.filterInput(2, 3, null), "two\nthree\n");
+        vim.filterLines(2, 3, "TWO\nTHREE\nextra");
+        compare(editor.text, "one\nTWO\nTHREE\nextra\nfour");
+        compare(cursorLine(), 2);
+        keys("u");
+        compare(editor.text, "one\ntwo\nthree\nfour");
+        // no output: the lines go, as with dd
+        vim.filterLines(2, 3, "");
+        compare(editor.text, "one\nfour");
+        compare(cursorLine(), 2);
+        vim.filterLines(2, 2, "");
+        compare(editor.text, "one");
+        vim.filterLines(1, 1, "");
+        compare(editor.text, "");
+    }
+
+    // In the listing, a filter takes the lines without their prefixes, and
+    // its lines get one each, as new entries.
+    function test_filterPrefixes() {
+        load("M  b\nC  a\nM  c");
+        vim.linePrefixes = true;
+        compare(vim.filterInput(1, 2, null), "b\na\n");
+        compare(vim.filterInput(1, 3, [1, 3]), "b\nc\n");
+        vim.filterLines(1, 2, "a\nb");
+        compare(render(), "   a\n   b\n<M:h3>  c");
+        compare(vim.cursor, 3);
     }
 
     // :_!'s output in place of all of the text, as a change of its own.
@@ -3199,6 +3268,18 @@ TestCase {
         compare(vim.visualShown.marked, [0, 8]);
         keys("<CR>");
         compare(editor.text, "bbbb\naa\nbbbb");
+    }
+
+    // A filter's output goes where the first marked line was, and the
+    // others go.
+    function test_filterMarked() {
+        load("c\nx\na\ny\nb");
+        compare(vim.filterInput(1, 5, [1, 3, 5]), "c\na\nb\n");
+        vim.filterLines(1, 5, "a\nb\nc", [1, 3, 5]);
+        compare(render(), "a\nb\nc\nx\ny");
+        load("c\nx\na\ny\nb");
+        vim.filterLines(1, 5, "", [1, 3, 5]);
+        compare(render(), "x\ny");
     }
 
     // Each buffer has its own, and the listing's entries are found again

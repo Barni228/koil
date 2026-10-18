@@ -122,7 +122,7 @@ ApplicationWindow {
     property bool diskChanged: false
     property bool askingConflicts: false
     // The shell command running (see runShell), which vim waits for: {
-    // line, scratch }, or null.
+    // line, filter, scratch }, or null.
     property var shellRun: null
     // A box over the editor that has the keys (:help, or a question), a
     // shell command vim waits for, or a :s or the find bar's replace field
@@ -679,18 +679,22 @@ ApplicationWindow {
             openShortcuts(true);
     }
 
-    // !: the command line for a shell command on the entry (in a file or
-    // the scratchpad, the path) on the cursor's line, or with a count, on
-    // as many lines from there as there are, or on the marked lines (see
-    // runShell).
+    // !: the command line for a shell command on what % stands for (see
+    // runShell), with the cursor before it: :!| %. With a count, or on the
+    // marked lines, the range of those lines (as many as there are from
+    // the cursor's), with a % for their entries in the listing and the
+    // scratchpad (see Vim.bangEntries), but in a file for vim's filter, as
+    // g! types it.
     function bangLines(count) {
         if (vim.marked.length) {
-            vim.commandOnMarked(true);
-            return;
+            vim.commandOnMarked(true, vim.bangEntries);
+        } else if (count && activeView !== pathView) {
+            const t = activeView.textArea.latest.text;
+            const more = Math.min(count - 1, Txt.countLines(t) - Txt.lineOf(t, vim.cursor));
+            vim.openBang(more ? ".,.+" + more : ".", vim.bangEntries);
+        } else {
+            vim.openBang("", true);
         }
-        const t = activeView.textArea.latest.text;
-        const more = Math.min(Math.max(count, 1) - 1, Txt.countLines(t) - Txt.lineOf(t, vim.cursor));
-        vim.openCommandLine(":", (more ? ".,.+" + more : ".") + "!");
     }
 
     // Sorts the listing by `by` (one of Vim.sorts), the other way round if
@@ -824,36 +828,49 @@ ApplicationWindow {
 
     // :!command, and with a range (see Vim.shellRequested): runs it in the
     // shell (:set shell), in the dir Koil has open, while vim waits for it
-    // (Esc stops it), then shows what it wrote (see shellDone). % is what's
-    // on the range's lines, which go after a command without %: in the
-    // listing, their entries, and in a file or the scratchpad, the paths
-    // written on them (see Koil.writtenPaths). Without a range, it's the
-    // cursor's line's, but in a file, the file, and in the path field, the
-    // open dir. With `scratch` (:_!), the output goes in the scratchpad
-    // instead (see showInScratch). As the scratchpad is shown in the
+    // (Esc stops it), then shows what it wrote (see shellDone). % is the
+    // entry on the cursor's line (from the path field, the open dir), in
+    // the scratchpad the path written on it (see Koil.writtenPaths), and in
+    // a file the file. A range is filtered: its lines go through the
+    // command (without their prefixes), whose output replaces them; but in
+    // the listing and the scratchpad, one with % is run on the range's
+    // entries (or paths) instead, which % stands for. With `scratch` (:_!),
+    // the output goes in the scratchpad instead (see showInScratch), and a
+    // filter's lines only go through it. As the scratchpad is shown in the
     // file's place, its unsaved changes are asked about first (unless
     // `asked`), as for File > Open. A range of marked lines (with `lines`)
-    // is only those.
+    // is only those, as if they were together.
     function runShell(command, range, scratch, asked) {
         if (scratch && !listing && !scratchpad && modified && !asked) {
             askToSave(() => runShell(command, range, scratch, true));
             return;
         }
-        // The lines it's run on, as spans of lines from 0.
-        const t = editorView.textArea.latest.text, line = Txt.lineOf(t, vim.cursor) - 1;
-        const spans = range && range.lines ? lineSpans(range.lines) : range ? [[range.first - 1, range.last - 1]]
-            : [[line, line]];
+        const t = activeView.textArea.latest.text;
+        // A % that isn't escaped (\%, see shell::expand).
+        const percent = /(^|[^\\])%/.test(command);
+        const filter = !!range && !(percent && (listing || scratchpad));
+        // A file's last line break ends its last line, as in vim: the empty
+        // line after it isn't one to filter (:%!sort would sort it first).
+        const end = Txt.countLines(t), past = l => l === end && t.endsWith("\n");
+        const last = filter && range.last > range.first && past(range.last) ? range.last - 1 : range && range.last;
+        // The marked lines it's for (see Vim.exRange), from 1.
+        const lines = range && range.lines ? range.lines.filter((l, i) => i === 0 || !filter || !past(l)) : null;
+        // The lines % stands for the entries on, as spans of lines from 0.
+        const line = Txt.lineOf(t, vim.cursor) - 1;
+        const spans = filter || !range ? [[line, line]] : lines ? lineSpans(lines) : [[range.first - 1, range.last - 1]];
         const hidden = JSON.stringify(editorView.hidden);
-        const found = !listing && filePath && !range ? { paths: [filePath], message: "" }
-            : listing ? JSON.parse(koil.pathsOnLines(t, hidden, JSON.stringify(activeView === pathView ? [] : spans)))
-            : JSON.parse(koil.writtenPaths(t, hidden, JSON.stringify(spans), linkDirs()));
+        const found = !percent ? { paths: [], message: "" }
+            : listing ? JSON.parse(koil.pathsOnLines(editorView.textArea.latest.text, hidden,
+                JSON.stringify(activeView === pathView ? [] : spans)))
+            : scratchpad ? JSON.parse(koil.writtenPaths(t, hidden, JSON.stringify(spans), linkDirs()))
+            : { paths: filePath ? [filePath] : [], message: "" };
         const request = JSON.stringify({
             shell: vim.shell || systemShell,
             command: command,
             cwd: koil.currentDir(),
             files: found.paths,
             why: found.message,
-            append: !!range,
+            input: filter ? vim.filterInput(range.first, last, lines) : null,
             scratchpad: scratch,
             environment: shellEnvironment
         });
@@ -869,6 +886,8 @@ ApplicationWindow {
         }
         shellRun = {
             line: r.line,
+            filter: filter && !scratch ? { first: range.first, last: last, lines: lines, text: t, view: activeView,
+                listing: listing, path: filePath, scratchpad: scratchpad } : null,
             scratch: scratch
         };
         vim.showMessage((scratch ? ":_!" : ":!") + r.line);
@@ -896,6 +915,7 @@ ApplicationWindow {
         const run = shellRun, title = (run.scratch ? ":_!" : ":!") + run.line;
         shellRun = null;
         const exit = ran.code === 0 ? "" : ran.code === null ? "killed" : "shell returned " + ran.code;
+        const f = run.filter;
         if (ran.stopped) {
             vim.showMessage("Interrupted");
         } else if (ran.error) {
@@ -904,8 +924,18 @@ ApplicationWindow {
             // A macro that ran it goes on in the scratchpad.
             vim.endWait(false, () => showInScratch(title, ran.output, exit));
             return;
-        } else {
+        } else if (!f) {
             showOutput(title, ran.output, ran.cut, exit);
+        } else if (exit) {
+            // The lines stay.
+            showOutput(title, ran.errors, ran.cut, exit);
+        } else if (activeView !== f.view || listing !== f.listing || filePath !== f.path || scratchpad !== f.scratchpad
+                || f.view.textArea.latest.text !== f.text) {
+            vim.showError("The text changed while the command ran, so its output wasn't put in");
+        } else {
+            vim.filterLines(f.first, f.last, ran.output, f.lines);
+            if (ran.errors)
+                showOutput(title, ran.errors, ran.cut, "");
         }
         vim.endWait(ran.stopped);
     }
@@ -1607,6 +1637,7 @@ ApplicationWindow {
         completer: root.listing && root.activeView === pathView ? (line, cursor) => JSON.parse(koil.complete(line, cursor)) : null
         lineHistory: root.pathHistory
         linePrefixes: root.listing && root.activeView === editorView
+        bangEntries: root.listing || root.scratchpad
         clipboard: system
         fileName: root.listing ? root.location : root.filePath
         lineHeight: editorView.lineHeight

@@ -132,6 +132,11 @@ QtObject {
     // and two spaces, or three spaces on a line that has none, which the
     // cursor never goes into (see Prefixes). A line without one is plain.
     property bool linePrefixes: false
+    // Whether ! in visual mode, or on marked lines, is for a command on the
+    // lines' entries (Koil's listing and scratchpad): it types '<,'>! and a
+    // % for them, rather than for vim's filter, which g! types (see
+    // openBang).
+    property bool bangEntries: false
     // What a new line starts with, and a line break that starts one.
     readonly property string blankPrefix: linePrefixes ? "   " : ""
     readonly property string lineBreak: "\n" + blankPrefix
@@ -179,10 +184,12 @@ QtObject {
     // One of commandKeys was typed, with its count (0 if none).
     signal keyCommand(string name, int count)
     // :!command, with the lines of the range before it ({ first, last },
-    // from 1), or null: Koil runs it in the shell, on the entries of those
-    // lines (in a file, the paths on them), while vim waits (see waiting).
-    // With `scratchpad` (:_!command), its output goes in the scratchpad
-    // (see replaceWhole).
+    // from 1), or null: Koil runs it in the shell, while vim waits (see
+    // waiting). The lines go through it, and its output replaces them (see
+    // filterLines), unless it's on their entries (a % in the listing or
+    // the scratchpad). With `scratchpad` (:_!command), its output goes in
+    // the scratchpad instead (see replaceWhole), and the lines only go
+    // through it.
     signal shellRequested(string command, var range, bool scratchpad)
     // Esc or Ctrl-C while vim waits.
     signal stopRequested()
@@ -191,7 +198,7 @@ QtObject {
     signal nothingToUndo()
 
     readonly property bool isMac: Qt.platform.os === "osx"
-    readonly property var operators: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!"]
+    readonly property var operators: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!", "g!"]
     readonly property var motions: ["h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ",
         "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G", "gj", "gk",
         ";", ",", "%", "{", "}", "+", "-", "_", "<CR>", "<S-CR>", "|", "n", "N", "*", "#", "H", "M", "L",
@@ -207,7 +214,7 @@ QtObject {
     // linewise selection in visual mode (see Marked lines): an operator at
     // once. The others are normal mode's, so u still undoes, and i and o
     // type at the cursor.
-    readonly property var markedActions: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!", "x", "<Del>",
+    readonly property var markedActions: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!", "g!", "x", "<Del>",
         "X", "D", "s", "S", "C", "R", "Y", "~", "r", "J", "gJ", "p", "P", "I", "A", "gI", ":"]
     // Scroll the view sideways (see scrollSideways).
     readonly property var sideScrolls: ["zh", "zl", "zH", "zL", "zs", "ze"]
@@ -1267,9 +1274,10 @@ QtObject {
     function isChange(cmd) {
         if (isVisual)
             return !cmd.motion && !cmd.textObj
-                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "!", "gf", "gx"].includes(cmd.action);
+                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "!", "g!", "gf", "gx"]
+                    .includes(cmd.action);
         // ! only types a command line, whose command may change the text.
-        return cmd.op ? cmd.op !== "y" && cmd.op !== "!" : changeActions.includes(cmd.action);
+        return cmd.op ? !["y", "!", "g!"].includes(cmd.op) : changeActions.includes(cmd.action);
     }
 
     function execute(cmd) {
@@ -1290,7 +1298,7 @@ QtObject {
             typeahead = [];
             return;
         }
-        const changing = marking ? !["y", "Y", ":", "!"].includes(cmd.action) : isChange(cmd);
+        const changing = marking ? !["y", "Y", ":", "!", "g!"].includes(cmd.action) : isChange(cmd);
         const wasVisual = isVisual;
         if (changing) {
             beginChange();
@@ -1301,7 +1309,7 @@ QtObject {
             executeMarked(cmd);
         else if (isVisual)
             executeVisual(cmd);
-        else if (cmd.op && cursors.length && cmd.op !== "!")
+        else if (cmd.op && cursors.length && cmd.op !== "!" && cmd.op !== "g!")
             atEveryCursor(() => executeOperator(cmd));
         else if (cmd.op)
             executeOperator(cmd);
@@ -1456,7 +1464,8 @@ QtObject {
         case "<":
             shiftLines(range, op === ">" ? 1 : -1, 1);
             break;
-        case "!": {
+        case "!":
+        case "g!": {
             // As vim's: a command line for the lines, on the first of them.
             const first = Txt.lineOf(t, range.start), last = Txt.lineOf(t, Math.max(range.start, range.end - 1));
             setCursor(clampNormal(t, firstNonBlank(t, range.start)));
@@ -1707,13 +1716,16 @@ QtObject {
             setCursor(cursor);
             return;
         }
-        // : and ! leave visual mode, for a command on its lines, as in vim,
-        // which still shows them selected while it's typed.
-        if (a === ":" || a === "!") {
+        // :, ! and g! leave visual mode, for a command on its lines, as in
+        // vim, which still shows them selected while it's typed.
+        if (a === ":" || a === "!" || a === "g!") {
             setMode("normal");
             setCursor(clampNormal(t, cursor));
             visualShown = lastVisual;
-            openCommandLine(":", "'<,'>" + (a === "!" ? "!" : ""));
+            if (a === ":")
+                openCommandLine(":", "'<,'>");
+            else
+                openBang("'<,'>", a === "!" && bangEntries);
             return;
         }
         if (a === "/" || a === "?") {
@@ -2686,15 +2698,28 @@ QtObject {
         return { text: text, entries: entries };
     }
 
-    // : (and Koil's ! in the listing) while lines are marked: a command
-    // line for them, as : in visual mode, with the range '<,'>, which
-    // stands for them (see exRange), and a ! if `bang`. They stay drawn
-    // while it's typed (visualShown).
-    function commandOnMarked(bang) {
+    // : (and ! and g!) while lines are marked: a command line for them, as
+    // : in visual mode, with the range '<,'>, which stands for them (see
+    // exRange), and a ! if `bang`, then a % for their entries if `entries`
+    // (see openBang). They stay drawn while it's typed (visualShown).
+    function commandOnMarked(bang, entries) {
         lastVisual = markedVisual(marked);
         visualShown = lastVisual;
         setMarked([]);
-        openCommandLine(":", "'<,'>" + (bang ? "!" : ""));
+        if (bang)
+            openBang("'<,'>", entries);
+        else
+            openCommandLine(":", "'<,'>");
+    }
+
+    // The command line for a shell command on the lines of `range` (none
+    // for the cursor's), as !, with `entries`, types it for Koil (see
+    // bangEntries): a % after it for what's on them, with the cursor
+    // before it, where the command goes (:!| %).
+    function openBang(range, entries) {
+        openCommandLine(":", range + "!" + (entries ? " %" : ""));
+        if (entries)
+            commandCursor -= 2;
     }
 
     // Runs one of markedActions on the marked lines, which it unmarks (see
@@ -2703,8 +2728,8 @@ QtObject {
     // and J put what takes the lines' place.
     function executeMarked(cmd) {
         const t = bufferText(), a = cmd.action, starts = marked;
-        if (a === ":" || a === "!") {
-            commandOnMarked(a === "!");
+        if (a === ":" || a === "!" || a === "g!") {
+            commandOnMarked(a !== ":", a === "!" && bangEntries);
             return;
         }
         const blocks = markedBlocks(t, starts), lines = linesText(t, blocks), n = starts.length;
@@ -4615,6 +4640,55 @@ QtObject {
             setCursor(clampNormal(bufferText(), cursor));
         }
         outside(() => shellRequested(command, range, scratchpad));
+    }
+
+    // The text of lines first to last (from 1), or of `lines` (from 1, in
+    // order: marked ones), for a filter to take (see filterLines), each
+    // without its prefix (see Prefixes) and with a line break after it.
+    function filterInput(first, last, lines) {
+        const t = bufferText(), text = (ls, le) => t.slice(prefixEnd(t, ls), le);
+        if (!lines && !linePrefixes)
+            return t.slice(Txt.lineToPos(t, first), Txt.lineEnd(t, Txt.lineToPos(t, last))) + "\n";
+        const shown = [];
+        for (const l of lines || Array.from({ length: last - first + 1 }, (_, k) => first + k)) {
+            const ls = Txt.lineToPos(t, l);
+            shown.push(text(ls, Txt.lineEnd(t, ls)));
+        }
+        return shown.join("\n") + "\n";
+    }
+
+    // Puts `text` in place of lines first to last (from 1), as a change of
+    // its own: a filter's output (see shellRequested), its lines with a
+    // prefix each (see prefixLines). Without text, the lines go, as with
+    // dd. The cursor goes to the first of them. With `lines` (from 1, in
+    // order: marked ones), only those, as if they were together: the text
+    // goes where the first one is, and the others go.
+    function filterLines(first, last, text, lines) {
+        batched(() => {
+            beginChange();
+            const t = bufferText();
+            let s = Txt.lineToPos(t, first);
+            if (lines) {
+                const starts = lines.map(l => Txt.lineToPos(t, l));
+                const gone = removals(t, markedBlocks(t, text === "" ? starts : starts.slice(1)));
+                const e = Txt.lineEnd(t, s), p = prefixLines(s, e, text, []);
+                replaceRanges(text === "" ? gone : [{ start: s, end: e, text: p.text, entries: p.entries }].concat(gone));
+            } else {
+                let e = Txt.lineEnd(t, Txt.lineToPos(t, last));
+                if (text === "" && e < t.length)
+                    e++;
+                else if (text === "" && s > 0)
+                    s--;
+                const p = prefixLines(s, e, text, []);
+                replaceRange(s, e, p.text, p.entries);
+            }
+            const u = bufferText();
+            setCursor(clampNormal(u, firstNonBlank(u, Math.min(s, u.length))));
+            commitChange(); // during a run, with it (see commitChange)
+            const n = lines ? lines.length : last - first + 1;
+            if (n > 2)
+                showMessage(n + " lines filtered");
+        });
     }
 
     // Puts `text` in place of all of the text, as a change of its own: what

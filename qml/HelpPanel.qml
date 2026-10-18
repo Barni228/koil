@@ -215,25 +215,31 @@ Popup {
         },
         {
             title: "Shell commands",
-            tags: ["!", ":!", ":!!", ":_!", "_!", "shell", "sh", "%", "%:p", "%:h", "%:t",
+            tags: ["!", "g!", "g!!", ":!", ":!!", ":_!", "_!", "shell", "sh", "filter", "%", "%:p", "%:h", "%:t",
                 "%:r", "%:e", "terminal", "run"],
             intro: "`:!cmd` runs `cmd` in the shell (`:set shell`, or Settings), in the dir that's open, like "
                 + "`:!git status`. What it writes shows in the status line, or in a box like this one if it's "
                 + "longer (`:_!cmd`: in the scratchpad). `Esc` stops it.",
             rows: [
-                ["`!`", "A command for the entry on the line, like `!git add` or `!rm`, then `Enter`. The "
-                    + "entry goes at the end, or where `%` is (`!mv % old/`). With a count (`3!`), in visual "
-                    + "mode or with lines marked (`m`), the entries on those lines. In a file or the "
-                    + "scratchpad, the paths written on the lines, as `gf` reads them."],
+                ["`!`", "Types `:! %` with the cursor before the `%`, for a command on the entry on the "
+                    + "line, like `git add` then `Enter`. With a count (`3!`), in visual mode or with lines "
+                    + "marked (`m`), the range of those lines, where `%` is their entries. In a file, `%` is "
+                    + "the file, and a range is put through the command, as `g!` does."],
+                ["`g!`", "Vim's `!`: `g!!` or `g!ip` types the range of those lines (in visual mode, the "
+                    + "selection's), which go through the command you type, like `sort`, and its output "
+                    + "takes their place (in the listing, as new entries)."],
                 ["`%`", "The entry on the line (from the path field, the open dir; in the scratchpad, the "
-                    + "path), or in a file, the file, quoted for the shell. `\\%` is a `%`, as in "
+                    + "path written on it), or in a file, the file, quoted for the shell. With a range, in "
+                    + "the listing and the scratchpad, the entries on its lines. `\\%` is a `%`, as in "
                     + "`:!date +\\%F`."],
                 ["`%:p`  `%:h`  `%:t`", "Its full path, the dir it's in, its name."],
                 ["`%:r`  `%:e`", "It without its extension, and its extension (`%:t:r`: its name without it)."],
-                ["`:.,+2!cmd`  `:'<,'>!cmd`", "Run it on the entries on those lines (in a file or the "
-                    + "scratchpad, the paths on them)."],
+                ["`:.,+2!cmd`  `:'<,'>!cmd`", "As in vim: put the lines through it, and its output in "
+                    + "their place (`:%!sort`). In the listing and the scratchpad, one with `%` is run on "
+                    + "the entries on those lines instead (`:'<,'>!git add %`)."],
                 ["`:_!cmd`", "Put what it writes in the scratchpad, in place of its text (`u` brings that "
-                    + "back), like `:_!git ls-files`. With a range, on those entries or paths."],
+                    + "back), like `:_!git log`. With a range, the lines go to it but stay, or with `%`, "
+                    + "it's on their entries."],
                 ["`:!!`", "Run the last command again."]
             ],
             note: "A command can't read what you type: one that asks (`rm -i`) gets no answer."

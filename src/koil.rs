@@ -146,8 +146,8 @@ pub mod qobject {
             lines: &QString,
         ) -> QString;
 
-        /// The paths written on `lines` of a file's text (or the
-        /// scratchpad's), for a shell command run on them (see
+        /// The paths written on `lines` of the scratchpad's text, for a
+        /// shell command run on them (see
         /// `listing::written_paths`), relative ones looked for in each of
         /// `dirs` in turn: `{ paths, message }`, as `paths_on_lines` gives.
         #[qinvokable]
