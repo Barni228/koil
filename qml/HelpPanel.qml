@@ -76,8 +76,8 @@ Popup {
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
                 ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing."],
                 ["`_`", "The scratchpad: text of your own, never saved, kept as you left it until Koil "
-                    + "quits. `_` or `-` there goes back to where you were, and `!` puts the line through a "
-                    + "command (`!sort`)."],
+                    + "quits. `_` or `-` there goes back to where you were, and `!` runs a command on the "
+                    + "path on the line (`!rm`), as in the listing."],
                 ["icons", "The cursor skips each line's icon and the spaces after it, so `0` goes to the "
                     + "name. `Backspace` there clears the icon (the entry becomes new), then joins lines."],
                 ["quitting", "`:conf q` and `ZZ` ask to apply the changes first. In a file, quitting goes "
@@ -215,26 +215,25 @@ Popup {
         },
         {
             title: "Shell commands",
-            tags: ["!", ":!", "!!", ":!!", ":_!", "_!", "shell", "sh", "filter", "%", "%:p", "%:h", "%:t",
+            tags: ["!", ":!", ":!!", ":_!", "_!", "shell", "sh", "%", "%:p", "%:h", "%:t",
                 "%:r", "%:e", "terminal", "run"],
             intro: "`:!cmd` runs `cmd` in the shell (`:set shell`, or Settings), in the dir that's open, like "
                 + "`:!git status`. What it writes shows in the status line, or in a box like this one if it's "
                 + "longer (`:_!cmd`: in the scratchpad). `Esc` stops it.",
             rows: [
-                ["`!`", "In the listing: a command for the entry on the line, like `!git add` or `!rm`, then "
-                    + "`Enter`. The entry goes at the end, or where `%` is (`!mv % old/`). With a count "
-                    + "(`3!`), in visual mode or with lines marked (`m`), the entries on those lines. In the "
-                    + "scratchpad, `:.!`: the line goes through it."],
-                ["`%`", "The entry on the line (from the path field, the open dir), or in a file, the file, "
-                    + "quoted for the shell. `\\%` is a `%`, as in `:!date +\\%F`."],
+                ["`!`", "A command for the entry on the line, like `!git add` or `!rm`, then `Enter`. The "
+                    + "entry goes at the end, or where `%` is (`!mv % old/`). With a count (`3!`), in visual "
+                    + "mode or with lines marked (`m`), the entries on those lines. In a file or the "
+                    + "scratchpad, the paths written on the lines, as `gf` reads them."],
+                ["`%`", "The entry on the line (from the path field, the open dir; in the scratchpad, the "
+                    + "path), or in a file, the file, quoted for the shell. `\\%` is a `%`, as in "
+                    + "`:!date +\\%F`."],
                 ["`%:p`  `%:h`  `%:t`", "Its full path, the dir it's in, its name."],
                 ["`%:r`  `%:e`", "It without its extension, and its extension (`%:t:r`: its name without it)."],
-                ["`:.,+2!cmd`  `:'<,'>!cmd`", "In the listing: run it on the entries on those lines. In a "
-                    + "file, as in vim: put the lines through it, and its output in their place (`:%!sort`, "
-                    + "or `!ip` then `fmt`)."],
+                ["`:.,+2!cmd`  `:'<,'>!cmd`", "Run it on the entries on those lines (in a file or the "
+                    + "scratchpad, the paths on them)."],
                 ["`:_!cmd`", "Put what it writes in the scratchpad, in place of its text (`u` brings that "
-                    + "back), like `:_!git log`. With a range, on those entries; in a file, the lines go to "
-                    + "it but stay."],
+                    + "back), like `:_!git ls-files`. With a range, on those entries or paths."],
                 ["`:!!`", "Run the last command again."]
             ],
             note: "A command can't read what you type: one that asks (`rm -i`) gets no answer."

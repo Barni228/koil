@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
-use cxx_qt_lib::QString;
+use cxx_qt_lib::{QString, QStringList};
 use koil_core::{Action, Applied, Conflict, Id, KoilError, Report, Settings, Sort, Watched};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -25,6 +25,8 @@ pub mod qobject {
     unsafe extern "C++" {
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
+        include!("cxx-qt-lib/qstringlist.h");
+        type QStringList = cxx_qt_lib::QStringList;
     }
 
     #[auto_cxx_name]
@@ -142,6 +144,19 @@ pub mod qobject {
             text: &QString,
             hidden: &QString,
             lines: &QString,
+        ) -> QString;
+
+        /// The paths written on `lines` of a file's text (or the
+        /// scratchpad's), for a shell command run on them (see
+        /// `listing::written_paths`), relative ones looked for in each of
+        /// `dirs` in turn: `{ paths, message }`, as `paths_on_lines` gives.
+        #[qinvokable]
+        fn written_paths(
+            self: &Koil,
+            text: &QString,
+            hidden: &QString,
+            lines: &QString,
+            dirs: &QStringList,
         ) -> QString;
 
         /// The dir that's open (a pattern's base dir), where shell commands
@@ -437,6 +452,16 @@ fn read_hidden(hidden: &QString) -> Vec<Hidden> {
     serde_json::from_str(&hidden.to_string()).unwrap_or_default()
 }
 
+/// The paths a shell command runs on, or why there are none, as QML takes
+/// them: `{ paths, message }`.
+fn found_paths(paths: Result<Vec<PathBuf>, String>) -> QString {
+    let (paths, message) = match paths {
+        Ok(paths) => (paths, String::new()),
+        Err(message) => (Vec::new(), message),
+    };
+    to_json(&json!({ "paths": paths, "message": message }))
+}
+
 impl qobject::Koil {
     fn watch(self: Pin<&mut Self>) {
         let thread = self.qt_thread();
@@ -608,11 +633,27 @@ impl qobject::Koil {
             let text = text.to_string();
             listing::paths_on_lines(&self.koil, &text, &read_hidden(hidden), &lines)
         };
-        let (paths, message) = match paths {
-            Ok(paths) => (paths, String::new()),
-            Err(message) => (Vec::new(), message),
-        };
-        to_json(&json!({ "paths": paths, "message": message }))
+        found_paths(paths)
+    }
+
+    fn written_paths(
+        &self,
+        text: &QString,
+        hidden: &QString,
+        lines: &QString,
+        dirs: &QStringList,
+    ) -> QString {
+        let lines: Vec<(usize, usize)> =
+            serde_json::from_str(&lines.to_string()).unwrap_or_default();
+        let dirs: Vec<PathBuf> = dirs.iter().map(|d| PathBuf::from(d.to_string())).collect();
+        let text = text.to_string();
+        found_paths(listing::written_paths(
+            &self.koil,
+            &text,
+            &read_hidden(hidden),
+            &lines,
+            &dirs,
+        ))
     }
 
     fn current_dir(&self) -> QString {

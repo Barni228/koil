@@ -179,11 +179,10 @@ QtObject {
     // One of commandKeys was typed, with its count (0 if none).
     signal keyCommand(string name, int count)
     // :!command, with the lines of the range before it ({ first, last },
-    // from 1), or null: Koil runs it in the shell (on the entries of those
-    // lines, in the listing), while vim waits (see waiting). In a file, the
-    // lines go through it, and its output replaces them (see filterLines).
+    // from 1), or null: Koil runs it in the shell, on the entries of those
+    // lines (in a file, the paths on them), while vim waits (see waiting).
     // With `scratchpad` (:_!command), its output goes in the scratchpad
-    // instead (see replaceWhole), and a file's lines only go through it.
+    // (see replaceWhole).
     signal shellRequested(string command, var range, bool scratchpad)
     // Esc or Ctrl-C while vim waits.
     signal stopRequested()
@@ -4616,37 +4615,6 @@ QtObject {
             setCursor(clampNormal(bufferText(), cursor));
         }
         outside(() => shellRequested(command, range, scratchpad));
-    }
-
-    // Puts `text` in place of lines first to last (from 1), as a change of
-    // its own: a filter's output (see shellRequested). Without text, the
-    // lines go, as with dd. The cursor goes to the first of them. With
-    // `lines` (from 1, in order: marked ones), only those, as if they were
-    // together: the text goes where the first one is, and the others go.
-    function filterLines(first, last, text, lines) {
-        batched(() => {
-            beginChange();
-            const t = bufferText();
-            let s = Txt.lineToPos(t, first);
-            if (lines) {
-                const starts = lines.map(l => Txt.lineToPos(t, l));
-                const gone = removals(t, markedBlocks(t, text === "" ? starts : starts.slice(1)));
-                replaceRanges(text === "" ? gone : [{ start: s, end: Txt.lineEnd(t, s), text: text }].concat(gone));
-            } else {
-                let e = Txt.lineEnd(t, Txt.lineToPos(t, last));
-                if (text === "" && e < t.length)
-                    e++;
-                else if (text === "" && s > 0)
-                    s--;
-                replaceRange(s, e, text);
-            }
-            const u = bufferText();
-            setCursor(clampNormal(u, firstNonBlank(u, Math.min(s, u.length))));
-            commitChange(); // during a run, with it (see commitChange)
-            const n = lines ? lines.length : last - first + 1;
-            if (n > 2)
-                showMessage(n + " lines filtered");
-        });
     }
 
     // Puts `text` in place of all of the text, as a change of its own: what

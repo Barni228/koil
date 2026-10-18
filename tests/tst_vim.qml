@@ -1150,7 +1150,8 @@ TestCase {
         compare(shellCalls(), [["sort", "2-3"], ["rev", "1-2"]]);
     }
 
-    // ! and a motion type the lines' range, as in vim, and change nothing.
+    // ! and a motion type the lines' range, as in vim, and change nothing
+    // (Koil's ! is one of its keys instead: see main.qml's bangLines).
     function test_bangOperator() {
         load("one\ntwo\nthree\nfour");
         keys("j!j");
@@ -1242,24 +1243,6 @@ TestCase {
         compare(editor.text, "one\ntwo\nthree");
         keys("<C-r>");
         compare(editor.text, "a\nb");
-    }
-
-    // A filter's output in place of its lines.
-    function test_filterLines() {
-        load("one\ntwo\nthree\nfour");
-        vim.filterLines(2, 3, "TWO\nTHREE\nextra");
-        compare(editor.text, "one\nTWO\nTHREE\nextra\nfour");
-        compare(cursorLine(), 2);
-        keys("u");
-        compare(editor.text, "one\ntwo\nthree\nfour");
-        // no output: the lines go, as with dd
-        vim.filterLines(2, 3, "");
-        compare(editor.text, "one\nfour");
-        compare(cursorLine(), 2);
-        vim.filterLines(2, 2, "");
-        compare(editor.text, "one");
-        vim.filterLines(1, 1, "");
-        compare(editor.text, "");
     }
 
     // ---- Substitute ------------------------------------------------------
@@ -3199,7 +3182,7 @@ TestCase {
         const range = shells.signalArguments[0][1];
         compare([range.first, range.last, range.lines], [1, 3, [1, 3]]);
         compare(vim.visualShown, null);
-        // ! is an operator in a file, which they take at once.
+        // ! is vim's operator without Koil's keys, which they take at once.
         keys("gv!");
         compare(vim.commandLine, ":'<,'>!");
         keys("<Esc>");
@@ -3216,17 +3199,6 @@ TestCase {
         compare(vim.visualShown.marked, [0, 8]);
         keys("<CR>");
         compare(editor.text, "bbbb\naa\nbbbb");
-    }
-
-    // A filter's output goes where the first marked line was, and the
-    // others go.
-    function test_filterMarked() {
-        load("c\nx\na\ny\nb");
-        vim.filterLines(1, 5, "a\nb\nc", [1, 3, 5]);
-        compare(render(), "a\nb\nc\nx\ny");
-        load("c\nx\na\ny\nb");
-        vim.filterLines(1, 5, "", [1, 3, 5]);
-        compare(render(), "x\ny");
     }
 
     // Each buffer has its own, and the listing's entries are found again

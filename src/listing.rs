@@ -21,6 +21,7 @@ use koil_core::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::link;
 use crate::sizes::{DirSize, Measure, SizeOf};
 
 /// The icon of a file devicons has none for (its own is `*`, a glob character).
@@ -1156,7 +1157,7 @@ pub fn file_at(koil: &Koil, location: &str) -> Option<PathBuf> {
     };
     let written = home.unwrap_or_else(|| koil.current_dir().join(location));
     if written.is_file() {
-        return Some(crate::link::normalized(&written));
+        return Some(link::normalized(&written));
     }
     match koil.read_location(location, false) {
         Location {
@@ -1220,6 +1221,57 @@ pub fn paths_on_lines(
         (false, _) => Ok(paths),
         (true, [(first, last)]) if first == last => Err("No entry on this line".to_string()),
         (true, _) => Err("No entries on these lines".to_string()),
+    }
+}
+
+/// The paths written on `lines` of a file's text (or the scratchpad's),
+/// for a shell command run on them as on the listing's entries (see
+/// [`paths_on_lines`]): each line is a path as gf reads it, a relative one
+/// looked for in each of `dirs` in turn (see `link::target`), or an entry
+/// pasted with its ID, where that is on disk. Blank lines are left out,
+/// and one that isn't a path on disk says why it can't be.
+pub fn written_paths(
+    koil: &Koil,
+    text: &str,
+    hidden: &[Hidden],
+    lines: &[(usize, usize)],
+    dirs: &[PathBuf],
+) -> Result<Vec<PathBuf>, String> {
+    let hidden: HashMap<usize, &Hidden> = hidden.iter().map(|h| (h.at, h)).collect();
+    let on = |line| {
+        let i = lines.partition_point(|&(_, last)| last < line);
+        lines.get(i).is_some_and(|&(first, _)| first <= line)
+    };
+    let end = lines.last().map_or(0, |&(_, last)| last + 1);
+    let mut paths = Vec::new();
+    // Where the next line starts, while there are icons to find.
+    let mut next = 0;
+    for (i, line) in text.split('\n').enumerate().take(end) {
+        let start = next;
+        if !hidden.is_empty() {
+            next += utf16_len(line) + 1;
+        }
+        if !on(i) || line.trim().is_empty() {
+            continue;
+        }
+        let rest = &line[indent(line).len()..];
+        let entry = (hidden.get(&(start + utf16_len(indent(line)))))
+            .filter(|h| rest.starts_with(&h.icon))
+            .and_then(|h| koil.path_of(Id(h.text.parse().ok()?)));
+        if let Some(path) = entry {
+            paths.push(path.to_path_buf());
+            continue;
+        }
+        match link::target(line, dirs) {
+            link::Target::Path(path) => paths.push(PathBuf::from(path)),
+            link::Target::Url(url) => return Err(format!("“{url}” isn't a path")),
+            link::Target::Error(why) => return Err(why),
+        }
+    }
+    match (paths.is_empty(), lines) {
+        (false, _) => Ok(paths),
+        (true, [(first, last)]) if first == last => Err("No path on this line".to_string()),
+        (true, _) => Err("No paths on these lines".to_string()),
     }
 }
 

@@ -24,7 +24,8 @@ the scratchpad (see Scratchpad).
   opens (`file_at`), what's shown after
   each line when sorted by size or a date (`notes`), what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`),
-  and the entries a shell command runs on (`paths_on_lines`). Its tests
+  and the entries a shell command runs on (`paths_on_lines`), or the
+  paths written on a file's lines (`written_paths`). Its tests
   (`src/listing/tests.rs`) use a temp dir.
 - `src/history.rs`: `History`, the undo history kept in a file across
   sessions (see Undo history). Its tests (`src/history/tests.rs`) use a
@@ -327,7 +328,7 @@ the scratchpad (see Scratchpad).
   failed, like "No app opens", which Finder would ask about, while
   Explorer asks itself), `-` opens `..`
   (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), `!` a shell
-  command on the entry (see Shell commands), Tab goes to
+  command on the entry (see Shell commands; in a file too), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
   buttons), and `gs` and a key sort it (see Sorting). Cmd+S (File > Save,
@@ -340,8 +341,8 @@ the scratchpad (see Scratchpad).
   path field (`openPath`, also from insert mode: see `singleLine`) updates
   and goes to the listing, unless the update fails; Shift+Enter there only
   updates, so vim stays in the field. In a file, `Space Space` saves (as
-  `:w`: `save`), and with a path, `-` is Koil's too (`leaveFile`): back
-  to the listing, on the file's line. `Space q` lists the user's shortcuts
+  `:w`: `save`), `!` is Koil's too, and with a path, so is `-`
+  (`leaveFile`): back to the listing, on the file's line. `Space q` lists the user's shortcuts
   (see Shortcuts) everywhere, in visual mode too (`visualCommandKeys`), so
   the list can run one on the selection.
   They're only matched at the start of a normal-mode command (so `d-` and
@@ -635,8 +636,8 @@ the scratchpad (see Scratchpad).
   quits; it only fails then, as a write that fails does in vim.
 - **Files**: Enter on a file, File > Open (and a file on the command line)
   leave the listing (updating it first, so its edits stay in koil) for a
-  plain editor: no colors or problems, only `-` and `Space Space` (a
-  save) of `commandKeys`, and `:w` saves. `-` goes back to what's still open in koil, on `openedFrom` (the
+  plain editor: no colors or problems, only `-`, `!` and `Space Space`
+  (a save) of `commandKeys`, and `:w` saves. `-` goes back to what's still open in koil, on `openedFrom` (the
   entry Enter was on), with the column and view it had (`fileSpot`), or
   for a file opened otherwise, opens its dir. Enter
   on a new file (`createFile`) updates, then asks to create it, listing the
@@ -695,9 +696,9 @@ the scratchpad (see Scratchpad).
   (`koil -s` starts in it, and text piped in starts it: see Command line).
   It leaves the listing as a file does (updating it first, `fileSpot`),
   and `_` or `-` there goes back (`leaveFile`) to where the cursor was,
-  in the path field if it was there (`scratchFromPath`). `!` there is
-  Koil's too, as in the listing (a filter of the line: see Shell
-  commands), and `:_!` puts a command's output in it. It's the
+  in the path field if it was there (`scratchFromPath`). `!` there runs
+  a command on the path on the line (see Shell commands), and `:_!` puts
+  a command's output in it. It's the
   listing's editor, so whatever shows something else in it saves the
   scratchpad's text, cursor, undo history and view first (`keepScratch`,
   from `showListing` and `load`, as anything shown goes through those),
@@ -722,33 +723,35 @@ the scratchpad (see Scratchpad).
   its stdin. `%` in it is, as in vim, the file (relative to that dir if
   it's in it), but in the listing the entry on the cursor's line (from the
   path field, the open dir, `.`), where its ID is on disk, as for Space r
-  (`listing::paths_on_lines`; a new entry is an error), with vim's
+  (`listing::paths_on_lines`; a new entry is an error), and in the
+  scratchpad the path on it (see below), with vim's
   modifiers (`%:p`, `:h`, `:t`, `:r`, `:e`); `\%` is a `%` (`date +\%F`),
   as in vim, also in quotes. A path is quoted as the shell's kind needs
   (`shell::Kind`, by its name: cmd.exe, PowerShell, else sh), only if it
   must be, and escaped instead where the `%` is in quotes (`"%"` works);
-  one starting with `-` gets `./`. With a range (`:.,+2!`, `:'<,'>!`), in
-  the listing it runs on the entries of its lines (blank lines left out;
+  one starting with `-` gets `./`. With a range (`:.,+2!`, `:'<,'>!`), it
+  runs on the entries of its lines (blank lines left out;
   `listing::paths_on_lines` takes spans of lines, as `'<,'>` after marked
   lines is only those: see Marked lines), which go after a command without
-  `%` (`!git add`); in a file (or the scratchpad) it's vim's filter: the
-  lines go to its stdin, and its stdout replaces them (`Vim.filterLines`,
-  one undo step; no output deletes them; a failure, or the text changed
-  meanwhile, leaves them; marked lines go to it together, and its output
-  goes where the first one was), without the empty line after a file's
-  last line break, which `:%!sort` would sort first. `!` in the listing, the path field and the scratchpad is one of
-  `commandKeys` (`bangLines`), typing `:.!` (`3!`: `:.,.+2!`); in a file
-  it's vim's operator, typing the range of the lines `!{motion}` covers,
-  and in visual mode `:'<,'>!` (`:` types `'<,'>` too, leaving visual
-  mode, as in vim). Ex commands take vim's ranges (`exRange`: numbers,
+  `%` (`!git add`). In a file or the scratchpad, those are the paths
+  written on them (`listing::written_paths`), as gf reads a path
+  (`link::target`: from the file's dir, then the open dir, `linkDirs`),
+  or an entry pasted with its ID, where that is on disk; a line that isn't
+  one on disk is an error (E447), so the same `:.!rm` acts on what the
+  line names wherever it's typed. Vim's filter (lines through the command
+  on its stdin, its output in their place) isn't Koil's, for that reason.
+  `!` everywhere is one of `commandKeys` (`bangLines`), typing `:.!`
+  (`3!`: `:.,.+2!`), so Vim.qml's own `!` operator (`!{motion}`) is only
+  vim's without Koil's keys (the tests), and in visual mode it types
+  `:'<,'>!` (`:` types `'<,'>` too, leaving visual mode, as in vim). Ex commands take vim's ranges (`exRange`: numbers,
   `.`, `$`, `'<`, `'>`, `+N`, `-N`, `%`): one alone goes to its last line,
   and commands other than `!` refuse one (E481). A `!` first is the last
   command (`:!!`). `:_!cmd` (Koil's, after the scratchpad's key; `:%_!`
   with a range) puts what it writes in the scratchpad (`showInScratch`),
   in place of its text, as a change `u` takes back (`Vim.replaceWhole`):
-  stdout and stderr as for `:!`, but all of it (up to `FILTER_BYTES`) and
-  with its tabs (`Request::scratchpad`). A range is the listing's entries,
-  as for `:!`, or a file's lines on its stdin, which stay. It shows the
+  stdout and stderr as for `:!`, but all of it (up to `SCRATCHPAD_BYTES`)
+  and with its tabs (`Request::scratchpad`). A range is the lines' entries
+  or paths, as for `:!`. It shows the
   scratchpad from the listing as `_` does, updating before the command
   runs (after which the listing might not read: an entry it deleted), and
   from a file over its dir's listing, as `-` from it would, asking about
@@ -1346,10 +1349,10 @@ the scratchpad (see Scratchpad).
   changes and `r` change each one where it is (`markedBlocks`, as one edit
   through `replaceRanges`), `I`, `A` and `gI` type on each one (extra
   cursors; they stay marked meanwhile: `markedInsert`), and `:` (and `!`,
-  Koil's in the listing too: `bangLines`) types `'<,'>`, which then stands
-  for them (`exRange` gives their `lines`: `:s` keeps to them through
-  `selectionRegion`, `:!` runs on their entries, `pathsOnLines` taking
-  spans of lines, and a filter takes them together). Other keys are normal
+  Koil's too: `bangLines`) types `'<,'>`, which then stands for them
+  (`exRange` gives their `lines`: `:s` keeps to them through
+  `selectionRegion`, and `:!` runs on their entries or paths,
+  `pathsOnLines` and `writtenPaths` taking spans of lines). Other keys are normal
   mode's (`u` undoes, `i` types at the cursor), and `.` repeating a change
   isn't on them. A command (or `Esc`) unmarks them (`unmark`), and
   `lastVisual` (mode `"marked"`) keeps them for `gv`: where they are after

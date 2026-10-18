@@ -82,8 +82,8 @@ until you apply, and your edits stay while you go through other dirs.
 - **Shell commands** run in the open dir, in the shell from Settings (Git
   Bash, say, on Windows). `%` is the entry on the line (or the open file),
   quoted, like vim's: `:!mv % old/`. `!` in visual mode (or with lines
-  marked) runs one on every selected entry, and in a file, `:%!sort`
-  filters the lines as in vim.
+  marked) runs one on every selected entry, and in a file or the
+  scratchpad, on the paths written on the lines.
   `:_!cmd` puts what it writes in the scratchpad, like `:_!git log`.
 - **Shortcuts** (`Space q`, _Koil → Shortcuts…_, or Settings): `Space` and
   a key of yours run keys as a macro does, like `:!echo %:p | pbcopy<CR>` to

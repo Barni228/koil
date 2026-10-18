@@ -183,13 +183,12 @@ fn test_shown_lines() {
 mod running {
     use super::*;
 
-    /// Runs `command` in sh, in `cwd`, with `input` for a filter.
-    fn run(command: &str, cwd: &Path, input: Option<&str>) -> Ran {
+    /// Runs `command` in sh, in `cwd`.
+    fn run(command: &str, cwd: &Path) -> Ran {
         run_request(Request {
             shell: "/bin/sh".into(),
             command: command.into(),
             cwd: cwd.into(),
-            input: input.map(String::from),
             ..Request::default()
         })
     }
@@ -204,7 +203,7 @@ mod running {
     fn test_run() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join("a b"), "").unwrap();
-        let ran = run("ls; echo oops >&2; exit 3", temp.path(), None);
+        let ran = run("ls; echo oops >&2; exit 3", temp.path());
         assert_eq!(ran.output, "a b\noops");
         assert_eq!(ran.code, Some(3));
         assert!(!ran.stopped);
@@ -223,18 +222,6 @@ mod running {
     }
 
     #[test]
-    fn test_filter() {
-        let temp = tempfile::tempdir().unwrap();
-        let ran = run("tr a-z A-Z; echo note >&2", temp.path(), Some("one\ntwo\n"));
-        assert_eq!(ran.output, "ONE\nTWO");
-        assert_eq!(ran.errors, "note");
-        assert_eq!(ran.code, Some(0));
-        // one that doesn't read it all
-        let input = "x\n".repeat(1 << 20);
-        assert_eq!(run("head -n 1", temp.path(), Some(&input)).output, "x");
-    }
-
-    #[test]
     fn test_scratchpad() {
         // all of it, stderr too, with its tabs
         let temp = tempfile::tempdir().unwrap();
@@ -250,17 +237,6 @@ mod running {
         assert_eq!(lines.len(), SHOWN_LINES + 7);
         assert_eq!(lines[SHOWN_LINES + 5..], ["a\tb", "oops"]);
         assert_eq!(ran.cut, 0);
-        // with the lines of a range on its stdin
-        let ran = run_request(Request {
-            shell: "/bin/sh".into(),
-            command: "sort -r; exit 2".into(),
-            cwd: temp.path().into(),
-            input: Some("a\nb\n".into()),
-            scratchpad: true,
-            ..Request::default()
-        });
-        assert_eq!(ran.output, "b\na");
-        assert_eq!(ran.code, Some(2));
     }
 
     #[test]
@@ -323,7 +299,7 @@ mod running {
         // what it leaves running keeps its output open, which isn't waited for
         let temp = tempfile::tempdir().unwrap();
         let begun = Instant::now();
-        let ran = run("sleep 5 & echo done", temp.path(), None);
+        let ran = run("sleep 5 & echo done", temp.path());
         assert_eq!(ran.output, "done");
         assert!(begun.elapsed() < Duration::from_secs(3));
     }
