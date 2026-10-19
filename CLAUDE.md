@@ -1809,13 +1809,12 @@ the scratchpad (see Scratchpad).
   drag selects in a field, scrolled by a `WheelHandler`) past
   `maxListHeight` (440 at zoom 1, and never past the screen), with Restore
   Defaults under them, and Tab scrolls to what it goes to
-  (`onActiveFocusItemChanged`). The pointer anywhere on a setting's row (or
-  its note's) shows what it does after a moment, in a `Tip` under it (over
-  it, at the view's end), from its label's `about`, so its note (if any)
-  is a short line. One `HoverHandler` on the grid finds the row
-  (`settingAt`: GridLayout puts the children that show three to a row), as
-  it's hovered along with the controls, and the tip hides while a button
-  with a tip of its own is (`buttonsHovered`). They're
+  (`onActiveFocusItemChanged`). The pointer on a setting's name (its
+  `SettingLabel`'s `HoverHandler`) shows what it does after a moment, in a
+  `Tip` under its row (over it, at the view's end; `rowOf`: GridLayout
+  puts the children that show three to a row), from the label's `about`,
+  so its note (if any) is a short line. Only the name: anywhere on the row
+  (and its note's), a tip showed wherever the pointer rested. They're
   stored in `~/Library/Preferences/com.koil.Koil.plist` on macOS, the registry
   (`HKEY_CURRENT_USER\Software\Koil\Koil`) on Windows.
 - **Fonts**: the editor offers only monospaced fonts

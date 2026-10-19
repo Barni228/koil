@@ -18,9 +18,9 @@ import QtQuick.Templates as T
 // The zoom and :set change only the settings in use, so they don't show
 // here. Each setting has a button that
 // resets it to its default, and Restore Defaults resets them all. The
-// settings scroll past a height (maxListHeight), and the pointer on one
-// shows what it does (its label's `about`), so the notes under some of
-// them are short.
+// settings scroll past a height (maxListHeight), and the pointer on one's
+// name shows what it does (its label's `about`), so the notes under some
+// of them are short.
 Window {
     id: win
 
@@ -112,37 +112,23 @@ Window {
     readonly property bool scrolls: grid.implicitHeight > maxListHeight
     // Room for the scroll bar, right of the reset buttons.
     readonly property real barRoom: 14 * zoom
-    // The setting whose tip shows (see settingAt), and how many buttons
-    // with tips of their own the pointer is on.
+    // The label of the setting whose tip shows (see SettingLabel).
     property var tipSetting: null
-    property int buttonsHovered: 0
 
     function scrollTo(y) {
         scroller.contentY = Math.max(0, Math.min(scroller.maxY, y));
     }
-    // The setting at `y` in the grid: { label, top, bottom } of its row
-    // (its label's, which has its `about`), as far down as the note under
-    // it goes. GridLayout puts the children that show three to a row.
-    function settingAt(y) {
+    // The top and bottom of the row `label` is in: GridLayout puts the
+    // children that show three to a row.
+    function rowOf(label) {
         const shown = [];
         for (const child of grid.children) {
             if (child.visible)
                 shown.push(child);
         }
-        const half = grid.rowSpacing / 2;
-        let setting = null;
-        for (let i = 0; i + 2 < shown.length; i += 3) {
-            const row = shown.slice(i, i + 3);
-            const top = Math.min(...row.map(c => c.y)) - half;
-            const bottom = Math.max(...row.map(c => c.y + c.height)) + half;
-            if (row[0].about !== undefined)
-                setting = { label: row[0], top: top, bottom: bottom - half, end: bottom };
-            else if (setting)
-                setting.end = bottom;
-            if (setting && y >= setting.top && y < setting.end)
-                return { label: setting.label, top: setting.top + half, bottom: setting.bottom };
-        }
-        return null;
+        const first = shown.indexOf(label) - shown.indexOf(label) % 3;
+        const row = shown.slice(first, first + 3);
+        return { top: Math.min(...row.map(c => c.y)), bottom: Math.max(...row.map(c => c.y + c.height)) };
     }
     // Whether `item` is in the settings (not the buttons under them).
     function inGrid(item) {
@@ -267,13 +253,11 @@ Window {
         onActivated: win.close()
     }
 
-    // A small button with an icon, which Tab reaches. Its tip shows in
-    // place of its setting's.
+    // A small button with an icon, which Tab reaches.
     component SettingButton: IconButton {
         theme: win.theme
         color: win.textColor
         focusPolicy: Qt.TabFocus
-        onHoveredChanged: win.buttonsHovered += hovered ? 1 : -1
     }
 
     // Resets one setting; hidden while it has its default value.
@@ -284,12 +268,25 @@ Window {
     }
 
     // A setting's name, and in `about`, what it does, which shows with the
-    // pointer anywhere on its row (see settingAt).
+    // pointer on the name. Only there: anywhere on the row, a tip showed
+    // wherever the pointer rested.
     component SettingLabel: Label {
+        id: label
+
         property string about
 
         font.pixelSize: Math.round(13 * win.zoom)
         color: win.textColor
+
+        HoverHandler {
+            enabled: label.about !== ""
+            onHoveredChanged: {
+                if (hovered)
+                    win.tipSetting = label;
+                else if (win.tipSetting === label)
+                    win.tipSetting = null;
+            }
+        }
     }
 
     ColumnLayout {
@@ -324,20 +321,28 @@ Window {
             }
 
             // Under the setting's row, or over it if there's no room in
-            // view; not while a button's own tip shows.
+            // view.
             Tip {
-                readonly property var at: win.tipSetting
-                readonly property real below: at ? at.bottom + 4 * win.zoom : 0
+                // The setting's label, kept as the tip fades out, which
+                // emptied it where the grid starts.
+                property var at: null
+                Binding on at {
+                    when: win.tipSetting !== null
+                    value: win.tipSetting
+                    restoreMode: Binding.RestoreNone
+                }
+                readonly property var row: at ? win.rowOf(at) : null
+                readonly property real below: row ? row.bottom + 4 * win.zoom : 0
 
                 parent: grid
                 theme: win.theme
                 wrapWidth: 340 * win.zoom
                 closePolicy: Popup.NoAutoClose
-                visible: at !== null && win.buttonsHovered === 0
-                text: at ? at.label.about : ""
-                x: at ? at.label.x : 0
-                y: !at ? 0 : below + height <= scroller.contentY + scroller.height ? below
-                    : at.top - height - 4 * win.zoom
+                visible: win.tipSetting !== null
+                text: at ? at.about : ""
+                x: at ? at.x : 0
+                y: !row ? 0 : below + height <= scroller.contentY + scroller.height ? below
+                    : row.top - height - 4 * win.zoom
             }
 
             GridLayout {
@@ -346,21 +351,6 @@ Window {
                 columns: 3
                 columnSpacing: 12 * win.zoom
                 rowSpacing: 10 * win.zoom
-
-                // The setting under the pointer, wherever it is in its row,
-                // shows what it does (see settingAt). A HoverHandler, as it
-                // takes the hover along with the controls.
-                HoverHandler {
-                    onPointChanged: {
-                        const found = hovered ? win.settingAt(point.position.y) : null;
-                        if (found?.label !== win.tipSetting?.label)
-                            win.tipSetting = found;
-                    }
-                    onHoveredChanged: {
-                        if (!hovered)
-                            win.tipSetting = null;
-                    }
-                }
 
                 SettingLabel {
                     text: qsTr("Font")

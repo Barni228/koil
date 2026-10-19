@@ -96,6 +96,8 @@ until you apply, and your edits stay while you go through other dirs.
   a macro you recorded with `q`. A click in the list runs one, also one with
   no keys. Built-in shortcuts can't be changed or taken; the lock button
   shows them under yours.
+- **Settings** (`Cmd+,`): rest the pointer on a setting's name to see what
+  it does.
 
 ## Install
 
