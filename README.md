@@ -66,6 +66,10 @@ until you apply, and your edits stay while you go through other dirs.
 - **Reindent** with `=`: `==` the line, `gg=G` the file. A line in
   brackets (or HTML tags) goes a level deeper than the line they open on;
   lines in none keep their indent, so Python and YAML don't break.
+- **Neovim's defaults**: `Y` yanks to the line's end, `&` keeps `:s`'s
+  flags, `G`, `gg` and `dd` keep the cursor's column, `*` in visual mode
+  searches for the selection, `@q` in visual mode runs the macro on each
+  line, and `Q` runs the one recorded last.
 - **IDs**: each icon hides its entry's ID, which goes with the line wherever
   it's pasted, so a pasted line is a copy or a move, never a new empty file.
   `gh` (or hovering the mouse on the icon) shows the path an ID stands for.

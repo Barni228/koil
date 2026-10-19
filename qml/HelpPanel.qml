@@ -255,7 +255,8 @@ Popup {
                 ["`/pattern`  `?pattern`", "Search forward or backward, with JavaScript regexes (`\\bword\\b`, "
                     + "`\\d{3}`), not vim's. Case counts only if there's an uppercase letter."],
                 ["`n`  `N`", "Next or previous match."],
-                ["`*`  `#`", "Search for the word under the cursor."],
+                ["`*`  `#`", "Search for the word under the cursor, or in visual mode for what's selected, "
+                    + "as it is (not as a regex), as Neovim's do."],
                 ["`" + cmdKey + "F`", "The find bar. Its matches are highlighted while it's open."],
                 [isMac ? "`⌘G`  `⇧⌘G`" : "`F3`  `Shift+F3`  `Ctrl+G`  `Ctrl+Shift+G`",
                     "Next or previous find bar match."],
@@ -289,7 +290,8 @@ Popup {
                     + "case; don't."],
                 ["`n`  `e`", "Only count the matches; no error if there are none."],
                 ["`:s#/#-#`", "Any punctuation can stand for `/`."],
-                ["`&`  `:s`  `:&&`", "Run the last one again on the cursor's line (`:&&`: with its flags)."],
+                ["`&`  `:&&`  `:s`", "Run the last one again on the cursor's line: `&` and `:&&` with its flags "
+                    + "(as Neovim's `&`; Vim's drops them), `:s` and `:&` without."],
                 ["`g&`", "Run it again on every line, with its flags, for the last search."]
             ]
         },
@@ -328,7 +330,7 @@ Popup {
             title: "Registers and macros",
             tags: ["registers", "register", "reg", "clipboard", "\"", "\"+", "+", "*", "\"0", "\"_", "\"-",
                 "\"1", "\".", "\":", "\"/", "\"%", "macros", "macro",
-                "q", "@", "@@", "record", "recording", "yank", "paste", "p", "y", "shortcuts", "shortcut", "map",
+                "q", "@", "@@", "Q", "record", "recording", "yank", "paste", "p", "y", "shortcuts", "shortcut", "map",
                 "mapping", "mappings"],
             rows: [
                 ["`\"+`  `\"*`", "The system clipboard, e.g. `\"+yy`. Plain `y` and `p` don't use it; "
@@ -340,6 +342,10 @@ Popup {
                 ["`qa` … `q`", "Record keys into register `a`. `qA` appends to it."],
                 ["`@a`  `3@a`  `@@`", "Run the macro in `a`, three times, or the last one again. `u` undoes a "
                     + "whole run, and `Esc` stops a long one."],
+                ["`Q`", "Run the macro recorded last, as Neovim's (Vim's starts Ex mode)."],
+                ["`@a`  `Q`", "In visual mode: run the macro on each selected line in turn, from its start, as "
+                    + "Neovim's do (`:'<,'>normal @a`). A line it fails on is skipped, and the lines go with its "
+                    + "edits, so one that adds or deletes lines still runs on each. `@:` runs the last command."],
                 ["Your keys", "Your shortcuts: keys of yours (`Space c`, `gc`, `<C-k>`"
                     + (isMac ? ", `⌘K` as `<D-k>`" : "") + ") that run keys as a "
                     + "macro does, like `:!git add %<CR>`, in normal mode, visual mode or both. A count runs one "
@@ -482,8 +488,14 @@ Popup {
         },
         {
             title: "Other keys",
-            tags: ["keys", "other", "zoom", "settings", "undo", "word", "=", "==", "indent", "reindent"],
+            tags: ["keys", "other", "zoom", "settings", "undo", "word", "=", "==", "indent", "reindent", "Y",
+                "startofline", "sol", "nostartofline", "column"],
             rows: [
+                ["`Y`", "Yank to the line's end, as `y$` (and as Neovim's), like `D` and `C`. Vim's yanks "
+                    + "the line, which `yy` does. In visual mode it still yanks the lines."],
+                ["`G`  `gg`  `dd`  `>>`", "Keep the cursor's column, as Neovim's do, and so do `H`, `M`, `L`, "
+                    + "`50%`, `:5`, `==` and visual `d`, `>` and `<` on lines. Vim's go to the line's first "
+                    + "character that isn't blank, which `^` does."],
                 ["`=`  `==`", "Reindent: `==` the line, `=ip` the paragraph, `gg=G` all of it, or in visual mode "
                     + "what's selected. A line in brackets (or HTML tags) goes a level deeper than the line "
                     + "they open on, and one that closes them as deep as that line. A line in none keeps its "

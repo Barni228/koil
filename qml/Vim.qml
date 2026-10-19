@@ -207,10 +207,10 @@ QtObject {
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
-        "<C-x>", "q", "@", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m"]
+        "<C-x>", "q", "@", "Q", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m"]
     readonly property var visualActions: ["<Esc>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D", "s",
-        "C", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>",
-        "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m"]
+        "C", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "@", "Q", "I", "A", "<C-e>",
+        "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m"]
     // While lines are marked, the keys that act on them, as they act on a
     // linewise selection in visual mode (see Marked lines): an operator at
     // once. The others are normal mode's, so u still undoes, and i and o
@@ -300,10 +300,11 @@ QtObject {
     // which runs them one by one; a failing command empties it, as in vim.
     property string recording: ""
     property var recordKeys: []
-    // The keys left to run, as a stack of { keys, next, runs }: the top
-    // one's keys[next] is next, and each runs its keys `runs` times
+    // The keys left to run, as a stack of { keys, next, runs, each }: the
+    // top one's keys[next] is next, and each runs its keys `runs` times
     // (rather than holding them that many times: 10000@q copied them
-    // 10000 times over).
+    // 10000 times over), on each line of `each` if it has one (see
+    // runOnLines).
     property var typeahead: []
     // A long command running in steps (see startTask), before any more
     // keys: { steps, done, step, finish }. Null if none.
@@ -341,12 +342,17 @@ QtObject {
     // cursor's position, like "@q 34%".
     property string progress: ""
     property string lastMacro: ""
+    // The register q recorded into last, which Q runs, as Neovim's.
+    property string lastRecorded: ""
     // As vim's 'maxmapdepth': macros running macros, past this, fail, and
     // so do shortcuts and macros running only each other (see execute).
     readonly property int maxMacroDepth: 1000
     // The shortcuts and macros run since a command or a key typed (see
     // execute).
     property int chainedRuns: 0
+    // Set by a command on whole lines that left the cursor in its column
+    // (see toLine), so j and k keep wantCol after it.
+    property bool colKept: false
     // Command-line history: ":" commands, "/" and "?" searches together,
     // and the tags typed for a surround ("<", see askTag).
     property var history: ({ ":": [], "/": [], "<": [] })
@@ -707,7 +713,7 @@ QtObject {
     function showError(text) {
         message = text;
         messageIsError = true;
-        typeahead = [];
+        macroFails();
     }
 
     function showMessage(text) {
@@ -1111,7 +1117,7 @@ QtObject {
         if (r.status === "ok")
             execute(r.cmd);
         else
-            typeahead = [];
+            macroFails();
     }
 
     // ---- Parsing -----------------------------------------------------------
@@ -1397,7 +1403,8 @@ QtObject {
     function isChange(cmd) {
         if (isVisual)
             return !cmd.motion && !cmd.textObj
-                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "!", "g!", "gf", "gx"]
+                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "@", "Q", "!", "g!", "gf",
+                    "gx"]
                     .includes(cmd.action);
         // ! only types a command line, whose command may change the text.
         return cmd.op ? !["y", "!", "g!"].includes(cmd.op) : changeActions.includes(cmd.action);
@@ -1409,7 +1416,8 @@ QtObject {
         // until Esc, as vim's 'maxmapdepth' catches mappings (see runKeys).
         // One that runs a command first (qa<C-a>j@aq) goes on until a
         // command fails.
-        chainedRuns = cmd.shortcut || cmd.action === "@" ? chainedRuns + 1 : 0;
+        chainedRuns = cmd.shortcut || cmd.action === "@" || cmd.action === "Q" ? chainedRuns + 1 : 0;
+        colKept = false;
         if (cmd.command) {
             outside(() => keyCommand(cmd.command, cmd.count));
             return;
@@ -1429,7 +1437,7 @@ QtObject {
         // ". ": "/ and "% can only be pasted.
         if (readOnlyRegisters.includes(cmd.reg) && (cmd.op || writingActions.includes(cmd.action)
                 || (isVisual || marking) && cmd.action === "R")) {
-            typeahead = [];
+            macroFails();
             return;
         }
         const changing = marking ? !["y", "Y", ":", "!", "g!"].includes(cmd.action) : isChange(cmd);
@@ -1458,7 +1466,7 @@ QtObject {
             executeOperator(cmd);
         else if (cmd.motion && lineStep(cmd.motion.name)) {
             if (!browseLines(lineStep(cmd.motion.name), Math.max(cmd.count, 1)))
-                typeahead = []; // as a motion that fails
+                macroFails(); // as a motion that fails
         } else if (cmd.motion)
             moveBy(cmd); // moves the extra cursors itself
         else if (cursors.length && everyCursorActions.includes(cmd.action))
@@ -1471,8 +1479,9 @@ QtObject {
         if (changing && !inserting)
             commitChange();
         // As in vim, j and k go on from the column an edit or a yank left
-        // the cursor in (d0, dd, p), not the one they had before it.
-        if ((changing || cmd.op || wasVisual && ["y", "Y"].includes(cmd.action)) && !inserting)
+        // the cursor in (d0, x, p), not the one they had before it, unless
+        // it kept that one (dd, >>: see toLine).
+        if ((changing || cmd.op || wasVisual && ["y", "Y"].includes(cmd.action)) && !inserting && !colKept)
             wantCol = Txt.column(bufferText(), cursor);
     }
 
@@ -1490,7 +1499,7 @@ QtObject {
                 wantCol = r.eol ? Infinity : Txt.column(t, p);
             setCursor(p);
         } else {
-            typeahead = [];
+            macroFails();
         }
         if (cursors.length && mode === "normal")
             moveCursors(t, cmd.motion, count, cmd.count > 0);
@@ -1532,7 +1541,7 @@ QtObject {
         }
         const range = operatorRange(t, cmd, count);
         if (!range) {
-            typeahead = [];
+            macroFails();
             return;
         }
         applyOperator(cmd.op, range, cmd.reg, count,
@@ -1693,7 +1702,8 @@ QtObject {
             executeOperator({ op: "d", reg: cmd.reg, count: cmd.count, motion: { name: "$" } });
             break;
         case "Y":
-            executeOperator({ op: "y", reg: cmd.reg, count: cmd.count, linewise: true });
+            // As Neovim's: to the line's end, like D and C (Vim's is yy).
+            executeOperator({ op: "y", reg: cmd.reg, count: cmd.count, motion: { name: "$" } });
             break;
         case "p":
         case "P":
@@ -1811,8 +1821,15 @@ QtObject {
         case "@":
             runMacro(cmd.ch, count);
             break;
+        case "Q":
+            // As Neovim's: the macro recorded last.
+            if (lastRecorded)
+                runMacro(lastRecorded, count);
+            else
+                showError("E748: No previously used register");
+            break;
         case "&":
-            runEx("s");
+            runEx("&&"); // with its flags, as Neovim's (Vim's is :s)
             break;
         case "g&":
             substituteEverywhere();
@@ -1824,6 +1841,12 @@ QtObject {
         const t = bufferText();
         const n = t.length;
         const count = Math.max(cmd.count, 1);
+        // * and # search for what's selected, as Neovim's, leaving visual
+        // mode (see searchSelection).
+        if (cmd.motion && (cmd.motion.name === "*" || cmd.motion.name === "#")) {
+            searchSelection(t, cmd.motion.name === "*");
+            return;
+        }
         if (cmd.motion) {
             moveBy(cmd);
             return;
@@ -1895,6 +1918,16 @@ QtObject {
         }
         if (a === "q") {
             startRecording(cmd.ch);
+            return;
+        }
+        // @ and Q run a macro on each of its lines, as Neovim's (see
+        // runOnLines), leaving visual mode.
+        if (a === "@" || a === "Q") {
+            const lo = Math.min(anchor, cursor), hi = Math.max(anchor, cursor);
+            setMode("normal");
+            setCursor(clampNormal(t, cursor));
+            runOnLines(a === "Q" ? lastRecorded : cmd.ch,
+                lineStarts(t, lo, Txt.lineOf(t, hi) - Txt.lineOf(t, lo) + 1), count);
             return;
         }
         // gf and gx open what's selected (a block's corners, as characters).
@@ -2261,9 +2294,13 @@ QtObject {
         // The marked lines move as they would edit by edit (from the last,
         // so each goes by the text as it was before it), not as for one
         // edit from the first to the last (see movedMarks).
-        let marks = marked;
-        for (let i = edits.length - 1; i >= 0 && marks.length; i--)
-            marks = movedMarks(marks, t, edits[i].start, edits[i].end, edits[i].text);
+        const moved = list => {
+            for (let i = edits.length - 1; i >= 0 && list.length; i--)
+                list = movedMarks(list, t, edits[i].start, edits[i].end, edits[i].text);
+            return list;
+        };
+        const marks = moved(marked);
+        moveLineRuns(moved);
         // The editor's cursor moves to the end of the new text, and the view
         // follows it: keep the view where it was.
         const view = flickable && { x: flickable.contentX, y: flickable.contentY };
@@ -2913,7 +2950,10 @@ QtObject {
             const p = movedPast(cursor, edits);
             replaceRanges(edits);
             const u = bufferText();
-            setCursor(clampNormal(u, gone ? firstNonBlank(u, Math.min(p, u.length)) : p));
+            if (gone)
+                toLine(u, Math.min(p, u.length));
+            else
+                setCursor(clampNormal(u, p));
             if (n > 2)
                 showMessage(n + " fewer lines");
             break;
@@ -3024,14 +3064,16 @@ QtObject {
 
     // Makes `edits` of the marked lines (`starts`) that leave them where
     // they are (a case change): the cursor stays on its character, or with
-    // `toFirst` (> and <, which move it), goes to its line's first
-    // non-blank if its line is marked.
-    function editMarked(t, starts, edits, toFirst) {
+    // `toColumn` (> and <, which move it), goes to its column if its line
+    // is marked, as for a line of a selection (see toLine).
+    function editMarked(t, starts, edits, toColumn) {
         const line = Txt.lineOf(t, cursor), p = movedPast(cursor, edits);
         replaceRanges(edits);
         const u = bufferText();
-        setCursor(clampNormal(u, toFirst && has(starts, Txt.lineStart(t, cursor))
-            ? firstNonBlank(u, Txt.lineToPos(u, line)) : p));
+        if (toColumn && has(starts, Txt.lineStart(t, cursor)))
+            toLine(u, Txt.lineToPos(u, line));
+        else
+            setCursor(clampNormal(u, p));
     }
 
     // J and gJ on two or more marked lines (`starts`): the others are
@@ -3155,6 +3197,7 @@ QtObject {
         if (old)
             ks = (old.keys || macroKeys(old.text)).concat(ks);
         registers[reg] = { text: ks.join(""), linewise: false, hidden: [], keys: ks };
+        lastRecorded = reg;
         recording = "";
         recordKeys = [];
     }
@@ -3245,8 +3288,9 @@ QtObject {
     }
 
     // Runs keys as a macro's, `count` times, called `label` on the status
-    // line (see Runs): a register's, or a shortcut's.
-    function runKeys(ks, count, label) {
+    // line (see Runs): a register's, or a shortcut's. With `each`, on each
+    // of its lines (see runOnLines).
+    function runKeys(ks, count, label, each) {
         if (!ks.length)
             return;
         if (typeahead.length >= maxMacroDepth || chainedRuns > maxMacroDepth) {
@@ -3255,7 +3299,7 @@ QtObject {
             return;
         }
         // A macro run from a macro goes before the rest of that one.
-        const frame = { keys: ks, next: 0, runs: count };
+        const frame = { keys: ks, next: 0, runs: count, each: each || null };
         typeahead.push(frame);
         if (!running)
             startRun(label, frame, count);
@@ -3293,6 +3337,97 @@ QtObject {
         return list;
     }
 
+    // @ and Q in visual mode, as Neovim's: the macro in `reg` runs on each
+    // line that starts at `starts`, in turn, `count` times, from the line's
+    // start, as :'<,'>normal @q does. What it leaves half done on a line is
+    // ended (endHalfDone), and a command that fails stops it only on that
+    // line (see macroFails). The lines left move with the edits, as the
+    // marked lines do (see moveLineRuns), so one that adds or deletes lines
+    // still goes to each line it was given (:normal goes by their numbers).
+    // `@:` runs the last command line on each.
+    function runOnLines(reg, starts, count) {
+        if (reg === "@")
+            reg = lastMacro;
+        if (!reg) {
+            showError("E748: No previously used register");
+            return;
+        }
+        let ks;
+        if (reg === ":") {
+            const list = history[":"];
+            if (!list.length) {
+                showError("E30: No previous command line");
+                return;
+            }
+            ks = [":"].concat(Array.from(list[list.length - 1].trim()), ["<CR>"]);
+        } else {
+            const r = getRegister(reg);
+            ks = r ? r.keys || macroKeys(r.text) : [];
+        }
+        lastMacro = reg;
+        runKeys(ks, count, "@" + reg, { starts: starts, count: count, total: starts.length, due: true });
+    }
+
+    // Runs the next key of the macros running (see typeahead), or for one
+    // on each line that's done with one (`due`), goes to its next line.
+    function macroStep() {
+        const f = typeahead[typeahead.length - 1], e = f.each;
+        if (!e || !e.due) {
+            runKey(nextMacroKey(), null);
+            return;
+        }
+        endHalfDone();
+        if (task)
+            return; // an insert's repeat, which goes first (see repeatInsert)
+        if (!e.starts.length) {
+            typeahead.pop();
+            return;
+        }
+        const t = bufferText();
+        e.due = false;
+        setCursor(clampNormal(t, Txt.lineStart(t, Math.min(e.starts.shift(), t.length))));
+        wantCol = Txt.column(t, cursor);
+    }
+
+    // Ends what keys left half done (a command line, an insert, a
+    // selection, a command), as :normal ends it after each line.
+    function endHalfDone() {
+        if (commandLine !== "")
+            commandLineKey("<Esc>");
+        if (mode !== "normal")
+            runKey("<Esc>", null);
+        keys = [];
+        pendingKeys = "";
+        awaitingReplaceChar = false;
+    }
+
+    // A command failed: as in vim, the macros running stop, but one on each
+    // line (see runOnLines) stops only on its line, and goes on with the
+    // next, as :normal does, with the macros it ran.
+    function macroFails() {
+        let i = typeahead.length - 1;
+        while (i >= 0 && !typeahead[i].each)
+            i--;
+        if (i < 0) {
+            typeahead = [];
+            return;
+        }
+        typeahead.splice(i + 1);
+        const f = typeahead[i];
+        f.next = 0;
+        f.runs = f.each.count;
+        f.each.due = true;
+    }
+
+    // The lines that macros run on each line have yet to go to, `moved`
+    // as an edit moves them (see movedMarks).
+    function moveLineRuns(moved) {
+        for (const f of typeahead) {
+            if (f.each && f.each.starts.length)
+                f.each.starts = moved(f.each.starts);
+        }
+    }
+
     // The next key of the macros running (see typeahead).
     function nextMacroKey() {
         const f = typeahead[typeahead.length - 1];
@@ -3300,9 +3435,14 @@ QtObject {
         if (f.next === f.keys.length) {
             f.next = 0;
             // Gone before its last key runs, so a macro that runs itself
-            // last (qa…@aq) doesn't stack up.
-            if (--f.runs === 0)
+            // last (qa…@aq) doesn't stack up. One on each line goes on to
+            // its next line once its last key ran (see macroStep).
+            if (--f.runs === 0 && f.each) {
+                f.runs = f.each.count;
+                f.each.due = true;
+            } else if (f.runs === 0) {
                 typeahead.pop();
+            }
         }
         return k;
     }
@@ -3368,7 +3508,7 @@ QtObject {
                 if (task)
                     stepTask();
                 else
-                    runKey(nextMacroKey(), null);
+                    macroStep();
                 if (Date.now() - start >= chunkTime)
                     break;
             }
@@ -3405,6 +3545,10 @@ QtObject {
             return task ? r.label + " " + Math.floor(100 * task.done / task.steps) + "%" : r.label;
         if (typeahead[0] !== f)
             return r.label;
+        if (f.each) {
+            const e = f.each, done = e.total - e.starts.length - (e.due ? 0 : 1);
+            return r.label + " " + Math.floor(100 * Math.max(0, done) / e.total) + "%";
+        }
         const done = (r.runs - f.runs) * f.keys.length + f.next;
         return r.label + " " + Math.floor(100 * done / (r.runs * f.keys.length)) + "%";
     }
@@ -3629,6 +3773,8 @@ QtObject {
             if (m !== marked)
                 marked = m;
         }
+        if (!placingMarks)
+            moveLineRuns(list => movedMarks(list, old, start, end, text));
         if (findScope)
             moveScope(start, end, text.length);
         if (!batch && tracking())
@@ -3933,7 +4079,7 @@ QtObject {
         replaceRange(s, range.end, "");
         const nt = bufferText();
         if (range.linewise)
-            setCursor(clampNormal(nt, firstNonBlank(nt, Math.min(s, nt.length))));
+            toLine(nt, Math.min(s, nt.length));
         else
             setCursor(clampNormal(nt, s));
     }
@@ -4127,6 +4273,7 @@ QtObject {
                 if (m !== marked)
                     marked = m;
             }
+            moveLineRuns(list => movedMarks(list, before, d.start, d.end1, after.slice(d.start, d.end2)));
             if (findScope)
                 moveScope(d.start, d.end1, d.end2 - d.start);
         }
@@ -4607,7 +4754,7 @@ QtObject {
             m = re.exec(line);
         while (m && ls + m.index + m[0].length <= cursor);
         if (!m) {
-            typeahead = [];
+            macroFails();
             return;
         }
         const s = m[0];
@@ -4633,8 +4780,7 @@ QtObject {
 
     // =: the lines of `ranges` ({ start, end }, in order and apart, as an
     // operator's) reindented by their brackets and tags (see Txt.reindent),
-    // as one edit, with the cursor on the first one's first character that
-    // isn't blank, as vim's.
+    // as one edit, with the cursor on the first one (see toLine).
     function reindentLines(ranges) {
         const t = bufferText();
         const spans = ranges.map(r => ({ from: Txt.lineStart(t, r.start),
@@ -4642,7 +4788,7 @@ QtObject {
         const edits = Txt.reindent(t, spans, Txt.indentUnit(t), !/\.py[iw]?$/i.test(fileName), ls => prefixEnd(t, ls));
         replaceAll(edits);
         const u = bufferText(), lines = spans.reduce((n, s) => n + Txt.lineOf(t, s.to) - Txt.lineOf(t, s.from) + 1, 0);
-        setCursor(clampNormal(u, firstNonBlank(u, spans[0].from)));
+        toLine(u, spans[0].from);
         if (lines > 2)
             showMessage(lines + " lines indented");
     }
@@ -4653,7 +4799,16 @@ QtObject {
         const e = Txt.lineEnd(t, Math.max(range.start, range.end - 1));
         const text = shiftedLines(t, s, e, dir, times);
         replaceRange(s, e, text, carriedHidden(s, e, text));
-        setCursor(clampNormal(bufferText(), firstNonBlank(bufferText(), s)));
+        toLine(bufferText(), s);
+    }
+
+    // Puts the cursor on p's line as a command on whole lines leaves it
+    // (dd, >>, ==, :5): in the column it was in, as j and k do, which
+    // they then keep (`colKept`), as Neovim's nostartofline has it (Vim
+    // goes to the first non-blank).
+    function toLine(t, p) {
+        setCursor(clampNormal(t, Txt.atColumn(t, Txt.lineStart(t, p), wantCol)));
+        colKept = true;
     }
 
     // The lines of t from s (a line's start) to e (a line's end) indented
@@ -4803,7 +4958,7 @@ QtObject {
                 range = operatorRange(t, { op: "y", motion: s.motion, textObj: s.textObj, count: cmd.count }, count);
             }
             if (!range || s.line && range.end <= range.start) {
-                typeahead = []; // as a motion that fails
+                macroFails(); // as a motion that fails
                 return;
             }
             const start = range.start;
@@ -4820,7 +4975,7 @@ QtObject {
         }
         const pair = surroundTarget(t, cursor, s.target, count);
         if (!pair) {
-            typeahead = []; // as a text object that isn't there
+            macroFails(); // as a text object that isn't there
             return;
         }
         let b = pair.o2, c = pair.c1;
@@ -4986,6 +5141,25 @@ QtObject {
         moveBy({ count: 0, motion: { name: "n" } });
     }
 
+    // * and # in visual mode, as Neovim's: a / or ? search for what's
+    // selected, as it is (a block's parts one per line, V's lines without
+    // the last one's line break), without the prefixes, as searches go
+    // (see withoutPrefixes). It leaves visual mode. Unlike Neovim's (from
+    // the cursor), it goes on from the selection's end, or back from its
+    // start, so # doesn't go to the selection itself first.
+    function searchSelection(t, forward) {
+        const u = withoutPrefixes(t), part = (s, e) => u.text.slice(unprefixedAt(u, s), unprefixedAt(u, e));
+        const r = selectedRange(t, mode, anchor, cursor);
+        const text = mode === "visualBlock" ? blockShape(t).lines.map(l => part(l.start, l.end)).join("\n")
+            : part(r.start, mode === "visualLine" ? Txt.lineEnd(t, Math.max(anchor, cursor)) : r.end);
+        lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+        setMode("normal");
+        setCursor(clampNormal(t, forward ? Math.max(anchor, cursor) : r.start));
+        const line = (forward ? "/" : "?") + Txt.escapeRegExp(text).replace(/\n/g, "\\n");
+        addToHistory(line);
+        runCommandLine(line);
+    }
+
     // `confirm` is set by :confirm, which runs the command after it.
     function runEx(command, confirm) {
         if (command === "")
@@ -5002,7 +5176,7 @@ QtObject {
             const line = Math.max(1, Math.min(r.last, Txt.countLines(t)));
             if (isVisual)
                 setMode("normal");
-            setCursor(clampNormal(t, firstNonBlank(t, Txt.lineToPos(t, line))));
+            toLine(t, Txt.lineToPos(t, line));
             return;
         }
         // :_! is Koil's: the output in the scratchpad (_ in the listing).
@@ -5949,7 +6123,7 @@ QtObject {
         case "G": {
             const lines = Txt.countLines(t);
             const line = explicit ? Math.min(count, lines) : m.name === "gg" ? 1 : lines;
-            return { pos: firstNonBlank(t, Txt.lineToPos(t, line)), type: "linewise" };
+            return { pos: Txt.atColumn(t, Txt.lineToPos(t, line), wantCol), type: "linewise", keepCol: true };
         }
         case "w":
         case "W": {
@@ -5999,7 +6173,7 @@ QtObject {
         case "%": {
             if (explicit) {
                 const line = Math.min(Math.ceil(count * Txt.countLines(t) / 100), Txt.countLines(t));
-                return { pos: firstNonBlank(t, Txt.lineToPos(t, line)), type: "linewise" };
+                return { pos: Txt.atColumn(t, Txt.lineToPos(t, line), wantCol), type: "linewise", keepCol: true };
             }
             return Txt.matchPair(t, p);
         }
@@ -6055,7 +6229,7 @@ QtObject {
             }
             const line = m.name === "H" ? Math.min(top + count - 1, bottom)
                 : m.name === "L" ? Math.max(bottom - count + 1, top) : Math.floor((top + bottom) / 2);
-            return { pos: firstNonBlank(t, Txt.lineToPos(t, line + 1)), type: "linewise" };
+            return { pos: Txt.atColumn(t, Txt.lineToPos(t, line + 1), wantCol), type: "linewise", keepCol: true };
         }
         default: { // page scrolling
             if ((m.name === "<C-f>" || m.name === "<PageDown>") && flickable && !forOp && !quiet)

@@ -381,6 +381,82 @@ TestCase {
         compare(render(), "xx three\nfour five\nfour five\nfour five");
     }
 
+    // * and # in visual mode search for what's selected, as it is (not as
+    // a regex), as Neovim's, without the prefixes in the listing.
+    function test_visualSearch() {
+        load("x foo.bar\nfooXbar foo.bar");
+        keys("wv6l*");
+        compare(vim.mode, "normal");
+        compare(vim.cursor, 18);
+        compare(vim.lastSearch.pattern, "foo\\.bar");
+        keys("v6l#");
+        compare(vim.cursor, 2);
+        keys("n");
+        compare(vim.cursor, 18);
+        load("ab\ncd\nab\ncd");
+        keys("Vj*");
+        compare(vim.cursor, 6);
+        compare(vim.lastSearch.pattern, "ab\\ncd");
+        loadListing("M  ab\nC  ab");
+        keys("V*");
+        compare(vim.cursor, editor.text.lastIndexOf("ab"));
+    }
+
+    // Y yanks to the line's end, as Neovim's (y$), but lines in visual
+    // mode.
+    function test_yankToEnd() {
+        load("one two\nthree\nfour");
+        keys("wY");
+        compare(vim.registers["\""].text, "two");
+        compare(vim.registers["\""].linewise, false);
+        compare(vim.cursor, 4);
+        keys("2Y");
+        compare(vim.registers["\""].text, "two\nthree");
+        keys("vjY");
+        compare(vim.registers["\""].text, "one two\nthree\n");
+        compare(render(), "one two\nthree\nfour");
+    }
+
+    // G, gg, N%, :N and commands on whole lines (dd, >>, ==, V's d) keep
+    // the cursor's column, as Neovim's nostartofline, and j and k keep it
+    // after them too. Vim's go to the first non-blank.
+    function test_noStartOfLine() {
+        load("abcdef\n  ab\nabcdef");
+        keys("3lG");
+        compare(vim.cursor, 15);
+        keys("gg");
+        compare(vim.cursor, 3);
+        keys("2%");
+        compare(vim.cursor, 3);
+        keys("50%");
+        compare(vim.cursor, 10);
+        keys(":3<CR>");
+        compare(vim.cursor, 15);
+        keys("$gg");
+        compare(vim.cursor, 5);
+        load("abcdef\nab\nabcdef");
+        keys("4ldd");
+        compare(vim.cursor, 1);
+        keys("j");
+        compare(vim.cursor, 7);
+        load("abcdef\nabcdef\nabcdef");
+        keys("3lVjd");
+        compare(render(), "abcdef");
+        compare(vim.cursor, 3);
+        load("abcdef");
+        keys("2l>>");
+        verify(editor.text.endsWith("abcdef") && editor.text.length > 6);
+        compare(vim.cursor, 2);
+        load("{\nabc\n}");
+        keys("j2l==");
+        compare(render(), "{\n    abc\n}");
+        compare(vim.cursor, 4);
+        // In the listing, out of the prefixes.
+        loadListing("M  abc\nC  d");
+        keys("G");
+        compare(vim.cursor, 12);
+    }
+
     // j and k keep the column the cursor last went to, but not past a new
     // text, nor an edit, a yank or an undo that left it in another (as vim).
     function test_jkColumn() {
@@ -562,6 +638,79 @@ TestCase {
         compare(vim.message, "E223: recursive mapping");
         compare(vim.running, null);
         compare(vim.typeahead.length, 0);
+    }
+
+    // @ in visual mode runs the macro on each line, as Neovim's, from its
+    // start, as one undo step. A line it fails on is skipped, and what it
+    // leaves half done (an insert) is ended.
+    function test_visualMacro() {
+        load("a\nb\nc\nd");
+        vim.registers["q"] = { text: "A!<Esc>", linewise: false, hidden: [] };
+        keys("jVj@q");
+        compare(render(), "a\nb!\nc!\nd");
+        compare(vim.mode, "normal");
+        compare(vim.running, null);
+        keys("u");
+        compare(render(), "a\nb\nc\nd");
+        load("a,1\nb\nc,3");
+        vim.registers["q"] = { text: "f,r;", linewise: false, hidden: [] };
+        keys("VG@q");
+        compare(render(), "a;1\nb\nc;3");
+        compare(vim.typeahead.length, 0);
+        load("a\nb");
+        vim.registers["q"] = { text: "A!", linewise: false, hidden: [] };
+        keys("Vj@q");
+        compare(render(), "a!\nb!");
+        compare(vim.mode, "normal");
+        // in the last command line typed, and with a count
+        load("a\nb\nc");
+        keys(":s/$/!/<CR>jVj@:");
+        compare(render(), "a!\nb!\nc!");
+        load("a\nb");
+        vim.registers["q"] = { text: "A!<Esc>", linewise: false, hidden: [] };
+        keys("Vj2@q");
+        compare(render(), "a!!\nb!!");
+    }
+
+    // The lines it goes to move with the edits, as the marked lines do,
+    // rather than going by their numbers as :normal does.
+    function test_visualMacroFollowsLines() {
+        load("a\nb");
+        vim.registers["q"] = { text: "yyp", linewise: false, hidden: [] };
+        keys("Vj@q");
+        compare(render(), "a\na\nb\nb");
+        load("a\nb\nc\nd");
+        vim.registers["q"] = { text: "dd", linewise: false, hidden: [] };
+        keys("jVj@q");
+        compare(render(), "a\nd");
+    }
+
+    // A macro running one on each line goes on after it, also after a
+    // line it failed on, as after :normal.
+    function test_visualMacroInMacro() {
+        load("a,\nb\nc,");
+        vim.registers["q"] = { text: "f,x", linewise: false, hidden: [] };
+        vim.registers["w"] = { text: "VG@qggAz<Esc>", linewise: false, hidden: [] };
+        keys("@w");
+        compare(render(), "az\nb\nc");
+        load("a,\nb,\nc");
+        vim.registers["q"] = { text: "f,x", linewise: false, hidden: [] };
+        vim.registers["w"] = { text: "VG@qGAz<Esc>", linewise: false, hidden: [] };
+        keys("@w");
+        compare(render(), "a\nb\ncz");
+    }
+
+    // Q runs the macro recorded last, as Neovim's, and in visual mode on
+    // each line.
+    function test_replayRecorded() {
+        load("a\nb\nc");
+        vim.lastRecorded = "";
+        keys("Q");
+        compare(vim.message, "E748: No previously used register");
+        keys("qqA!<Esc>qjQ");
+        compare(render(), "a!\nb!\nc");
+        keys("jVkQ");
+        compare(render(), "a!\nb!!\nc!");
     }
 
     // A long command (u with a count) runs in chunks too, with its
@@ -1321,7 +1470,7 @@ TestCase {
         load("{\na\nb\n}");
         keys("jVj=");
         compare(render(), "{\n    a\n    b\n}");
-        compare(vim.cursor, 6);
+        compare(vim.cursor, 2); // in its column, as Neovim's nostartofline
         load("{\na\nb\nc\n}");
         keys("jmjjm=");
         compare(render(), "{\n    a\nb\n    c\n}");
@@ -1729,16 +1878,19 @@ TestCase {
         compare(editor.text, "a a\na");
     }
 
-    // :&& and g& run the last one again with its flags, :s alone (with
-    // flags of its own) and & without them (which, as in vim, they then
-    // forget), g& on every line with the last search's pattern.
+    // :&&, & (as Neovim's) and g& run the last one again with its flags,
+    // :s alone (with flags of its own) and :& without them (which, as in
+    // vim, they then forget), g& on every line with the last search's
+    // pattern.
     function test_substituteAgain() {
         load("a a\na a\na a\nb b");
         keys(":s/a/b/g<CR>");
         compare(editor.text, "b b\na a\na a\nb b");
-        keys("j:&&<CR>");
-        compare(editor.text, "b b\nb b\na a\nb b");
         keys("j&");
+        compare(editor.text, "b b\nb b\na a\nb b");
+        keys("u:&&<CR>");
+        compare(editor.text, "b b\nb b\na a\nb b");
+        keys("j:&<CR>");
         compare(editor.text, "b b\nb b\nb a\nb b");
         keys("u:s g<CR>");
         compare(editor.text, "b b\nb b\nb b\nb b");
@@ -1837,7 +1989,7 @@ TestCase {
         compare(editor.text[vim.cursor], "x");
         keys("<Esc>");
         compare(vim.cursor, at);
-        keys("gg:s/a/xy/");
+        keys("gg0:s/a/xy/");
         compare(vim.cursor, 0);
         keys("<Esc>");
         // In the listing, it stays out of the icons.
@@ -1900,19 +2052,19 @@ TestCase {
         verify(vim.visualShown);
         keys("<Esc>");
         compare(vim.visualShown, null);
-        keys("uggvjl:s/a/b/g<CR>");
+        keys("ugg0vjl:s/a/b/g<CR>");
         compare(editor.text, "bbb bbb bbb\nbba aaa aaa");
-        keys("uggw<C-v>jl:");
+        keys("ugg0w<C-v>jl:");
         compare(vim.blockSpans(0, editor.text.length, vim.visualShown).map(b => editor.text.slice(b.start, b.end)),
             ["aa", "aa"]);
         keys("s/a/b/g<CR>");
         compare(editor.text, "aaa bba aaa\naaa bba aaa");
-        keys("ugg<C-v>j$:s/a$/b/<CR>");
+        keys("ugg0<C-v>j$:s/a$/b/<CR>");
         compare(editor.text, "aaa aaa aab\naaa aaa aab");
         keys("uggVj:s/a/b/<CR>");
         compare(editor.text, "baa aaa aaa\nbaa aaa aaa");
         // A range typed otherwise is lines, as in vim.
-        keys("uggwviw<Esc>:1s/a/b/g<CR>");
+        keys("ugg0wviw<Esc>:1s/a/b/g<CR>");
         compare(editor.text, "bbb bbb bbb\naaa aaa aaa");
     }
 
@@ -3274,7 +3426,7 @@ TestCase {
         compare(render(), "<M:h1>  one\n   new\n<C:h2>  two");
         keys("Oup<Esc>");
         compare(render(), "<M:h1>  one\n   up\n   new\n<C:h2>  two");
-        keys("Gi<CR>x<Esc>");
+        keys("G0i<CR>x<Esc>");
         compare(render(), "<M:h1>  one\n   up\n   new\n   \n<C:h2>  xtwo");
         keys("ggla<CR>b<Esc>");
         compare(render(), "<M:h1>  on\n   be\n   up\n   new\n   \n<C:h2>  xtwo");

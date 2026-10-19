@@ -1290,8 +1290,18 @@ the scratchpad (see Scratchpad).
   vim's do, but unlike vim's go on past the end of its line (which vim
   stops at), leaving the cursor, so a long line's note or message can be
   read; `zs` and `ze` put the cursor at an edge. Vim keeps its own undo stack (diffs per change), so native
-  undo (Cmd+Z) is routed to it. Only the `"+`/`"*` registers use the system
-  clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
+  undo (Cmd+Z) is routed to it. Where Neovim's defaults differ from
+  Vim's, Koil's are Neovim's: `Y` is `y$` (but lines in visual mode and
+  on marked lines), `&` is `:&&`, `Q` runs the macro recorded last
+  (`lastRecorded`), `@` and `Q` in visual mode run one on each line (see
+  Macros), `*` and `#` in visual mode search for what's selected, as it
+  is (`searchSelection`, which goes on from the selection's end or back
+  from its start, so `#` doesn't stop on it first, as Neovim's does),
+  and `nostartofline`: `G`, `gg`, `H`, `M`, `L`, `N%` (`keepCol`), `:N`
+  and the commands on whole lines (`dd`, `>>`, `==`, visual and marked
+  lines' `d`, `>`, `<`: `toLine`) keep the cursor's column, which j and
+  k then go on from (`colKept`). Only the `"+`/`"*`
+  registers use the system clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
   `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
   are read from vim's state and can't be written. `:reg` (`:di`) lists
@@ -1308,12 +1318,22 @@ the scratchpad (see Scratchpad).
   times) on `typeahead`, whose keys a run (see Batches and runs) gives
   `runKey` with no key event, so vim types insert-mode keys itself
   (`typeKey`, `insertMove`). A failing command (bad keys, failed motion,
-  `showError`) empties `typeahead`. Past `maxMacroDepth` frames it's E223,
+  `showError`) empties `typeahead` (`macroFails`). Past `maxMacroDepth`
+  frames it's E223,
   as vim's `'maxmapdepth'`, and so is a chain of that many shortcuts and
   `@`s with no other command between (`chainedRuns`): one that runs
   itself last (`qa@aq`, or `s` running `ys`, which runs `s`) doesn't nest,
   and would never end (vim's `@` loops until Ctrl-C). One that runs a
   command, then itself (`qa<C-a>j@aq`), goes on until a command fails.
+  `@q` in visual mode (`runOnLines`) is a frame with `each`: its keys run
+  on each line in turn, from its start, as `:'<,'>normal @q` does
+  (`macroStep` goes to the next line once a line's are done, ending what
+  they left half done, `endHalfDone`), and a command that fails empties
+  `typeahead` only down to it, which goes on with its next line, so the
+  frames under it go on too, as after `:normal`. The lines left move
+  with the edits as the marked lines do (`moveLineRuns`, through
+  `movedMarks`), rather than by number as `:normal`'s do, which has `yyp`
+  copy the copies.
 - **Batches and runs** (Vim.qml): each edit of the `TextArea` has Qt go over
   all the text, so while a key runs (`handleKey` through `batched`) vim edits
   a copy (`batch`; everything reads the text through `bufferText()`), and
@@ -1562,8 +1582,8 @@ the scratchpad (see Scratchpad).
   and a line a replacement starts gets one: `prefixLines`), and vim's
   replacement (`Txt.substitution`: `&`, `\1`, `\u`, `\r`; but `~` is only
   a `~`, which paths have). Flags `g`, `i`, `I`, `n`, `e`, `&` first
-  keeping the last one's; `:s` alone, `:&`, `:&&`, `&` and `g&` run
-  `lastSubstitute` again. With the range `'<,'>` it keeps to the last
+  keeping the last one's; `:s` alone, `:&`, `:&&`, `&` (`:&&`, as
+  Neovim's) and `g&` run `lastSubstitute` again. With the range `'<,'>` it keeps to the last
   selection (`selectionRegion`: its characters or block, where vim's takes
   the lines), whose `wantCol` `lastVisual` keeps for a `$` block. Typed,
   it's previewed as neovim's `inccommand` does (`previewSubstitute`, at
