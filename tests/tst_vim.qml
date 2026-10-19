@@ -3738,9 +3738,42 @@ TestCase {
         help.show("");
         tryCompare(help, "opened", true);
         keys("/Space Space<CR>");
-        compare(help.matches.length, 1);
+        compare(help.matches.length, 3);
         compare(help.matchMarks["0/1k"], "0,11,1");
         keys("<Esc><Esc>");
+        tryCompare(help, "opened", false);
+    }
+
+    // :h goes to a topic's section, and to the row of a key in it, or
+    // else to the first row of that key.
+    function test_helpTopics() {
+        const section = title => help.sections.findIndex(s => s.title === title);
+        const row = (title, keys) => help.sections[section(title)].rows.findIndex(r => r[0] === keys);
+        const shows = (topic, title, keys) => {
+            verify(help.show(topic), topic);
+            compare(help.shownSection, section(title), topic);
+            compare(help.shownRow, keys ? row(title, keys) : -1, topic);
+        };
+        shows("", "The listing");
+        shows("g", "Keys starting with g");
+        shows("Z", "Keys starting with z");
+        shows("space", "Keys starting with Space");
+        // As typed first, so gI isn't gi, then in any case.
+        shows("gI", "Keys starting with g", "`gI`");
+        shows("gi", "The listing", "`g.`  `gi`  `gr`");
+        shows("gs", "The listing", "`gs`");
+        shows("zs", "Keys starting with z", "`zs`  `ze`");
+        shows("ZZ", "Keys starting with z", "`ZZ`");
+        shows("enter", "The listing", "`Enter`");
+        // A key no section is for, where it's written.
+        shows("J", "Marked lines", "`c`  `p`  `J`");
+        shows("Shift+Enter", "The listing", "`Shift+Enter`");
+        // Ctrl keys however they're written.
+        shows("<C-a>", "Ctrl keys", "`Ctrl-A`  `Ctrl-X`");
+        shows("CTRL-D", "Ctrl keys", "`Ctrl-D`  `Ctrl-U`");
+        shows("^x", "Ctrl keys", "`Ctrl-A`  `Ctrl-X`");
+        verify(!help.show("nothing"));
+        help.close();
         tryCompare(help, "opened", false);
     }
 

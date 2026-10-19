@@ -104,9 +104,9 @@ the scratchpad (see Scratchpad).
   `lineOf`, `lineToPos` and `countLines` (the status line, line numbers,
   highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
-- `qml/HelpPanel.qml`: `:help` (`:h topic`), a box listing what isn't obvious;
-  `:reg` shows the registers in it (`showList`), and `:!` what a command
-  wrote (`showText`). `/` and `?` search it (see Help).
+- `qml/HelpPanel.qml`: `:help` (`:h topic`, `:h key`), a box listing what
+  isn't obvious; `:reg` shows the registers in it (`showList`), and `:!`
+  what a command wrote (`showText`). `/` and `?` search it (see Help).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
   the question: `:confirm q`, applying and undoing (lists to pick from),
   and what changed on disk against the user's edits.
@@ -1847,7 +1847,15 @@ the scratchpad (see Scratchpad).
   `root.findNext`), the menu's items that open, save or edit something
   are off while it or a question is open (`boxOpen`), syncing waits (it
   can switch vim's buffer), and if anything else still takes the keys it
-  closes (`keepHelpKeys`, leaving them there: `hadKeys`).
+  closes (`keepHelpKeys`, leaving them there: `hadKeys`). `:h topic`
+  (`show`) goes to the section whose `tags` have it, as typed first (so
+  `gI` isn't `gi`), then in any case, and scrolls to its row of that key
+  if it has one (`shownRow`, `keyRow`: a code in the row's keys, `:h gs`);
+  a topic no section has goes to the first row with that key (`:h J`),
+  again as typed first. `<C-a>`, `^A` and `CTRL-A` are `Ctrl-A`. The keys
+  starting with `g`, `z` and Space, and the Ctrl keys, have sections of
+  their own (`:h g`, `:h z`, `:h space`, `:h ctrl`), as an index of them,
+  pointing to the sections that say more.
 - **Scrolling boxes**: the help, the hover box and the confirmations are
   `Flickable`s that aren't interactive (a drag selects their text),
   scrolled by a `WheelHandler`. It needs `acceptedDevices` with

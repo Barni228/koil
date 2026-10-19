@@ -7,10 +7,11 @@ import "text.js" as Txt
 
 // :help, a box over the editor with what isn't obvious: Koil's listing,
 // :set and its forms, the commands, shell commands, search, registers and
-// macros, visual block and multiple cursors, marked lines, hidden text and
-// other keys.
-// :help topic scrolls to a section. :reg shows the registers in it too
-// (showList), and :! what a command wrote (showText).
+// macros, visual block and multiple cursors, marked lines, hidden text, the
+// keys starting with g, z and Space, Ctrl keys and other keys.
+// :help topic scrolls to a section, or a key's row (see show). :reg shows
+// the registers in it too (showList), and :! what a command wrote
+// (showText).
 // Keys scroll it as in a vim help buffer, / and ? search it (see Search);
 // Esc, q or Enter (as after vim's :!) closes it. Its text can be selected
 // with the mouse and copied.
@@ -44,7 +45,7 @@ Popup {
     readonly property var sections: [
         {
             title: "The listing",
-            tags: ["koil", "listing", "list", "entry", "entries", "space", "update", "apply", "-", "enter",
+            tags: ["koil", "listing", "list", "entry", "entries", "update", "apply", "-", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
                 "gr", "gs", "sort", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer",
                 "app"],
@@ -193,7 +194,8 @@ Popup {
                 ["`:s/old/new/`  `:%s/old/new/g`", "Replace on the line, or every match in the file (see `:h s`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
-                ["`:h`  `:help [topic]`", "This help, e.g. `:h set`, `:h search`, `:h macros`."],
+                ["`:h`  `:help [topic]`", "This help, e.g. `:h set`, `:h macros`, `:h g` (the keys starting "
+                    + "with `g`), or a key, like `:h gJ`."],
                 ["`↑`  `↓`", "In the command line: earlier and later commands (or searches)."],
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
                 ["`@:`", "Run the last command again."]
@@ -373,34 +375,117 @@ Popup {
             ]
         },
         {
-            title: "Other keys",
-            tags: ["keys", "other", "ctrl-a", "ctrl-x", "g?", "rot13", "ctrl-e", "ctrl-y", "scroll", "zoom",
-                "settings", "undo", "gv", "zz", "zl", "zh", "sideways", "gj", "gk", "word"],
+            title: "Keys starting with g",
+            tags: ["g", "gg", "ge", "gE", "gj", "gk", "gI", "gJ", "g~", "gu", "gU", "g?", "rot13", "case",
+                "uppercase", "lowercase", "gv"],
             rows: [
-                ["`Ctrl-A`  `Ctrl-X`", "Add to or subtract from the number at or after the cursor."],
-                ["`g?`  `g~`  `gu`  `gU`", "ROT13, toggle case, lowercase, uppercase (e.g. `g?w`)."],
-                ["`Ctrl-E`  `Ctrl-Y`", "Scroll a line down or up (a row, while lines wrap)."],
+                ["`gg`", "The first line (`5gg`: line 5)."],
+                ["`ge`  `gE`", "Back to the end of the word before (`gE`: of the WORD, between blanks)."],
                 ["`gj`  `gk`", "Down or up a row of a line that wraps (see `:set wrap`)."],
+                ["`gI`", "Type at the line's very start, before its indent (in the listing, at the name)."],
+                ["`gJ`", "Join the lines, adding no space between them."],
+                ["`g~`  `gu`  `gU`  `g?`", "Toggle case, lowercase, uppercase or ROT13, over a motion: "
+                    + "`gUiw` uppercases a word, `gUU` the line."],
+                ["`g!`", "Put lines through a shell command, like `g!ip` then `sort` (see `:h !`)."],
+                ["`g&`", "Run the last `:s` again on every line (see `:h s`)."],
+                ["`gv`", "Select the last visual selection again, or mark the last marked lines again."],
+                ["`gh`", "Show what the line's icon hides, or the message under the cursor."],
+                ["`gf`  `gx`", "Open the link under the cursor in Koil, or in its default app (see `:h gf`)."],
+                ["`g.`  `gi`  `gr`", "In the listing: toggle hidden files, hiding what git ignores, and "
+                    + "reading the path as a regex."],
+                ["`gs`", "In the listing: sort, by the key after it: `n` name, `v` natural, `e` extension, "
+                    + "`s` size, `d` size on disk, `m` modified, `c` created, `a` accessed (`gss` by size). "
+                    + "Shifted, the other way round (`gsS`)."]
+            ]
+        },
+        {
+            title: "Keys starting with z",
+            tags: ["z", "zz", "zt", "zb", "zl", "zh", "zL", "zH", "zs", "ze", "ZZ", "ZQ", "scroll", "sideways"],
+            rows: [
                 ["`zz`  `zt`  `zb`", "Scroll the cursor's line to the middle, top or bottom."],
-                ["`zl`  `zh`  `zL`  `zH`", "Scroll sideways a column or half the view, as far as the sizes "
-                    + "and messages after the lines (not while lines wrap)."],
+                ["`zl`  `zh`", "Scroll sideways a column (`5zl`: five), as far as the sizes and messages "
+                    + "after the lines."],
+                ["`zL`  `zH`", "Scroll sideways half the view."],
                 ["`zs`  `ze`", "Scroll sideways to put the cursor at the left or right edge."],
-                ["`gv`", "Select the last visual selection again."],
+                ["`ZZ`", "Save and quit (in the listing: `:confirm q`)."],
+                ["`ZQ`", "Quit without saving."]
+            ],
+            note: "Nothing scrolls sideways while lines wrap (`:set wrap`)."
+        },
+        {
+            title: "Keys starting with Space",
+            tags: ["space", "<space>", "leader"],
+            intro: "Koil's own, in the listing and the path field. In a file, `Space Space` saves, and "
+                + "`Space q` works everywhere, in visual mode too.",
+            rows: [
+                ["`Space Space`", "Apply the changes, listing them first (Settings can skip that). In a "
+                    + "file: save."],
+                ["`Space a`", "Apply, always listing the changes first."],
+                ["`Space u`", "Undo applies, picked from all of them, newest first."],
+                ["`Space r`", "Show the entry on the line in " + fileManager + "."],
+                ["`Space o`", "Open the entry on the line in its default app."],
+                ["`Space q`", "List your shortcuts, and the built-in ones (see `:h shortcuts`)."]
+            ],
+            note: "Shortcuts of yours can start with `Space` too, like `Space c`."
+        },
+        {
+            title: "Ctrl keys",
+            tags: ["ctrl", "control", "ctrl-a", "ctrl-x", "ctrl-e", "ctrl-y", "ctrl-d", "ctrl-u", "ctrl-f",
+                "ctrl-b", "ctrl-r", "ctrl-c", "ctrl-n", "ctrl-p", "ctrl-w"],
+            intro: isMac ? "The `Ctrl` key, not `⌘`."
+                : "On Windows, `Ctrl+F` is Find, and `Ctrl+V` pastes while typing.",
+            rows: [
+                ["`Ctrl-D`  `Ctrl-U`", "Down or up half a page."],
+                ["`Ctrl-F`  `Ctrl-B`", "Down or up a page."],
+                ["`Ctrl-E`  `Ctrl-Y`", "Scroll a line down or up (a row, while lines wrap)."],
+                ["`Ctrl-R`", "Redo."],
+                ["`Ctrl-A`  `Ctrl-X`", "Add to or subtract from the number at or after the cursor."],
+                ["`Ctrl-V`", "Visual block (see `:h block`)."],
+                ["`Ctrl-C`", "Stop a macro or shell command that's running, or close the command line, "
+                    + "as `Esc` does."],
+                ["`Ctrl-N`  `Ctrl-P`", "While completing a path: the next or previous dir."],
+                ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
+                ["`Ctrl-B`  `Ctrl-E`", "In the command line: go to the start or the end."]
+            ]
+        },
+        {
+            title: "Other keys",
+            tags: ["keys", "other", "zoom", "settings", "undo", "word"],
+            rows: [
                 [isMac ? "`⌘Z`  `⇧⌘Z`" : "`Ctrl+Z`  `Ctrl+Shift+Z`",
                     "Undo and redo, like `u` and `Ctrl-R`."],
                 [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",
                     "Zoom in, out, or back to the Settings size."],
                 ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, word wrap, theme, folders "
-                    + "first, when applying asks, start dir."]
+                    + "first, when applying asks, start dir, shell and more. The pointer on a setting's name "
+                    + "shows what it does."]
             ]
         }
     ]
 
-    // Opens the help at the section for `topic` (all of it if ""). False if
-    // there's no help for it.
+    // Opens the help at the section for `topic` (all of it if ""), at its
+    // row of that key if it has one (`:h gs`), or else at the first row of
+    // that key (`:h zs`). Tags and keys match as typed first, so `gI` isn't
+    // `gi`, then in any case. `<C-a>`, `^A` and `CTRL-A` are `Ctrl-A`. False
+    // if there's no help for it.
     function show(topic) {
-        const t = topic.trim().toLowerCase().replace(/^:/, "").replace(/^'(.*)'$/, "$1");
-        const i = t === "" ? 0 : sections.findIndex(s => s.tags.includes(t));
+        const t = topic.trim().replace(/^:/, "").replace(/^'(.*)'$/, "$1")
+            .replace(/^(?:<c-(.)>|\^(.)|ctrl[-+](.))$/i, (m, a, b, c) => "Ctrl-" + (a || b || c).toUpperCase());
+        const lower = t.toLowerCase();
+        let i = t === "" ? 0 : sections.findIndex(s => s.tags.includes(t));
+        if (i < 0)
+            i = sections.findIndex(s => s.tags.some(tag => tag.toLowerCase() === lower));
+        // The key's row in that section, else in the first that has it.
+        let row = -1;
+        const looked = i >= 0 ? [i] : sections.map((s, k) => k);
+        for (const exact of t === "" ? [] : [true, false]) {
+            const s = looked.find(s => keyRow(sections[s], t, exact) >= 0);
+            if (s !== undefined) {
+                i = s;
+                row = keyRow(sections[s], t, exact);
+                break;
+            }
+        }
         if (i < 0)
             return false;
         heading = "Koil Help";
@@ -408,8 +493,16 @@ Popup {
         clearSearch();
         open();
         shownSection = i;
+        shownRow = row;
         showSection();
         return true;
+    }
+
+    // The row of `section` with `key` in its keys (as written, or unless
+    // `exact`, in any case), or -1.
+    function keyRow(section, key, exact) {
+        const same = code => exact ? code === key : code.toLowerCase() === key.toLowerCase();
+        return section.rows.findIndex(row => Txt.parseCode(row[0], false).codes.some(c => same(c.text)));
     }
 
     // Opens the box with `title` over `rows` of [keys, text], both shown
@@ -432,17 +525,22 @@ Popup {
         clearSearch();
         open();
         shownSection = 0;
+        shownRow = -1;
         showSection();
     }
 
-    // The section :help went to. Its text is laid out over the first frames,
-    // so it's scrolled to again as the layout changes, until the user scrolls.
+    // The section :help went to, and its row (-1 for its top). Its text is
+    // laid out over the first frames, so it's scrolled to again as the
+    // layout changes, until the user scrolls.
     property int shownSection: -1
+    property int shownRow: -1
 
     function showSection() {
         const item = shownSection >= 0 ? sectionRepeater.itemAt(shownSection) : null;
-        if (item)
-            scroller.contentY = Math.min(item.y, scroller.maxY);
+        if (!item)
+            return;
+        const row = shownRow >= 0 ? textItems.get(shownSection + "/" + shownRow + "k") : null;
+        scroller.contentY = Math.min(row ? row.mapToItem(body, 0, 0).y : item.y, scroller.maxY);
     }
 
     function scrollBy(dy) {

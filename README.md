@@ -23,7 +23,7 @@ until you apply, and your edits stay while you go through other dirs.
 | `Space q`      | Your shortcuts: run one, edit them or make one                                    |
 | `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
 | `m`            | Mark lines anywhere, then `d`, `y`, `!` or `A` act on all of them at once         |
-| `:h`           | Show help page                                                                    |
+| `:h`           | Show help page (`:h g`: the keys starting with `g`; `:h gJ`: a key)               |
 
 `Cmd` is `Ctrl` on Windows.
 
