@@ -294,6 +294,37 @@ Popup {
             ]
         },
         {
+            title: "Surround",
+            tags: ["surround", "vim-surround", "ys", "yss", "yS", "ySS", "ds", "cs", "cS", "S", "gS", "pair",
+                "pairs", "brackets", "quotes", "tag", "tags", "it", "at"],
+            intro: "As vim-surround: put brackets, quotes or tags around text, or change or delete the ones "
+                + "around the cursor.",
+            rows: [
+                ["`ys`", "Around what a motion or text object goes over: `ysiw)` makes `word` `(word)`, and "
+                    + "`ys$\"` quotes up to the line's end. Blanks at its end stay out (`ysaw]`). One over "
+                    + "lines (`ysip)`) gets the pair on lines of its own."],
+                ["`yss`", "Around the line, after its indent (`2yss)`: two lines)."],
+                ["`ds`", "Delete the pair around the cursor: `ds)`, `ds\"`, `dst` for tags, `ds2(` for the "
+                    + "second one out. A bracket alone on its line goes with the line."],
+                ["`cs`", "Change it: `cs\"'` makes `\"a\"` `'a'`, and `cs)]` makes `(a)` `[a]`."],
+                ["`S`  `gS`", "In visual mode: around the selection, like `S)`. Lines get the pair on lines of "
+                    + "its own, a level deeper (with `gS`, not deeper), and a block on each of its lines. "
+                    + "`gS` puts it on lines of its own around characters too."],
+                ["`yS`  `ySS`  `cS`", "As `ys`, `yss` and `cs`, with the pair on lines of its own and "
+                    + "what's inside a level deeper. Inside brackets or tags, it's then reindented as `=` "
+                    + "does."],
+                ["`)`  `]`  `}`  `>`", "The brackets (`b`, `r`, `B` and `a` too). `(`, `[` and `{` put a space "
+                    + "inside, and as what to delete or change, take the blanks inside away (so does a space "
+                    + "before the key: `ds )`)."],
+                ["`*`  `_`  `|`", "Any other sign goes on both sides, and as what to delete or change, is the "
+                    + "nearest one on each side on the line. `s` is a space before: `csbs` makes `f(x)` `f x`."],
+                ["`<`", "A tag (`t` too), typed in the status line: `ysiw<em>` makes `<em>word</em>`. `cst<` "
+                    + "keeps the old tag's attributes if it ends with `Enter` rather than `>`."],
+                ["`it`  `at`", "The text inside the tags around the cursor, or with them, as in vim: `dit`, `vat`."]
+            ],
+            note: "`.` repeats them. Unlike vim-surround's, they leave the registers alone."
+        },
+        {
             title: "Registers and macros",
             tags: ["registers", "register", "reg", "clipboard", "\"", "\"+", "+", "*", "\"0", "\"_", "\"-",
                 "\"1", "\".", "\":", "\"/", "\"%", "macros", "macro",
@@ -349,7 +380,7 @@ Popup {
                 ["`I`  `A`", "Type at the start or end of each one, like `A.bak<Esc>`."],
                 ["`c`  `p`  `J`", "Change them into one line, put a register in their place, or join them, "
                     + "where the first one is."],
-                ["`>`  `gU`  `r`", "Indent, change case or replace characters on each one."],
+                ["`>`  `=`  `gU`  `r`", "Indent, reindent, change case or replace characters on each one."],
                 ["`:`", "`:'<,'>` is them: `:s/a/b/` changes only them."],
                 ["`Esc`", "Unmark them all. `gv` marks them again (also after using them)."]
             ],
@@ -384,6 +415,7 @@ Popup {
                 ["`gj`  `gk`", "Down or up a row of a line that wraps (see `:set wrap`)."],
                 ["`gI`", "Type at the line's very start, before its indent (in the listing, at the name)."],
                 ["`gJ`", "Join the lines, adding no space between them."],
+                ["`gS`", "In visual mode: put a pair on lines of its own around the selection (see `:h surround`)."],
                 ["`g~`  `gu`  `gU`  `g?`", "Toggle case, lowercase, uppercase or ROT13, over a motion: "
                     + "`gUiw` uppercases a word, `gUU` the line."],
                 ["`g!`", "Put lines through a shell command, like `g!ip` then `sort` (see `:h !`)."],
@@ -450,8 +482,13 @@ Popup {
         },
         {
             title: "Other keys",
-            tags: ["keys", "other", "zoom", "settings", "undo", "word"],
+            tags: ["keys", "other", "zoom", "settings", "undo", "word", "=", "==", "indent", "reindent"],
             rows: [
+                ["`=`  `==`", "Reindent: `==` the line, `=ip` the paragraph, `gg=G` all of it, or in visual mode "
+                    + "what's selected. A line in brackets (or HTML tags) goes a level deeper than the line "
+                    + "they open on, and one that closes them as deep as that line. A line in none keeps its "
+                    + "indent, so Python and YAML stay as they are. A level is the file's: a tab, or 2, 4 or "
+                    + "8 spaces."],
                 [isMac ? "`⌘Z`  `⇧⌘Z`" : "`Ctrl+Z`  `Ctrl+Shift+Z`",
                     "Undo and redo, like `u` and `Ctrl-R`."],
                 [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",

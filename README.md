@@ -59,6 +59,13 @@ until you apply, and your edits stay while you go through other dirs.
   only the selection. As you type it, the text shows what it would become,
   and `Esc` puts it back. In the listing a line starts at its name, so
   `:%s/^/old_/` renames every entry.
+- **Surround**, as vim-surround: `ysiw)` puts `(`…`)` around a word, `yss"`
+  quotes the line, `ds(` deletes the brackets around the cursor, `cs"'`
+  changes `"` to `'`, and `S)` in visual mode surrounds the selection.
+  `ysiw<em>` puts a tag around it (`dst`, `cst<` for tags).
+- **Reindent** with `=`: `==` the line, `gg=G` the file. A line in
+  brackets (or HTML tags) goes a level deeper than the line they open on;
+  lines in none keep their indent, so Python and YAML don't break.
 - **IDs**: each icon hides its entry's ID, which goes with the line wherever
   it's pasted, so a pasted line is a copy or a move, never a new empty file.
   `gh` (or hovering the mouse on the icon) shows the path an ID stands for.

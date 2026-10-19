@@ -534,6 +534,11 @@ function textObject(t, p, obj, count) {
     case "}":
     case "B":
         return blockObject(t, p, obj.around, "{", "}", count);
+    case "t": {
+        const r = tagPair(t, p, count);
+        return r && (obj.around ? { start: r.o1, end: r.c2, linewise: false }
+            : { start: r.o2, end: r.c1, linewise: false });
+    }
     default:
         return blockObject(t, p, obj.around, "<", ">", count);
     }
@@ -651,6 +656,37 @@ function blockObject(t, p, around, open, close, count) {
     return { start: o + 1, end: c, linewise: false };
 }
 
+// The `count`th pair of tags out from p (an HTML or XML element p is in,
+// its tags too), as { o1, o2, c1, c2 }: [o1, o2) the opening tag, [c1, c2)
+// the closing one. A closing tag pairs with the nearest open one of its
+// name, leaving those between unpaired (`<br>`, an `<li>` with no
+// `</li>`); a tag ending with `/>` has no pair. Null if there's none.
+function tagPair(t, p, count) {
+    const re = /<(\/?)([A-Za-z][^\s\/>]*)[^<>]*>/g, open = [], around = [];
+    let m;
+    while ((m = re.exec(t))) {
+        const end = m.index + m[0].length;
+        if (!m[1]) {
+            if (m[0][m[0].length - 2] !== "/")
+                open.push({ name: m[2], o1: m.index, o2: end });
+            continue;
+        }
+        let k = open.length - 1;
+        while (k >= 0 && open[k].name !== m[2])
+            k--;
+        if (k < 0)
+            continue;
+        const o = open[k];
+        open.length = k;
+        // Pairs are nested or apart, so those p is in close innermost first.
+        if (o.o1 <= p && p < end)
+            around.push({ o1: o.o1, o2: o.o2, c1: m.index, c2: end });
+        if (around.length >= count || k === 0 && m.index > p)
+            break;
+    }
+    return around[count - 1] || null;
+}
+
 function paragraphObject(t, p, around) {
     const n = t.length;
     const ls = lineStart(t, p);
@@ -676,6 +712,235 @@ function paragraphObject(t, p, around) {
         }
     }
     return { start: s, end: Math.min(lineEnd(t, e) + 1, n), linewise: true };
+}
+
+// ---- Indent ----------------------------------------------------------------
+
+// A level of indent in t: a tab if more of its lines (of the first 2000)
+// start with one than with a space, else 2, 4 or 8 spaces, as a line most
+// often goes in by from the one before it (not by others: a line lined up
+// with something), if lines do twice or more (one may be a mistake, as
+// in text to reindent), else 4.
+function indentUnit(t) {
+    let tabs = 0, spaces = 0, last = 0;
+    const steps = {};
+    for (let ls = 0, n = 0; ls < t.length && n < 2000; n++) {
+        let le = t.indexOf("\n", ls);
+        if (le < 0)
+            le = t.length;
+        let e = ls;
+        while (e < le && isBlank(t[e]))
+            e++;
+        if (e < le) {
+            if (t[ls] === "\t") {
+                tabs++;
+            } else if (e > ls) {
+                spaces++;
+                const step = e - ls - last;
+                if (step === 2 || step === 4 || step === 8)
+                    steps[step] = (steps[step] || 0) + 1;
+            }
+            last = t[ls] === "\t" ? 0 : e - ls;
+        }
+        ls = le + 1;
+    }
+    if (tabs > spaces)
+        return "\t";
+    let best = 4;
+    for (const s in steps)
+        if (steps[s] >= 2 && steps[s] > (steps[best] || 0))
+            best = Number(s);
+    return " ".repeat(best);
+}
+
+// The starts of t's tags that pair with another (see tagPair), in order:
+// an opening one with a closing one of its name, so `List<String>` isn't
+// taken for a tag. An array, not a Set: V4's takes time in proportion to
+// its size for each add and lookup (40,000 adds took 2 s).
+function pairedTags(t) {
+    const re = /<(\/?)([A-Za-z][^\s\/>]*)[^<>]*>/g, open = [], paired = [];
+    let m;
+    while ((m = re.exec(t))) {
+        if (!m[1]) {
+            if (m[0][m[0].length - 2] !== "/")
+                open.push({ name: m[2], at: m.index });
+            continue;
+        }
+        let k = open.length - 1;
+        while (k >= 0 && open[k].name !== m[2])
+            k--;
+        if (k >= 0) {
+            paired.push(open[k].at, m.index);
+            open.length = k;
+        }
+    }
+    return paired.sort((a, b) => a - b);
+}
+
+// The indents `=` gives the lines in `spans` ({ from, to }: the starts of
+// a span's first and last lines, in order), by the brackets (( [ {) and
+// the tags around them, as vim's C-indenting does without knowing the
+// language: a line in brackets goes `unit` deeper than the line they
+// open on, one that starts by closing them as deep as that line, a blank
+// line has none, and a line in no brackets keeps its own (a block of
+// Python or YAML stays as it is). Brackets in strings and comments
+// (those syntax.rs colors; `slashes`: // and /* */ ones) don't count. In
+// a /* */ comment, a line starting with * goes a space deeper than the
+// comment's first line, and others stay. A line's indent starts where
+// textStart(its start) says (after the listing's prefix). Gives the
+// edits, as { start, end, text }, for the lines whose indent changes.
+function reindent(t, spans, unit, slashes, textStart) {
+    // Whether a tag that pairs starts at i, which only goes on.
+    const paired = t.indexOf("</") >= 0 ? pairedTags(t) : [];
+    let next = 0;
+    const pairedAt = i => {
+        while (next < paired.length && paired[next] < i)
+            next++;
+        return paired[next] === i;
+    };
+    const tagAt = /<(\/?)([A-Za-z][^\s\/>]*)[^<>]*>/y;
+    const isWordAt = i => i >= 0 && charClass(t[i], false) === 2;
+    const blankOr = (i, signs) => i < 0 || isBlank(t[i]) || t[i] === "\n" || signs.includes(t[i]);
+    // Whether a \ escapes the character at i (an odd number of them before it).
+    const escaped = i => {
+        let n = 0;
+        while (i - n - 1 >= 0 && t.charCodeAt(i - n - 1) === 92)
+            n++;
+        return n % 2 === 1;
+    };
+    const signs = /[\/<#"'`()[\]{}]/g;
+    // In a comment going on to the next line: { close, indent }, its end
+    // and the indent of the line it starts on.
+    let comment = null;
+    // The brackets and tags open, as { kind, indent, line, level }: the
+    // indent of the line each opens on, and whether it's the first still
+    // open of its line, which a level of indent is for.
+    const stack = [], edits = [];
+    const pop = kind => {
+        for (let k = stack.length - 1; k >= 0; k--) {
+            if (stack[k].kind === kind) {
+                const e = stack[k];
+                stack.length = k;
+                return e;
+            }
+        }
+        return null;
+    };
+    const last = spans[spans.length - 1].to;
+    let s = 0;
+    for (let ls = 0, line = 0; ls <= last; line++) {
+        let le = t.indexOf("\n", ls);
+        if (le < 0)
+            le = t.length;
+        while (s < spans.length && spans[s].to < ls)
+            s++;
+        const inRange = s < spans.length && spans[s].from <= ls;
+        const ts = textStart(ls);
+        let first = ts;
+        while (first < le && isBlank(t[first]))
+            first++;
+        const old = t.slice(ts, first);
+        // The tokens of the line: brackets and tags, as { kind, close, at, end }.
+        const tokens = [], inComment = comment;
+        let i = first;
+        if (comment) {
+            const end = t.indexOf(comment.close, first);
+            if (end < 0 || end >= le) {
+                i = le;
+            } else {
+                i = end + comment.close.length;
+                comment = null;
+            }
+        }
+        while (i < le) {
+            // To the next character that can start something.
+            signs.lastIndex = i;
+            const found = signs.exec(t);
+            if (!found || found.index >= le)
+                break;
+            i = found.index;
+            const c = found[0];
+            if (slashes && c === "/" && t[i + 1] === "/" && blankOr(i - 1, ";{}"))
+                break;
+            const close = slashes && c === "/" && t[i + 1] === "*" && blankOr(i - 1, "({[,;=") ? "*/"
+                : t.startsWith("<!--", i) ? "-->" : null;
+            if (close) {
+                const end = t.indexOf(close, i + 2);
+                if (end < 0 || end >= le) {
+                    comment = { close: close, indent: null };
+                    break;
+                }
+                i = end + close.length;
+                continue;
+            }
+            if (c === "#" && blankOr(i - 1, "") && (i + 1 >= le || isBlank(t[i + 1])
+                    || t[i + 1] === "!" && t[i + 2] !== "[" || "#-=*/~:+|".includes(t[i + 1])))
+                break;
+            if ((c === "\"" || c === "`" || c === "'" && !isWordAt(i - 1)) && t[i - 1] !== "\\") {
+                // A string, if it ends on the line (a ' one at a ' no word
+                // goes on from: not it's, nor &'a).
+                let j = t.indexOf(c, i + 1);
+                while (j >= 0 && j < le && c !== "`" && escaped(j))
+                    j = t.indexOf(c, j + 1);
+                if (j >= 0 && j < le && !(c === "'" && isWordAt(j + 1))) {
+                    i = j + 1;
+                    continue;
+                }
+            }
+            const b = "([{)]}".indexOf(c);
+            if (b >= 0) {
+                tokens.push({ kind: "([{"[b % 3], close: b >= 3, at: i, end: i + 1 });
+            } else if (c === "<" && pairedAt(i)) {
+                tagAt.lastIndex = i;
+                const m = tagAt.exec(t);
+                tokens.push({ kind: "<" + m[2], close: m[1] === "/", at: i, end: i + m[0].length });
+                i += m[0].length;
+                continue;
+            }
+            i++;
+        }
+        // Its indent: as its opener's line, if it starts by closing (the
+        // outermost it closes), else a level deeper than the line the
+        // innermost level opened on.
+        let indent = null, k = 0, popped = null;
+        if (inComment) {
+            indent = inComment.indent !== null && t[first] === "*" ? inComment.indent + " " : null;
+        } else {
+            for (let at = first; k < tokens.length && tokens[k].close && tokens[k].at === at; k++) {
+                popped = pop(tokens[k].kind) || popped;
+                at = tokens[k].end;
+                while (at < le && isBlank(t[at]))
+                    at++;
+            }
+            if (popped) {
+                indent = popped.indent;
+            } else {
+                for (let e = stack.length - 1; e >= 0 && indent === null; e--)
+                    if (stack[e].level)
+                        indent = stack[e].indent + unit;
+            }
+        }
+        if (first >= le)
+            indent = "";
+        if (inRange && indent !== null && indent !== old)
+            edits.push({ start: ts, end: first, text: indent });
+        const now = inRange && indent !== null ? indent : old;
+        if (comment && comment.indent === null)
+            comment.indent = now;
+        for (; k < tokens.length; k++) {
+            if (tokens[k].close)
+                pop(tokens[k].kind);
+            else
+                stack.push({ kind: tokens[k].kind, indent: now, line: line, level: false });
+        }
+        let lowest = -1;
+        for (let e = stack.length - 1; e >= 0 && stack[e].line === line; e--)
+            lowest = e;
+        if (lowest >= 0)
+            stack[lowest].level = true;
+        ls = le + 1;
+    }
+    return edits;
 }
 
 // ---- Case ------------------------------------------------------------------

@@ -95,9 +95,10 @@ the scratchpad (see Scratchpad).
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, marked lines, hidden text,
-  the listing's prefixes, `:` and its ranges, `/`, `:s`, buffers). It drives
-  the `TextArea` through `insert`/`remove`/`select`.
-- `qml/text.js`: pure text helpers (lines, characters, words, text objects,
+  the listing's prefixes, `:` and its ranges, `/`, `:s`, surround,
+  buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
+- `qml/text.js`: pure text helpers (lines, characters, words, text objects
+  and the tags `it` and `at` find, `tagPair`, `=`'s indents, `reindent`,
   `:s`'s arguments and replacement, `code` in the help and tips), imported
   as `Txt` by Vim.qml and the views. The only state it keeps is
   where the lines of the last two long texts start (`lineIndex`), so
@@ -152,7 +153,12 @@ the scratchpad (see Scratchpad).
   `.qml`, or cxx-qt-build panics); `main.qml` and `text.js` stay lowercase.
 - `qmltestrunner -input tests` runs the tests. They load `qml/` by path, so
   anything they instantiate must not `import Koil` (only `main.qml` does, for
-  `Document` and `System`; `Editor` takes `System` as a `var`).
+  `Document` and `System`; `Editor` takes `System` as a `var`). A test's
+  keys go to the window that has them, and while another app is in front
+  (where the tests were started from), macOS takes qmltestrunner's
+  activation away about half a second in and refuses to give it back: so
+  tst_shortcuts.qml, whose keys go to a window of their own, sends them
+  through `press`, which shows that window again first (`keepKeys`).
 - `qmllint -I target/cxxqt/qml_modules qml/*.qml` should print nothing.
   cxx-qt-build writes `.qmlls.ini` (ignored by git) for qmlls.
 - Windows' Qt (6.10, see CI) can be tried on macOS, for a bug only
@@ -1493,6 +1499,56 @@ the scratchpad (see Scratchpad).
   takes what Yes and No do; without a No action it offers only [Y]es/(N)o. Saving a file that has
   no path opens the Save dialog, so `root.save(quit)` sets `quitAfterSave` to
   quit once it's saved (also for `:wq`).
+- **Surround** (Surround in Vim.qml, `parseSurround`): vim-surround's keys,
+  `ys{motion}{pair}` (`yss` the line, after its indent), `ds{target}`,
+  `cs{target}{pair}` and `S{pair}` in visual mode, which takes the place of
+  vim's visual `S` (change lines; marked lines' `S` is still that, as
+  marked lines are normal mode, which vim-surround leaves `S` to). `yS`,
+  `ySS`, `cS` and `S` on lines (`gS` on characters) put the pair on lines
+  of its own and what's inside a level deeper, as `>` indents it
+  (`wrapEdits`), then for brackets and tags reindent what's inside and
+  the closing line as `=` does (`surroundWith`), as vim-surround's
+  `'[=']` does: not for a quote or a sign, which `=` knows nothing of, so
+  it keeps the `>`'s level. A linewise motion and `gS` on lines put it on
+  lines of its own, not deeper, and nothing is reindented (vim-surround
+  reindents only with a language's indent). Pairs (`surroundPair`)
+  and targets (`surroundTarget`) are vim-surround's, but for `p`, `s` as a
+  target, `f`, `<C-t>` and `/` as a comment: `/` is a sign like `*`. A
+  parsed one is an action, `surround`, with `cmd.surround` holding its
+  motion or text object (so `execute` doesn't take it for a motion), and
+  runs at every cursor; `operatorRange` (out of `executeOperator`) gives
+  the range `ys` goes over. Each is one `replaceRanges` of the pair's
+  spans only, so the hidden text inside stays, and none touches a
+  register (vim-surround puts its own back). Over lines, `ds` takes a
+  bracket alone on its line away with its line (`ysip)` then `ds)` gives
+  the paragraph back), and a pair's space inside isn't put next to a line
+  break (`cs)(` on a block that's on its own lines). A tag (`<` or `t`) is
+  asked for in the command line, as its kind `"<"` (`askTag`, with its
+  own history; `>` ends it as Enter does, as vim-surround's `cnoremap`),
+  before anything changes, so Esc leaves no undo step, and the command
+  runs again with `surround.tag` (`finishTag`), which `.` then repeats
+  without asking. From visual mode, it keeps the selection
+  (`surround.selection`, drawn as `visualShown` meanwhile), and isn't
+  repeated, as visual commands aren't.
+- **Reindent** (`=`, `Txt.reindent`): vim's `=` operator (`==`, `=ip`,
+  visual mode, marked lines), as its C-indenting does without a language,
+  but by brackets and tags only: a line in them goes a level deeper than
+  the line the innermost opens on (only the first still open on a line
+  makes a level: `foo({` is one), one starting by closing them as deep as
+  the line the outermost it closes opens on, and a blank line has none.
+  A line in none keeps its indent, so Python, YAML and Markdown, whose
+  levels brackets don't show, aren't flattened (vim's `gg=G` puts every
+  top-level line at column 0). Brackets in strings and comments don't
+  count, read as syntax.rs reads them (`'` as an apostrophe or a
+  lifetime's isn't a string; no `//` in Python, by `fileName`), and only
+  tags with a closing tag of their name count (`pairedTags`), so
+  `List<String>` and `<br>` don't. It reads from the text's start, as a
+  bracket that's open can be anywhere above (0.3 s for 120,000 lines),
+  jumping between the characters that can start something with a regex
+  (`signs`). A level is the text's (`indentUnit`): a tab if most indented
+  lines start with one, else 2, 4 or 8 spaces, the step lines most often
+  go in by, if twice or more (a text to reindent can have one stray), else
+  4; surround's levels use it too, `>` doesn't.
 - **Substitute** (`:s`, Substitute in Vim.qml): vim's, with `/`'s patterns
   (JavaScript regexes, smart case unless the `i` or `I` flag says) through
   the text without its prefixes, as a search (a line starts at its name,
@@ -1865,7 +1921,9 @@ the scratchpad (see Scratchpad).
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The
   engine has no `Array.prototype.flatMap` nor `String.prototype.trimEnd`;
-  `?.` and `??` work. A `var`
+  `?.` and `??` work. A `Set` takes time in proportion to its size for
+  each add and lookup (40,000 adds took 2 s, 340,000 lookups 31 s), so
+  use a sorted array or an object of keys. A `var`
   property bound to objects of constants (`dark ? { create: "#73c991" } :
   { … }`) came out undefined in the compiled app, though qmltestrunner had
   it (`regexColors`, with a `String(text)` in it, works), so

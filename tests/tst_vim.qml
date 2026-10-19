@@ -1057,6 +1057,310 @@ TestCase {
         compare(editCommands.count, 5);
     }
 
+    // ---- Surround ------------------------------------------------------------
+
+    // vim-surround's ys, ds and cs, with the cursor on the pair's start,
+    // and no register changed.
+    function test_surround() {
+        load("one two three");
+        keys("wysiw)");
+        compare(render(), "one (two) three");
+        compare(vim.cursor, 4);
+        keys("ds)");
+        compare(render(), "one two three");
+        compare(vim.cursor, 4);
+        // An opening bracket puts a space inside, and takes the blanks
+        // inside away.
+        keys("ysiw(");
+        compare(render(), "one ( two ) three");
+        keys("ds(");
+        compare(render(), "one two three");
+        // A word's blanks after it stay out.
+        keys("ysaw]");
+        compare(render(), "one [two] three");
+        keys("cs]{");
+        compare(render(), "one { two } three");
+        keys("cs{\"");
+        compare(render(), "one \"two\" three");
+        keys("cs\"'");
+        compare(render(), "one 'two' three");
+        keys("ds'");
+        compare(render(), "one two three");
+        keys("u");
+        compare(render(), "one 'two' three");
+        keys("yss*");
+        compare(render(), "*one 'two' three*");
+        compare(vim.cursor, 0);
+        // Another sign is the nearest ones on the line.
+        keys("fwds*");
+        compare(render(), "one 'two' three");
+        compare(JSON.stringify(vim.registers), "{}");
+        // Aliases, a space first, and s.
+        load("ab");
+        keys("ysiwb");
+        compare(render(), "(ab)");
+        keys("csbB");
+        compare(render(), "{ab}");
+        keys("csBr");
+        compare(render(), "[ab]");
+        keys("csra");
+        compare(render(), "<ab>");
+        keys("cs> )");
+        compare(render(), "( ab )");
+        keys("ds )");
+        compare(render(), "ab");
+        load("f(x)");
+        keys("fxcsbs");
+        compare(render(), "f x");
+        // A word has nothing to take away: csw is ysiw.
+        load("ab cd");
+        keys("csw)");
+        compare(render(), "(ab) cd");
+        keys("dsw");
+        compare(render(), "(ab) cd");
+        // The second pair out, by either count.
+        load("f(a(b)c)");
+        keys("fbds2(");
+        compare(render(), "fa(b)c");
+        load("f(a(b)c)");
+        keys("fb2ds(");
+        compare(render(), "fa(b)c");
+        // yss over lines, from the first one's indent.
+        load("  a\nb\nc");
+        keys("2yss)");
+        compare(render(), "  (a\nb)\nc");
+        // Nothing for keys that put nothing, or a pair that isn't there.
+        load("a b");
+        keys("ysiwq");
+        compare(render(), "a b");
+        keys("ds(ds*ds\"");
+        compare(render(), "a b");
+        keys("yss)");
+        compare(render(), "(a b)");
+    }
+
+    // "." repeats a surround, and it's at every cursor.
+    function test_surroundRepeat() {
+        load("a b c");
+        keys("ysiw\"W.W.");
+        compare(render(), "\"a\" \"b\" \"c\"");
+        keys("0ds\"W.");
+        compare(render(), "a b \"c\"");
+        load("a\nb");
+        vim.toggleCursor(2);
+        keys("ysiw]");
+        compare(render(), "[a]\n[b]");
+        keys("<Esc>u");
+        compare(render(), "a\nb");
+    }
+
+    // Over lines: a linewise motion puts the pair on lines of its own, a
+    // bracket alone on its line goes with it, and yS, ySS and S on lines
+    // indent what's inside.
+    function test_surroundLines() {
+        load("one\ntwo\n\nthree");
+        keys("ysip)");
+        compare(render(), "(\none\ntwo\n)\n\nthree");
+        compare(vim.cursor, 0);
+        keys("ds)");
+        compare(render(), "one\ntwo\n\nthree");
+        load("f(\n    a\n)");
+        keys("jds)");
+        compare(render(), "f\n    a");
+        // No space inside next to a line break.
+        load("f(\n  a\n)");
+        keys("jcs)[");
+        compare(render(), "f[\n  a\n]");
+        load("  a b");
+        keys("ySS}");
+        compare(render(), "  {\n      a b\n  }");
+        load("foo bar");
+        keys("wySiw)");
+        compare(render(), "foo (\n    bar\n)");
+        // Brackets have what's inside reindented by them, as = does.
+        load("x\n\ty\nz");
+        keys("jySj]");
+        compare(render(), "x\n\t[\n\t\ty\n\t\tz\n\t]");
+        keys("ds]");
+        compare(render(), "x\n\t\ty\n\t\tz");
+        load("a\n      b");
+        keys("VjS{");
+        compare(render(), "{\n    a\n    b\n}");
+        // Another pair, which = knows nothing of, a level deeper as > goes.
+        load("a\n  b");
+        keys("VjS\"");
+        compare(render(), "\"\n    a\n      b\n\"");
+        load("<p>x</p>");
+        keys("ySS<");
+        keys("div>");
+        compare(render(), "<div>\n    <p>x</p>\n</div>");
+        load("a(b)");
+        keys("fbcS([");
+        compare(render(), "a[\n    b\n]");
+    }
+
+    // S in visual mode: around the characters, or the lines on lines of
+    // their own (indented, but by gS), or each line's part of a block.
+    function test_surroundVisual() {
+        load("one two");
+        keys("wveS'");
+        compare(render(), "one 'two'");
+        compare(vim.mode, "normal");
+        compare(vim.cursor, 4);
+        load("a\nb");
+        keys("VjS)");
+        compare(render(), "(\n    a\n    b\n)");
+        load("a\nb");
+        keys("VjgS)");
+        compare(render(), "(\na\nb\n)");
+        load("one two");
+        keys("wvegS)");
+        compare(render(), "one (\n    two\n)");
+        load("abc\nde\nfgh");
+        keys("l<C-v>ljjS)");
+        compare(render(), "a(bc)\nd(e )\nf(gh)");
+        compare(vim.cursor, 1);
+    }
+
+    // A tag is asked for, ends with > or Enter, and cs keeps the old one's
+    // attributes unless it ended with >. "." doesn't ask again.
+    function test_surroundTags() {
+        load("one two");
+        keys("wysiw<");
+        compare(vim.commandLine, "<");
+        keys("em>");
+        compare(render(), "one <em>two</em>");
+        compare(vim.commandLine, "");
+        compare(vim.cursor, 4);
+        keys("cst<");
+        keys("b class=\"x\"<CR>");
+        compare(render(), "one <b class=\"x\">two</b>");
+        keys("cst<");
+        keys("i<CR>");
+        compare(render(), "one <i class=\"x\">two</i>");
+        keys("cst<");
+        keys("u>");
+        compare(render(), "one <u>two</u>");
+        keys("cst\"");
+        compare(render(), "one \"two\"");
+        keys("u");
+        compare(render(), "one <u>two</u>");
+        keys("dst");
+        compare(render(), "one two");
+        load("a b");
+        keys("ysiwt");
+        keys("br/<CR>");
+        compare(render(), "<br />a b");
+        load("a b");
+        keys("ysiw<");
+        keys("i>W.");
+        compare(render(), "<i>a</i> <i>b</i>");
+        // Esc, or nothing typed, puts in none.
+        load("a");
+        keys("ysiw<");
+        keys("em<Esc>ysiw<");
+        keys("<CR>");
+        compare(render(), "a");
+        compare(vim.commandLine, "");
+        // From visual mode, on the selection, which stays drawn meanwhile.
+        load("one two");
+        keys("wveS<");
+        compare(vim.mode, "normal");
+        verify(vim.visualShown !== null);
+        keys("b>");
+        compare(render(), "one <b>two</b>");
+        // Earlier tags come back with Up.
+        keys("0ysiw<");
+        keys("<Up><CR>");
+        compare(render(), "<b>one</b> <b>two</b>");
+    }
+
+    // it and at: in the tags around the cursor, or with them.
+    function test_tagObjects() {
+        load("<a><b>x</b> <br> y</a>");
+        keys("fxdit");
+        compare(render(), "<a><b></b> <br> y</a>");
+        keys("dat");
+        compare(render(), "<a> <br> y</a>");
+        keys("fyvity");
+        compare(vim.registers["0"].text, " <br> y");
+        compare(Txt.tagPair("<a>x</a>", 1, 2), null);
+        compare(Txt.tagPair("<a><b/>x</a>", 7, 1), { o1: 0, o2: 3, c1: 8, c2: 12 });
+    }
+
+    // In the listing, a pair goes after a line's prefix, and lines it's
+    // put on get one, while the entries keep their IDs.
+    function test_surroundPrefixes() {
+        loadListing("M  one\nC  two");
+        keys("yss)");
+        compare(render(), "<M:h1>  (one)\n<C:h2>  two");
+        keys("ysj]");
+        compare(render(), "   [\n<M:h1>  (one)\n<C:h2>  two\n   ]");
+        keys("ds]");
+        compare(render(), "<M:h1>  (one)\n<C:h2>  two");
+        keys("ds)");
+        compare(render(), "<M:h1>  one\n<C:h2>  two");
+    }
+
+    // = reindents lines by their brackets and tags: in them a level deeper
+    // than the line they open on, one that starts by closing them as deep
+    // as that line, a blank one with none, and one in none as it is.
+    function test_reindent() {
+        load("f() {\nx(\n1,\n    2\n        )\n}\n");
+        keys("gg=G");
+        compare(render(), "f() {\n    x(\n        1,\n        2\n    )\n}\n");
+        compare(vim.message, "6 lines indented");
+        compare(vim.cursor, 0);
+        keys("u");
+        compare(render(), "f() {\nx(\n1,\n    2\n        )\n}\n");
+        load("{\na\nb\n}");
+        keys("j==");
+        compare(render(), "{\n    a\nb\n}");
+        keys("j2==");
+        compare(render(), "{\n    a\n    b\n}");
+        load("{\na\nb\n}");
+        keys("jVj=");
+        compare(render(), "{\n    a\n    b\n}");
+        compare(vim.cursor, 6);
+        load("{\na\nb\nc\n}");
+        keys("jmjjm=");
+        compare(render(), "{\n    a\nb\n    c\n}");
+        // Python, outside brackets, stays; a blank line goes.
+        load("def f():\n    return (1,\n2)\n  \nx = 1");
+        keys("gg=G");
+        compare(render(), "def f():\n    return (1,\n        2)\n\nx = 1");
+        // Not brackets in strings and comments, nor an apostrophe's or a
+        // lifetime's quote for a string.
+        load("a(\n\")\",\n// )\n/* ( */\n'(',\nit's (\nb)\n)");
+        keys("gg=G");
+        compare(render(), "a(\n    \")\",\n    // )\n    /* ( */\n    '(',\n    it's (\n        b)\n)");
+        load("fn f<'a>(x: &'a str) {\nb\n}");
+        keys("gg=G");
+        compare(render(), "fn f<'a>(x: &'a str) {\n    b\n}");
+        // A comment's lines starting with *.
+        load("{\n/**\n* doc\n*/\n}");
+        keys("gg=G");
+        compare(render(), "{\n    /**\n     * doc\n     */\n}");
+        // Tags that pair, not a type's <>.
+        load("<ul>\n<li>a</li>\n<li>\nb\n</li>\n</ul>\nList<String> x;\ny");
+        keys("gg=G");
+        compare(render(), "<ul>\n    <li>a</li>\n    <li>\n        b\n    </li>\n</ul>\nList<String> x;\ny");
+        // A level as the text has them, if lines show it twice.
+        load("a {\n  b {\n    c\n  }\n}\nd {\ne\n}");
+        keys("gg=G");
+        compare(render(), "a {\n  b {\n    c\n  }\n}\nd {\n  e\n}");
+        load("a {\n  b\n}\nc {\nd\n}");
+        keys("gg=G");
+        compare(render(), "a {\n    b\n}\nc {\n    d\n}");
+        load("a {\n\tb\nc\n}");
+        keys("gg=G");
+        compare(render(), "a {\n\tb\n\tc\n}");
+        // After the listing's prefixes.
+        loadListing("M  a(\nC  b\n   )");
+        keys("gg=G");
+        compare(render(), "<M:h1>  a(\n<C:h2>      b\n   )");
+    }
+
     // ---- Ranges and shell commands -------------------------------------------
 
     // The line the cursor is on.
@@ -2672,7 +2976,7 @@ TestCase {
         vim.registersRequested.connect(show);
         vim.lastInsert = "";
         vim.lastSearch = null;
-        vim.history = { ":": [], "/": [] };
+        vim.history = { ":": [], "/": [], "<": [] };
         keys("yyjdw\"ayy");
         compare(vim.registerList(""), [["l  \"\"", "x^J"], ["l  \"0", "one^J"], ["l  \"a", "x^J"],
             ["c  \"-", "two^I"]]);
@@ -3764,6 +4068,7 @@ TestCase {
         shows("gs", "The listing", "`gs`");
         shows("zs", "Keys starting with z", "`zs`  `ze`");
         shows("ZZ", "Keys starting with z", "`ZZ`");
+        shows("gS", "Surround", "`S`  `gS`");
         shows("enter", "The listing", "`Enter`");
         // A key no section is for, where it's written.
         shows("J", "Marked lines", "`c`  `p`  `J`");

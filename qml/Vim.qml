@@ -199,7 +199,7 @@ QtObject {
     signal nothingToUndo()
 
     readonly property bool isMac: Qt.platform.os === "osx"
-    readonly property var operators: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!", "g!"]
+    readonly property var operators: ["d", "c", "y", ">", "<", "=", "g~", "gu", "gU", "g?", "!", "g!"]
     readonly property var motions: ["h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ",
         "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G", "gj", "gk",
         ";", ",", "%", "{", "}", "+", "-", "_", "<CR>", "<S-CR>", "|", "n", "N", "*", "#", "H", "M", "L",
@@ -209,13 +209,13 @@ QtObject {
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
         "<C-x>", "q", "@", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m"]
     readonly property var visualActions: ["<Esc>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D", "s",
-        "C", "S", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>",
+        "C", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "I", "A", "<C-e>", "<C-y>",
         "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m"]
     // While lines are marked, the keys that act on them, as they act on a
     // linewise selection in visual mode (see Marked lines): an operator at
     // once. The others are normal mode's, so u still undoes, and i and o
     // type at the cursor.
-    readonly property var markedActions: ["d", "c", "y", ">", "<", "g~", "gu", "gU", "g?", "!", "g!", "x", "<Del>",
+    readonly property var markedActions: ["d", "c", "y", ">", "<", "=", "g~", "gu", "gU", "g?", "!", "g!", "x", "<Del>",
         "X", "D", "s", "S", "C", "R", "Y", "~", "r", "J", "gJ", "p", "P", "I", "A", "gI", ":"]
     // Scroll the view sideways (see scrollSideways).
     readonly property var sideScrolls: ["zh", "zl", "zH", "zL", "zs", "ze"]
@@ -232,9 +232,9 @@ QtObject {
     readonly property string clipboardSession: Math.random().toString(36).slice(2)
     // Normal-mode commands that modify the text (and so can be repeated with ".").
     readonly property var changeActions: ["i", "a", "I", "A", "gI", "o", "O", "x", "<Del>", "X", "s", "S",
-        "C", "D", "p", "P", "J", "gJ", "~", "r", "R", "<C-a>", "<C-x>"]
+        "C", "D", "p", "P", "J", "gJ", "~", "r", "R", "<C-a>", "<C-x>", "surround"]
     readonly property var textObjects: ["w", "W", "p", "\"", "'", "`", "(", ")", "b", "[", "]", "{", "}",
-        "B", "<", ">"]
+        "B", "<", ">", "t"]
 
     property var keys: []
     property var registers: ({})
@@ -343,10 +343,14 @@ QtObject {
     property string lastMacro: ""
     // As vim's 'maxmapdepth': macros running macros, past this, fail.
     readonly property int maxMacroDepth: 1000
-    // Command-line history: ":" commands, and "/" and "?" searches together.
-    property var history: ({ ":": [], "/": [] })
+    // Command-line history: ":" commands, "/" and "?" searches together,
+    // and the tags typed for a surround ("<", see askTag).
+    property var history: ({ ":": [], "/": [], "<": [] })
     property int historyIndex: -1 // -1 while not browsing
     property string historyTyped: ""
+    // While the command line asks for a surround's tag ("<"): the command
+    // it's for (see askTag).
+    property var surroundTag: null
     // While a search is typed: where Enter would jump (-1 if nowhere), and
     // the view to go back to if the search is cancelled.
     property int searchTarget: -1
@@ -963,6 +967,16 @@ QtObject {
             return true;
         }
         historyIndex = -1;
+        // A surround's tag ends with its > too, as vim-surround's.
+        if (commandLine[0] === "<" && (tok === "<CR>" || tok === ">")) {
+            if (tok === ">")
+                editCommandLine(c, c, ">");
+            const line = commandLine;
+            commandLine = "";
+            addToHistory(line);
+            finishTag(line.slice(1));
+            return true;
+        }
         if (tok === "<Esc>" || tok === "<C-c>") {
             commandLine = "";
         } else if (tok === "<CR>") {
@@ -999,7 +1013,7 @@ QtObject {
     }
 
     function historyList(kind) {
-        return history[kind === ":" ? ":" : "/"];
+        return history[kind === "?" ? "/" : kind];
     }
 
     function addToHistory(line) {
@@ -1154,6 +1168,8 @@ QtObject {
             if (j >= keys.length)
                 return more;
             const k = keys[j];
+            if (!c2.count && (k === "s" && ["y", "d", "c"].includes(cmd.op) || k === "S" && ["y", "c"].includes(cmd.op)))
+                return parseSurround(keys, j + 1, cmd);
             const last = cmd.op[cmd.op.length - 1];
             if (k === last) {
                 cmd.linewise = true;
@@ -1179,6 +1195,16 @@ QtObject {
             if (m.status !== "ok")
                 return m;
             cmd.motion = m.motion;
+            return { status: "ok", cmd };
+        }
+
+        // vim-surround's S and gS (see Surround).
+        if (visual && (w.name === "S" || w.name === "gS")) {
+            const r = parseReplacement(keys, w.next);
+            if (r.status !== "ok")
+                return r;
+            cmd.action = "surround";
+            cmd.surround = { kind: "add", with: r.with, pad: r.pad, g: w.name === "gS" };
             return { status: "ok", cmd };
         }
 
@@ -1251,11 +1277,86 @@ QtObject {
             const ch = charArg(keys[w.next], false);
             if (ch === null)
                 return { status: "bad" };
-            return { status: "ok", motion: { name: w.name, ch } };
+            return { status: "ok", motion: { name: w.name, ch }, next: w.next + 1 };
         }
         if (motions.includes(w.name))
-            return { status: "ok", motion: { name: w.name } };
+            return { status: "ok", motion: { name: w.name }, next: w.next };
         return { status: "bad" };
+    }
+
+    // vim-surround's keys from keys[i], after the operator and the s (or S)
+    // that start them (see Surround): ys{motion}{pair} (yss the line),
+    // ds{target}, cs{target}{pair}, and yS, ySS and cS, which put what's
+    // inside on lines of its own. A count can go before the motion or the
+    // target, as for an operator.
+    function parseSurround(keys, i, cmd) {
+        const more = { status: "more" }, bad = { status: "bad" }, ok = { status: "ok", cmd };
+        const s = { kind: { y: "add", d: "delete", c: "change" }[cmd.op], indented: keys[i - 1] === "S" };
+        delete cmd.op;
+        cmd.action = "surround";
+        cmd.surround = s;
+        const c = readCount(keys, i);
+        if (c.count)
+            cmd.count = Math.max(cmd.count, 1) * c.count;
+        let j = c.next;
+        if (j >= keys.length)
+            return more;
+        const k = keys[j];
+        if (s.kind === "add") {
+            if (k === "s" || s.indented && k === "S") {
+                s.line = true;
+                j++;
+            } else if (k === "i" || k === "a") {
+                if (j + 1 >= keys.length)
+                    return more;
+                if (!textObjects.includes(keys[j + 1]))
+                    return bad;
+                s.textObj = { around: k === "a", ch: keys[j + 1] };
+                j += 2;
+            } else {
+                const m = parseMotion(keys, j);
+                if (m.status !== "ok")
+                    return m;
+                s.motion = m.motion;
+                j = m.next;
+            }
+        } else {
+            // A space first trims the blanks inside, as an opening bracket
+            // does.
+            if (k === " ") {
+                s.trim = true;
+                if (++j >= keys.length)
+                    return more;
+            }
+            const target = keys[j++];
+            if (!(target.length === 1 && ("b()B{}r[]a<>t\"'`wW".includes(target) || /^[!-\/:-@\[-`{-~ ]$/.test(target))))
+                return bad;
+            s.target = target;
+            s.trim = s.trim || "([{<".includes(target);
+            if (s.kind === "delete")
+                return ok;
+        }
+        const r = parseReplacement(keys, j);
+        if (r.status !== "ok")
+            return r;
+        s.with = r.with;
+        s.pad = r.pad;
+        return ok;
+    }
+
+    // What ys, cs and S put around (see surroundPair), from keys[i]: a key
+    // that isn't a letter (but b, B, r, a, s and t), or a space and one,
+    // which puts a space inside too. { status, with, pad }.
+    function parseReplacement(keys, i) {
+        const pad = keys[i] === " ";
+        if (pad)
+            i++;
+        if (i >= keys.length)
+            return { status: "more" };
+        const k = keys[i];
+        if (isSpecial(k) || /[A-Za-z]/.test(k) && !/^[bBrast]$/.test(k))
+            return { status: "bad" };
+        return { status: "ok", with: k, pad: pad };
     }
 
     // A command name: one key, or two for the g, z and Z prefixes.
@@ -1306,6 +1407,11 @@ QtObject {
             runKeys(macroKeys(cmd.shortcut.macro), Math.max(cmd.count, 1), cmd.shortcut.label);
             return;
         }
+        // A tag to put in is asked for first, then the command runs with it.
+        if (cmd.surround && (cmd.surround.with === "<" || cmd.surround.with === "t") && cmd.surround.tag === undefined) {
+            askTag(cmd);
+            return;
+        }
         // On the marked lines, but not for "." repeating a change (made at
         // the cursor: a marked line's isn't repeated).
         const marking = !isVisual && !replaying && marked.length > 0 && markedActions.includes(cmd.action);
@@ -1317,15 +1423,24 @@ QtObject {
         }
         const changing = marking ? !["y", "Y", ":", "!", "g!"].includes(cmd.action) : isChange(cmd);
         const wasVisual = isVisual;
+        // A selection's surround, once its tag is typed, isn't repeated, as
+        // visual mode's commands aren't.
+        const selected = cmd.surround && cmd.surround.selection;
         if (changing) {
             beginChange();
-            if (!isVisual && !replaying && !marking)
+            if (!isVisual && !replaying && !marking && !selected)
                 dot = { cmd: Object.assign({}, cmd), insertKeys: [] };
         }
         if (marking)
             executeMarked(cmd);
         else if (isVisual)
             executeVisual(cmd);
+        else if (selected)
+            surroundSelection(cmd.surround.selection, cmd.surround);
+        else if (cmd.surround && cursors.length)
+            atEveryCursor(() => surround(cmd));
+        else if (cmd.surround)
+            surround(cmd);
         else if (cmd.op && cursors.length && cmd.op !== "!" && cmd.op !== "g!")
             atEveryCursor(() => executeOperator(cmd));
         else if (cmd.op)
@@ -1391,7 +1506,6 @@ QtObject {
 
     function executeOperator(cmd) {
         const t = bufferText();
-        const n = t.length;
         const count = Math.max(cmd.count, 1);
         if (cmd.op === "d" && cmd.motion && ["h", "<Left>", "<BS>"].includes(cmd.motion.name)) {
             // dh and X at a name's start clear its line's icon (the ID
@@ -1405,6 +1519,21 @@ QtObject {
                 return;
             }
         }
+        const range = operatorRange(t, cmd, count);
+        if (!range) {
+            typeahead = [];
+            return;
+        }
+        applyOperator(cmd.op, range, cmd.reg, count,
+            range.linewise ? Math.min(cursor, range.target) : range.start);
+    }
+
+    // What operator `cmd.op` goes over from the cursor, by cmd's motion or
+    // text object, or the operator again (linewise), as { start, end,
+    // linewise, regOne, target }, where `target` is where the motion went.
+    // Null if it fails.
+    function operatorRange(t, cmd, count) {
+        const n = t.length;
         let range, target = cursor;
         if (cmd.linewise) {
             let le = Txt.lineEnd(t, cursor);
@@ -1413,10 +1542,8 @@ QtObject {
             range = { start: Txt.lineStart(t, cursor), end: Math.min(le + 1, n), linewise: true };
         } else if (cmd.textObj) {
             range = textObject(t, cursor, cmd.textObj, count);
-            if (!range) {
-                typeahead = [];
-                return;
-            }
+            if (!range)
+                return null;
             target = range.start;
         } else {
             let r;
@@ -1431,10 +1558,8 @@ QtObject {
             } else {
                 r = motion(t, cursor, cmd.motion, count, cmd.count > 0, true);
             }
-            if (!r) {
-                typeahead = [];
-                return;
-            }
+            if (!r)
+                return null;
             target = r.pos;
             const a = Math.min(cursor, r.pos), b = Math.max(cursor, r.pos);
             if (r.type === "linewise")
@@ -1444,8 +1569,8 @@ QtObject {
             // Deleting with these always fills "1, even within a line, as in Vi.
             range.regOne = ["%", "n", "N", "{", "}"].includes(cmd.motion.name);
         }
-        applyOperator(cmd.op, range, cmd.reg, count,
-            range.linewise ? Math.min(cursor, target) : range.start);
+        range.target = target;
+        return range;
     }
 
     function applyOperator(op, range, reg, count, yankCursor) {
@@ -1480,6 +1605,9 @@ QtObject {
         case ">":
         case "<":
             shiftLines(range, op === ">" ? 1 : -1, 1);
+            break;
+        case "=":
+            reindentLines([range]);
             break;
         case "!":
         case "g!": {
@@ -1699,6 +1827,11 @@ QtObject {
         }
         const a = cmd.action;
         lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+        if (a === "surround") {
+            setMode("normal");
+            surroundSelection(lastVisual, cmd.surround);
+            return;
+        }
         if (a === "<Esc>" || visualModes[a] === mode) {
             setMode("normal");
             setCursor(clampNormal(t, cursor));
@@ -1792,7 +1925,6 @@ QtObject {
             applyOperator("c", range, cmd.reg);
             break;
         case "C":
-        case "S":
         case "R":
             applyOperator("c", lineRange, cmd.reg);
             break;
@@ -1805,6 +1937,9 @@ QtObject {
         case ">":
         case "<":
             shiftLines(range, a === ">" ? 1 : -1, count);
+            break;
+        case "=":
+            reindentLines([range]);
             break;
         case "~":
         case "g~":
@@ -2792,6 +2927,9 @@ QtObject {
                 const text = shiftedLines(t, b.start, b.end, a === ">" ? 1 : -1, Math.max(cmd.count, 1));
                 return { start: b.start, end: b.end, text: text, entries: carriedHidden(b.start, b.end, text) };
             }), true);
+            break;
+        case "=":
+            reindentLines(blocks);
             break;
         case "~":
         case "g~":
@@ -4479,6 +4617,22 @@ QtObject {
         setCursor(start + text.length - 1);
     }
 
+    // =: the lines of `ranges` ({ start, end }, in order and apart, as an
+    // operator's) reindented by their brackets and tags (see Txt.reindent),
+    // as one edit, with the cursor on the first one's first character that
+    // isn't blank, as vim's.
+    function reindentLines(ranges) {
+        const t = bufferText();
+        const spans = ranges.map(r => ({ from: Txt.lineStart(t, r.start),
+            to: Txt.lineStart(t, Math.max(r.start, r.end - (r.end > r.start && t[r.end - 1] === "\n" ? 1 : 0))) }));
+        const edits = Txt.reindent(t, spans, Txt.indentUnit(t), !/\.py[iw]?$/i.test(fileName), ls => prefixEnd(t, ls));
+        replaceAll(edits);
+        const u = bufferText(), lines = spans.reduce((n, s) => n + Txt.lineOf(t, s.to) - Txt.lineOf(t, s.from) + 1, 0);
+        setCursor(clampNormal(u, firstNonBlank(u, spans[0].from)));
+        if (lines > 2)
+            showMessage(lines + " lines indented");
+    }
+
     function shiftLines(range, dir, times) {
         const t = bufferText();
         const s = Txt.lineStart(t, range.start);
@@ -4518,6 +4672,289 @@ QtObject {
     function caseChanged(s, how) {
         return how === "u" ? s.toLowerCase() : how === "U" ? s.toUpperCase()
             : how === "?" ? Txt.rot13(s) : Txt.toggleCase(s);
+    }
+
+    // ---- Surround ----------------------------------------------------------
+    // vim-surround's keys (see parseSurround): ys{motion}{pair} puts a pair
+    // around what the motion goes over (ysiw) makes `word` `(word)`, yss
+    // the line), ds{target} takes the pair around the cursor away, cs
+    // {target}{pair} changes it, and S in visual mode puts one around the
+    // selection. yS, ySS and cS (and S on lines, gS on characters) put the
+    // pair on lines of its own, what's inside one level deeper. Pairs are
+    // surroundPair's, targets surroundTarget's, and a tag is asked for
+    // first (askTag). Each is one edit, of the pair's spans only
+    // (replaceRanges), so what's inside keeps its hidden text, and "."
+    // repeats it. Unlike vim-surround's, they leave the registers alone.
+
+    // Opens the command line's "<", for the tag `cmd` puts in (see
+    // execute), which ">" or Enter ends (see finishTag). From visual mode,
+    // the selection is kept for it, and stays drawn meanwhile, as for ":".
+    function askTag(cmd) {
+        if (isVisual) {
+            lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+            cmd = Object.assign({}, cmd, { surround: Object.assign({}, cmd.surround, { selection: lastVisual }) });
+            setMode("normal");
+            setCursor(clampNormal(bufferText(), cursor));
+            visualShown = lastVisual;
+        }
+        surroundTag = cmd;
+        openCommandLine("<");
+    }
+
+    // The tag typed for surroundTag: runs its command with it, or nothing
+    // for none.
+    function finishTag(text) {
+        const cmd = surroundTag;
+        surroundTag = null;
+        if (cmd && text.replace(/>+$/, "").trim())
+            execute(Object.assign({}, cmd, { surround: Object.assign({}, cmd.surround, { tag: text }) }));
+    }
+
+    // What `s` (a command's surround) puts before and after what it goes
+    // around, as { open, close }, as vim-surround's do: ) b } B ] r > a
+    // their brackets, ( { [ with a space inside, s a space before, < and t
+    // the tags of `s.tag` (as typed: `a href="x"` gives `<a href="x">` and
+    // `</a>`, `br/` a `<br />` alone) with `attributes` (the old tag's, for
+    // cs) unless it ends with >, and any other key itself on both sides.
+    // With `s.pad` (a space typed first), a space inside each.
+    function surroundPair(s, attributes) {
+        const pairs = "b()B{}r[]a<>", k = s.with, i = pairs.indexOf(k);
+        let open = k, close = k;
+        if (k === "<" || k === "t") {
+            const tag = s.tag.replace(/>+$/, ""), attrs = /[^>]$/.test(s.tag) && attributes || "";
+            if (tag.endsWith("/")) {
+                open = "<" + tag.slice(0, -1).replace(/\s+$/, "") + attrs + " />";
+                close = "";
+            } else {
+                open = "<" + tag + attrs + ">";
+                close = "</" + tag.replace(/\s[\s\S]*$/, "") + ">";
+            }
+        } else if (k === "s") {
+            open = " ";
+            close = "";
+        } else if (i >= 0) {
+            const space = i % 3 === 1 ? " " : "", at = i - i % 3;
+            open = pairs[at + 1] + space;
+            close = space + pairs[at + 2];
+        }
+        return s.pad ? { open: open + " ", close: " " + close } : { open: open, close: close };
+    }
+
+    // The pair around p that ds and cs take away, by its target `ch`, as
+    // { o1, o2, c1, c2 }: [o1, o2) before what's inside and [c1, c2) after
+    // it. ) b } B ] r > a and their opening brackets are the `count`th
+    // brackets out (as a( is), t the tags (as at), a quote the quotes
+    // around p on its line (or after it, as a" finds), w and W the word
+    // (there's nothing to take away), and another sign the nearest ones on
+    // p's line before and after p (or at it). Null if there's none.
+    function surroundTarget(t, p, ch, count) {
+        if (ch === "w" || ch === "W") {
+            const r = Txt.textObject(t, p, { around: false, ch: ch }, 1);
+            return { o1: r.start, o2: r.start, c1: r.end, c2: r.end };
+        }
+        if (ch === "t")
+            return Txt.tagPair(t, p, count);
+        if ("b()B{}r[]a<>".includes(ch)) {
+            const r = Txt.textObject(t, p, { around: true, ch: { a: ">", r: "]" }[ch] || ch }, count);
+            return r && { o1: r.start, o2: r.start + 1, c1: r.end - 1, c2: r.end };
+        }
+        if ("\"'`".includes(ch)) {
+            const r = Txt.textObject(t, p, { around: false, ch: ch }, 1);
+            return r && { o1: r.start - 1, o2: r.start, c1: r.end, c2: r.end + 1 };
+        }
+        const ls = Txt.lineStart(t, p);
+        let o = p > ls ? t.lastIndexOf(ch, p - 1) : -1;
+        if (o < ls) {
+            if (t[p] !== ch)
+                return null;
+            o = p;
+        }
+        const c = t.indexOf(ch, o === p ? p + 1 : p);
+        return c >= 0 && c < Txt.lineEnd(t, p) ? { o1: o, o2: o + 1, c1: c, c2: c + 1 } : null;
+    }
+
+    // Runs `cmd`'s surround at the cursor: ys, ds or cs (see Surround).
+    function surround(cmd) {
+        const t = bufferText(), s = cmd.surround, count = Math.max(cmd.count, 1);
+        if (s.kind === "add") {
+            let range;
+            if (s.line) {
+                // As vim-surround's yss: from the line's first character
+                // that isn't blank, to the end of the count's last line.
+                let le = Txt.lineEnd(t, cursor);
+                for (let i = 1; i < count && le < t.length; i++)
+                    le = Txt.lineEnd(t, le + 1);
+                range = { start: firstNonBlank(t, cursor), end: le, linewise: false };
+            } else {
+                range = operatorRange(t, { op: "y", motion: s.motion, textObj: s.textObj, count: cmd.count }, count);
+            }
+            if (!range || s.line && range.end <= range.start) {
+                typeahead = []; // as a motion that fails
+                return;
+            }
+            const start = range.start;
+            let end = range.end;
+            // Blanks at the end stay out: ysaw) makes `word ` `(word) `.
+            if (!range.linewise)
+                while (end > start && Txt.isBlank(t[end - 1]))
+                    end--;
+            surroundWith(t, { start: start, end: start }, { start: end, end: end }, surroundPair(s, ""),
+                range.linewise, s.indented);
+            const u = bufferText();
+            setCursor(clampNormal(u, range.linewise ? firstNonBlank(u, start) : start));
+            return;
+        }
+        const pair = surroundTarget(t, cursor, s.target, count);
+        if (!pair) {
+            typeahead = []; // as a text object that isn't there
+            return;
+        }
+        let b = pair.o2, c = pair.c1;
+        if (s.trim) {
+            while (b < c && Txt.isBlank(t[b]))
+                b++;
+            while (c > b && Txt.isBlank(t[c - 1]))
+                c--;
+        }
+        if (s.kind === "change") {
+            // A tag keeps its attributes (see surroundPair).
+            const old = s.target === "t" ? /^<[^\s>]+([^>]*)>$/.exec(t.slice(pair.o1, pair.o2)) : null;
+            surroundWith(t, { start: pair.o1, end: b }, { start: c, end: pair.c2 },
+                surroundPair(s, old ? old[1] : ""), false, s.indented);
+            setCursor(clampNormal(bufferText(), pair.o1));
+            return;
+        }
+        if (pair.o1 === b && c === pair.c2)
+            return; // a word: nothing to take away
+        let left = { start: pair.o1, end: b }, right = { start: c, end: pair.c2 }, whole = false;
+        // Over lines, a bracket alone on its line goes with the line.
+        if (Txt.lineEnd(t, b) < c) {
+            const alone = (from, to) => onlyBlanks(t, prefixEnd(t, Txt.lineStart(t, from)), from)
+                && onlyBlanks(t, to, Txt.lineEnd(t, to));
+            if (alone(left.start, left.end)) {
+                left = { start: Txt.lineStart(t, left.start), end: Txt.lineEnd(t, left.end) + 1 };
+                whole = true;
+            }
+            if (alone(right.start, right.end))
+                right = { start: Txt.lineStart(t, right.start) - 1, end: Txt.lineEnd(t, right.end) };
+        }
+        replaceRanges(left.end <= right.start
+            ? [{ start: left.start, end: left.end, text: "" }, { start: right.start, end: right.end, text: "" }]
+            : [{ start: left.start, end: right.end, text: "" }]);
+        const u = bufferText();
+        setCursor(clampNormal(u, whole ? firstNonBlank(u, left.start) : left.start));
+    }
+
+    // replaceRanges, for edits that may be none.
+    function replaceAll(edits) {
+        return edits.length ? replaceRanges(edits) : [];
+    }
+
+    // Puts `pair` around what's between `left` and `right` (see
+    // wrapEdits). On lines of its own a level deeper (`indented`), a
+    // pair of brackets or tags then has what's inside reindented by them,
+    // and its closing line, as = does (vim-surround's reindent), so it
+    // comes out right however it was indented.
+    function surroundWith(t, left, right, pair, lines, indented) {
+        const ends = replaceAll(wrapEdits(t, left, right, pair, lines, indented)), open = pair.open.trim();
+        if (!indented || !pair.close || !/[(\[{]$/.test(open) && !(/^<[A-Za-z][^>]*>$/.test(open) && !open.endsWith("/>")))
+            return;
+        const u = bufferText(), from = Txt.lineEnd(u, left.start) + 1, to = Txt.lineStart(u, ends[ends.length - 1] - 1);
+        if (from <= to)
+            replaceAll(Txt.reindent(u, [{ from: from, to: to }], Txt.indentUnit(u), !/\.py[iw]?$/i.test(fileName),
+                ls => prefixEnd(u, ls)));
+    }
+
+    // Whether t has only blanks in [from, to) (a part of a line).
+    function onlyBlanks(t, from, to) {
+        for (let q = from; q < to; q++)
+            if (!Txt.isBlank(t[q]))
+                return false;
+        return true;
+    }
+
+    // The edits (for replaceRanges) that put pair.open in place of [left.
+    // start, left.end) and pair.close in place of [right.start, right.end),
+    // around what's between. With `lines`, that's whole lines (left and
+    // right empty, at their starts), and the pair goes on lines of its own
+    // above and below them, at the first one's indent. With `indented`, it
+    // goes on lines of its own unless it's there already, and what's
+    // between one level deeper (as > indents). A space of the pair's
+    // inside goes on a line of its own, and next to a line break.
+    function wrapEdits(t, left, right, pair, lines, indented) {
+        const ls = Txt.lineStart(t, left.start), lead = t.slice(prefixEnd(t, ls), firstNonBlank(t, ls));
+        const unit = Txt.indentUnit(t);
+        // Whether what's between goes on to another line, and only blanks
+        // are after the open's place or before the close's on their lines.
+        const apart = Txt.lineEnd(t, left.end) < right.start;
+        const openEnds = apart && onlyBlanks(t, left.end, Txt.lineEnd(t, left.end));
+        const closeStarts = apart && onlyBlanks(t, prefixEnd(t, Txt.lineStart(t, right.start)), right.start);
+        let open = pair.open, close = pair.close;
+        if (lines || indented || openEnds)
+            open = open.replace(/ +$/, "");
+        if (lines || indented || closeStarts)
+            close = close.replace(/^ +/, "");
+        if (!lines && !indented)
+            return [{ start: left.start, end: left.end, text: open }, { start: right.start, end: right.end, text: close }];
+        const edits = [];
+        let b = left.end, c = right.start;
+        if (lines) {
+            if (open)
+                edits.push({ start: left.start, end: left.start, text: blankPrefix + lead + open + "\n" });
+        } else if (openEnds) {
+            edits.push({ start: left.start, end: Txt.lineEnd(t, left.end), text: open }); // its blanks go
+        } else {
+            while (b < c && Txt.isBlank(t[b]))
+                b++;
+            edits.push({ start: left.start, end: b, text: open + lineBreak + lead + unit });
+        }
+        if (!lines && !closeStarts)
+            while (c > b && Txt.isBlank(t[c - 1]))
+                c--;
+        // One level deeper: each line that starts in what's between and has
+        // something in it, not counting the close's.
+        if (indented) {
+            for (let q = lines ? left.start : Txt.lineEnd(t, left.end) + 1; q < c; q = Txt.lineEnd(t, q) + 1) {
+                const f = firstNonBlank(t, q);
+                if (f < Math.min(c, Txt.lineEnd(t, q)))
+                    edits.push({ start: prefixEnd(t, q), end: prefixEnd(t, q), text: unit });
+            }
+        }
+        if (lines) {
+            if (close)
+                edits.push({ start: c, end: c, text: c > 0 && t[c - 1] === "\n" ? blankPrefix + lead + close + "\n"
+                    : lineBreak + lead + close });
+        } else {
+            edits.push({ start: c, end: right.end, text: closeStarts ? close : lineBreak + lead + close });
+        }
+        return edits;
+    }
+
+    // S (or gS) in visual mode, on the selection `sel` (as lastVisual
+    // keeps one): around its characters, or around its lines on lines of
+    // their own (S indents them, gS a selection of characters), or around
+    // each line's part of a block, padded to the block's width.
+    function surroundSelection(sel, s) {
+        const t = bufferText(), pair = surroundPair(s, "");
+        if (sel.mode === "visualBlock") {
+            const b = blockShape(t, undefined, undefined, sel), edits = [];
+            // Lines that reach the block; the others are left alone.
+            for (const l of b.lines.filter(l => l.cols > b.left)) {
+                const pad = b.right === Infinity ? "" : " ".repeat(Math.max(0, b.right + 1 - Txt.column(t, l.end)));
+                edits.push({ start: l.start, end: l.start, text: pair.open },
+                    { start: l.end, end: l.end, text: pad + pair.close });
+            }
+            replaceAll(edits);
+            setCursor(clampNormal(bufferText(), edits.length ? edits[0].start : Math.min(sel.cursor, t.length)));
+            return;
+        }
+        const lines = sel.mode === "visualLine";
+        const lo = Math.min(sel.anchor, sel.cursor, t.length), hi = Math.min(Math.max(sel.anchor, sel.cursor), t.length);
+        const start = lines ? Txt.lineStart(t, lo) : lo, end = lines ? Math.min(Txt.lineEnd(t, hi) + 1, t.length)
+            : Txt.charEnd(t, hi);
+        surroundWith(t, { start: start, end: start }, { start: end, end: end }, pair, lines, s.g !== lines);
+        const u = bufferText();
+        setCursor(clampNormal(u, lines ? firstNonBlank(u, start) : start));
     }
 
     // ---- Command line ------------------------------------------------------

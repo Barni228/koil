@@ -118,23 +118,47 @@ TestCase {
 
     // What has the keys, by its accessible name (a row's is its title).
     function focused() {
+        keepKeys();
         const f = win.activeFocusItem;
         return f ? f.Accessible.name || String(f).split("(")[0] : "none";
     }
 
+    // Gives the window the keys back if it lost them. macOS takes the
+    // app's activation away once, about half a second after it starts,
+    // while another app is in front (the one the tests were started from),
+    // and won't give it back for the window asking: then no window has the
+    // keys, and keys sent go nowhere. Showing the window again, in front,
+    // gives it the keys (the app stays inactive, but the keys sent are
+    // Qt's own), and keeps what it shows.
+    function keepKeys() {
+        if (win.visible && !win.active) {
+            win.hide();
+            win.show();
+            win.raise();
+            win.requestActivate();
+            tryVerify(() => win.active);
+        }
+    }
+
+    // A key, to the window (see keepKeys).
+    function press(key, modifiers) {
+        keepKeys();
+        keyClick(key, modifiers);
+    }
+
     function tab(n) {
         for (let i = 0; i < (n || 1); i++)
-            keyClick(Qt.Key_Tab);
+            press(Qt.Key_Tab);
     }
 
     function type(text) {
         for (const ch of text)
-            keyClick(ch);
+            press(ch);
     }
 
     function back(n) {
         for (let i = 0; i < (n || 1); i++)
-            keyClick(Qt.Key_Backtab, Qt.ShiftModifier);
+            press(Qt.Key_Backtab, Qt.ShiftModifier);
     }
 
     // The search has the keys: typing searches, Up and Down pick a
@@ -156,23 +180,23 @@ TestCase {
         // letters search, rather than move
         type("jk");
         compare(win.shown, []);
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         verify(win.visible);
         compare(win.shown, [0, 1]);
-        keyClick(Qt.Key_Down);
+        press(Qt.Key_Down);
         compare(win.currentShortcut(), 1);
-        keyClick(Qt.Key_Down);
+        press(Qt.Key_Down);
         compare(win.currentShortcut(), 1);
-        keyClick(Qt.Key_Up);
+        press(Qt.Key_Up);
         compare(win.currentShortcut(), 0);
         // the picked one's trash
-        keyClick(Qt.Key_Down);
+        press(Qt.Key_Down);
         tab(2);
         compare(focused(), "Delete");
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         compare(app.shortcuts.map(s => s.name), ["Copy"]);
         compare(focused(), "Search shortcuts");
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         compare(app.ran, ["yy"]);
         verify(!win.visible);
     }
@@ -181,10 +205,10 @@ TestCase {
     // the arrows, the checkbox and the buttons with Space, the key, a macro
     // picked, and Enter, which saves from anything.
     function test_form() {
-        keyClick(Qt.Key_Down);
+        press(Qt.Key_Down);
         tab();
         compare(focused(), "Edit");
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         verify(win.editing);
         compare(focused(), "Name");
         const order = [];
@@ -198,48 +222,48 @@ TestCase {
         compare(focused(), "Save");
         tab(5);
         compare(focused(), "Mode");
-        keyClick(Qt.Key_Left);
+        press(Qt.Key_Left);
         compare(win.draft.mode, "visual");
         tab();
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         compare(win.draft.enabled, false);
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         compare(win.draft.enabled, true);
         // the macros, with the keys
         back(2);
         compare(focused(), "Recorded Macros");
-        keyClick(Qt.Key_Space);
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Space);
+        press(Qt.Key_Return);
         compare(win.draft.macro, ":!ls<CR>");
         compare(focused(), "Keys it runs");
         verify(win.editing);
         tab();
-        keyClick(Qt.Key_Space);
-        keyClick(Qt.Key_Down);
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Space);
+        press(Qt.Key_Down);
+        press(Qt.Key_Return);
         compare(win.draft.macro, "dd");
         // Tab while they're listed goes on from the button
         tab();
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         tab();
         compare(focused(), "Mode");
         back(3);
         compare(focused(), "Shortcut keys");
         // after the keys it had
-        keyClick("x");
+        press("x");
         compare(win.draft.keys, " ex");
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         compare(win.draft.keys, " ");
-        keyClick(Qt.Key_Space);
-        keyClick("x");
+        press(Qt.Key_Space);
+        press("x");
         compare(win.draft.keys, "  x");
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
-        keyClick("x");
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press("x");
         tab(7);
         compare(focused(), "Save");
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         verify(!win.editing);
         compare(app.shortcuts[1].keys, " x");
         compare(app.shortcuts[1].mode, "visual");
@@ -250,28 +274,28 @@ TestCase {
     // Enter saves from anything in the form, not only a field.
     function test_enterSaves() {
         tab();
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         verify(win.editing);
         tab(4);
         compare(focused(), "Mode");
-        keyClick(Qt.Key_Right);
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Right);
+        press(Qt.Key_Return);
         verify(!win.editing);
         compare(app.shortcuts[0].mode, "visual");
         tab();
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         tab(5);
         compare(focused(), "Enabled");
-        keyClick(Qt.Key_Space);
-        keyClick(Qt.Key_Enter);
+        press(Qt.Key_Space);
+        press(Qt.Key_Enter);
         verify(!win.editing);
         compare(app.shortcuts[0].enabled, false);
         // and Cancel and Delete still do what they say, with Space
         tab();
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         tab(7);
         compare(focused(), "Cancel");
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         verify(!win.editing);
         compare(app.shortcuts.length, 2);
     }
@@ -290,27 +314,27 @@ TestCase {
         compare(win.rows.map(r => r.at), [0, 1]);
         back(2);
         compare(focused(), "Show Built-in Shortcuts");
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         verify(app.showOwnShortcuts);
         compare(win.rows.map(r => r.own ? "own:" + r.shortcut.keys : r.at), [0, 1, "own:  ", "own: q", "own:g.",
             "own:-"]);
         compare(win.rows.map(r => r.heading), [false, false, true, false, false, false]);
         tab(2);
         compare(focused(), "Search shortcuts");
-        keyClick(Qt.Key_Down);
-        keyClick(Qt.Key_Down);
-        keyClick(Qt.Key_Down);
-        keyClick(Qt.Key_Down);
+        press(Qt.Key_Down);
+        press(Qt.Key_Down);
+        press(Qt.Key_Down);
+        press(Qt.Key_Down);
         compare(win.currentShortcut(), -1);
         tab();
         compare(focused(), "Show Built-in Shortcuts");
         tab(2);
         // g. only in the listing
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         compare(app.ran, []);
         verify(win.visible);
-        keyClick(Qt.Key_Up);
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Up);
+        press(Qt.Key_Return);
         compare(app.ran, ["own: q"]);
         verify(!win.visible);
     }
@@ -328,7 +352,7 @@ TestCase {
         type("toggle");
         compare(win.shown, []);
         compare(win.shownOwn, [2]);
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         compare(app.ran, []);
     }
 
@@ -337,7 +361,7 @@ TestCase {
     // mode), as one of the two would never run; nor keys that start with a
     // count or a register. Keys of vim's can, but it says so.
     function test_keys() {
-        keyClick(Qt.Key_N, Qt.ControlModifier);
+        press(Qt.Key_N, Qt.ControlModifier);
         tab(2);
         type("d");
         back();
@@ -349,79 +373,79 @@ TestCase {
         compare(win.problem, "");
         compare(win.note, "");
         verify(win.canSave);
-        keyClick(Qt.Key_K, Qt.MetaModifier);
+        press(Qt.Key_K, Qt.MetaModifier);
         compare(win.draft.keys, "gc<C-k>");
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         // Cmd+W too, rather than closing the window
-        keyClick(Qt.Key_W, Qt.ControlModifier);
+        press(Qt.Key_W, Qt.ControlModifier);
         verify(win.visible);
         compare(win.draft.keys, "gc<D-w>");
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         // the menus' keys, which vim never gets
-        keyClick(Qt.Key_S, Qt.ControlModifier);
+        press(Qt.Key_S, Qt.ControlModifier);
         compare(win.problem, "<D-s> is the built-in “Save”.");
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         type("g");
         compare(win.problem, "g starts the built-in g. (“Toggle hidden”).");
         verify(!win.canSave);
         type(".x");
         compare(win.problem, "g.x starts with the built-in g. (“Toggle hidden”).");
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         compare(win.problem, "g. is the built-in “Toggle hidden”.");
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Space);
         compare(win.problem, "Space starts the built-in Space Space (“Apply”).");
-        keyClick("c");
+        press("c");
         compare(win.problem, "Space c already runs “Copy” in normal mode.");
-        keyClick("x");
+        press("x");
         compare(win.problem, "Space cx starts with Space c, which already runs “Copy” in normal mode.");
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
-        keyClick("e");
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press("e");
         compare(win.problem, "Space e already runs “dd”.");
         // Koil's - is normal mode's, and Space c is too
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
-        keyClick("-");
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press("-");
         compare(win.problem, "- is the built-in “Up”.");
         tab(3);
-        keyClick(Qt.Key_Right);
+        press(Qt.Key_Right);
         compare(win.draft.mode, "visual");
         compare(win.problem, "");
         back(3);
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Space);
-        keyClick("c");
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Space);
+        press("c");
         compare(win.problem, "");
         // nor if it's off
         tab(3);
-        keyClick(Qt.Key_Right);
+        press(Qt.Key_Right);
         compare(win.problem, "Space c already runs “Copy” in normal mode.");
         tab();
-        keyClick(Qt.Key_Space);
+        press(Qt.Key_Space);
         compare(win.draft.enabled, false);
         compare(win.problem, "");
         back(4);
         compare(focused(), "Shortcut keys");
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         type("2x");
         compare(win.problem, "2x can't start with 2, which is a count.");
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         // vim's
         type("xa");
         compare(win.problem, "");
         compare(win.note, "It takes the place of vim's x.");
         verify(win.canSave);
-        keyClick(Qt.Key_Backspace);
-        keyClick(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
+        press(Qt.Key_Backspace);
         type("z");
         compare(win.note, "It takes the place of vim's commands that start with z.");
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         verify(!win.editing);
         compare(app.shortcuts[2].keys, "z");
     }
@@ -432,52 +456,52 @@ TestCase {
         type("dd");
         compare(win.shown, [1]);
         compare(win.currentShortcut(), 1);
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         verify(win.visible);
         compare(win.shown, [0, 1]);
         type("Cop");
         compare(win.shown, [0]);
         type(" zz");
         compare(win.shown, []);
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         // a key matches as a word, not as a part of "space"
         type("pa");
         compare(win.shown, []);
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         type("space E");
         compare(win.shown, [1]);
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         // Koil's own too, under the user's, if they're shown
         type("space");
         compare(win.shownOwn, []);
         app.showOwnShortcuts = true;
         compare(win.shownOwn, [0, 1]);
         app.showOwnShortcuts = false;
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         // Up and Down pick a match, and Enter runs it
         type("space");
         compare(win.shown, [0, 1]);
-        keyClick(Qt.Key_Down);
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Down);
+        press(Qt.Key_Return);
         compare(app.ran, ["dd"]);
         verify(!win.visible);
     }
 
     // Esc with no search closes the window.
     function test_close() {
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         verify(!win.visible);
     }
 
     // Cmd+N (Ctrl+N) adds one, as + does.
     function test_add() {
-        keyClick(Qt.Key_N, Qt.ControlModifier);
+        press(Qt.Key_N, Qt.ControlModifier);
         verify(win.editing);
         compare(focused(), "Name");
         type("New");
         tab(2);
         type("x");
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         verify(!win.editing);
         compare(app.shortcuts.map(s => s.name), ["Copy", "", "New"]);
         compare(focused(), "Search shortcuts");
@@ -488,10 +512,10 @@ TestCase {
     function test_new() {
         back();
         compare(focused(), "New Shortcut");
-        keyClick(Qt.Key_Return);
+        press(Qt.Key_Return);
         verify(win.editing);
         verify(!win.draft.macro);
-        keyClick(Qt.Key_Escape);
+        press(Qt.Key_Escape);
         verify(!win.editing);
         compare(focused(), "Search shortcuts");
         compare(app.shortcuts.length, 2);
