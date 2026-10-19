@@ -29,6 +29,16 @@ until you apply, and your edits stay while you go through other dirs.
 
 ## Good to know
 
+### In short
+
+- In the path field's regex mode (`gr`), `,` is any character but `/`.
+- In a glob, `*` matches only files and `*/` only dirs (`*{,/}` both).
+- `Cmd+click` a path or URL to open it.
+- `!` runs a shell command on the entry on the line (`g!` is vim's `!`).
+- `:h` and a key or a word shows its help, like `:h g` or `:h gJ`.
+
+### In detail
+
 - **The path field** takes a path relative to the open dir (`src`,
   `../docs`), `~`, one pasted from a terminal (`"my dir"`, `my\ dir`), or a
   glob (`**/*.rs`). Write `/`, also on Windows. `Tab` while typing completes
