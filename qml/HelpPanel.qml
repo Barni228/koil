@@ -113,7 +113,7 @@ Popup {
             intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
                 + "once: `:set nu rnu fs=18`.",
             rows: [
-                ["`fontsize`  `fs`", "Font size in points, 6 to 72. Default 16."],
+                ["`fontsize`  `fs`", "Font size in pixels, 6 to 72. Default 16."],
                 ["`guifont`  `gfn`", "An installed monospaced font. Default `" + defaultFontFamily
                     + "` (comes with Koil). Icons show in any font."],
                 ["`number`  `nu`", "Line numbers."],

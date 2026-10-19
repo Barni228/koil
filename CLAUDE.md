@@ -1644,7 +1644,9 @@ the scratchpad (see Scratchpad).
   (`theme.base`, `theme.highlight`), never from a palette. It also holds `zoom` (font size / default). Every text in the app grows
   and shrinks with View > Zoom (Cmd+ / Cmd- / Cmd+0), not just the editor:
   text in the editor's font uses `theme.font`, other UI scales its sizes by
-  `theme.zoom`. New UI must do the same, and use `Panel` for a box over the
+  `theme.zoom`. Both are in pixels (`fontSize` too: `font.pixelSize`): in
+  points, Windows' 96 dpi (macOS's 72 makes them the same) made the editor
+  a third bigger next to the UI. New UI must do the same, and use `Panel` for a box over the
   editor, `Tip` for tooltips (keys that do the same go in its
   `shortcuts`, each shown as code, not in the text; other keys, commands
   like `:set wrap` and file names go in its text in backquotes, which

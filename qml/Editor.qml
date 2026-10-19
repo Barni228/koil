@@ -903,7 +903,7 @@ Item {
             property var latest: null
 
             font.family: view.vim.fontFamily
-            font.pointSize: view.vim.fontSize
+            font.pixelSize: view.vim.fontSize
             textFormat: TextEdit.PlainText
             wrapMode: TextEdit.NoWrap // see applyWrapMode
             selectByMouse: true
@@ -1388,7 +1388,7 @@ Item {
 
                 readonly property font underlined: Qt.font({
                     family: editor.font.family,
-                    pointSize: editor.font.pointSize,
+                    pixelSize: editor.font.pixelSize,
                     underline: true
                 })
 

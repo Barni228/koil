@@ -55,7 +55,7 @@ QtObject {
     property bool wrap: false
     property bool defaultWrap: false
     readonly property bool wrapping: wrap && !singleLine && flickable !== null
-    // :set fontsize, in points (the view sets the editor's font), with its
+    // :set fontsize, in pixels (the view sets the editor's font), with its
     // default and range.
     property int fontSize: 16
     property int defaultFontSize: 16

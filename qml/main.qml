@@ -2127,7 +2127,7 @@ ApplicationWindow {
             // its cursor is measured from its start.
             elide: vim.commandLine === "" ? Text.ElideMiddle : Text.ElideRight
             font.family: vim.fontFamily
-            font.pointSize: vim.fontSize
+            font.pixelSize: vim.fontSize
             textFormat: vim.commandLine === "" ? Text.PlainText : Text.StyledText
             color: vim.commandLine === "" && vim.message !== "" && vim.messageIsError ? "#d33" : theme.windowText
             text: vim.commandLine ? root.commandLineHtml(vim.commandLine) : vim.message || vim.modeLabel || " "
@@ -2180,7 +2180,7 @@ ApplicationWindow {
 
             anchors.right: parent.right
             font.family: vim.fontFamily
-            font.pointSize: vim.fontSize
+            font.pixelSize: vim.fontSize
             // A macro's progress while it runs: not the position, which
             // would be found again at every key it runs. Or what vim waits
             // for (a shell command).
