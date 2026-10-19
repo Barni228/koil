@@ -341,8 +341,12 @@ QtObject {
     // cursor's position, like "@q 34%".
     property string progress: ""
     property string lastMacro: ""
-    // As vim's 'maxmapdepth': macros running macros, past this, fail.
+    // As vim's 'maxmapdepth': macros running macros, past this, fail, and
+    // so do shortcuts and macros running only each other (see execute).
     readonly property int maxMacroDepth: 1000
+    // The shortcuts and macros run since a command or a key typed (see
+    // execute).
+    property int chainedRuns: 0
     // Command-line history: ":" commands, "/" and "?" searches together,
     // and the tags typed for a surround ("<", see askTag).
     property var history: ({ ":": [], "/": [], "<": [] })
@@ -523,6 +527,7 @@ QtObject {
     function typedKey(tok, event) {
         if (recording && tok !== null)
             recordKeys.push(tok);
+        chainedRuns = 0;
         return runKey(tok, event);
     }
 
@@ -1399,6 +1404,12 @@ QtObject {
     }
 
     function execute(cmd) {
+        // Shortcuts and macros that run only each other, with no command
+        // between (s running ys, which runs s; qa@aq), fail rather than run
+        // until Esc, as vim's 'maxmapdepth' catches mappings (see runKeys).
+        // One that runs a command first (qa<C-a>j@aq) goes on until a
+        // command fails.
+        chainedRuns = cmd.shortcut || cmd.action === "@" ? chainedRuns + 1 : 0;
         if (cmd.command) {
             outside(() => keyCommand(cmd.command, cmd.count));
             return;
@@ -3214,6 +3225,7 @@ QtObject {
         }
         lastMacro = reg;
         if (reg === ":") {
+            chainedRuns = 0; // a command, not keys
             const list = history[":"];
             if (!list.length) {
                 showError("E30: No previous command line");
@@ -3237,7 +3249,8 @@ QtObject {
     function runKeys(ks, count, label) {
         if (!ks.length)
             return;
-        if (typeahead.length >= maxMacroDepth) {
+        if (typeahead.length >= maxMacroDepth || chainedRuns > maxMacroDepth) {
+            chainedRuns = 0;
             showError("E223: recursive mapping");
             return;
         }
@@ -3253,6 +3266,7 @@ QtObject {
     // no keys. In visual mode if vim is in it and the shortcut is for it,
     // else in normal mode, which vim goes to first (see toNormal).
     function runShortcut(s) {
+        chainedRuns = 0;
         batched(() => {
             if (isVisual && s.visual) {
                 interrupt();

@@ -1066,6 +1066,8 @@ the scratchpad (see Scratchpad).
   wait (no timeout tells it apart), and any key but `a` after it is a bad
   command; `gc`, which vim reads as a bad command, takes nothing. A macro
   recorded meanwhile keeps the shortcut's keys, not what they ran.
+  Their keys run other shortcuts (as macros recorded with them need),
+  which can loop (see Macros).
   They're saved in `settings.shortcuts`, as JSON of `{ name, keys, macro,
   mode, enabled }` (`readShortcuts` drops what isn't one, as the settings
   can be edited by hand), which Restore Defaults leaves alone, and
@@ -1306,7 +1308,12 @@ the scratchpad (see Scratchpad).
   times) on `typeahead`, whose keys a run (see Batches and runs) gives
   `runKey` with no key event, so vim types insert-mode keys itself
   (`typeKey`, `insertMove`). A failing command (bad keys, failed motion,
-  `showError`) empties `typeahead`.
+  `showError`) empties `typeahead`. Past `maxMacroDepth` frames it's E223,
+  as vim's `'maxmapdepth'`, and so is a chain of that many shortcuts and
+  `@`s with no other command between (`chainedRuns`): one that runs
+  itself last (`qa@aq`, or `s` running `ys`, which runs `s`) doesn't nest,
+  and would never end (vim's `@` loops until Ctrl-C). One that runs a
+  command, then itself (`qa<C-a>j@aq`), goes on until a command fails.
 - **Batches and runs** (Vim.qml): each edit of the `TextArea` has Qt go over
   all the text, so while a key runs (`handleKey` through `batched`) vim edits
   a copy (`batch`; everything reads the text through `bufferText()`), and

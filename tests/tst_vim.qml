@@ -2129,6 +2129,37 @@ TestCase {
         compare(vim.macroList().map(m => "\"" + m.name + " " + m.keys), ["\"a 1<CR>", "\"q  i", "\"\" 1<CR>"]);
     }
 
+    // Shortcuts and macros that run only each other fail, as vim's
+    // recursive mappings do, but one that runs a command and then itself
+    // goes on until a command fails.
+    function test_recursiveShortcuts() {
+        load("1\n1\n1");
+        vim.shortcuts = [
+            { keys: "s", macro: "ys", label: "s", normal: true, visual: false },
+            { keys: "ys", macro: "s", label: "ys", normal: true, visual: false }
+        ];
+        keys("s");
+        compare(vim.message, "E223: recursive mapping");
+        compare(vim.running, null);
+        compare(vim.typeahead.length, 0);
+        compare(editor.text, "1\n1\n1");
+        vim.shortcuts = [{ keys: " n", macro: "<C-a>j n", label: "Space n", normal: true, visual: false }];
+        keys(" n");
+        compare(editor.text, "2\n2\n2");
+        compare(vim.running, null);
+        compare(vim.message, "");
+        // a macro that only runs itself, and one a shortcut runs that runs
+        // the shortcut
+        keys("qaqqa@aq@a");
+        compare(vim.message, "E223: recursive mapping");
+        compare(vim.running, null);
+        vim.shortcuts = [{ keys: "s", macro: "@b", label: "s", normal: true, visual: false }];
+        keys("qbqqbsqs");
+        compare(vim.message, "E223: recursive mapping");
+        compare(vim.running, null);
+        compare(editor.text, "2\n2\n2");
+    }
+
     // A shortcut's keys in parts, the names of keys apart, which Koil
     // colors: only the names macros read as keys.
     function test_keyParts() {
