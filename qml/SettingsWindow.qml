@@ -942,7 +942,7 @@ Window {
 
                 SettingLabel {
                     text: qsTr("Shortcuts")
-                    about: qsTr("`Space` and a key of yours, which run keys of yours as a macro does, in normal mode, visual mode or both. `Space q` lists them.")
+                    about: qsTr("Keys of yours, like `Space c` or `gc`, which run keys of yours as a macro does, in normal mode, visual mode or both. `Space q` lists them, and Koil's own.")
                 }
                 // The user's (see ShortcutsWindow), which Restore Defaults
                 // leaves alone, and how many there are.

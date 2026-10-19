@@ -90,10 +90,12 @@ until you apply, and your edits stay while you go through other dirs.
   and `g!` is vim's `!`, which puts the lines through a command (`g!ip`,
   then `fmt`).
   `:_!cmd` puts what it writes in the scratchpad, like `:_!git log`.
-- **Shortcuts** (`Space q`, _Koil → Shortcuts…_, or Settings): `Space` and
-  a key of yours run keys as a macro does, like `:!echo %:p | pbcopy<CR>` to
-  copy the entry's path. Type the keys, or take a macro you recorded with
-  `q`. A click in the list runs one, also one with no key.
+- **Shortcuts** (`Space q`, _Koil → Shortcuts…_, or Settings): keys of
+  yours, like `Space c` or `gc`, run keys as a macro does, like
+  `:!echo %:p | pbcopy<CR>` to copy the entry's path. Type the keys, or take
+  a macro you recorded with `q`. A click in the list runs one, also one with
+  no keys. Built-in shortcuts can't be changed or taken; the lock button
+  shows them under yours.
 
 ## Install
 

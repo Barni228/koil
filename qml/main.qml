@@ -164,22 +164,56 @@ ApplicationWindow {
     // The shell :! runs commands in when the shell setting is empty: $SHELL,
     // or cmd.exe on Windows.
     readonly property string systemShell: system.defaultShell()
-    // The user's shortcuts (see ShortcutsWindow), as saved: { name, key,
-    // macro, mode, enabled }, where `key` is the one after Space ("" for
-    // none), `macro` the keys it runs (as a register's text), and `mode`
-    // "normal", "visual" or "both".
+    // The user's shortcuts (see ShortcutsWindow), as saved: { name, keys,
+    // macro, mode, enabled }, where `keys` are those that run it, written
+    // as Vim.commandKeys' are (" c" is Space c, "gc"; "" for none), `macro`
+    // the keys it runs (as a register's text), and `mode` "normal",
+    // "visual" or "both".
     readonly property var shortcuts: readShortcuts(settings.shortcuts)
-    // What Koil's own keys after Space do (see Vim.commandKeys), which
-    // shortcuts can't take.
-    readonly property var spaceKeys: ({
-        " ": qsTr("applies the changes (in a file, saves)"),
-        "a": qsTr("applies, listing the changes first"),
-        "u": qsTr("lists the applies to undo"),
-        "r": isMac ? qsTr("shows the entry in Finder") : Qt.platform.os === "windows"
-            ? qsTr("shows the entry in Explorer") : qsTr("shows the entry in the file manager"),
-        "o": qsTr("opens the entry in its app"),
-        "q": qsTr("lists your shortcuts")
-    })
+    // Koil's own keys (see Vim.commandKeys), which the shortcuts' list
+    // shows under the user's, to run but not to change, as { keys, name,
+    // mode, where }: where they work, if not everywhere. No shortcut can
+    // have them, start with them, or be their start (in the same mode), so
+    // gs, which stands for the sort keys after it, keeps them all.
+    readonly property var ownShortcuts: [
+        { keys: "  ", name: qsTr("Apply the changes (in a file, save)"), mode: "normal", where: "" },
+        { keys: " a", name: qsTr("Apply, listing the changes first"), mode: "normal", where: qsTr("Listing") },
+        { keys: " u", name: qsTr("List the applies to undo"), mode: "normal", where: qsTr("Listing") },
+        { keys: " r", name: isMac ? qsTr("Show the entry in Finder") : Qt.platform.os === "windows"
+            ? qsTr("Show the entry in Explorer") : qsTr("Show the entry in the file manager"), mode: "normal",
+            where: qsTr("Listing") },
+        { keys: " o", name: qsTr("Open the entry in its default app"), mode: "normal", where: qsTr("Listing") },
+        { keys: " q", name: qsTr("List your shortcuts"), mode: "both", where: "" },
+        { keys: "<CR>", name: qsTr("Open the dir or file on the line"), mode: "normal", where: qsTr("Listing") },
+        { keys: "<S-CR>", name: qsTr("Update, staying in the path field"), mode: "normal",
+            where: qsTr("Path field") },
+        { keys: "-", name: qsTr("The dir above (in a file, back to the listing)"), mode: "normal", where: "" },
+        { keys: "<Tab>", name: qsTr("Go between the listing and the path field"), mode: "normal",
+            where: qsTr("Listing") },
+        { keys: "g.", name: qsTr("Toggle hidden entries"), mode: "normal", where: qsTr("Listing") },
+        { keys: "gi", name: qsTr("Toggle hiding what git ignores"), mode: "normal", where: qsTr("Listing") },
+        { keys: "gr", name: qsTr("Toggle reading the path as a regex"), mode: "normal", where: qsTr("Listing") },
+        { keys: "gs", name: qsTr("Sort the listing, by the key after it"), mode: "normal", where: qsTr("Listing") },
+        { keys: "_", name: qsTr("The scratchpad (in it, back)"), mode: "normal", where: qsTr("Listing, scratchpad") },
+        { keys: "!", name: qsTr("Run a shell command on the entry"), mode: "normal", where: "" }
+    ]
+    // The keys Koil's menus (and the editor's copy, paste and undo) take
+    // before vim gets them, as vim names them (see Vim.tokenFor: Cmd on
+    // macOS, Ctrl elsewhere, with Shift only for Cmd), which no shortcut
+    // can have, as ownShortcuts are, but which the list doesn't show.
+    readonly property var menuShortcuts: {
+        const key = (k, name) => ({ keys: "<" + (isMac ? "D" : "C") + "-" + k + ">", name: name, mode: "both",
+            where: "" });
+        const both = [key("o", qsTr("Open…")), key("s", qsTr("Save")), key("q", qsTr("Quit")), key("f", qsTr("Find")),
+            key("g", qsTr("Find Next")), key("z", qsTr("Undo")), key("c", qsTr("Copy"))];
+        return both.concat(isMac ? [key("O", qsTr("Open Folder…")), key("S", qsTr("Save As…")),
+            key(",", qsTr("Settings…")), key("G", qsTr("Find Previous")), key("=", qsTr("Zoom In")),
+            key("+", qsTr("Zoom In")), key("-", qsTr("Zoom Out")), key("0", qsTr("Actual Size")),
+            key("Z", qsTr("Redo")), key("x", qsTr("Cut")), key("v", qsTr("Paste")), key("a", qsTr("Select All")),
+            key("h", qsTr("Hide Koil"))] : [key("h", qsTr("Replace…"))]);
+    }
+    // Whether the shortcuts' list shows Koil's own under the user's (saved).
+    property bool showOwnShortcuts: settings.showOwnShortcuts
 
     width: 900
     height: 650
@@ -1428,7 +1462,7 @@ ApplicationWindow {
     onColorSchemeChanged: applyColorScheme()
 
     // Saves a setting and uses it now: one of vimSettings, colorScheme,
-    // confirmChanges or shellEnvironment.
+    // confirmChanges, shellEnvironment or showOwnShortcuts.
     function changeSetting(name, value) {
         (vimSettings.includes(name) ? vim : root)[name] = value;
         settings[name] = value;
@@ -1445,7 +1479,7 @@ ApplicationWindow {
         }
         return Array.isArray(list) ? list.filter(s => s && typeof s.macro === "string").map(s => ({
             name: typeof s.name === "string" ? s.name : "",
-            key: typeof s.key === "string" && [...s.key].length === 1 ? s.key : "",
+            keys: typeof s.keys === "string" ? s.keys : "",
             macro: s.macro,
             mode: ["normal", "visual", "both"].includes(s.mode) ? s.mode : "normal",
             enabled: s.enabled !== false
@@ -1460,29 +1494,62 @@ ApplicationWindow {
     // A shortcut as vim has it (see Vim.shortcuts).
     function vimShortcut(s) {
         return {
-            keys: " " + s.key,
+            keys: s.keys,
             macro: s.macro,
-            label: s.key ? "Space " + s.key : s.name || qsTr("Shortcut"),
+            label: s.keys ? vim.keysName(s.keys) : s.name || qsTr("Shortcut"),
             normal: s.mode !== "visual",
             visual: s.mode !== "normal"
         };
     }
 
     // A click in the shortcuts' list: runs the shortcut in the editor vim
-    // edits, as its key would (see Vim.runShortcut), unless a box over it
-    // has the keys or vim waits for a shell command.
-    function runShortcut(s) {
+    // edits, as its keys would (see Vim.runShortcut), or one of Koil's own
+    // (`own`, of ownShortcuts) as if they were typed in normal mode, unless
+    // a box over it has the keys or vim waits for a shell command.
+    function runShortcut(s, own) {
         requestActivate();
         if (boxOpen || askingConflicts)
             return;
         activeView.textArea.forceActiveFocus();
-        vim.runShortcut(vimShortcut(s));
+        if (own)
+            vim.startCommand(vim.macroKeys(s.keys));
+        else
+            vim.runShortcut(vimShortcut(s));
+    }
+
+    // Whether Koil's own `keys` (ownShortcuts') do something where vim is
+    // now, in normal mode: they're one of commandKeys, or their start (gs).
+    function commandHere(keys) {
+        const ks = vim.macroKeys(keys);
+        return Object.keys(vim.commandKeys).some(k => {
+            const own = vim.macroKeys(k);
+            return ks.length <= own.length && ks.every((t, i) => t === own[i]);
+        });
     }
 
     // A shortcut's keys in parts, the names of keys apart (see
-    // Vim.keyParts).
+    // Vim.keyParts), one by one (Vim.macroKeys), and as Koil shows them
+    // (Vim.keysName).
     function keyParts(text) {
         return vim.keyParts(text);
+    }
+    function keyTokens(text) {
+        return vim.macroKeys(text);
+    }
+    function keysName(text) {
+        return vim.keysName(text);
+    }
+
+    // A key typed in the shortcuts' window, as vim names it (see
+    // Vim.tokenFor), or null.
+    function keyToken(event) {
+        return vim.tokenFor(event);
+    }
+
+    // What of vim's own keys a shortcut's take the place of (see
+    // Vim.vimCommandIn).
+    function vimCommandIn(text, visual) {
+        return vim.vimCommandIn(text, visual);
     }
 
     // The macros recorded, which a shortcut can run (see Vim.macroList).
@@ -1544,6 +1611,8 @@ ApplicationWindow {
         property string startDir: ""
         // The user's shortcuts, as JSON (see root.shortcuts).
         property string shortcuts: "[]"
+        // Whether their list shows Koil's own too (root.showOwnShortcuts).
+        property bool showOwnShortcuts: false
     }
 
     Theme {
@@ -1710,8 +1779,8 @@ ApplicationWindow {
         visualCommandKeys: ({
             " q": "shortcuts"
         })
-        // The user's, which are on and have a key, everywhere.
-        shortcuts: root.shortcuts.filter(s => s.enabled && s.key && s.macro).map(root.vimShortcut)
+        // The user's, which are on and have keys, everywhere.
+        shortcuts: root.shortcuts.filter(s => s.enabled && s.keys && s.macro).map(root.vimShortcut)
 
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: (quit, confirm) => root.save(quit, confirm)

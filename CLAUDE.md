@@ -1048,25 +1048,39 @@ the scratchpad (see Scratchpad).
   as the font has two names, and which one Qt uses depends on the
   platform). Only the regular weight is shipped: the editor draws no bold.
 - **Shortcuts** (`Vim.shortcuts`, ShortcutsWindow.qml): the user's own,
-  Space and a key that run keys of theirs as `@` runs a register's
+  any keys (`Space c`, `gc`, `<C-k>`, written as `commandKeys`' are) that
+  run keys of theirs as `@` runs a register's
   (`runKeys`: in chunks, one undo step, Esc stops it, a count runs it that
   many times), in normal mode, visual mode or both, wherever vim is (the
   listing, the path field, a file, the scratchpad). `commandFor` matches
   them after `commandKeys`, which are normal mode's only; in visual mode
   too, so Space there waits for a key rather than moving (`Space q` is
-  one), and Space and another key is a bad command. A macro
-  recorded meanwhile keeps the Space and the key, not what they ran.
-  They're saved in `settings.shortcuts`, as JSON of `{ name, key, macro,
+  one), and Space and another key is a bad command. They come before
+  vim's own keys, as a vim mapping does: a shortcut on `xa` makes `x`
+  wait (no timeout tells it apart), and any key but `a` after it is a bad
+  command; `gc`, which vim reads as a bad command, takes nothing. A macro
+  recorded meanwhile keeps the shortcut's keys, not what they ran.
+  They're saved in `settings.shortcuts`, as JSON of `{ name, keys, macro,
   mode, enabled }` (`readShortcuts` drops what isn't one, as the settings
-  can be edited by hand), which Restore Defaults leaves alone, and only
-  the enabled ones with a key reach vim. The window (`Space q`, Koil >
+  can be edited by hand), which Restore Defaults leaves alone, and
+  only the enabled ones with keys reach vim. Koil shows keys with Space
+  as a word (`Vim.keysName`: `Space gc`), in the list, the form and the
+  status line's run. The window (`Space q`, Koil >
   Shortcuts…, `ApplicationSpecificRole`, which puts it in the app menu;
   File > Shortcuts… elsewhere; and a button in Settings) lists each by its
-  name, else its key, else its keys. A click on one (or Enter) closes it
-  and runs it in the main window
-  (`runShortcut`), even one that's off or has no key: in visual mode if
+  name, else its keys, else the keys it runs, and under them, while the
+  lock button by + is on (`root.showOwnShortcuts`, saved, off at first),
+  Koil's own
+  (`root.ownShortcuts`: `commandKeys`' of every buffer, by hand, with
+  where they work; `gs` for the sort keys), under a heading, each with a
+  lock rather than a pencil and a trash, dimmed where they do nothing
+  (`commandHere`: none of `commandKeys` starts with them). A click on one
+  (or Enter) closes it and runs it in the main window
+  (`runShortcut`), even one that's off or has no keys: in visual mode if
   vim is in it and the shortcut is for it, else in normal mode, which vim
-  goes to first; not while a box has the keys or a shell command runs.
+  goes to first; Koil's own as if typed in normal mode
+  (`vim.startCommand`), only where they do something; not while a box
+  has the keys or a shell command runs.
   Its pencil shows it in a form, as + (or Cmd+N) does a new one, which Save
   saves (Esc and Cancel go back to the list), and its trash deletes it at
   once. `Space q` opens it once the key is up (`openShortcuts`, on the
@@ -1085,13 +1099,14 @@ the scratchpad (see Scratchpad).
   search over it has them whenever the list shows (`focusSearch`), so
   typing searches, Up and Down pick a shortcut, Enter runs it, and Tab
   goes to the picked one's pencil and trash, then +. The search shows only
-  the shortcuts every word of it matches (`shown`: in the name or the
-  keys, or the key as a whole word, `space` or `c`, as a part of "space"
-  would match every shortcut with a key). Esc empties it, as in a macOS
+  the shortcuts every word of it matches (`shown`, `shownOwn`, `matches`:
+  in the name or the keys it runs, or a word of its keys as shown,
+  `space` or `gc`, as a part of "space" would match every shortcut with
+  Space). Esc empties it, as in a macOS
   search field, and with none, closes the window (`back`). A row gets its
-  shortcut with its index (`{ at, shortcut }`), not the index alone, as
-  the shortcuts change before the list does, which left a deleted one's
-  row reading past their end. Opened anew, it has no search, on its
+  shortcut with its index (`rows`: `{ at, shortcut, own, heading }`), not
+  the index alone, as the shortcuts change before the list does, which
+  left a deleted one's row reading past their end. Opened anew, it has no search, on its
   first. Its shortcuts, and Settings' (Esc, Cmd+W), are on only while
   their window has the keys (`focused`: its `activeFocusItem`, which is
   null otherwise): with Qt Quick Controls loaded, a `Shortcut` takes its
@@ -1102,9 +1117,23 @@ the scratchpad (see Scratchpad).
   Left and Right pick. While the macros are listed, their popup's window
   gets the keys (so it has `focus`, and both it and the button handle
   them: `macroKey`), and the window asks to be active again once it
-  closes, as Qt's offscreen platform left the popup's. Its key can't be
-  one of Koil's after Space (`spaceKeys`), nor one another enabled shortcut
-  has in the same mode (`problemOf`). Its keys are typed as `q` records
+  closes, as Qt's offscreen platform left the popup's. The form's key box
+  takes the keys typed, as vim names them (`typeKey`, `Vim.tokenFor`:
+  Backspace takes one back, Cmd+Backspace all; Tab, Enter and Esc go to
+  the form, so no shortcut has them). On macOS, Cmd and a letter, digit or
+  sign is a key too (`<D-k>`, `<D-K>` with Shift, as MacVim names them),
+  in the box and in the editor, where only a shortcut does something with
+  it (else it's a bad command); Cmd+W goes to the box rather than closing
+  the window. They can't be Koil's own, start
+  them, or start with them (`g`, `g.x`), nor a key Koil's menus or the
+  editor's copy, paste and undo take before vim gets it
+  (`root.menuShortcuts`, which the list doesn't show: Cmd keys on macOS,
+  Ctrl elsewhere), nor another enabled shortcut's,
+  in the same mode, nor start with a count or `"`, which vim reads first
+  (`problemOf`). What of vim's they take the place of is said, in the
+  warning's color, but they can be saved (`noteOf`, `Vim.vimCommandIn`:
+  `parse`'s `plain` reads vim's keys alone; not where Koil's own already
+  took them, as Space). The keys it runs are typed as `q` records
   them (`<CR>`), or taken from a register `q` records into
   (`Vim.macroList`). The names of keys in them are colored
   (`theme.specialKey`, `styledKeys`, from `Vim.keyParts`, so only what a
@@ -1261,7 +1290,10 @@ the scratchpad (see Scratchpad).
   them (`registerList`) in the help box, one line each, cut off. The `TextArea` does nothing on Cmd+Backspace, so on macOS
   it's vim's `<D-BS>`: typed by vim in insert mode (`typedEdit`: back to
   the line's start, the name's in the listing, and there Backspace),
-  `Ctrl-U` in the command line, nothing in the other modes.
+  `Ctrl-U` in the command line, nothing in the other modes. Other Cmd
+  keys (`<D-k>`, see Shortcuts) do nothing but run a shortcut: insert
+  mode leaves them to the editor, the command line drops them, and Cmd
+  and an arrow stays the editor's (no token).
 - **Macros**: typed keys are recorded as tokens (`"<Esc>"`, `"x"`); the register
   keeps them as `keys` next to the text, so literal "<CR>" typed in insert mode
   stays text. `@` pushes a frame (`{ keys, next, runs }`, not the keys `runs`

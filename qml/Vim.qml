@@ -102,9 +102,10 @@ QtObject {
     // The user's shortcuts (Koil's, see ShortcutsWindow): keys that run
     // keys of theirs, as @ runs a register's, as many times as their
     // count, as { keys, macro, label, normal, visual }: `keys` written as
-    // commandKeys' are (" c" is Space c), which type it in normal mode,
-    // visual mode or both, `macro` as a register's text, and `label` what
-    // the status line calls its run. commandKeys come first.
+    // commandKeys' are (" c" is Space c, "gc", "<C-k>"), which type it in
+    // normal mode, visual mode or both, `macro` as a register's text, and
+    // `label` what the status line calls its run. commandKeys come first,
+    // and a shortcut comes before what vim does with its keys.
     property var shortcuts: []
     // A buffer of one line (Koil's path field): a line break put in it
     // becomes a space, and Enter while typing leaves insert mode, then does
@@ -781,7 +782,8 @@ QtObject {
     // ---- Keys --------------------------------------------------------------
 
     // Turns a key event into a vim key: a character, or a name like "<Esc>",
-    // "<CR>" or "<C-r>". Returns null for keys vim doesn't handle.
+    // "<CR>", "<C-r>" or (Cmd on macOS, as MacVim names it) "<D-k>".
+    // Returns null for keys vim doesn't handle.
     function tokenFor(event) {
         const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
         if ((event.modifiers & ctrl) && !(event.modifiers & Qt.AltModifier)) {
@@ -791,8 +793,22 @@ QtObject {
                 return "<Esc>";
             return null;
         }
-        if (isMac && (event.modifiers & Qt.ControlModifier)) // Cmd
-            return event.key === Qt.Key_Backspace ? "<D-BS>" : null;
+        // Cmd and a letter (<D-K> with Shift), digit or sign, which only the
+        // user's shortcuts do something with: Koil's menus take theirs
+        // first (see menuShortcuts in main.qml). Cmd and an arrow is the
+        // editor's.
+        if (isMac && (event.modifiers & Qt.ControlModifier)) { // Cmd
+            if (event.key === Qt.Key_Backspace)
+                return "<D-BS>";
+            if (event.modifiers & (Qt.AltModifier | Qt.MetaModifier))
+                return null;
+            if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
+                return "<D-" + String.fromCharCode(event.key - Qt.Key_A
+                    + (event.modifiers & Qt.ShiftModifier ? 65 : 97)) + ">";
+            if (event.key > 0x20 && event.key < 0x7f && event.key !== 0x3e) // not ">"
+                return "<D-" + String.fromCharCode(event.key) + ">";
+            return null;
+        }
         const named = {
             [Qt.Key_Escape]: "<Esc>",
             [Qt.Key_Return]: "<CR>",
@@ -1085,9 +1101,10 @@ QtObject {
     //   ["x] [count] operator [count] (motion | text object | operator again)
     //   ["x] [count] (motion | action)
     // In visual mode, or while lines are marked (`marking`), an operator
-    // is an action of its own, on what's selected or marked.
+    // is an action of its own, on what's selected or marked. `plain` reads
+    // vim's own keys alone, without commandKeys and the shortcuts.
     // Returns { status: "more" | "bad" | "ok", cmd }.
-    function parse(keys, visual, marking) {
+    function parse(keys, visual, marking, plain) {
         const more = { status: "more" }, bad = { status: "bad" };
         const cmd = { reg: null, count: 0 };
         let i = 0;
@@ -1102,7 +1119,7 @@ QtObject {
         const c1 = readCount(keys, i);
         cmd.count = c1.count;
         i = c1.next;
-        if (i < keys.length) {
+        if (i < keys.length && !plain) {
             const c = commandFor(keys.slice(i), visual);
             if (c && (c.name || c.shortcut)) {
                 cmd.command = c.name;
@@ -3002,7 +3019,7 @@ QtObject {
     // Register text as it's written: a key's name, like <CR>, or a
     // character.
     function keysIn(text) {
-        return text.match(/<(?:Esc|CR|S-CR|BS|Del|Tab|S-Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z])>|[\s\S]/gu) || [];
+        return text.match(/<(?:Esc|CR|S-CR|BS|Del|Tab|S-Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|C-[a-z]|D-BS|D-[!-=?-~])>|[\s\S]/gu) || [];
     }
 
     // Register text (a shortcut's macro) in parts, as { text, special }:
@@ -3019,6 +3036,34 @@ QtObject {
                 parts.push({ text: k, special: special });
         }
         return parts;
+    }
+
+    // Keys written out (a shortcut's) as Koil shows them: Space as
+    // "Space", apart from the keys around it, and the rest as written
+    // (" gc" is "Space gc", "<C-k>" stays).
+    function keysName(text) {
+        let name = "";
+        for (const k of keysIn(text))
+            name += k === " " ? (name && !name.endsWith(" ") ? " " : "") + "Space " : k;
+        return name.trim();
+    }
+
+    // What of vim's own the keys `text` (a shortcut's) take the place of,
+    // as a shortcut comes first (see commandFor), as { keys, whole }: the
+    // command of vim's they are or start with (x of xa, which then waits
+    // for the a), or, if they're only the start of vim's commands (z,
+    // which zz starts), themselves, which those start with (`whole`
+    // false). Null if vim reads them as a bad command (gc).
+    function vimCommandIn(text, visual) {
+        const ks = macroKeys(text);
+        for (let n = 1; n <= ks.length; n++) {
+            const r = parse(ks.slice(0, n), visual, false, true);
+            if (r.status === "ok")
+                return { keys: ks.slice(0, n).join(""), whole: true };
+            if (r.status === "bad")
+                return null;
+        }
+        return ks.length ? { keys: ks.join(""), whole: false } : null;
     }
 
     function runMacro(reg, count) {

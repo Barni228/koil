@@ -1860,6 +1860,84 @@ TestCase {
         compare(vim.mode, "normal");
     }
 
+    // Any keys can be a shortcut's: gc, which vim reads as a bad command,
+    // with a count, or keys of vim's, which then wait for the rest of the
+    // shortcut's, while vim's other commands with their start still work.
+    function test_shortcutKeys() {
+        load("1\n1\n1");
+        vim.commandKeys = { "g.": "hidden" };
+        vim.shortcuts = [
+            { keys: "gc", macro: "<C-a>j", label: "gc", normal: true, visual: false },
+            { keys: "xa", macro: "<C-a><C-a>", label: "xa", normal: true, visual: false }
+        ];
+        keys("gc");
+        compare(editor.text, "2\n1\n1");
+        compare(cursorLine(), 2);
+        keys("2gc");
+        compare(editor.text, "2\n2\n2");
+        keys("ggxa");
+        compare(editor.text, "4\n2\n2");
+        keys("x");
+        compare(vim.pendingKeys, "x");
+        keys("l");
+        compare(vim.pendingKeys, "");
+        compare(editor.text, "4\n2\n2");
+        keys("jgg");
+        compare(cursorLine(), 1);
+        keys("gJ");
+        compare(editor.text, "42\n2");
+        vim.commandKeys = {};
+    }
+
+    // Cmd and a key are keys too on macOS (as MacVim names them), for the
+    // user's shortcuts, which a macro records; Cmd+C still copies.
+    function test_cmdKeys() {
+        if (Qt.platform.os !== "osx")
+            skip("Cmd is macOS's");
+        load("1\n1");
+        vim.shortcuts = [{ keys: "<D-k>", macro: "<C-a>", label: "<D-k>", normal: true, visual: false }];
+        keys("<D-k>");
+        compare(editor.text, "2\n1");
+        // a bad command, like any key vim doesn't know
+        keys("d<D-j>");
+        compare(vim.pendingKeys, "");
+        compare(editor.text, "2\n1");
+        keys("qa<D-k>q");
+        compare(editor.text, "3\n1");
+        compare(vim.getRegister("a").text, "<D-k>");
+        keys("@a");
+        compare(editor.text, "4\n1");
+        compare(vim.macroKeys("<D-k><D-K><D-BS><D-,><D->"), ["<D-k>", "<D-K>", "<D-BS>", "<D-,>", "<", "D", "-",
+            ">"]);
+        keys("ggV<D-c>");
+        compare(clipboard.text, "4\n");
+    }
+
+    // A shortcut's keys as Koil shows them: Space as a word.
+    function test_keysName() {
+        compare(vim.keysName(" gc"), "Space gc");
+        compare(vim.keysName("  "), "Space Space");
+        compare(vim.keysName("g "), "g Space");
+        compare(vim.keysName("<C-k> x"), "<C-k> Space x");
+        compare(vim.keysName(""), "");
+    }
+
+    // What of vim's own a shortcut's keys take the place of, whatever
+    // Koil's and the shortcuts already have.
+    function test_vimCommandIn() {
+        vim.commandKeys = { "x": "parent" };
+        vim.shortcuts = [{ keys: "gc", macro: "x", label: "gc", normal: true, visual: true }];
+        compare(vim.vimCommandIn("gc", false), null);
+        compare(vim.vimCommandIn("xa", false), { keys: "x", whole: true });
+        compare(vim.vimCommandIn("dd", false), { keys: "dd", whole: true });
+        compare(vim.vimCommandIn("z", false), { keys: "z", whole: false });
+        compare(vim.vimCommandIn("<C-k>", false), null);
+        compare(vim.vimCommandIn("U", false), null);
+        compare(vim.vimCommandIn("U", true), { keys: "U", whole: true });
+        vim.commandKeys = {};
+        vim.shortcuts = [];
+    }
+
     // The bracket at the cursor and its match, as vim's matchparen shows
     // them, looked for only in view.
     function test_bracketPair() {
