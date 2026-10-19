@@ -84,6 +84,8 @@ Popup {
                     + "back to the listing while it has changes (`:qa!` still quits)."],
                 ["path", "The field at the top: a dir or a glob, like `~/src/**/*.rs` (a regex with `:set "
                     + "regex`). Write `/`, also on Windows: in a pattern, `\\` escapes."],
+                ["glob", "A dir matches with its `/`: `*` is only files, `*/` only dirs, `{*,*/}` both. "
+                    + "`*` skips names starting with `.`, but `.*` and `**/.env` show them."],
                 ["`Enter`  `Shift+Enter`", "In the path field: open it and go to the listing, or open it and "
                     + "stay."],
                 ["`k`  `j`", "In the path field: the dirs listed before (`↑` and `↓` while typing)."],

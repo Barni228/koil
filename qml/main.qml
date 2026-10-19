@@ -894,6 +894,20 @@ ApplicationWindow {
         vim.waiting = "Running";
     }
 
+    // The command line `line` as the status line shows it: its parts in
+    // their colors (see Vim.commandLineParts), as styled text, where its
+    // spaces are no-break ones, which it doesn't run together.
+    function commandLineHtml(line) {
+        const html = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/ /g, "&nbsp;");
+        let shown = "", at = 0;
+        for (const p of vim.commandLineParts(line)) {
+            shown += html(line.slice(at, p.start)) + "<font color=\"" + theme.commandColor(p.kind) + "\">"
+                + html(line.slice(p.start, p.end)) + "</font>";
+            at = p.end;
+        }
+        return shown + html(line.slice(at));
+    }
+
     // Line numbers (from 1, in order) as spans of lines from 0, [first,
     // last], of those next to each other.
     function lineSpans(lines) {
@@ -2045,9 +2059,9 @@ ApplicationWindow {
             elide: vim.commandLine === "" ? Text.ElideMiddle : Text.ElideRight
             font.family: vim.fontFamily
             font.pointSize: vim.fontSize
-            textFormat: Text.PlainText
+            textFormat: vim.commandLine === "" ? Text.PlainText : Text.StyledText
             color: vim.commandLine === "" && vim.message !== "" && vim.messageIsError ? "#d33" : theme.windowText
-            text: vim.commandLine || vim.message || vim.modeLabel || " "
+            text: vim.commandLine ? root.commandLineHtml(vim.commandLine) : vim.message || vim.modeLabel || " "
 
             // For what's shown here or not (see fitsStatus).
             TextMetrics {

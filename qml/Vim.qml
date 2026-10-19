@@ -4615,6 +4615,81 @@ QtObject {
         return { first: Math.min(a, b), last: Math.max(a, b), rest: c.slice(i) };
     }
 
+    // The names of the Ex commands runEx knows, as the command line colors
+    // them (see commandLineParts), but :s's (substituteNames), and ! and
+    // _!, which aren't letters.
+    readonly property var exNames: new RegExp("^(?:w|write|wq!?|x!?|xit|exit|qa?!?|quit!?|qall!?"
+        + "|noh(?:l|lsearch)?|set?|sy(?:n|nt|nta|ntax)?|h(?:elp)?|e(?:d|di|dit)?!?"
+        + "|reg(?:i|is|ist|iste|ister|isters)?|di(?:s|sp|spl|spla|splay)?|conf(?:i|ir|irm)?)$")
+
+    // The parts of the command line `line` (with its : first) that are
+    // colored as it's typed, in order, as { start, end, kind }: its range
+    // ("range"), the name of a command runEx knows ("command", and ! and
+    // _!, and a ! after them for the last one), and after it, a shell
+    // command's % and its modifiers ("file") and \% ("escape"), :set's
+    // options ("option"), and :e's path ("file"). A search (/ or ?) has
+    // none.
+    function commandLineParts(line) {
+        const parts = [];
+        if (line[0] !== ":")
+            return parts;
+        const add = (start, end, kind) => {
+            if (end > start)
+                parts.push({ start: start, end: end, kind: kind });
+        };
+        const blanks = at => at + /^\s*/.exec(line.slice(at))[0].length;
+        let i = blanks(1);
+        const range = /^(?:%|[\d.$,+\-\s]*(?:'[<>][\d.$,+\-\s]*)*)/.exec(line.slice(i))[0].replace(/\s+$/, "");
+        add(i, i + range.length, "range");
+        // A command, and after :confirm, the one it runs.
+        for (i = blanks(i + range.length); ; i = blanks(i)) {
+            const rest = line.slice(i), bang = /^(?:_\s*)?!!?/.exec(rest);
+            if (bang) {
+                add(i, i + bang[0].length, "command");
+                // As shell::expand reads it: \ and the character after it,
+                // where \% is a %.
+                for (let k = i + bang[0].length; k < line.length; k++) {
+                    if (line[k] === "\\") {
+                        if (line[k + 1] === "%")
+                            add(k, k + 2, "escape");
+                        k++;
+                    } else if (line[k] === "%") {
+                        const file = /^%(?::[phtre])*/.exec(line.slice(k))[0];
+                        add(k, k + file.length, "file");
+                        k += file.length - 1;
+                    }
+                }
+                return parts;
+            }
+            const letters = /^[a-zA-Z]*/.exec(rest)[0];
+            if (substituteNames.includes(letters) || !letters && rest[0] === "&") {
+                add(i, i + (letters || (rest[1] === "&" ? "&&" : "&")).length, "command");
+                return parts;
+            }
+            const name = letters + (rest[letters.length] === "!" ? "!" : "");
+            if (!letters || !exNames.test(name))
+                return parts;
+            add(i, i + name.length, "command");
+            i += name.length;
+            if (/^conf/.test(name))
+                continue;
+            const args = blanks(i);
+            if (/^se/.test(name)) {
+                // As setOptions reads them.
+                const words = /(?:\\.|\S)+/g;
+                words.lastIndex = args;
+                for (let w; (w = words.exec(line));) {
+                    const m = /^(no|inv)?([a-z]+)/.exec(w[0]);
+                    if (m && options.some(o => o.name === m[2] || o.short === m[2]))
+                        add(w.index, w.index + m[0].length, "option");
+                }
+            } else if (/^e(d|di|dit)?!?$/.test(name)) {
+                add(args, line.replace(/\s+$/, "").length, "file");
+            }
+            return parts;
+        }
+    }
+
     // :!command (see shellRequested), on the lines of `range` if not null,
     // its output for the scratchpad with `scratchpad`. A ! it starts with is
     // the last one (:!! runs it again).

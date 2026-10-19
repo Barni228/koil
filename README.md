@@ -34,6 +34,10 @@ until you apply, and your edits stay while you go through other dirs.
   glob (`**/*.rs`). Write `/`, also on Windows. `Tab` while typing completes
   a dir like a shell (and like zsh, `myt` gives `my_tools` if no dir starts
   with `myt`), and `k` and `j` go through the dirs you listed before.
+- **Globs match a dir with its `/`**, as it's listed, so unlike in a shell,
+  `*` shows only files, `*/` only dirs, and `{*,*/}` both. As in a shell,
+  `*` skips names starting with `.`, but `.*` or `**/.env` shows them even
+  while hidden entries are off (`g.`).
 - **Regex paths** (`gr`) must match the whole path below the dir they start
   in. For convenience, `,` is same as `.` except it does not match `/`, which
   is useful to list things without going into subdirectories

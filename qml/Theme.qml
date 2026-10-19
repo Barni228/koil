@@ -125,6 +125,21 @@ QtObject {
         return dark ? "#4fc1ff" : "#0070c1";
     }
 
+    // The color of a kind of part of the command line (see Vim's
+    // commandLineParts): "range", "command", "file" (a path, in the dirs'
+    // color), "escape" or "option".
+    function commandColor(kind) {
+        if (kind === "range")
+            return dark ? "#d19a66" : "#986801";
+        if (kind === "command")
+            return dark ? "#c586c0" : "#af00db";
+        if (kind === "file")
+            return String(directory);
+        if (kind === "escape")
+            return dark ? "#56b6c2" : "#0184bc";
+        return dark ? "#9cdcfe" : "#001080";
+    }
+
     // The color of a warning's or an error's squiggle, message and icon.
     function severityColor(severity) {
         if (severity === "error")

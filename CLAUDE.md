@@ -1495,6 +1495,15 @@ the scratchpad (see Scratchpad).
   `boxOpen` (nothing syncs, drops or saves meanwhile); `updateListing`
   ends it first (`endPreview`: an option button updates), and `reset`
   drops it without putting the text back, as the new text replaced it.
+- **Command line colors** (`Vim.commandLineParts`, `commandLineHtml` in
+  main.qml, `theme.commandColor`): as a `:` command is typed, the status
+  line colors its range, the name of a command `runEx` knows (`exNames`,
+  `substituteNames`, `!`, `_!`), a shell command's `%` and its modifiers
+  (in the dirs' color, as a path) and `\%`, `:set`'s options and `:e`'s
+  path. It's styled text (`<font color>`), where spaces are `&nbsp;`, as
+  styled text runs spaces together; the cursor block is measured on the
+  plain text, which is as wide in a font of one width. `exNames` is apart
+  from `runEx`'s matching, so a new command goes in both.
 - **Find bar**: moving to a match moves vim's cursor to its start
   (`vim.jumpTo`, which leaves visual mode and breaks an insert); it doesn't
   select it. Its regex option (`useRegex`) is on at first, so Find's seed
@@ -1816,7 +1825,8 @@ the scratchpad (see Scratchpad).
 - **QML's JavaScript**: don't make a binding depend on something by reading it
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The
-  engine has no `Array.prototype.flatMap`; `?.` and `??` work. A `var`
+  engine has no `Array.prototype.flatMap` nor `String.prototype.trimEnd`;
+  `?.` and `??` work. A `var`
   property bound to objects of constants (`dark ? { create: "#73c991" } :
   { … }`) came out undefined in the compiled app, though qmltestrunner had
   it (`regexColors`, with a `String(text)` in it, works), so

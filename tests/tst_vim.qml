@@ -1270,6 +1270,25 @@ TestCase {
         vim.shellRequested.disconnect(wait);
     }
 
+    // The parts of the command line that are colored, as "text:kind".
+    function test_commandLineParts() {
+        const parts = line => vim.commandLineParts(line).map(p => line.slice(p.start, p.end) + ":" + p.kind);
+        compare(parts(":!git add %"), ["!:command", "%:file"]);
+        compare(parts(":'<,'>!mv %:p:h \\% x"), ["'<,'>:range", "!:command", "%:p:h:file", "\\%:escape"]);
+        compare(parts(":!echo \\\\%"), ["!:command", "%:file"]);
+        compare(parts(":.,+2_!sort"), [".,+2:range", "_!:command"]);
+        compare(parts(":!!"), ["!!:command"]);
+        compare(parts(":%s/a/b/g"), ["%:range", "s:command"]);
+        compare(parts(":&&"), ["&&:command"]);
+        compare(parts(":set nowrap fs=14 bogus"), ["set:command", "nowrap:option", "fs:option"]);
+        compare(parts(":conf q"), ["conf:command", "q:command"]);
+        compare(parts(":e! ~/my dir "), ["e!:command", "~/my dir:file"]);
+        compare(parts(":wq"), ["wq:command"]);
+        compare(parts(":5"), ["5:range"]);
+        compare(parts(":bogus %"), []);
+        compare(parts("/a %"), []);
+    }
+
     // A filter's output in place of its lines.
     function test_filterLines() {
         load("one\ntwo\nthree\nfour");
