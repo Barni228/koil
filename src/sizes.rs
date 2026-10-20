@@ -35,14 +35,16 @@ pub enum DirSize {
     Unreadable,
 }
 
-/// The sizes known, by the dirs' paths.
-pub type DirSizes = HashMap<PathBuf, DirSize>;
-
 /// What's known of the sizes of dirs, by their paths.
 pub trait SizeOf {
     fn size_of(&self, dir: &Path) -> Option<DirSize>;
 }
 
+/// The sizes known, by the dirs' paths, for the tests.
+#[cfg(test)]
+pub type DirSizes = HashMap<PathBuf, DirSize>;
+
+#[cfg(test)]
 impl SizeOf for DirSizes {
     fn size_of(&self, dir: &Path) -> Option<DirSize> {
         self.get(dir).copied()

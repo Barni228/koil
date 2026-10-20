@@ -57,14 +57,7 @@ function carryLines(before, after, start, end, text) {
     }
     // Those at the edit's start or before it stay, those past its end move,
     // and the line breaks it puts in start lines of their own.
-    let lo = 0, hi = s.length;
-    while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (s[mid] <= start)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
+    const lo = partition(0, s.length, i => s[i] <= start);
     const starts = s.slice(0, lo);
     for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1))
         starts.push(start + i + 1);
@@ -73,6 +66,21 @@ function carryLines(before, after, start, end, text) {
         k++;
     const moved = s.slice(k).map(p => p + d);
     lineIndexes = [{ text: after, starts: starts.concat(moved), done: x.done }, x];
+}
+
+// The first index in [from, to) that `before` is false for, where it's true
+// for those before it and false for those after (or `to`): a binary search,
+// for sorted lists that can be long (line starts, hidden text, highlights).
+function partition(from, to, before) {
+    let lo = from, hi = to;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (before(mid))
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo;
 }
 
 // Finds line starts in x until it has `count` of them and one past p (or
@@ -103,13 +111,6 @@ function lineBreaks(t, from, to) {
     for (let i = t.indexOf("\n", from); i >= 0 && i < to; i = t.indexOf("\n", i + 1))
         r.push(i);
     return r;
-}
-
-function firstNonBlank(t, p) {
-    let q = lineStart(t, p);
-    while (q < t.length && isBlank(t[q]))
-        q++;
-    return q;
 }
 
 function isBlank(ch) {
@@ -150,15 +151,7 @@ function lineOf(t, p) {
     const x = lineIndex(t), s = x.starts;
     findLines(x, 0, p);
     // How many lines start at p or before it.
-    let lo = 0, hi = s.length;
-    while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if (s[mid] <= p)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-    return Math.max(1, lo);
+    return Math.max(1, partition(0, s.length, i => s[i] <= p));
 }
 
 // ---- Characters ------------------------------------------------------------
@@ -441,18 +434,25 @@ function matchPair(t, p) {
         q++;
     if (q >= le)
         return null;
-    const i = pairs.indexOf(t[q]);
+    const k = bracketMatch(t, q, 0, t.length - 1);
+    return k < 0 ? null : { pos: k, type: "inclusive" };
+}
+
+// Where the bracket at p (one of `()[]{}`) is matched in [from, to], or
+// -1.
+function bracketMatch(t, p, from, to) {
+    const pairs = "()[]{}", i = pairs.indexOf(t[p]);
     const open = pairs[i & ~1], close = pairs[i | 1], step = i % 2 === 0 ? 1 : -1;
     let depth = 0;
-    for (let k = q; k >= 0 && k < t.length; k += step) {
+    for (let k = p; k >= from && k <= to; k += step) {
         if (t[k] === open)
             depth += step;
         else if (t[k] === close)
             depth -= step;
         if (depth === 0)
-            return { pos: k, type: "inclusive" };
+            return k;
     }
-    return null;
+    return -1;
 }
 
 // The bracket at p and the one it matches, as [at, match], when both are
@@ -468,17 +468,8 @@ function bracketPair(t, p, before, from, to) {
     }
     if (i < 0 || p < from || p > to)
         return null;
-    const open = pairs[i & ~1], close = pairs[i | 1], step = i % 2 === 0 ? 1 : -1;
-    let depth = 0;
-    for (let k = p; k >= from && k <= to; k += step) {
-        if (t[k] === open)
-            depth += step;
-        else if (t[k] === close)
-            depth -= step;
-        if (depth === 0)
-            return [p, k];
-    }
-    return null;
+    const k = bracketMatch(t, p, from, to);
+    return k < 0 ? null : [p, k];
 }
 
 function nextParagraph(t, p) {
@@ -662,13 +653,30 @@ function blockObject(t, p, around, open, close, count) {
 // name, leaving those between unpaired (`<br>`, an `<li>` with no
 // `</li>`); a tag ending with `/>` has no pair. Null if there's none.
 function tagPair(t, p, count) {
-    const re = /<(\/?)([A-Za-z][^\s\/>]*)[^<>]*>/g, open = [], around = [];
+    const around = [];
+    eachTagPair(t, (o, c, depth) => {
+        // Pairs are nested or apart, so those p is in close innermost first.
+        if (o.start <= p && p < c.end)
+            around.push({ o1: o.start, o2: o.end, c1: c.start, c2: c.end });
+        return around.length >= count || depth === 0 && c.start > p;
+    });
+    return around[count - 1] || null;
+}
+
+// A tag, as tagPair takes them: `<name …>`, `</name>`, or `<name …/>`.
+const tagSource = "<(\\/?)([A-Za-z][^\\s\\/>]*)[^<>]*>";
+
+// Calls fn(o, c, depth) for each pair of t's tags (see tagPair), in the
+// order they close: o and c the opening and closing tags' { start, end },
+// and depth how many are open around them. fn returning true stops it.
+function eachTagPair(t, fn) {
+    const re = new RegExp(tagSource, "g"), open = [];
     let m;
     while ((m = re.exec(t))) {
         const end = m.index + m[0].length;
         if (!m[1]) {
             if (m[0][m[0].length - 2] !== "/")
-                open.push({ name: m[2], o1: m.index, o2: end });
+                open.push({ name: m[2], start: m.index, end: end });
             continue;
         }
         let k = open.length - 1;
@@ -678,13 +686,9 @@ function tagPair(t, p, count) {
             continue;
         const o = open[k];
         open.length = k;
-        // Pairs are nested or apart, so those p is in close innermost first.
-        if (o.o1 <= p && p < end)
-            around.push({ o1: o.o1, o2: o.o2, c1: m.index, c2: end });
-        if (around.length >= count || k === 0 && m.index > p)
-            break;
+        if (fn(o, { start: m.index, end: end }, k))
+            return;
     }
-    return around[count - 1] || null;
 }
 
 function paragraphObject(t, p, around) {
@@ -758,22 +762,10 @@ function indentUnit(t) {
 // taken for a tag. An array, not a Set: V4's takes time in proportion to
 // its size for each add and lookup (40,000 adds took 2 s).
 function pairedTags(t) {
-    const re = /<(\/?)([A-Za-z][^\s\/>]*)[^<>]*>/g, open = [], paired = [];
-    let m;
-    while ((m = re.exec(t))) {
-        if (!m[1]) {
-            if (m[0][m[0].length - 2] !== "/")
-                open.push({ name: m[2], at: m.index });
-            continue;
-        }
-        let k = open.length - 1;
-        while (k >= 0 && open[k].name !== m[2])
-            k--;
-        if (k >= 0) {
-            paired.push(open[k].at, m.index);
-            open.length = k;
-        }
-    }
+    const paired = [];
+    eachTagPair(t, (o, c) => {
+        paired.push(o.start, c.start);
+    });
     return paired.sort((a, b) => a - b);
 }
 
@@ -798,7 +790,7 @@ function reindent(t, spans, unit, slashes, textStart) {
             next++;
         return paired[next] === i;
     };
-    const tagAt = /<(\/?)([A-Za-z][^\s\/>]*)[^<>]*>/y;
+    const tagAt = new RegExp(tagSource, "y");
     const isWordAt = i => i >= 0 && charClass(t[i], false) === 2;
     const blankOr = (i, signs) => i < 0 || isBlank(t[i]) || t[i] === "\n" || signs.includes(t[i]);
     // Whether a \ escapes the character at i (an odd number of them before it).

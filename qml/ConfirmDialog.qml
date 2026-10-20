@@ -31,14 +31,12 @@ import QtQuick.Layouts
 // by what it stands for, like CREATE in green, and a question can have one
 // more button, on the left, apart from the choices, which does something
 // with the picked lines, and is off while none are (see ask).
-Popup {
+ModalBox {
     id: dialog
 
-    required property Theme theme
     // Colors the list's keywords (see `keywords`); none in the tests.
     property var system: null
 
-    readonly property real zoom: theme.zoom
     // The question, or a function of how many lines are picked (and which)
     // that gives it (see ask).
     property var question: ""
@@ -226,30 +224,17 @@ Popup {
         rowHighlight.y = top.y;
         rowHighlight.height = bottom.y + bottom.height - top.y;
         if (top.y < scroller.contentY)
-            scrollTo(top.y);
+            scroller.scrollTo(top.y);
         else if (bottom.y + bottom.height > scroller.contentY + scroller.height)
-            scrollTo(bottom.y + bottom.height - scroller.height);
-    }
-
-    function scrollBy(dy) {
-        scrollTo(scroller.contentY + dy);
-    }
-
-    function scrollTo(y) {
-        scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, y));
+            scroller.scrollTo(bottom.y + bottom.height - scroller.height);
     }
 
     onKeywordColorsChanged: system?.setKeywordColors(label.textDocument, keywordColors)
     onRowChanged: Qt.callLater(showRow)
     onRowShownChanged: Qt.callLater(showRow)
 
-    parent: Overlay.overlay
-    anchors.centerIn: parent
     width: Math.min(parent ? parent.width - 48 * zoom : 500,
-        Math.max(questionText.implicitWidth, label.implicitWidth + scrollBar.width, buttons.implicitWidth) + 2 * padding)
-    padding: 16 * zoom
-    modal: true
-    focus: true
+        Math.max(questionText.implicitWidth, label.implicitWidth + scroller.scrollBar.width, buttons.implicitWidth) + 2 * padding)
     closePolicy: Popup.CloseOnPressOutside
     onClosed: {
         questionText.deselect();
@@ -259,15 +244,6 @@ Popup {
         afterAction = null;
         if (after)
             after();
-    }
-
-    Overlay.modal: Rectangle {
-        color: dialog.theme.dark ? "#60000000" : "#30000000"
-    }
-
-    background: Panel {
-        theme: dialog.theme
-        raised: true
     }
 
     component Choice: AbstractButton {
@@ -305,27 +281,17 @@ Popup {
 
     // The question's and the list's text, which can be selected (one at a
     // time) and copied.
-    component Selectable: TextEdit {
+    component Selectable: SelectableText {
         id: selectable
 
+        theme: dialog.theme
         font: dialog.theme.font
         color: dialog.theme.text
         textFormat: TextEdit.PlainText
         wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-        readOnly: true
-        selectByMouse: true
-        // Keys stay with the dialog, which forwards Copy.
-        activeFocusOnPress: false
-        persistentSelection: true
-        selectionColor: dialog.theme.highlight
-        selectedTextColor: dialog.theme.highlightedText
         onSelectedTextChanged: {
             if (selectedText)
                 (selectable === label ? questionText : label).deselect();
-        }
-
-        HoverHandler {
-            cursorShape: Qt.IBeamCursor
         }
     }
 
@@ -354,9 +320,9 @@ Popup {
                 dialog.rowShown = true;
                 dialog.pickAll();
             } else if (event.key === Qt.Key_Down || event.key === Qt.Key_J)
-                dialog.scrollBy(step);
+                scroller.scrollBy(step);
             else if (event.key === Qt.Key_Up || event.key === Qt.Key_K)
-                dialog.scrollBy(-step);
+                scroller.scrollBy(-step);
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                 dialog.answer(dialog.choices[dialog.current].answer);
             else if (dialog.extra && event.key === dialog.extra.key)
@@ -380,8 +346,7 @@ Popup {
             text: dialog.text
         }
 
-        // Not interactive, since a drag selects text; the wheel scrolls it.
-        Flickable {
+        WheelFlickable {
             id: scroller
 
             Layout.fillWidth: true
@@ -392,25 +357,14 @@ Popup {
             visible: dialog.list !== ""
             contentWidth: width
             contentHeight: label.implicitHeight
-            interactive: false
-            clip: true
-
-            ScrollBar.vertical: ScrollBar {
-                id: scrollBar
-            }
-
-            // The trackpad too, which a WheelHandler leaves out by default.
-            WheelHandler {
-                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                onWheel: event => dialog.scrollBy(-(event.pixelDelta.y || event.angleDelta.y / 120 * 60 * dialog.zoom))
-            }
+            wheelStep: 60 * dialog.zoom
 
             Selectable {
                 id: label
 
                 // Room for the scroll bar, which the width can't depend on
                 // needing: that depends on the height, which depends on it.
-                width: scroller.width - scrollBar.width
+                width: scroller.width - scroller.scrollBar.width
                 text: dialog.list
                 onTextChanged: Qt.callLater(dialog.showRow)
                 onContentHeightChanged: Qt.callLater(dialog.showRow)

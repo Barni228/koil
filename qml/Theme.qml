@@ -114,40 +114,33 @@ QtObject {
     readonly property color bracketMatch: dark ? "#2effffff" : "#1f000000"
     readonly property color bracketBorder: dark ? "#80ffffff" : "#66000000"
 
+    // A color of `pair`, [dark, light], as the theme is.
+    function pick(pair) {
+        return pair[dark ? 0 : 1];
+    }
+
     // The color of a kind of change in the confirmations (see
     // ConfirmDialog's keywords): "create", "delete", "rename" (or move) or
     // "copy". A function, as an object of constant colors in a binding
     // (`dark ? { create: "#73c991", … } : { … }`) came out undefined in the
     // compiled app, though qmltestrunner had it.
     function changeColor(kind) {
-        if (kind === "create")
-            return dark ? "#73c991" : "#388a34";
-        if (kind === "delete")
-            return dark ? "#f14c4c" : "#e51400";
-        if (kind === "rename")
-            return dark ? "#e2c08d" : "#895503";
-        return dark ? "#4fc1ff" : "#0070c1";
+        return pick({ create: ["#73c991", "#388a34"], delete: ["#f14c4c", "#e51400"],
+            rename: ["#e2c08d", "#895503"] }[kind] || ["#4fc1ff", "#0070c1"]);
     }
 
     // The color of a kind of part of the command line (see Vim's
     // commandLineParts): "range", "command", "file" (a path, in the dirs'
     // color), "escape" or "option".
     function commandColor(kind) {
-        if (kind === "range")
-            return dark ? "#d19a66" : "#986801";
-        if (kind === "command")
-            return dark ? "#c586c0" : "#af00db";
         if (kind === "file")
             return String(directory);
-        if (kind === "escape")
-            return dark ? "#56b6c2" : "#0184bc";
-        return dark ? "#9cdcfe" : "#001080";
+        return pick({ range: ["#d19a66", "#986801"], command: ["#c586c0", "#af00db"],
+            escape: ["#56b6c2", "#0184bc"] }[kind] || ["#9cdcfe", "#001080"]);
     }
 
     // The color of a warning's or an error's squiggle, message and icon.
     function severityColor(severity) {
-        if (severity === "error")
-            return dark ? "#f14c4c" : "#e51400";
-        return dark ? "#ff9d3b" : "#e07000";
+        return severity === "error" ? changeColor("delete") : pick(["#ff9d3b", "#e07000"]);
     }
 }

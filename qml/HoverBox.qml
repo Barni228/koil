@@ -181,49 +181,30 @@ Item {
             path: hover.severity === "error" ? "M1.5 8 A6.5 6.5 0 1 1 14.5 8 A6.5 6.5 0 1 1 1.5 8 Z M5.7 5.7 L10.3 10.3 M10.3 5.7 L5.7 10.3" : "M8 1.8 L14.5 13.8 L1.5 13.8 Z M8 6.2 L8 9.6 M8 11.8 L8 11.9"
         }
 
-        // Not interactive, since a drag selects text; the wheel scrolls it.
-        Flickable {
+        WheelFlickable {
             id: scroller
 
             x: icon.visible ? icon.x + icon.width + 6 * hover.theme.zoom : 8
             y: 4
             // Room beside the text for the scroll bar, when there is one.
-            width: label.width + (contentHeight > height ? scrollBar.width + 4 : 0)
+            width: label.width + (contentHeight > height ? scroller.scrollBar.width + 4 : 0)
             height: Math.min(label.height, hover.maxHeight - 8)
             contentWidth: label.width
             contentHeight: label.height
-            interactive: false
-            clip: true
+            wheelStep: 3 * hover.editor.lineHeight
 
-            ScrollBar.vertical: ScrollBar {
-                id: scrollBar
-            }
-
-            // The trackpad too, which a WheelHandler leaves out by default.
-            WheelHandler {
-                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                onWheel: event => {
-                    const dy = event.pixelDelta.y || event.angleDelta.y / 120 * 3 * hover.editor.lineHeight;
-                    scroller.contentY = Math.max(0, Math.min(scroller.contentHeight - scroller.height, scroller.contentY - dy));
-                }
-            }
-
-            TextEdit {
+            // Keys stay with the editor, which forwards Copy (see
+            // copySelection).
+            SelectableText {
                 id: label
 
                 width: Math.min(implicitWidth, hover.maxWidth - scroller.x - 8)
+                theme: hover.theme
                 text: hover.text
                 font: hover.theme.font
                 color: hover.theme.text
                 textFormat: TextEdit.PlainText
                 wrapMode: TextEdit.WrapAtWordBoundaryOrAnywhere
-                readOnly: true
-                selectByMouse: true
-                // Keys stay with the editor, which forwards Copy (see copySelection).
-                activeFocusOnPress: false
-                persistentSelection: true
-                selectionColor: hover.theme.highlight
-                selectedTextColor: hover.theme.highlightedText
             }
         }
     }

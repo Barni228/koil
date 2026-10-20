@@ -12,6 +12,7 @@ use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde_json::json;
 
+use crate::convert::{Coalesced, from_json, path_string, paths, to_json};
 use crate::history::History;
 use crate::listing::{self, Hidden, Notes};
 use crate::sizes::{Measure, Sizes};
@@ -277,9 +278,7 @@ impl DiskWatcher {
     fn new(thread: CxxQtThread<qobject::Koil>, sizes: Sizes) -> Option<DiskWatcher> {
         let watched = Arc::new(Mutex::new(Watched::default()));
         let writes = Arc::new(AtomicBool::new(false));
-        // Whether `changedOnDisk` is on its way, so a burst of changes (a
-        // build writing thousands of files) sends it once, not once each.
-        let queued = Arc::new(AtomicBool::new(false));
+        let changed = Coalesced::new(thread);
         let (filter, with_writes) = (watched.clone(), writes.clone());
         let handler = move |event: notify::Result<notify::Event>| {
             match &event {
@@ -308,12 +307,8 @@ impl DiskWatcher {
                 // Changes may have been missed.
                 Err(_) => true,
             };
-            if matters && !queued.swap(true, Ordering::AcqRel) {
-                let queued = queued.clone();
-                let _ = thread.queue(move |koil| {
-                    queued.store(false, Ordering::Release);
-                    koil.changed_on_disk();
-                });
+            if matters {
+                changed.emit(|koil| koil.changed_on_disk());
             }
         };
         let watcher = notify::recommended_watcher(handler).ok()?;
@@ -436,33 +431,42 @@ impl KoilRust {
     }
 }
 
-/// What `open`, `apply` and `undo` did.
+/// What `open`, `apply`, `undo` and `create` did: the message they show,
+/// or why they failed.
 #[derive(Serialize)]
 struct Outcome {
     ok: bool,
     message: String,
 }
 
-fn to_json(value: &impl Serialize) -> QString {
-    QString::from(
-        serde_json::to_string(value)
-            .expect("always valid JSON")
-            .as_str(),
-    )
+fn outcome(result: Result<String, String>) -> QString {
+    to_json(&match result {
+        Ok(message) => Outcome { ok: true, message },
+        Err(message) => Outcome { ok: false, message },
+    })
 }
 
 fn read_hidden(hidden: &QString) -> Vec<Hidden> {
-    serde_json::from_str(&hidden.to_string()).unwrap_or_default()
+    from_json(hidden)
 }
 
-/// The paths a shell command runs on, or why there are none, as QML takes
-/// them: `{ paths, message }`.
-fn found_paths(paths: Result<Vec<PathBuf>, String>) -> QString {
-    let (paths, message) = match paths {
-        Ok(paths) => (paths, String::new()),
-        Err(message) => (Vec::new(), message),
+/// A list, or why there is none, as QML takes it: `{ <key>, message }`
+/// (the paths a shell command runs on, the steps creating a file takes,
+/// the applies that can be undone).
+fn listed(key: &str, list: Result<impl Serialize, String>) -> QString {
+    let (list, message) = match list {
+        Ok(list) => (json!(list), String::new()),
+        Err(message) => (json!([]), message),
     };
-    to_json(&json!({ "paths": paths, "message": message }))
+    to_json(&json!({ key: list, "message": message }))
+}
+
+/// The items of `shown` at the indexes QML gave in `picked`, as JSON.
+fn pick<T: Clone>(shown: &[T], picked: &QString) -> Vec<T> {
+    let picked: Vec<usize> = from_json(picked);
+    (picked.iter())
+        .filter_map(|&i| shown.get(i).cloned())
+        .collect()
 }
 
 impl qobject::Koil {
@@ -506,8 +510,7 @@ impl qobject::Koil {
     ) -> QString {
         let mut rust = self.rust_mut();
         let hidden = read_hidden(hidden);
-        let conflicts: Vec<Conflict> =
-            serde_json::from_str(&conflicts.to_string()).unwrap_or_default();
+        let conflicts: Vec<Conflict> = from_json(conflicts);
         let rust = &mut *rust;
         let sizes = rust.sizes.known(rust.measure());
         to_json(&listing::resolve(
@@ -525,17 +528,12 @@ impl qobject::Koil {
         let koil = &mut rust.koil;
         // This reopens what was open, if anything, which is left right away.
         let _ = koil.set_settings(settings);
-        let outcome = match koil.open(location.to_string()) {
-            Ok(()) => Outcome {
-                ok: true,
-                message: String::new(),
-            },
-            Err(error) => Outcome {
-                ok: false,
-                message: listing::describe_open(&error),
-            },
-        };
-        to_json(&outcome)
+        let opened = koil.open(location.to_string());
+        outcome(
+            opened
+                .map(|()| String::new())
+                .map_err(|e| listing::describe_open(&e)),
+        )
     }
 
     fn render(self: Pin<&mut Self>) -> QString {
@@ -628,15 +626,14 @@ impl qobject::Koil {
     }
 
     fn paths_on_lines(&self, text: &QString, hidden: &QString, lines: &QString) -> QString {
-        let lines: Vec<(usize, usize)> =
-            serde_json::from_str(&lines.to_string()).unwrap_or_default();
+        let lines: Vec<(usize, usize)> = from_json(lines);
         let paths = if lines.is_empty() {
             Ok(vec![self.koil.current_dir().to_path_buf()])
         } else {
             let text = text.to_string();
             listing::paths_on_lines(&self.koil, &text, &read_hidden(hidden), &lines)
         };
-        found_paths(paths)
+        listed("paths", paths)
     }
 
     fn links_on_lines(
@@ -647,27 +644,26 @@ impl qobject::Koil {
         at: i32,
         dirs: &QStringList,
     ) -> QString {
-        let lines: Vec<(usize, usize)> =
-            serde_json::from_str(&lines.to_string()).unwrap_or_default();
-        let dirs: Vec<PathBuf> = dirs.iter().map(|d| PathBuf::from(d.to_string())).collect();
+        let lines: Vec<(usize, usize)> = from_json(lines);
         let text = text.to_string();
-        found_paths(listing::links_on_lines(
+        let links = listing::links_on_lines(
             &self.koil,
             &text,
             &read_hidden(hidden),
             &lines,
             usize::try_from(at).ok(),
-            &dirs,
-        ))
+            &paths(dirs),
+        );
+        listed("paths", links)
     }
 
     fn current_dir(&self) -> QString {
-        QString::from(self.koil.current_dir().to_string_lossy().as_ref())
+        path_string(self.koil.current_dir())
     }
 
     fn file_at(&self, location: &QString) -> QString {
         let file = listing::file_at(&self.koil, &location.to_string());
-        QString::from(file.unwrap_or_default().to_string_lossy().as_ref())
+        path_string(&file.unwrap_or_default())
     }
 
     fn id_path(&self, id: &QString) -> QString {
@@ -686,42 +682,18 @@ impl qobject::Koil {
     }
 
     fn apply(self: Pin<&mut Self>, picked: &QString) -> QString {
-        let picked: Vec<usize> = serde_json::from_str(&picked.to_string()).unwrap_or_default();
         let mut this = self.rust_mut();
         let this = &mut *this;
-        let actions: Vec<Action> = (picked.iter())
-            .filter_map(|&i| this.shown.get(i).cloned())
-            .collect();
-        let shown = this.shown.len();
-        let outcome = match this.koil.apply_only(&actions) {
-            // Nothing picked: every change is forgotten.
-            Ok(report) if actions.is_empty() => Outcome {
-                ok: true,
-                message: report_message(
-                    Report {
-                        changes: shown,
-                        ..report
-                    },
-                    "discarded",
-                ),
-            },
-            // As many as the confirmation listed, not Koil's steps (a swap
-            // takes three).
-            Ok(report) => Outcome {
-                ok: true,
-                message: report_message(
-                    Report {
-                        changes: actions.len(),
-                        ..report
-                    },
-                    "applied",
-                ),
-            },
-            Err(error) => Outcome {
-                ok: false,
-                message: listing::describe(&error),
-            },
+        let actions: Vec<Action> = pick(&this.shown, picked);
+        // As many as the confirmation listed, not Koil's steps (a swap
+        // takes three); with nothing picked, every change is forgotten.
+        let (changes, done) = match actions.len() {
+            0 => (this.shown.len(), "discarded"),
+            n => (n, "applied"),
         };
+        let applied = this.koil.apply_only(&actions);
+        let applied = (applied.map(|report| report_message(Report { changes, ..report }, done)))
+            .map_err(|e| listing::describe(&e));
         // The sizes kept that it changed, before the watcher tells.
         for action in &actions {
             for path in action.removes().into_iter().chain(action.creates()) {
@@ -729,30 +701,23 @@ impl qobject::Koil {
             }
         }
         this.history.merge(&mut this.koil);
-        to_json(&outcome)
+        outcome(applied)
     }
 
     fn create_steps(&self, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
-        let value = match listing::create_steps(&self.koil, &path) {
-            Ok(steps) => json!({ "steps": steps, "message": "" }),
-            Err(message) => json!({ "steps": [], "message": message }),
-        };
-        to_json(&value)
+        listed("steps", listing::create_steps(&self.koil, &path))
     }
 
     fn create(self: Pin<&mut Self>, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
         let mut rust = self.rust_mut();
         let rust = &mut *rust;
-        let outcome = match listing::create_now(&mut rust.koil, &path) {
-            Ok(message) => Outcome { ok: true, message },
-            Err(message) => Outcome { ok: false, message },
-        };
+        let created = listing::create_now(&mut rust.koil, &path);
         // With the new dirs it's in.
         rust.sizes.changed(&path);
         rust.history.merge(&mut rust.koil);
-        to_json(&outcome)
+        outcome(created)
     }
 
     fn history(self: Pin<&mut Self>) -> QString {
@@ -760,41 +725,26 @@ impl qobject::Koil {
         let rust = &mut *rust;
         // With what other Koils applied or undid.
         rust.history.merge(&mut rust.koil);
-        let value = match listing::history(&rust.koil) {
-            Ok(lines) => {
-                rust.shown_history = lines.iter().map(|l| l.applied.clone()).collect();
-                json!({ "applies": lines, "message": "" })
-            }
-            Err(message) => json!({ "applies": [], "message": message }),
-        };
-        to_json(&value)
+        let lines = listing::history(&rust.koil);
+        if let Ok(lines) = &lines {
+            rust.shown_history = lines.iter().map(|l| l.applied.clone()).collect();
+        }
+        listed("applies", lines)
     }
 
     fn undo(self: Pin<&mut Self>, picked: &QString) -> QString {
-        let picked: Vec<usize> = serde_json::from_str(&picked.to_string()).unwrap_or_default();
         let mut rust = self.rust_mut();
         let rust = &mut *rust;
-        let applies: Vec<Applied> = (picked.iter())
-            .filter_map(|&i| rust.shown_history.get(i).cloned())
-            .collect();
+        let applies: Vec<Applied> = pick(&rust.shown_history, picked);
         // Those another Koil undid since aren't undone again.
         rust.history.merge(&mut rust.koil);
-        let outcome = match rust.koil.undo_only(&applies) {
-            Ok(report) => Outcome {
-                ok: true,
-                message: report_message(report, "undone"),
-            },
-            Err(KoilError::UndoBlocked { blocked, .. }) => Outcome {
-                ok: false,
-                message: format!(
-                    "Can't undo: {}",
-                    listing::describe_blocked(rust.koil.current_dir(), &blocked)
-                ),
-            },
-            Err(error) => Outcome {
-                ok: false,
-                message: listing::describe(&error),
-            },
+        let undone = match rust.koil.undo_only(&applies) {
+            Ok(report) => Ok(report_message(report, "undone")),
+            Err(KoilError::UndoBlocked { blocked, .. }) => Err(format!(
+                "Can't undo: {}",
+                listing::describe_blocked(rust.koil.current_dir(), &blocked)
+            )),
+            Err(error) => Err(listing::describe(&error)),
         };
         // The sizes kept that it changed, before the watcher tells.
         for step in applies.iter().flat_map(|applied| &applied.steps) {
@@ -803,16 +753,13 @@ impl qobject::Koil {
             }
         }
         rust.history.merge(&mut rust.koil);
-        to_json(&outcome)
+        outcome(undone)
     }
 
     fn forget_history(self: Pin<&mut Self>, picked: &QString) {
-        let picked: Vec<usize> = serde_json::from_str(&picked.to_string()).unwrap_or_default();
         let mut rust = self.rust_mut();
         let rust = &mut *rust;
-        let applies: Vec<Applied> = (picked.iter())
-            .filter_map(|&i| rust.shown_history.get(i).cloned())
-            .collect();
+        let applies: Vec<Applied> = pick(&rust.shown_history, picked);
         rust.history.forget(&mut rust.koil, &applies);
     }
 }

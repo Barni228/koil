@@ -57,22 +57,24 @@ fn once(reads: &[PathBuf]) -> bool {
     read.len() == reads.len()
 }
 
-/// `a` with 100 bytes in it, `a/b/c` with 20 and `a/d` with 3 (and an
-/// empty `a/d/e`, so it isn't small), and an empty `empty`, in `root`.
-fn make_tree(root: &Path) {
+/// A temp dir with `a` with 100 bytes in it, `a/b/c` with 20 and `a/d` with
+/// 3 (and an empty `a/d/e`, so it isn't small), and an empty `empty`.
+fn tree() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
     for dir in ["a/b/c", "a/d/e", "empty"] {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
     fs::write(root.join("a/top"), "x".repeat(100)).unwrap();
     fs::write(root.join("a/b/c/deep"), "x".repeat(20)).unwrap();
     fs::write(root.join("a/d/.hidden"), "123").unwrap();
+    temp
 }
 
 #[test]
 fn test_counts_dirs() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let sizes = Sizes::default();
     let (a, empty) = (root.join("a"), root.join("empty"));
     sizes.want([a.clone(), empty.clone(), root.join("gone")], Measure::Size);
@@ -104,9 +106,8 @@ fn test_counts_dirs() {
 
 #[test]
 fn test_keeps_dirs_in_it() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let sizes = Sizes::default();
     let a = root.join("a");
     sizes.want([a.clone()], Measure::Size);
@@ -150,9 +151,8 @@ fn test_small() {
 
 #[test]
 fn test_changed() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let sizes = Sizes::default();
     let a = root.join("a");
     let (b, c, d) = (a.join("b"), a.join("b/c"), a.join("d"));
@@ -190,9 +190,8 @@ fn test_changed() {
 
 #[test]
 fn test_stale() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let mut state = State::default();
     let a = root.join("a");
     let b = a.join("b");
@@ -214,9 +213,8 @@ fn test_stale() {
 
 #[test]
 fn test_changed_while_counting() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let mut state = State::default();
     let a = root.join("a");
     let (b, c, d) = (a.join("b"), a.join("b/c"), a.join("d"));
@@ -253,9 +251,8 @@ fn test_changed_while_counting() {
 
 #[test]
 fn test_waits_for_counts_in_it() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let mut state = State::default();
     let a = root.join("a");
     let (b, d) = (a.join("b"), a.join("d"));
@@ -287,9 +284,8 @@ fn test_waits_for_counts_in_it() {
 
 #[test]
 fn test_counts_in_count_go_on() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let mut state = State::default();
     let a = root.join("a");
     let (b, d) = (a.join("b"), a.join("d"));
@@ -310,9 +306,8 @@ fn test_counts_in_count_go_on() {
 
 #[test]
 fn test_watches() {
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tree();
     let root = temp.path();
-    make_tree(root);
     let sizes = Sizes::default();
     let (a, b, empty) = (root.join("a"), root.join("a/b"), root.join("empty"));
     sizes.want([b.clone()], Measure::Size);

@@ -47,6 +47,9 @@ the scratchpad (see Scratchpad).
   place in a line (`link_at`), or a line's first (`first_link`, for
   `<cfile>`), and what its text stands for (`target`). Its tests
   (`src/link/tests.rs`) use a temp dir.
+- `src/convert.rs`: what the QML elements share: JSON in and out of
+  QML's strings (`to_json`, `from_json`), paths (`path_string`, `paths`),
+  and a signal a watcher's thread emits once a burst (`Coalesced`).
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore`, `regex`,
   `sort` and `sortReverse` are properties, bound to vim's `:set` options.
@@ -61,7 +64,8 @@ the scratchpad (see Scratchpad).
   text, line format and colors, showing a path in Finder or Explorer
   (`reveal`) or opening it in its default app (`openInApp`), links
   (`linkAt`, `linkTarget`), and running shell commands (`runShell`,
-  `stopShell`, `shellDone`).
+  `stopShell`, `shellDone`). Its methods that only hand a QML item to
+  native.cpp are made by `forward!`.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, line format,
@@ -72,14 +76,16 @@ the scratchpad (see Scratchpad).
   text (`TextChanges`, see Long texts)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
   Koil), Objective-C++, which `build.rs` adds only there.
-- `qml/main.qml`: the window: settings, menus, dialogs, status line, the
-  path field and its option buttons, and Koil's listing (`showListing`,
+- `qml/main.qml`: the window: settings, menus (`MacMenuBar.qml`, and
+  `WindowMenuBar.qml` elsewhere, which run its functions), dialogs, the
+  status line (`StatusLine.qml`), the path field and its option buttons, and Koil's listing (`showListing`,
   `updateListing`, `applyChanges`, `undoApply`), a file (`loadFile`) or
   the scratchpad (`openScratch`), and which of the two editors vim edits (`activate`). It wires the pieces
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
-  with it: cursors, selection, the marked lines (`markedLines`, see Marked
-  lines), search highlights, what was just yanked (`yankFlash`), the
+  with it: cursors, selection, the marked lines (see Marked lines), the
+  find bar's scope and what was just yanked (each a `SpanShade`), search
+  highlights, the
   bracket matching the cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
   warnings and errors, line numbers, the link under the pointer with Cmd
   held (`link`, see Links), the long lines Qt doesn't draw (`longText`,
@@ -109,8 +115,9 @@ the scratchpad (see Scratchpad).
   highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`, `:h key`), a box listing what
-  isn't obvious; `:reg` shows the registers in it (`showList`), and `:!`
-  what a command wrote (`showText`). `/` and `?` search it (see Help).
+  isn't obvious (`qml/help.js`'s `sections`); `:reg` shows the registers
+  in it (`showList`), and `:!` what a command wrote (`showText`). `/` and
+  `?` search it (see Help).
 - `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
   the question: `:confirm q`, applying and undoing (lists to pick from),
   and what changed on disk against the user's edits.
@@ -118,9 +125,12 @@ the scratchpad (see Scratchpad).
   and shows what a setting does with the pointer on it (see Settings).
 - `qml/ShortcutsWindow.qml`: the user's shortcuts, listed and edited (see
   Shortcuts).
-- `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`: the
-  look the app's own controls share (see Theme), and `TextButton.qml` and
-  `Segmented.qml`, the buttons the Settings and Shortcuts windows share.
+- `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`,
+  `KeyCap.qml`: the look the app's own controls share (see Theme);
+  `ModalBox.qml` (:help's and the questions' box), `WheelFlickable.qml`
+  (see Scrolling boxes) and `SelectableText.qml`, the boxes'; and
+  `TextButton.qml`, `Segmented.qml` and `DropList.qml`, the buttons and
+  lists the Settings and Shortcuts windows share.
 - `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml, the find bar and the
   help's search; `tests/tst_shortcuts.qml`, the Shortcuts window with the
   keys alone.
@@ -849,7 +859,7 @@ the scratchpad (see Scratchpad).
   (`shell::as_shown`: no escapes, `\r` and backspaces writing over, tabs
   as spaces), the first `SHOWN_LINES` (1000: the help box took half a
   second to lay out 3000): a line that fits goes in the status line
-  (`fitsStatus`), more in the help box (`help.showText`, plain, where `/`
+  (`StatusLine.fits`), more in the help box (`help.showText`, plain, where `/`
   searches it, and Enter closes it, as vim's "Press ENTER"). A failure
   ("shell returned 1") is an error, which stops a macro. What it starts
   with `&` keeps its output open, which is read only `AFTER_EXIT` longer.
@@ -1208,9 +1218,10 @@ the scratchpad (see Scratchpad).
 
 - **Menus**: QtQuick Controls menus have no `role` property, so macOS uses
   `Qt.labs.platform` MenuBar with `PreferencesRole`/`QuitRole`, which moves the
-  items into the app menu. Windows and Linux use an in-window Controls
-  `MenuBar`. Both are created in `Component.onCompleted`, so only one exists at
-  a time. Qt titles the PreferencesRole item "Preferences..."; a `QTranslator`
+  items into the app menu (`MacMenuBar.qml`). Windows and Linux use an
+  in-window Controls `MenuBar` (`WindowMenuBar.qml`), with the same items,
+  so a change to one goes in both. One is created in main.qml's
+  `Component.onCompleted`, so only one exists at a time. Qt titles the PreferencesRole item "Preferences..."; a `QTranslator`
   for the `MAC_APPLICATION_MENU` context renames it to "Settings…".
 - **Shortcuts**: use `StandardKey` where Qt has a binding. On macOS
   `StandardKey.ZoomIn` also fires on Cmd+=; on Windows it doesn't, so that
@@ -1355,7 +1366,8 @@ the scratchpad (see Scratchpad).
   shows what it took for 200 ms, as Neovim's `vim.hl.on_yank` does
   (`yanked`, `flashYank`: yy its line, a block its part of each line,
   the marked lines each, every cursor's at once), drawn under the text
-  (`yankFlash`), which keeps its colors, until an edit or another buffer.
+  (a `SpanShade` in Editor.qml), which keeps its colors, until an edit or
+  another buffer.
   Not into `"_`, nor a macro's (`macroKey`, set as its key runs, since
   its frame goes before its last key), as Neovim's `on_macro`, but a
   shortcut's, as a mapping's. The `TextArea` does nothing on Cmd+Backspace, so on macOS
@@ -1664,7 +1676,7 @@ the scratchpad (see Scratchpad).
   ends it first (`endPreview`: an option button updates), and `reset`
   drops it without putting the text back, as the new text replaced it.
 - **Command line colors** (`Vim.commandLineParts`, `commandLineHtml` in
-  main.qml, `theme.commandColor`): as a `:` command is typed, the status
+  StatusLine.qml, `theme.commandColor`): as a `:` command is typed, the status
   line colors its range, the name of a command `runEx` knows (`exNames`,
   `substituteNames`, `!`, `_!`), a shell command's `%` and `<cfile>` with
   their modifiers (in the dirs' color, as a path) and `\%` and
@@ -1944,8 +1956,8 @@ the scratchpad (see Scratchpad).
   the folder button puts a picked one in with `~`. The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
   also switches the palette, title bar and menus; "system" unsets it. The
   Settings window's size follows the zoom, so it isn't resizable. Its
-  settings scroll (`scroller`, a `Flickable` that isn't interactive, as a
-  drag selects in a field, scrolled by a `WheelHandler`) past
+  settings scroll (`scroller`, a `WheelFlickable`, as a drag selects in a
+  field) past
   `maxListHeight` (440 at zoom 1, and never past the screen), with Restore
   Defaults under them, and Tab scrolls to what it goes to
   (`onActiveFocusItemChanged`). The pointer on a setting's name (its
@@ -1995,9 +2007,10 @@ the scratchpad (see Scratchpad).
   starting with `g`, `z` and Space, and the Ctrl keys, have sections of
   their own (`:h g`, `:h z`, `:h space`, `:h ctrl`), as an index of them,
   pointing to the sections that say more.
-- **Scrolling boxes**: the help, the hover box and the confirmations are
-  `Flickable`s that aren't interactive (a drag selects their text),
-  scrolled by a `WheelHandler`. It needs `acceptedDevices` with
+- **Scrolling boxes**: the help, the hover box, the confirmations and the
+  settings are `WheelFlickable`s: `Flickable`s that aren't interactive (a
+  drag selects their text), scrolled by a `WheelHandler`. It needs
+  `acceptedDevices` with
   `PointerDevice.TouchPad`: by default it takes only a mouse wheel, and the
   trackpad's scrolls go to the popup, which drops them.
 - **QML's JavaScript**: don't make a binding depend on something by reading it

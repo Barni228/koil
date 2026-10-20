@@ -473,10 +473,10 @@ impl Started {
             error: status.err().map(|e| e.to_string()).unwrap_or_default(),
             ..Ran::default()
         };
+        if (self.filter || self.scratchpad) && out.over {
+            ran.error = "The output is too long to put in".to_string();
+        }
         if self.filter {
-            if out.over {
-                ran.error = "The output is too long to put in".to_string();
-            }
             let output = document::decode_lossy(out.bytes).replace("\r\n", "\n");
             ran.output = match output.strip_suffix('\n') {
                 Some(output) => output.to_string(),
@@ -484,9 +484,6 @@ impl Started {
             };
             (ran.errors, ran.cut) = shown_lines(as_shown(err.bytes, false), err.more_lines);
         } else if self.scratchpad {
-            if out.over {
-                ran.error = "The output is too long to put in".to_string();
-            }
             ran.output = as_shown(out.bytes, true);
         } else {
             (ran.output, ran.cut) = shown_lines(as_shown(out.bytes, false), out.more_lines);

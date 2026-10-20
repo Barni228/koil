@@ -3,7 +3,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Templates as T
 
 // The user's shortcuts (Space q, Koil > Shortcuts…, or a button in
 // Settings): each is keys (Space c, gc, <C-k>) that run keys of theirs, as
@@ -380,32 +379,6 @@ Window {
         Keys.onBacktabPressed: event => win.tab(event)
     }
 
-    // Keys, as code: in the editor's font, on a shade.
-    component KeyCap: Rectangle {
-        id: cap
-
-        property string text
-
-        implicitWidth: capText.implicitWidth
-        implicitHeight: capText.implicitHeight
-        radius: 3 * win.zoom
-        color: win.theme.code
-
-        Text {
-            id: capText
-
-            leftPadding: 5 * win.zoom
-            rightPadding: 5 * win.zoom
-            topPadding: 1 * win.zoom
-            bottomPadding: 1 * win.zoom
-            text: cap.text
-            font.family: win.theme.font.family
-            font.pixelSize: Math.round(12 * win.zoom)
-            color: win.theme.windowText
-            textFormat: Text.PlainText
-        }
-    }
-
     // A text field.
     component Field: Rectangle {
         id: field
@@ -596,7 +569,10 @@ Window {
             KeyCap {
                 visible: row.shortcut.name !== "" && row.shortcut.keys !== ""
                 opacity: row.usable ? 1 : 0.5
+                theme: win.theme
                 text: win.app.keysName(row.shortcut.keys)
+                padding: 5 * win.zoom
+                textColor: win.theme.windowText
             }
             WindowButton {
                 id: editIcon
@@ -914,99 +890,71 @@ Window {
 
                     // The registers q records into that hold something,
                     // in its own window, as Settings' font list.
-                    T.Popup {
+                    DropList {
                         id: macroList
 
                         property var macros: []
                         // The one Enter takes.
                         property int highlighted: -1
 
-                        y: macroField.height + 2 * win.zoom
-                        width: macroField.width
-                        height: Math.min(implicitContentHeight + topPadding + bottomPadding, 240 * win.zoom)
-                        padding: 4 * win.zoom
-                        popupType: Popup.Window
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        theme: win.theme
+                        field: macroField
+                        maxHeight: 240 * win.zoom
+                        model: macros
                         // Its window gets the keys while it's open (see
                         // macroKey).
-                        focus: true
+                        takesKeys: true
+                        emptyText: qsTr("No macros recorded: qa records one in a, and q stops.")
+                        emptySize: Math.round(12 * win.zoom)
+                        onKeyPressed: event => win.macroKey(event)
                         onAboutToShow: {
                             macros = win.app.macroList();
                             highlighted = macros.length ? 0 : -1;
                         }
                         onHighlightedChanged: {
                             if (highlighted >= 0)
-                                macroView.positionViewAtIndex(highlighted, ListView.Contain);
+                                view.positionViewAtIndex(highlighted, ListView.Contain);
                         }
 
-                        contentItem: ListView {
-                            id: macroView
+                        delegate: DropList.Option {
+                            id: macro
 
-                            focus: true
-                            clip: true
-                            Keys.onPressed: event => win.macroKey(event)
-                            implicitHeight: Math.max(contentHeight, 24 * win.zoom)
-                            model: macroList.macros
-                            boundsBehavior: Flickable.StopAtBounds
-                            ScrollIndicator.vertical: ScrollIndicator {}
+                            required property var modelData
+                            required property int index
+                            readonly property bool highlighted: macroList.highlighted === index
 
-                            delegate: AbstractButton {
-                                id: macro
+                            theme: win.theme
+                            lit: highlighted
+                            Accessible.name: "\"" + modelData.name + " " + modelData.keys
+                            onHoveredChanged: if (hovered) macroList.highlighted = index
+                            onClicked: win.takeMacro(modelData)
 
-                                required property var modelData
-                                required property int index
-                                readonly property bool highlighted: macroList.highlighted === index
+                            // The register, dimmed, then its keys.
+                            contentItem: Row {
+                                leftPadding: 4 * win.zoom
+                                rightPadding: 4 * win.zoom
+                                spacing: 10 * win.zoom
 
-                                width: ListView.view.width
-                                implicitHeight: 24 * win.zoom
-                                focusPolicy: Qt.NoFocus
-                                hoverEnabled: true
-                                Accessible.name: "\"" + modelData.name + " " + modelData.keys
-                                onHoveredChanged: if (hovered) macroList.highlighted = index
-                                onClicked: win.takeMacro(modelData)
-
-                                background: Rectangle {
-                                    radius: 3 * win.zoom
-                                    color: macro.highlighted ? win.theme.accent : "transparent"
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "\"" + macro.modelData.name
+                                    font.family: win.theme.font.family
+                                    font.pixelSize: Math.round(13 * win.zoom)
+                                    color: macro.highlighted ? win.theme.highlightedText : win.theme.dim
+                                    textFormat: Text.PlainText
                                 }
-                                // The register, dimmed, then its keys.
-                                contentItem: Row {
-                                    leftPadding: 4 * win.zoom
-                                    rightPadding: 4 * win.zoom
-                                    spacing: 10 * win.zoom
-
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "\"" + macro.modelData.name
-                                        font.family: win.theme.font.family
-                                        font.pixelSize: Math.round(13 * win.zoom)
-                                        color: macro.highlighted ? win.theme.highlightedText : win.theme.dim
-                                        textFormat: Text.PlainText
-                                    }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: macro.width - x - 4 * win.zoom
-                                        text: win.styledKeys(macro.modelData.keys, macro.highlighted
-                                            ? win.theme.highlightedText : undefined)
-                                        font.family: win.theme.font.family
-                                        font.pixelSize: Math.round(13 * win.zoom)
-                                        color: macro.highlighted ? win.theme.highlightedText : win.theme.windowText
-                                        elide: Text.ElideRight
-                                        textFormat: Text.StyledText
-                                    }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: macro.width - x - 4 * win.zoom
+                                    text: win.styledKeys(macro.modelData.keys, macro.highlighted
+                                        ? win.theme.highlightedText : undefined)
+                                    font.family: win.theme.font.family
+                                    font.pixelSize: Math.round(13 * win.zoom)
+                                    color: macro.highlighted ? win.theme.highlightedText : win.theme.windowText
+                                    elide: Text.ElideRight
+                                    textFormat: Text.StyledText
                                 }
                             }
-
-                            Hint {
-                                anchors.centerIn: parent
-                                visible: !macroList.macros.length
-                                text: qsTr("No macros recorded: qa records one in a, and q stops.")
-                            }
-                        }
-                        background: Rectangle {
-                            radius: 4 * win.zoom
-                            color: win.theme.field
-                            border.color: win.theme.fieldBorder
                         }
                     }
                 }

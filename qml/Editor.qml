@@ -184,9 +184,14 @@ Item {
     // Colors the listing (see `listing`), the path field or a file, in the
     // light or dark theme's colors.
     function applyColors() {
+        formatOnly(colorText);
+    }
+
+    // Runs fn, which changes only the text's format (see `formatting`).
+    function formatOnly(fn) {
         const was = formatting;
         formatting = true;
-        colorText();
+        fn();
         formatting = was;
     }
 
@@ -218,12 +223,8 @@ Item {
     }
 
     function applyPendingLines() {
-        if (!listingColors)
-            return;
-        const was = formatting;
-        formatting = true;
-        system.setPendingLines(editor.textDocument, pendingLines.map(String));
-        formatting = was;
+        if (listingColors)
+            formatOnly(() => system.setPendingLines(editor.textDocument, pendingLines.map(String)));
     }
 
     // A press at x, y in the editor's coordinates, in the room the view
@@ -294,12 +295,10 @@ Item {
         Qt.callLater(applyWrapMode);
         Qt.callLater(colorAsShown);
     }
-    onListingColorsChanged: applyColors()
-    onIconColorsChanged: applyColors()
-    onPendingIconColorChanged: applyColors()
+    // What the colors are made of: when any changes, they're given again.
+    readonly property var colorInputs: [listingColors, iconColors, pendingIconColor, pathSyntax, filePath, theme.dark, vim.syntax]
+    onColorInputsChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
-    onPathSyntaxChanged: applyColors()
-    onFilePathChanged: applyColors()
 
     // An emoji comes from a taller font than the editor's, which makes its
     // line taller. Give every line the same height instead. Qt puts a
@@ -325,10 +324,8 @@ Item {
     function placeLongLines() {
         if (pathField)
             return;
-        const was = formatting;
-        formatting = true;
-        system.placeLongLines(editor.textDocument, lineHeight, lineFormat().bottomMargin, wrapping ? rowLength() : 0);
-        formatting = was;
+        formatOnly(() => system.placeLongLines(editor.textDocument, lineHeight, lineFormat().bottomMargin,
+            wrapping ? rowLength() : 0));
         longest = system.longestLine(editor.textDocument);
     }
 
@@ -442,14 +439,7 @@ Item {
         let s = from, c = cellAt(s);
         while (s < to && c.y < z.y) {
             // Where the next row starts: positions go down the rows.
-            let lo = s + 1, hi = to;
-            while (lo < hi) {
-                const mid = (lo + hi) >> 1;
-                if (cellAt(mid).y > c.y)
-                    hi = mid;
-                else
-                    lo = mid + 1;
-            }
+            const lo = Txt.partition(s + 1, to, i => cellAt(i).y <= c.y);
             // The row ends past its last character.
             const right = cellAt(Txt.charStart(t, lo - 1)).x + charWidth;
             spans.push({ start: s, end: lo, rect: Qt.rect(c.x, c.y, right - c.x, c.height) });
@@ -494,16 +484,8 @@ Item {
     // drawing them all took minutes a key.
     function visibleCursors() {
         const list = vim.cursors, v = visibleRange();
-        let lo = 0, hi = list.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (list[mid].pos < v.from)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
         const r = [];
-        for (let i = lo; i < list.length && list[i].pos <= v.to; i++)
+        for (let i = Txt.partition(0, list.length, k => list[k].pos < v.from); i < list.length && list[i].pos <= v.to; i++)
             r.push(list[i]);
         return r;
     }
@@ -546,16 +528,8 @@ Item {
     // thousands.
     function spansInView(list) {
         const t = editor.latest.text, v = visibleRange();
-        let lo = 0, hi = list.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (list[mid].end < v.from)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
         const spans = [];
-        for (let i = lo; i < list.length && list[i].start <= v.to; i++)
+        for (let i = Txt.partition(0, list.length, k => list[k].end < v.from); i < list.length && list[i].start <= v.to; i++)
             lineSpans(t, list[i].start, list[i].end, v, spans);
         return spans;
     }
@@ -584,17 +558,9 @@ Item {
         if (!shown.length)
             return [];
         const t = editor.latest.text, v = visibleRange(), to = Math.min(v.to, t.length);
-        let lo = 0, hi = shown.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (shown[mid] < v.from)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
         const spans = [];
-        for (let i = lo; i < shown.length && shown[i] <= to; i++)
-            spans.push({ start: shown[i], end: Txt.lineEnd(t, shown[i]) });
+        for (let i = Txt.partition(0, shown.length, k => shown[k] < v.from); i < shown.length && shown[i] <= to; i++)
+            spans.push({ start: shown[i], end: Txt.lineEnd(t, shown[i]), eol: true });
         return spans;
     }
 
@@ -720,22 +686,6 @@ Item {
     }
 
     Connections {
-        target: view.theme
-
-        function onDarkChanged() {
-            view.applyColors();
-        }
-    }
-
-    Connections {
-        target: view.vim
-
-        function onSyntaxChanged() {
-            view.applyColors();
-        }
-    }
-
-    Connections {
         target: view.flickable
 
         function onContentXChanged() {
@@ -792,6 +742,39 @@ Item {
         }
 
         onInputsChanged: Qt.callLater(refresh)
+    }
+
+    // A shade behind the text, a rectangle a row of each of `spans()` ({
+    // start, end, eol }), the last with the line break if it has it (`eol`),
+    // which shows as a space, as in Qt.
+    component SpanShade: Layer {
+        id: shade
+
+        required property color color
+        property var spans: () => []
+
+        compute: () => {
+            const list = [];
+            for (const s of shade.spans()) {
+                for (const r of view.rowSpans(s.start, s.end))
+                    list.push({ rect: r.rect, eol: s.eol && r.end === s.end });
+            }
+            return list;
+        }
+
+        Repeater {
+            model: shade.model
+
+            Rectangle {
+                required property var modelData
+
+                x: modelData.rect.x
+                y: modelData.rect.y
+                width: modelData.rect.width + (modelData.eol ? view.charWidth : 0)
+                height: modelData.rect.height
+                color: shade.color
+            }
+        }
     }
 
     // A cursor over the character in `cell`: a bar, a block that shows
@@ -1293,137 +1276,41 @@ Item {
             // What the find bar finds in (Find in Selection), a shade behind
             // it, as VS Code draws it: under the marked lines and the
             // selection.
-            Layer {
-                id: scopeShade
-
+            SpanShade {
                 z: -0.55
                 inputs: [view.active, view.findBar.active, view.vim.findScope, view.layout, view.viewport]
-                // A rectangle a row, the last with the line break, if it's
-                // in it.
-                compute: () => {
-                    const list = [];
-                    for (const s of view.scopeSpans()) {
-                        for (const r of view.rowSpans(s.start, s.end))
-                            list.push({ rect: r.rect, eol: s.eol && r.end === s.end });
-                    }
-                    return list;
-                }
-
-                Repeater {
-                    model: scopeShade.model
-
-                    Rectangle {
-                        required property var modelData
-
-                        x: modelData.rect.x
-                        y: modelData.rect.y
-                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
-                        height: modelData.rect.height
-                        color: view.theme.findScope
-                    }
-                }
+                spans: () => view.scopeSpans()
+                color: view.theme.findScope
             }
 
             // The marked lines, as a selection of lines is drawn, a shade
             // paler: not what the cursor selects, which goes over them. Also
             // while vim edits the other editor, as they stay marked.
-            Layer {
-                id: markedLines
-
+            SpanShade {
                 z: -0.52
                 inputs: [view.marked, view.active, view.vim.visualShown, view.layout, view.viewport]
-                // A rectangle a row, the last with the line break.
-                compute: () => {
-                    const list = [];
-                    for (const s of view.markedSpans()) {
-                        for (const r of view.rowSpans(s.start, s.end))
-                            list.push({ rect: r.rect, eol: r.end === s.end });
-                    }
-                    return list;
-                }
-
-                Repeater {
-                    model: markedLines.model
-
-                    Rectangle {
-                        required property var modelData
-
-                        x: modelData.rect.x
-                        y: modelData.rect.y
-                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
-                        height: modelData.rect.height
-                        color: view.theme.marked
-                    }
-                }
+                spans: () => view.markedSpans()
+                color: view.theme.marked
             }
 
             // The selection, drawn under the text (a negative z puts a child
             // below its parent's content) with the same height on every line.
-            Layer {
-                id: selection
-
+            SpanShade {
                 z: -0.5
                 inputs: [view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.vim.visualShown, view.layout, view.viewport]
-                // A rectangle a row, the last with the line break, if it's
-                // selected.
-                compute: () => {
-                    const list = [];
-                    for (const s of view.selectionSpans()) {
-                        for (const r of view.rowSpans(s.start, s.end))
-                            list.push({ rect: r.rect, eol: s.eol && r.end === s.end });
-                    }
-                    return list;
-                }
-
-                Repeater {
-                    model: selection.model
-
-                    Rectangle {
-                        required property var modelData
-
-                        x: modelData.rect.x
-                        y: modelData.rect.y
-                        // A selected line break shows as a space, as in Qt.
-                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
-                        height: modelData.rect.height
-                        color: view.theme.highlight
-                    }
-                }
+                spans: () => view.selectionSpans()
+                color: view.theme.highlight
             }
 
             // What was just yanked, for a moment (see Vim's `yanked`), as
             // Neovim's vim.hl.on_yank shows it, but under the text, which
             // keeps its colors. Over the selection, which Cmd+C in insert
             // mode leaves.
-            Layer {
-                id: yankFlash
-
+            SpanShade {
                 z: -0.5
                 inputs: [view.active, view.vim.yanked, view.layout, view.viewport]
-                // A rectangle a row, the last with the line break, if it
-                // was yanked.
-                compute: () => {
-                    const list = [];
-                    for (const s of view.yankedSpans()) {
-                        for (const r of view.rowSpans(s.start, s.end))
-                            list.push({ rect: r.rect, eol: s.eol && r.end === s.end });
-                    }
-                    return list;
-                }
-
-                Repeater {
-                    model: yankFlash.model
-
-                    Rectangle {
-                        required property var modelData
-
-                        x: modelData.rect.x
-                        y: modelData.rect.y
-                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
-                        height: modelData.rect.height
-                        color: view.theme.yanked
-                    }
-                }
+                spans: () => view.yankedSpans()
+                color: view.theme.yanked
             }
 
             // The long lines Qt doesn't draw (see longLength), as far as

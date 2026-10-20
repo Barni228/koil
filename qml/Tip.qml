@@ -50,31 +50,13 @@ ToolTip {
         Repeater {
             model: tip.shortcuts
 
-            Rectangle {
-                id: key
-
+            KeyCap {
                 required property string modelData
 
                 // Gone with the tip's button (a row of the shortcuts' list).
                 anchors.verticalCenter: parent?.verticalCenter
-                width: keyText.implicitWidth
-                height: keyText.implicitHeight
-                radius: 3 * tip.theme.zoom
-                color: tip.theme.code
-
-                Text {
-                    id: keyText
-
-                    leftPadding: 4 * tip.theme.zoom
-                    rightPadding: 4 * tip.theme.zoom
-                    topPadding: 1 * tip.theme.zoom
-                    bottomPadding: 1 * tip.theme.zoom
-                    text: key.modelData
-                    font.family: tip.theme.font.family
-                    font.pixelSize: Math.round(12 * tip.theme.zoom)
-                    color: tip.theme.text
-                    textFormat: Text.PlainText
-                }
+                theme: tip.theme
+                text: modelData
             }
         }
     }

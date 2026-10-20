@@ -8,6 +8,7 @@ use cxx_qt::Threading;
 use cxx_qt_lib::{QString, QStringList};
 use serde_json::json;
 
+use crate::convert::{paths, to_json};
 use crate::ffi;
 use crate::link;
 use crate::listing;
@@ -331,6 +332,19 @@ impl Drop for SystemRust {
     }
 }
 
+/// Methods that hand a QML item (or its `textDocument`) to the C++ helper of
+/// the same name in native.h.
+macro_rules! forward {
+    ($($name:ident($object:ident $(, $arg:ident: $type:ty)*) $(-> $result:ty)?;)*) => {$(
+        #[doc = concat!(
+            "# Safety\n\n`", stringify!($object), "` must be null or point to a live QObject."
+        )]
+        unsafe fn $name(&self, $object: *mut qobject::QObject $(, $arg: $type)*) $(-> $result)? {
+            unsafe { ffi::$name($object.cast() $(, $arg)*) }
+        }
+    )*};
+}
+
 impl qobject::System {
     fn clipboard_text(&self) -> QString {
         ffi::clipboard_text()
@@ -354,20 +368,19 @@ impl qobject::System {
 
     fn reveal(&self, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
-        let why = if path.symlink_metadata().is_err() {
-            format!("“{}” isn't on disk any more", listing::show_path(&path))
-        } else if let Err(e) = reveal(&path) {
-            format!("Can't show “{}”: {e}", listing::show_path(&path))
-        } else {
-            String::new()
+        let why = match gone(&path) {
+            Some(why) => why,
+            None => match reveal(&path) {
+                Ok(()) => String::new(),
+                Err(e) => format!("Can't show “{}”: {e}", listing::show_path(&path)),
+            },
         };
         QString::from(why.as_str())
     }
 
     fn open_in_app(self: Pin<&mut Self>, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
-        if path.symlink_metadata().is_err() {
-            let why = format!("“{}” isn't on disk any more", listing::show_path(&path));
+        if let Some(why) = gone(&path) {
             return QString::from(why.as_str());
         }
         let thread = self.qt_thread();
@@ -383,14 +396,11 @@ impl qobject::System {
         let found = usize::try_from(column)
             .ok()
             .and_then(|at| link::link_at(line.as_slice(), at, names));
-        let span = found.map(|r| json!({ "start": r.start, "end": r.end }));
-        QString::from(json!(span).to_string().as_str())
+        to_json(&found.map(|r| json!({ "start": r.start, "end": r.end })))
     }
 
     fn link_target(&self, text: &QString, dirs: &QStringList) -> QString {
-        let dirs: Vec<PathBuf> = dirs.iter().map(|d| PathBuf::from(d.to_string())).collect();
-        let target = link::target(&text.to_string(), &dirs);
-        QString::from(serde_json::to_string(&target).unwrap_or_default().as_str())
+        to_json(&link::target(&text.to_string(), &paths(dirs)))
     }
 
     fn default_shell(&self) -> QString {
@@ -398,8 +408,7 @@ impl qobject::System {
     }
 
     fn shells(&self) -> QString {
-        let found = serde_json::to_string(&shell::shells()).unwrap_or_default();
-        QString::from(found.as_str())
+        to_json(&shell::shells())
     }
 
     fn load_shell_environment(&self) {
@@ -416,91 +425,17 @@ impl qobject::System {
                 let running = self.running.clone();
                 thread::spawn(move || {
                     let ran = started.finish(&running);
-                    let result = serde_json::to_string(&ran).unwrap_or_default();
-                    let _ = thread.queue(move |system| system.shell_done(QString::from(&result)));
+                    let _ = thread.queue(move |system| system.shell_done(to_json(&ran)));
                 });
                 (line, String::new())
             }
             Err(error) => (String::new(), error),
         };
-        QString::from(json!({ "line": line, "error": error }).to_string().as_str())
+        to_json(&json!({ "line": line, "error": error }))
     }
 
     fn stop_shell(&self) {
         self.running.stop();
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn set_line_format(
-        &self,
-        text_document: *mut qobject::QObject,
-        height: f64,
-        bottom_margin: f64,
-        indent: f64,
-        right_margin: f64,
-    ) {
-        unsafe {
-            ffi::set_line_format(
-                text_document.cast(),
-                height,
-                bottom_margin,
-                indent,
-                right_margin,
-            );
-        };
-    }
-
-    /// # Safety
-    ///
-    /// `text_edit` must be null or point to a live QObject.
-    unsafe fn set_text(
-        &self,
-        text_edit: *mut qobject::QObject,
-        text: &QString,
-        height: f64,
-        bottom_margin: f64,
-        indent: f64,
-        right_margin: f64,
-    ) {
-        unsafe {
-            ffi::set_text(
-                text_edit.cast(),
-                text,
-                height,
-                bottom_margin,
-                indent,
-                right_margin,
-            );
-        };
-    }
-
-    /// # Safety
-    ///
-    /// `text_edit` must be null or point to a live QObject.
-    unsafe fn follow_text_length(&self, text_edit: *mut qobject::QObject) {
-        unsafe { ffi::follow_text_length(text_edit.cast()) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_edit` must be null or point to a live QObject.
-    unsafe fn redraw_text(&self, text_edit: *mut qobject::QObject) {
-        unsafe { ffi::redraw_text(text_edit.cast()) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_edit` must be null or point to a live QObject.
-    unsafe fn replace_text(
-        &self,
-        text_edit: *mut qobject::QObject,
-        start: i32,
-        end: i32,
-        text: &QString,
-    ) {
-        unsafe { ffi::replace_text(text_edit.cast(), start, end, text) };
     }
 
     fn same_string(&self, a: &QString, b: &QString) -> bool {
@@ -510,98 +445,6 @@ impl qobject::System {
 
     fn same_text(&self, a: &QString, b: &QString) -> bool {
         self.same_string(a, b) || a.as_slice() == b.as_slice()
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn watch_long_lines(&self, text_document: *mut qobject::QObject, long_length: i32) {
-        unsafe { ffi::watch_long_lines(text_document.cast(), long_length) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn place_long_lines(
-        &self,
-        text_document: *mut qobject::QObject,
-        line_height: f64,
-        bottom_margin: f64,
-        row_length: i32,
-    ) {
-        unsafe {
-            ffi::place_long_lines(text_document.cast(), line_height, bottom_margin, row_length)
-        };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn longest_line(&self, text_document: *mut qobject::QObject) -> i32 {
-        unsafe { ffi::longest_line(text_document.cast()) }
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn long_line_spot(
-        &self,
-        text_document: *mut qobject::QObject,
-        position: i32,
-    ) -> QString {
-        unsafe { ffi::long_line_spot(text_document.cast(), position) }
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn long_line_position(
-        &self,
-        text_document: *mut qobject::QObject,
-        row: i32,
-        column: f64,
-    ) -> i32 {
-        unsafe { ffi::long_line_position(text_document.cast(), row, column) }
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn long_line_runs(
-        &self,
-        text_document: *mut qobject::QObject,
-        first_row: i32,
-        last_row: i32,
-        first_column: i32,
-        last_column: i32,
-    ) -> QString {
-        unsafe {
-            ffi::long_line_runs(
-                text_document.cast(),
-                first_row,
-                last_row,
-                first_column,
-                last_column,
-            )
-        }
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn watch_text_changes(&self, text_document: *mut qobject::QObject) {
-        unsafe { ffi::watch_text_changes(text_document.cast()) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn take_text_change(
-        &self,
-        text_document: *mut qobject::QObject,
-        with_text: bool,
-    ) -> QStringList {
-        unsafe { ffi::take_text_change(text_document.cast(), with_text) }
     }
 
     fn kept_as_is(&self, text: &QString) -> bool {
@@ -621,81 +464,44 @@ impl qobject::System {
         })
     }
 
-    /// # Safety
-    ///
-    /// `text_edit` must be null or point to a live QObject.
-    unsafe fn rebuild_text_nodes(&self, text_edit: *mut qobject::QObject) {
-        unsafe { ffi::rebuild_text_nodes(text_edit.cast()) };
+    forward! {
+        set_line_format(
+            text_document, height: f64, bottom_margin: f64, indent: f64, right_margin: f64
+        );
+        set_text(
+            text_edit, text: &QString, height: f64, bottom_margin: f64, indent: f64,
+            right_margin: f64
+        );
+        follow_text_length(text_edit);
+        redraw_text(text_edit);
+        replace_text(text_edit, start: i32, end: i32, text: &QString);
+        watch_long_lines(text_document, long_length: i32);
+        place_long_lines(text_document, line_height: f64, bottom_margin: f64, row_length: i32);
+        longest_line(text_document) -> i32;
+        long_line_spot(text_document, position: i32) -> QString;
+        long_line_position(text_document, row: i32, column: f64) -> i32;
+        long_line_runs(
+            text_document, first_row: i32, last_row: i32, first_column: i32, last_column: i32
+        ) -> QString;
+        watch_text_changes(text_document);
+        take_text_change(text_document, with_text: bool) -> QStringList;
+        rebuild_text_nodes(text_edit);
+        scroll_to_cursor_in_qml(text_area);
+        set_listing_colors(
+            text_document, icon_colors: &QStringList, pending_icon_color: &QString,
+            directory_color: &QString
+        );
+        set_pending_lines(text_document, lines: &QStringList);
+        set_path_colors(text_document, directory_color: &QString, spans: &QStringList);
+        set_keyword_colors(text_document, keyword_colors: &QStringList);
+        set_text_colors(text_document, colors: &QStringList, file_name: &QString);
     }
+}
 
-    /// # Safety
-    ///
-    /// `text_area` must be null or point to a live QObject.
-    unsafe fn scroll_to_cursor_in_qml(&self, text_area: *mut qobject::QObject) {
-        unsafe { ffi::scroll_to_cursor_in_qml(text_area.cast()) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn set_listing_colors(
-        &self,
-        text_document: *mut qobject::QObject,
-        icon_colors: &QStringList,
-        pending_icon_color: &QString,
-        directory_color: &QString,
-    ) {
-        unsafe {
-            ffi::set_listing_colors(
-                text_document.cast(),
-                icon_colors,
-                pending_icon_color,
-                directory_color,
-            )
-        };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn set_pending_lines(&self, text_document: *mut qobject::QObject, lines: &QStringList) {
-        unsafe { ffi::set_pending_lines(text_document.cast(), lines) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn set_path_colors(
-        &self,
-        text_document: *mut qobject::QObject,
-        directory_color: &QString,
-        spans: &QStringList,
-    ) {
-        unsafe { ffi::set_path_colors(text_document.cast(), directory_color, spans) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn set_keyword_colors(
-        &self,
-        text_document: *mut qobject::QObject,
-        keyword_colors: &QStringList,
-    ) {
-        unsafe { ffi::set_keyword_colors(text_document.cast(), keyword_colors) };
-    }
-
-    /// # Safety
-    ///
-    /// `text_document` must be null or point to a live QObject.
-    unsafe fn set_text_colors(
-        &self,
-        text_document: *mut qobject::QObject,
-        colors: &QStringList,
-        file_name: &QString,
-    ) {
-        unsafe { ffi::set_text_colors(text_document.cast(), colors, file_name) };
-    }
+/// Why `path` can't be shown or opened, if it's gone from disk.
+fn gone(path: &Path) -> Option<String> {
+    let shown = listing::show_path(path);
+    (path.symlink_metadata().is_err()).then(|| format!("“{shown}” isn't on disk any more"))
 }
 
 /// Shows `path` selected in the dir it's in, in Finder or Explorer, or

@@ -217,8 +217,12 @@ fn entry_line(koil: &Koil, entry: &Entry, colors: &mut HashMap<String, [String; 
 
 /// An entry's name as the listing shows it, with a `/` after a dir's.
 fn entry_name(entry: &Entry) -> String {
-    let slash = if entry.is_dir { "/" } else { "" };
-    format!("{}{slash}", entry.name.to_string_lossy())
+    slashed(entry.name.to_string_lossy(), entry.is_dir)
+}
+
+/// `name`, with a `/` after it if it's a dir's.
+fn slashed(name: impl std::fmt::Display, is_dir: bool) -> String {
+    format!("{name}{}", if is_dir { "/" } else { "" })
 }
 
 /// The icon of the entry `name` in `dir`, and its color in a dark and in a
@@ -431,9 +435,9 @@ pub fn parse(text: &str, hidden: &[Hidden]) -> Parsed {
         if line.trim().is_empty() {
             continue;
         }
-        let rest = &line[indent(line).len()..];
-        let (id, rest) = match hidden.get(&(start + utf16_len(indent(line)))) {
-            Some(h) if rest.starts_with(&h.icon) => match h.text.parse() {
+        let (icon, rest) = line_icon(&hidden, line, start);
+        let (id, rest) = match icon {
+            Some(h) => match h.text.parse() {
                 Ok(id) => (Some(Id(id)), &rest[h.icon.len()..]),
                 Err(_) => {
                     parsed.problem(
@@ -448,22 +452,30 @@ pub fn parse(text: &str, hidden: &[Hidden]) -> Parsed {
         };
         let name = rest.trim();
         let column = utf16_len(&line[..line.len() - rest.trim_start().len()]);
-        let entry = match name.strip_suffix('/') {
-            Some(dir) => Entry {
-                id,
-                name: dir.trim_end_matches('/').into(),
-                is_dir: true,
-            },
-            None => Entry {
-                id,
-                name: name.into(),
-                is_dir: false,
-            },
+        let (name, is_dir) = match name.strip_suffix('/') {
+            Some(dir) => (dir.trim_end_matches('/'), true),
+            None => (name, false),
         };
-        parsed.entries.push(entry);
+        parsed.entries.push(Entry {
+            id,
+            name: name.into(),
+            is_dir,
+        });
         parsed.spots.push((i, column));
     }
     parsed
+}
+
+/// The icon hiding something that `line` (which starts at `start`) starts
+/// with, after its indent, if any, and the line after its indent.
+fn line_icon<'a, 'l>(
+    hidden: &HashMap<usize, &'a Hidden>,
+    line: &'l str,
+    start: usize,
+) -> (Option<&'a Hidden>, &'l str) {
+    let rest = &line[indent(line).len()..];
+    let icon = hidden.get(&(start + utf16_len(indent(line))));
+    (icon.filter(|h| rest.starts_with(&h.icon)).copied(), rest)
 }
 
 /// The spaces at the start of `line`.
@@ -961,10 +973,7 @@ fn questions(koil: &Koil, conflicts: &[Conflict]) -> Vec<Question> {
 /// The question about `conflicts`, all of `kind`: what happened, with
 /// paths as the confirmations show them, and what Yes does.
 fn question(koil: &Koil, kind: ConflictKind, conflicts: &[&Conflict]) -> Question {
-    let path = |p: &Path, is_dir: bool| {
-        let slash = if is_dir { "/" } else { "" };
-        format!("{}{slash}", relative(koil, p))
-    };
+    let path = |p: &Path, is_dir: bool| slashed(relative(koil, p), is_dir);
     let from = |c: &Conflict| path(&c.from, c.is_dir);
     let to = |c: &Conflict| {
         c.to.as_deref()
@@ -988,6 +997,11 @@ fn question(koil: &Koil, kind: ConflictKind, conflicts: &[&Conflict]) -> Questio
     let moved = |c: &Conflict| match c.to.as_deref().and_then(Path::parent) == c.from.parent() {
         true => "renamed",
         false => "moved",
+    };
+    // What the user did, to put it at `yours`.
+    let renamed = |yours: &[String]| match yours.len() {
+        1 => "renamed",
+        _ => "renamed or copied",
     };
     let one = conflicts.len() == 1;
     let c = conflicts[0];
@@ -1015,11 +1029,7 @@ fn question(koil: &Koil, kind: ConflictKind, conflicts: &[&Conflict]) -> Questio
                 from(c),
                 moved(c),
                 to(c),
-                if yours(c).len() > 1 {
-                    "renamed or copied"
-                } else {
-                    "renamed"
-                },
+                renamed(&yours(c)),
                 quoted(&yours(c)),
                 to(c)
             ),
@@ -1045,11 +1055,7 @@ fn question(koil: &Koil, kind: ConflictKind, conflicts: &[&Conflict]) -> Questio
                     "`{}` is no longer on disk, but you {} it to {}. Create {them} as {what} \
                      instead?",
                     from(c),
-                    if yours.len() > 1 {
-                        "renamed or copied"
-                    } else {
-                        "renamed"
-                    },
+                    renamed(&yours),
                     quoted(&yours),
                 ),
                 Vec::new(),
@@ -1200,14 +1206,10 @@ pub fn paths_on_lines(
     lines: &[(usize, usize)],
 ) -> Result<Vec<PathBuf>, String> {
     let parsed = parse(text, hidden);
-    let on = |line| {
-        let i = lines.partition_point(|&(_, last)| last < line);
-        lines.get(i).is_some_and(|&(first, _)| first <= line)
-    };
     let mut paths = Vec::new();
     for (&(line, _), entry) in parsed.spots.iter().zip(&parsed.entries) {
         match on_disk(koil, entry) {
-            _ if !on(line) => {}
+            _ if !on_lines(lines, line) => {}
             Some(OnDisk::Path(path)) => paths.push(path),
             Some(OnDisk::New(name)) => {
                 return Err(format!(
@@ -1242,10 +1244,6 @@ pub fn links_on_lines(
     dirs: &[PathBuf],
 ) -> Result<Vec<PathBuf>, String> {
     let hidden: HashMap<usize, &Hidden> = hidden.iter().map(|h| (h.at, h)).collect();
-    let on = |line| {
-        let i = lines.partition_point(|&(_, last)| last < line);
-        lines.get(i).is_some_and(|&(first, _)| first <= line)
-    };
     let end = lines.last().map_or(0, |&(_, last)| last + 1);
     let mut paths = Vec::new();
     // Where the next line starts, while there are icons to find.
@@ -1255,13 +1253,11 @@ pub fn links_on_lines(
         if !hidden.is_empty() {
             next += utf16_len(line) + 1;
         }
-        if !on(i) || line.trim().is_empty() {
+        if !on_lines(lines, i) || line.trim().is_empty() {
             continue;
         }
-        let rest = &line[indent(line).len()..];
-        let entry = (hidden.get(&(start + utf16_len(indent(line)))))
-            .filter(|h| rest.starts_with(&h.icon))
-            .and_then(|h| koil.path_of(Id(h.text.parse().ok()?)));
+        let (icon, _) = line_icon(&hidden, line, start);
+        let entry = icon.and_then(|h| koil.path_of(Id(h.text.parse().ok()?)));
         if let Some(path) = entry {
             paths.push(path.to_path_buf());
             continue;
@@ -1291,6 +1287,12 @@ pub fn links_on_lines(
     }
 }
 
+/// Whether `line` is in one of the spans of `lines` (see [`paths_on_lines`]).
+fn on_lines(lines: &[(usize, usize)], line: usize) -> bool {
+    let i = lines.partition_point(|&(_, last)| last < line);
+    lines.get(i).is_some_and(|&(first, _)| first <= line)
+}
+
 /// vim's error for `<cfile>` with no file name under the cursor.
 const NO_FILE_NAME: &str = "E446: No file name under cursor";
 
@@ -1298,11 +1300,7 @@ const NO_FILE_NAME: &str = "E446: No file name under cursor";
 fn on_disk(koil: &Koil, entry: &Entry) -> Option<OnDisk> {
     let path = match entry.id {
         Some(id) => koil.path_of(id)?,
-        None => {
-            let slash = if entry.is_dir { "/" } else { "" };
-            let name = entry.name.to_string_lossy();
-            return Some(OnDisk::New(format!("{name}{slash}")));
-        }
+        None => return Some(OnDisk::New(entry_name(entry))),
     };
     Some(OnDisk::Path(path.to_path_buf()))
 }
@@ -1312,8 +1310,7 @@ fn on_disk(koil: &Koil, entry: &Entry) -> Option<OnDisk> {
 /// dir's. None if it isn't an ID koil knows.
 pub fn id_path(koil: &Koil, id: &str) -> Option<String> {
     let path = koil.path_of(Id(id.parse().ok()?))?;
-    let slash = if path.is_dir() { "/" } else { "" };
-    Some(format!("{}{slash}", relative(koil, path)))
+    Some(slashed(relative(koil, path), path.is_dir()))
 }
 
 /// A line of what applying would do (see [`actions`]).
@@ -1349,7 +1346,7 @@ pub fn actions(koil: &Koil) -> Vec<ActionLine> {
 /// `action` as the user sees it, like `MOVE a -> b`.
 fn action_text(koil: &Koil, action: &Action) -> String {
     let path = |p: &Path| relative(koil, p);
-    let dir = |p: &Path| format!("{}{}", path(p), if p.is_dir() { "/" } else { "" });
+    let dir = |p: &Path| slashed(path(p), p.is_dir());
     match action {
         Action::CreateFile(p) => format!("CREATE {}", path(p)),
         Action::CreateDir(p) => format!("CREATE {}/", path(p)),
@@ -1463,7 +1460,7 @@ pub fn history(koil: &Koil) -> Result<Vec<HistoryLine>, String> {
 /// `TRASH   a`.
 fn undo_text(dir: &Path, step: &Undo) -> String {
     let path = |p: &Path| shown_in(dir, p);
-    let dir_path = |p: &Path| format!("{}{}", path(p), if p.is_dir() { "/" } else { "" });
+    let dir_path = |p: &Path| slashed(path(p), p.is_dir());
     match step {
         Undo::Trash(p) => format!("TRASH   {}", dir_path(p)),
         Undo::Restore(t) => format!("RESTORE {}", path(&t.original)),
@@ -1821,13 +1818,8 @@ pub fn describe_open(error: &OpenError) -> String {
 
 /// An error, followed by what caused it.
 pub fn describe(error: &dyn Error) -> String {
-    let mut message = error.to_string();
-    let mut source = error.source();
-    while let Some(e) = source {
-        message = format!("{message}: {e}");
-        source = e.source();
-    }
-    message
+    let causes = std::iter::successors(error.source(), |&e| e.source());
+    causes.fold(error.to_string(), |message, e| format!("{message}: {e}"))
 }
 
 #[cfg(test)]

@@ -109,8 +109,6 @@ hasFixedWidthText(const QString& family)
   return width > 0;
 }
 
-const QString highlighterName = QStringLiteral("koilListingHighlighter");
-
 // Whether a line's icon was last colored as pending (see setPendingLines),
 // as its block's user data. None is as false.
 struct ColoredAs : QTextBlockUserData
@@ -123,6 +121,8 @@ class ListingHighlighter : public QSyntaxHighlighter
 {
 public:
   using QSyntaxHighlighter::QSyntaxHighlighter;
+
+  static inline const QString name = QStringLiteral("koilListingHighlighter");
 
   // Whether it colors the path field (setPathColors) rather than the
   // listing.
@@ -178,21 +178,39 @@ protected:
   }
 };
 
-// The highlighter of a TextEdit's document (a QQuickTextDocument), if it
-// has one, or else a new one if `create` is set.
-ListingHighlighter*
-highlighterOf(QObject* textDocument, bool create)
+// The document of a TextEdit's `textDocument` (a QQuickTextDocument), if
+// it's one.
+QTextDocument*
+documentOf(QObject* textDocument)
 {
   auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
+  return quickDocument ? quickDocument->textDocument() : nullptr;
+}
+
+// Koil's T of a TextEdit's document (a QQuickTextDocument), if it has one.
+// Koil's classes have no Q_OBJECT (so no moc), so it's found by its name
+// (T::name) rather than by type.
+template<class T>
+T*
+childOf(QObject* textDocument)
+{
+  auto* document = documentOf(textDocument);
+  if (!document)
     return nullptr;
-  auto* document = quickDocument->textDocument();
-  // No Q_OBJECT (so no moc), so it's found by name rather than by type.
-  auto* highlighter = static_cast<ListingHighlighter*>(
-    document->findChild<QSyntaxHighlighter*>(highlighterName, Qt::FindDirectChildrenOnly));
-  if (!highlighter && create) {
-    highlighter = new ListingHighlighter(document);
-    highlighter->setObjectName(highlighterName);
+  return static_cast<T*>(document->findChild<QObject*>(T::name, Qt::FindDirectChildrenOnly));
+}
+
+// The highlighter T of a TextEdit's document, if it has one, or else a new
+// one if `create` is set.
+template<class T>
+T*
+highlighterOf(QObject* textDocument, bool create)
+{
+  auto* highlighter = childOf<T>(textDocument);
+  auto* document = documentOf(textDocument);
+  if (!highlighter && create && document) {
+    highlighter = new T(document);
+    highlighter->setObjectName(T::name);
   }
   return highlighter;
 }
@@ -205,13 +223,24 @@ colored(const QString& color)
   return format;
 }
 
-const QString keywordHighlighterName = QStringLiteral("koilKeywordHighlighter");
+// The colors in `keysAndColors`, which alternates keys and their colors, by
+// key.
+QHash<QString, QTextCharFormat>
+colorsByKey(const QStringList& keysAndColors)
+{
+  QHash<QString, QTextCharFormat> colors;
+  for (qsizetype i = 0; i + 1 < keysAndColors.size(); i += 2)
+    colors.insert(keysAndColors.at(i), colored(keysAndColors.at(i + 1)));
+  return colors;
+}
 
 // See setKeywordColors.
 class KeywordHighlighter : public QSyntaxHighlighter
 {
 public:
   using QSyntaxHighlighter::QSyntaxHighlighter;
+
+  static inline const QString name = QStringLiteral("koilKeywordHighlighter");
 
   QHash<QString, QTextCharFormat> keywords;
 
@@ -270,6 +299,27 @@ private:
   bool was;
 };
 
+// While it lives, `document` isn't laid out (unless not `paused`), and then
+// it's laid out once: Qt lays it out after each change otherwise.
+class LayoutPaused
+{
+public:
+  explicit LayoutPaused(QTextDocument* document, bool paused = true)
+    : document(paused ? document : nullptr)
+  {
+    if (this->document)
+      this->document->setLayoutEnabled(false);
+  }
+  ~LayoutPaused()
+  {
+    if (document)
+      document->setLayoutEnabled(true);
+  }
+
+private:
+  QTextDocument* document;
+};
+
 // The characters of `document` from `from` to `to`, as it keeps them (a
 // block's end as a paragraph separator). Not through a QTextCursor, which
 // lays out the line it's put in to find its x, all of a long one.
@@ -295,8 +345,6 @@ textBetween(const QTextDocument* document, int from, int to)
   return text;
 }
 
-const QString textColorsName = QStringLiteral("koilTextColors");
-
 // How much of a line syntax.rs colors (syntax::MAX_LENGTH).
 constexpr int coloredLength = 3000;
 
@@ -313,12 +361,14 @@ public:
   explicit TextColors(QTextDocument* document)
     : QObject(document)
   {
-    setObjectName(textColorsName);
+    setObjectName(name);
     connect(document, &QTextDocument::contentsChange, this, [this](int from, int, int added) {
       if (!formatOnly(this->document()))
         color(from, from + added);
     });
   }
+
+  static inline const QString name = QStringLiteral("koilTextColors");
 
   QTextDocument* document() const { return static_cast<QTextDocument*>(parent()); }
 
@@ -349,7 +399,7 @@ public:
   {
     auto* doc = document();
     const FormatOnly formatting(doc);
-    doc->setLayoutEnabled(false);
+    const LayoutPaused paused(doc);
     QTextCursor cursor(doc);
     bool editing = false;
     for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
@@ -363,7 +413,6 @@ public:
     }
     if (editing)
       cursor.endEditBlock();
-    doc->setLayoutEnabled(true);
   }
 
 private:
@@ -400,19 +449,6 @@ private:
   }
 };
 
-// The TextColors of a TextEdit's document (a QQuickTextDocument), if it has
-// them.
-TextColors*
-textColorsOf(QObject* textDocument)
-{
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
-    return nullptr;
-  // No Q_OBJECT (so no moc), so it's found by name rather than by type.
-  return static_cast<TextColors*>(
-    quickDocument->textDocument()->findChild<QObject*>(textColorsName, Qt::FindDirectChildrenOnly));
-}
-
 // Colors the document's lines again: the ones in `lines` (numbers, from
 // 0), or all of them. It's one edit, so the text's change signals (and what
 // QML does on them) come once, not once a line. QSyntaxHighlighter also
@@ -423,9 +459,7 @@ void
 recolor(QSyntaxHighlighter* highlighter, const std::optional<QSet<int>>& lines = std::nullopt)
 {
   auto* document = highlighter->document();
-  const bool many = !lines || lines->size() > 20;
-  if (many)
-    document->setLayoutEnabled(false);
+  const LayoutPaused paused(document, !lines || lines->size() > 20);
   if (lines) {
     QTextCursor cursor(document);
     cursor.beginEditBlock();
@@ -435,8 +469,6 @@ recolor(QSyntaxHighlighter* highlighter, const std::optional<QSet<int>>& lines =
   } else {
     highlighter->rehighlight();
   }
-  if (many)
-    document->setLayoutEnabled(true);
 }
 
 // The format setLineFormat gives every line.
@@ -456,8 +488,6 @@ lineFormat(double height, double bottomMargin, double indent, double rightMargin
 // A TextEdit with more characters than this builds only the lines in view
 // (QQuickTextEditPrivate::largeTextSizeThreshold).
 constexpr qsizetype largeTextSize = 10000;
-
-const QString longLinesName = QStringLiteral("koilLongLines");
 
 class LongLines;
 
@@ -487,7 +517,7 @@ public:
     , start(document)
     , end(document)
   {
-    setObjectName(longLinesName);
+    setObjectName(name);
     connect(document, &QTextDocument::contentsChange, this, &LongLines::changed);
     changed(0, 0, document->characterCount());
   }
@@ -497,6 +527,8 @@ public:
     for (auto* line : std::as_const(lines))
       line->lines = nullptr;
   }
+
+  static inline const QString name = QStringLiteral("koilLongLines");
 
   QTextDocument* document() const { return static_cast<QTextDocument*>(parent()); }
 
@@ -702,8 +734,6 @@ LongLine::~LongLine()
     lines->lines.remove(this);
 }
 
-const QString textChangesName = QStringLiteral("koilTextChanges");
-
 // What changed in a document's text since it was last taken (see
 // watchTextChanges), as one change: [from, from + removed) of the text then
 // became [from, from + added) of the text now.
@@ -714,9 +744,11 @@ public:
     : QObject(document)
     , length(document->characterCount() - 1)
   {
-    setObjectName(textChangesName);
+    setObjectName(name);
     connect(document, &QTextDocument::contentsChange, this, &TextChanges::changed);
   }
+
+  static inline const QString name = QStringLiteral("koilTextChanges");
 
   // The text's length as it was last taken.
   int length;
@@ -779,19 +811,6 @@ public:
     return change;
   }
 };
-
-// The LongLines of a TextEdit's document (a QQuickTextDocument), if it has
-// any.
-LongLines*
-longLinesOf(QObject* textDocument)
-{
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
-    return nullptr;
-  // No Q_OBJECT (so no moc), so it's found by name rather than by type.
-  return static_cast<LongLines*>(
-    quickDocument->textDocument()->findChild<QObject*>(longLinesName, Qt::FindDirectChildrenOnly));
-}
 
 } // namespace
 
@@ -887,19 +906,17 @@ setLineFormat(QObject* textDocument,
               double indent,
               double rightMargin)
 {
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
+  auto* document = documentOf(textDocument);
+  if (!document)
     return;
   // A highlighter colors every line again, and lays the document out after
   // each one it has colors for, as recolor says: turning wrapping off took
   // minutes in a colored file of 100,000 lines. So the layout waits.
-  auto* document = quickDocument->textDocument();
   const FormatOnly formatting(document);
-  document->setLayoutEnabled(false);
+  const LayoutPaused paused(document);
   QTextCursor cursor(document);
   cursor.select(QTextCursor::Document);
   cursor.mergeBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
-  document->setLayoutEnabled(true);
 }
 
 void
@@ -914,17 +931,16 @@ setText(QObject* textEdit,
   if (!item)
     return;
   auto* textDocument = item->property("textDocument").value<QObject*>();
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
+  auto* document = documentOf(textDocument);
+  if (!document)
     return;
   // The old text out and the new one in, after a line in the format (which
   // every line it makes takes on), in an edit block: the document tells its
   // layout and the TextEdit when it ends. Emptying the TextEdit first (the
   // way setting its text does) changed its width, as the scroll bar went,
   // and that laid out the new text again.
-  auto* document = quickDocument->textDocument();
   // The new text is colored as it goes in, with the colors as they are now.
-  if (auto* colors = textColorsOf(textDocument))
+  if (auto* colors = childOf<TextColors>(textDocument))
     colors->stale = false;
   const bool undo = document->isUndoRedoEnabled();
   document->setUndoRedoEnabled(false);
@@ -949,18 +965,14 @@ setText(QObject* textEdit,
 void
 replaceText(QObject* textEdit, int start, int end, const QString& text)
 {
-  auto* item = qobject_cast<QQuickItem*>(textEdit);
-  if (!item)
-    return;
-  auto* quickDocument =
-    qobject_cast<QQuickTextDocument*>(item->property("textDocument").value<QObject*>());
-  if (!quickDocument)
+  auto* document = textEdit ? documentOf(textEdit->property("textDocument").value<QObject*>())
+                            : nullptr;
+  if (!document)
     return;
   // As TextEdit's remove does, which is in bounds, and its insert, which a
   // cursor's insertText does after it removes the selection, in one edit
   // block. Both then update the cursor's rectangle only if the character
   // format there changed, which plain text's doesn't.
-  auto* document = quickDocument->textDocument();
   const int last = document->characterCount() - 1;
   QTextCursor cursor(document);
   cursor.setPosition(qBound(0, start, last));
@@ -1008,29 +1020,29 @@ redrawText(QObject* textEdit)
 void
 watchLongLines(QObject* textDocument, int longLength)
 {
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (quickDocument && !longLinesOf(textDocument))
-    new LongLines(quickDocument->textDocument(), longLength);
+  auto* document = documentOf(textDocument);
+  if (document && !childOf<LongLines>(textDocument))
+    new LongLines(document, longLength);
 }
 
 void
 placeLongLines(QObject* textDocument, double lineHeight, double bottomMargin, int rowLength)
 {
-  if (auto* lines = longLinesOf(textDocument))
+  if (auto* lines = childOf<LongLines>(textDocument))
     lines->place(lineHeight, bottomMargin, rowLength);
 }
 
 int
 longestLine(QObject* textDocument)
 {
-  auto* lines = longLinesOf(textDocument);
+  auto* lines = childOf<LongLines>(textDocument);
   return lines ? lines->longest() : 0;
 }
 
 QString
 longLineSpot(QObject* textDocument, int position)
 {
-  auto* lines = longLinesOf(textDocument);
+  auto* lines = childOf<LongLines>(textDocument);
   if (!lines || lines->lines.isEmpty())
     return {};
   const QTextBlock block = lines->document()->findBlock(position);
@@ -1052,7 +1064,7 @@ longLineSpot(QObject* textDocument, int position)
 int
 longLinePosition(QObject* textDocument, int row, double column)
 {
-  auto* lines = longLinesOf(textDocument);
+  auto* lines = childOf<LongLines>(textDocument);
   if (!lines || lines->lines.isEmpty() || row < 0)
     return -1;
   const QTextBlock block = lines->blockAtRow(row);
@@ -1079,7 +1091,7 @@ QString
 longLineRuns(QObject* textDocument, int firstRow, int lastRow, int firstColumn, int lastColumn)
 {
   QJsonArray runs;
-  auto* lines = longLinesOf(textDocument);
+  auto* lines = childOf<LongLines>(textDocument);
   if (!lines || lines->lines.isEmpty())
     return QStringLiteral("[]");
   auto* doc = lines->document();
@@ -1138,21 +1150,15 @@ longLineRuns(QObject* textDocument, int firstRow, int lastRow, int firstColumn, 
 void
 watchTextChanges(QObject* textDocument)
 {
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (quickDocument && !quickDocument->textDocument()->findChild<QObject*>(
-                         textChangesName, Qt::FindDirectChildrenOnly))
-    new TextChanges(quickDocument->textDocument());
+  auto* document = documentOf(textDocument);
+  if (document && !childOf<TextChanges>(textDocument))
+    new TextChanges(document);
 }
 
 QStringList
 takeTextChange(QObject* textDocument, bool withText)
 {
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
-    return {};
-  // No Q_OBJECT (so no moc), so it's found by name rather than by type.
-  auto* changes = static_cast<TextChanges*>(quickDocument->textDocument()->findChild<QObject*>(
-    textChangesName, Qt::FindDirectChildrenOnly));
+  auto* changes = childOf<TextChanges>(textDocument);
   return changes ? changes->take(withText) : QStringList();
 }
 
@@ -1179,16 +1185,14 @@ setListingColors(QObject* textDocument,
                  const QString& pendingIconColor,
                  const QString& directoryColor)
 {
-  auto* highlighter = highlighterOf(textDocument, !directoryColor.isEmpty());
+  auto* highlighter = highlighterOf<ListingHighlighter>(textDocument, !directoryColor.isEmpty());
   if (!highlighter)
     return;
   if (directoryColor.isEmpty()) {
     delete highlighter; // which takes its colors away
     return;
   }
-  QHash<QString, QTextCharFormat> icons;
-  for (qsizetype i = 0; i + 1 < iconColors.size(); i += 2)
-    icons.insert(iconColors.at(i), colored(iconColors.at(i + 1)));
+  const auto icons = colorsByKey(iconColors);
   const auto pendingIcon = colored(pendingIconColor);
   const auto directory = colored(directoryColor);
   if (icons == highlighter->icons && pendingIcon == highlighter->pendingIcon &&
@@ -1203,7 +1207,7 @@ setListingColors(QObject* textDocument,
 void
 setPendingLines(QObject* textDocument, const QStringList& lines)
 {
-  auto* highlighter = highlighterOf(textDocument, false);
+  auto* highlighter = highlighterOf<ListingHighlighter>(textDocument, false);
   if (!highlighter || highlighter->isPath)
     return;
   QSet<int> pending;
@@ -1228,7 +1232,7 @@ setPendingLines(QObject* textDocument, const QStringList& lines)
 void
 setPathColors(QObject* textDocument, const QString& directoryColor, const QStringList& spans)
 {
-  auto* highlighter = highlighterOf(textDocument, true);
+  auto* highlighter = highlighterOf<ListingHighlighter>(textDocument, true);
   if (!highlighter)
     return;
   highlighter->isPath = true;
@@ -1242,24 +1246,14 @@ setPathColors(QObject* textDocument, const QString& directoryColor, const QStrin
 void
 setKeywordColors(QObject* textDocument, const QStringList& keywordColors)
 {
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
+  auto* highlighter = highlighterOf<KeywordHighlighter>(textDocument, !keywordColors.isEmpty());
+  if (!highlighter)
     return;
-  auto* document = quickDocument->textDocument();
-  // No Q_OBJECT (so no moc), so it's found by name rather than by type.
-  auto* highlighter = static_cast<KeywordHighlighter*>(
-    document->findChild<QSyntaxHighlighter*>(keywordHighlighterName, Qt::FindDirectChildrenOnly));
   if (keywordColors.isEmpty()) {
     delete highlighter; // which takes its colors away
     return;
   }
-  if (!highlighter) {
-    highlighter = new KeywordHighlighter(document);
-    highlighter->setObjectName(keywordHighlighterName);
-  }
-  QHash<QString, QTextCharFormat> keywords;
-  for (qsizetype i = 0; i + 1 < keywordColors.size(); i += 2)
-    keywords.insert(keywordColors.at(i), colored(keywordColors.at(i + 1)));
+  const auto keywords = colorsByKey(keywordColors);
   if (keywords == highlighter->keywords)
     return;
   highlighter->keywords = keywords;
@@ -1269,10 +1263,10 @@ setKeywordColors(QObject* textDocument, const QStringList& keywordColors)
 void
 setTextColors(QObject* textDocument, const QStringList& colors, const QString& fileName)
 {
-  auto* quickDocument = qobject_cast<QQuickTextDocument*>(textDocument);
-  if (!quickDocument)
+  auto* document = documentOf(textDocument);
+  if (!document)
     return;
-  auto* textColors = textColorsOf(textDocument);
+  auto* textColors = childOf<TextColors>(textDocument);
   if (colors.isEmpty()) {
     if (textColors) {
       textColors->recolor(true);
@@ -1288,7 +1282,7 @@ setTextColors(QObject* textDocument, const QStringList& colors, const QString& f
     formats[url].setFontUnderline(true);
   const auto comments = syntaxComments(fileName);
   if (!textColors) {
-    textColors = new TextColors(quickDocument->textDocument());
+    textColors = new TextColors(document);
     textColors->formats = formats;
     textColors->comments = comments;
     textColors->recolor();

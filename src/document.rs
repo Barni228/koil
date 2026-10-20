@@ -1,8 +1,6 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cxx_qt::casting::{Downcast, Upcast};
@@ -10,6 +8,7 @@ use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QUrl};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
+use crate::convert::{Coalesced, path_string};
 #[cfg(target_os = "macos")]
 use crate::install;
 use crate::{cli, ffi, listing};
@@ -275,7 +274,7 @@ impl FileWatcher {
         // Links followed, as the changes name it.
         let target = std::fs::canonicalize(&path).ok()?;
         let dir = target.parent()?.to_path_buf();
-        let queued = Arc::new(AtomicBool::new(false));
+        let changed = Coalesced::new(thread);
         let handler = move |event: notify::Result<notify::Event>| {
             let matters = match &event {
                 Ok(event) => {
@@ -285,12 +284,8 @@ impl FileWatcher {
                 // Changes may have been missed.
                 Err(_) => true,
             };
-            if matters && !queued.swap(true, Ordering::AcqRel) {
-                let queued = queued.clone();
-                let _ = thread.queue(move |document| {
-                    queued.store(false, Ordering::Release);
-                    document.file_changed();
-                });
+            if matters {
+                changed.emit(|document| document.file_changed());
             }
         };
         let mut watcher = notify::recommended_watcher(handler).ok()?;
@@ -322,13 +317,16 @@ impl qobject::Document {
         }
     }
 
+    /// This Document as the QObject native.cpp emits its signals on.
+    fn object(self: Pin<&mut Self>) -> &mut cxx_qt::QObject {
+        // SAFETY: the QObject is only used where it is.
+        unsafe { Pin::into_inner_unchecked(self.upcast_pin()) }
+    }
+
     fn watch_file_opens(self: Pin<&mut Self>) {
         // SAFETY: the pointer is to this Document, a live QObject, which
         // fileOpened is emitted on (it's in its meta-object).
-        unsafe {
-            let object: &mut cxx_qt::QObject = Pin::into_inner_unchecked(self.upcast_pin());
-            ffi::watch_file_opens(object);
-        }
+        unsafe { ffi::watch_file_opens(self.object()) };
     }
 
     fn watch_file(self: Pin<&mut Self>, path: &QString) {
@@ -361,10 +359,7 @@ impl qobject::Document {
     fn watch_finder_service(self: Pin<&mut Self>) {
         // SAFETY: the pointer is to this Document, a live QObject, which
         // folderRequested is emitted on (it's in its meta-object).
-        unsafe {
-            let object: &mut cxx_qt::QObject = Pin::into_inner_unchecked(self.upcast_pin());
-            ffi::watch_finder_service(object);
-        }
+        unsafe { ffi::watch_finder_service(self.object()) };
     }
 
     fn finder_service_shortcut(&self) -> QString {
@@ -400,7 +395,7 @@ impl qobject::Document {
     fn write_scratchpad(mut self: Pin<&mut Self>, text: &QString) -> QString {
         let mut rust = self.as_mut().rust_mut();
         let path = match rust.scratchpad_file() {
-            Ok(path) => QString::from(path.to_string_lossy().as_ref()),
+            Ok(path) => path_string(&path),
             Err(err) => {
                 self.failed(QString::from(cannot("save", SCRATCHPAD, &err).as_str()));
                 return QString::default();
@@ -497,12 +492,11 @@ impl qobject::Document {
     fn dir_of(&self, path: &QString) -> QString {
         let path = std::path::absolute(path.to_string()).unwrap_or_default();
         let dir = path.parent().unwrap_or(&path);
-        QString::from(dir.to_string_lossy().as_ref())
+        path_string(dir)
     }
 
     fn home_dir(&self) -> QString {
-        let home = std::env::home_dir().unwrap_or_default();
-        QString::from(home.to_string_lossy().as_ref())
+        path_string(&std::env::home_dir().unwrap_or_default())
     }
 
     fn url_to_path(&self, url: &QUrl) -> QString {
@@ -549,8 +543,7 @@ fn this_exe() -> io::Result<std::path::PathBuf> {
 /// `document` must point to a live QObject.
 pub unsafe fn file_opened(document: *mut cxx_qt::QObject, path: &QString) {
     // SAFETY: the caller's.
-    let document = unsafe { Pin::new_unchecked(&mut *document) };
-    if let Some(document) = document.downcast_pin::<qobject::Document>() {
+    if let Some(document) = unsafe { as_document(document) } {
         document.file_opened(path.clone());
     }
 }
@@ -563,10 +556,19 @@ pub unsafe fn file_opened(document: *mut cxx_qt::QObject, path: &QString) {
 /// `document` must point to a live QObject.
 pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString, file: bool) {
     // SAFETY: the caller's.
-    let document = unsafe { Pin::new_unchecked(&mut *document) };
-    if let Some(document) = document.downcast_pin::<qobject::Document>() {
+    if let Some(document) = unsafe { as_document(document) } {
         document.folder_requested(path.clone(), file);
     }
+}
+
+/// `object` as a Document, if it's one.
+///
+/// # Safety
+///
+/// `object` must point to a live QObject.
+unsafe fn as_document<'a>(object: *mut cxx_qt::QObject) -> Option<Pin<&'a mut qobject::Document>> {
+    // SAFETY: the caller's.
+    unsafe { Pin::new_unchecked(&mut *object) }.downcast_pin::<qobject::Document>()
 }
 
 /// How a file's text is stored, so saving it writes it back the same way.
@@ -592,6 +594,26 @@ impl Encoding {
             Encoding::Utf16Be => &[0xfe, 0xff],
         }
     }
+
+    /// How `bytes` are stored, by the BOM they start with, which is taken
+    /// off them.
+    fn take(bytes: &mut Vec<u8>) -> Encoding {
+        let encoding = [Encoding::Utf8Bom, Encoding::Utf16Le, Encoding::Utf16Be]
+            .into_iter()
+            .find(|encoding| bytes.starts_with(encoding.bom()))
+            .unwrap_or(Encoding::Utf8);
+        bytes.drain(..encoding.bom().len());
+        encoding
+    }
+
+    /// How two bytes make a unit of UTF-16, or None for UTF-8.
+    fn unit(self) -> Option<fn([u8; 2]) -> u16> {
+        match self {
+            Encoding::Utf8 | Encoding::Utf8Bom => None,
+            Encoding::Utf16Le => Some(u16::from_le_bytes),
+            Encoding::Utf16Be => Some(u16::from_be_bytes),
+        }
+    }
 }
 
 /// The text of the file `path` and how it's stored, or why it can't be
@@ -605,15 +627,12 @@ fn read(path: &str) -> Result<(String, Encoding), String> {
 /// BOM (without one, UTF-16 can't be told from other bytes). None if it's
 /// neither, like a picture.
 fn decode(mut bytes: Vec<u8>) -> Option<(String, Encoding)> {
-    let encoding = [Encoding::Utf8Bom, Encoding::Utf16Le, Encoding::Utf16Be]
-        .into_iter()
-        .find(|encoding| bytes.starts_with(encoding.bom()))
-        .unwrap_or(Encoding::Utf8);
-    bytes.drain(..encoding.bom().len());
-    let text = match encoding {
-        Encoding::Utf8 | Encoding::Utf8Bom => String::from_utf8(bytes).ok()?,
-        Encoding::Utf16Le => utf16(&bytes, u16::from_le_bytes)?,
-        Encoding::Utf16Be => utf16(&bytes, u16::from_be_bytes)?,
+    let encoding = Encoding::take(&mut bytes);
+    let text = match encoding.unit() {
+        None => String::from_utf8(bytes).ok()?,
+        // An odd byte at the end is half a unit.
+        Some(_) if !bytes.len().is_multiple_of(2) => return None,
+        Some(unit) => utf16(&bytes, unit).collect::<Result<_, _>>().ok()?,
     };
     Some((text, encoding))
 }
@@ -622,34 +641,24 @@ fn decode(mut bytes: Vec<u8>) -> Option<(String, Encoding)> {
 /// `�` rather than none of it: for text piped in, which is given on purpose,
 /// unlike a file, which may be a picture opened by mistake.
 pub fn decode_lossy(mut bytes: Vec<u8>) -> String {
-    let unit: fn([u8; 2]) -> u16 = if bytes.starts_with(Encoding::Utf16Le.bom()) {
-        u16::from_le_bytes
-    } else if bytes.starts_with(Encoding::Utf16Be.bom()) {
-        u16::from_be_bytes
-    } else {
-        if bytes.starts_with(Encoding::Utf8Bom.bom()) {
-            bytes.drain(..Encoding::Utf8Bom.bom().len());
-        }
-        return String::from_utf8(bytes)
-            .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned());
-    };
-    // An odd byte at the end is half a unit, which is dropped.
-    let (units, _) = bytes[2..].as_chunks();
-    char::decode_utf16(units.iter().map(|&pair| unit(pair)))
-        .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
-        .collect()
+    match Encoding::take(&mut bytes).unit() {
+        None => String::from_utf8(bytes)
+            .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
+        // An odd byte at the end is half a unit, which is dropped.
+        Some(unit) => (utf16(&bytes, unit))
+            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect(),
+    }
 }
 
-/// `bytes` read as UTF-16, each two of them made a unit by `unit`; None if
-/// they aren't UTF-16.
-fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> Option<String> {
-    let (units, rest) = bytes.as_chunks();
-    if !rest.is_empty() {
-        return None;
-    }
-    char::decode_utf16(units.iter().map(|&pair| unit(pair)))
-        .collect::<Result<_, _>>()
-        .ok()
+/// The characters of `bytes` read as UTF-16, each two of them made a unit
+/// by `unit` (an odd one at the end left out).
+fn utf16(
+    bytes: &[u8],
+    unit: fn([u8; 2]) -> u16,
+) -> std::char::DecodeUtf16<impl Iterator<Item = u16>> {
+    let (units, _) = bytes.as_chunks();
+    char::decode_utf16(units.iter().map(move |&pair| unit(pair)))
 }
 
 /// `text` stored as `encoding` says, BOM and all.

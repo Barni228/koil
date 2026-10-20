@@ -4,7 +4,6 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
-import Qt.labs.platform as Platform
 
 import Koil
 
@@ -130,6 +129,10 @@ ApplicationWindow {
     // Vim.previewReplacements), while which the menu can't open, save or
     // edit anything, and the listing doesn't sync (see also keepHelpKeys).
     readonly property bool boxOpen: help.opened || confirmDialog.opened || shellRun !== null || vim.previewing
+    // A question is open, which the Edit menu waits for (see MacMenuBar).
+    readonly property bool asking: confirmDialog.opened
+    // :set wrap, which View > Word Wrap toggles.
+    property alias wordWrap: vim.wrap
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
     property bool quitAfterSave: false
@@ -359,9 +362,11 @@ ApplicationWindow {
         return scratchpad ? usersText().text : scratchState ? scratchState.text : "";
     }
 
-    // Opens the file `path` (see loadFile), or says in the status line why
-    // it can't, as vim does (a picture isn't text).
-    function readFile(path) {
+    // Opens the file `path` (see loadFile), from the entry `from` of the
+    // listing (see openedFrom), or says in the status line why it can't, as
+    // vim does (a picture isn't text).
+    function readFile(path, from) {
+        openedFrom = from || "";
         const error = doc.openFile(path);
         if (error)
             vim.showError(error);
@@ -689,44 +694,32 @@ ApplicationWindow {
     // Koil's keys in the listing and the path field, and the few in a file
     // (see Vim.commandKeys).
     function runKeyCommand(name, count) {
-        if (name === "update")
-            updateListing();
-        else if (name === "apply")
-            applyChanges(false, false);
-        else if (name === "save")
-            save(false);
-        else if (name === "applyAsking")
-            applyChanges(false, false, true);
-        else if (name === "undoApply")
-            undoApply();
-        else if (name === "reveal")
-            reveal();
-        else if (name === "openInApp")
-            openInApp();
-        else if (name === "parent")
-            updateListing(Array(Math.max(count, 1)).fill("..").join("/"));
-        else if (name === "open")
-            openLine(count);
-        else if (name === "openPath")
-            openPath();
-        else if (name === "switch")
-            activate(activeView === pathView ? editorView : pathView);
-        else if (name === "hidden")
-            vim.showHidden = !vim.showHidden;
-        else if (name === "gitignore")
-            vim.gitignore = !vim.gitignore;
-        else if (name === "regex")
-            vim.regex = !vim.regex;
-        else if (name.startsWith("sort"))
+        if (name.startsWith("sort")) {
             sortBy(name.split(":")[1], name.startsWith("sortReverse"));
-        else if (name === "back")
-            leaveFile(false);
-        else if (name === "scratch")
-            openScratch();
-        else if (name === "shell")
-            bangLines(count);
-        else if (name === "shortcuts")
-            openShortcuts(true);
+            return;
+        }
+        const commands = {
+            update: () => updateListing(),
+            apply: () => applyChanges(false, false),
+            save: () => save(false),
+            applyAsking: () => applyChanges(false, false, true),
+            undoApply: () => undoApply(),
+            reveal: () => reveal(),
+            openInApp: () => openInApp(),
+            parent: () => updateListing(Array(Math.max(count, 1)).fill("..").join("/")),
+            open: () => openLine(count),
+            openPath: () => openPath(),
+            switch: () => activate(activeView === pathView ? editorView : pathView),
+            hidden: () => vim.showHidden = !vim.showHidden,
+            gitignore: () => vim.gitignore = !vim.gitignore,
+            regex: () => vim.regex = !vim.regex,
+            back: () => leaveFile(false),
+            scratch: () => openScratch(),
+            shell: () => bangLines(count),
+            shortcuts: () => openShortcuts(true)
+        };
+        if (commands[name])
+            commands[name]();
     }
 
     // !: the command line for a shell command on what % stands for (see
@@ -781,8 +774,7 @@ ApplicationWindow {
         } else {
             // The file on disk, even if the line renames it; loadFile updates
             // the listing first.
-            openedFrom = target.file.name;
-            readFile(target.file.path);
+            readFile(target.file.path, target.file.name);
         }
         return true;
     }
@@ -960,20 +952,6 @@ ApplicationWindow {
         vim.waiting = "Running";
     }
 
-    // The command line `line` as the status line shows it: its parts in
-    // their colors (see Vim.commandLineParts), as styled text, where its
-    // spaces are no-break ones, which it doesn't run together.
-    function commandLineHtml(line) {
-        const html = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/ /g, "&nbsp;");
-        let shown = "", at = 0;
-        for (const p of vim.commandLineParts(line)) {
-            shown += html(line.slice(at, p.start)) + "<font color=\"" + theme.commandColor(p.kind) + "\">"
-                + html(line.slice(p.start, p.end)) + "</font>";
-            at = p.end;
-        }
-        return shown + html(line.slice(at));
-    }
-
     // Line numbers (from 1, in order) as spans of lines from 0, [first,
     // last], of those next to each other.
     function lineSpans(lines) {
@@ -1096,7 +1074,7 @@ ApplicationWindow {
         if (!text) {
             if (failed)
                 vim.showError(failed);
-        } else if (!cut && !text.includes("\n") && fitsStatus(text)) {
+        } else if (!cut && !text.includes("\n") && statusLine.fits(text)) {
             if (exit)
                 vim.showError(text);
             else
@@ -1109,12 +1087,6 @@ ApplicationWindow {
             if (failed)
                 vim.showError(failed);
         }
-    }
-
-    // Whether `text` fits in the status line.
-    function fitsStatus(text) {
-        statusMetrics.text = text;
-        return statusMetrics.advanceWidth <= status.width;
     }
 
     // The shells the Settings window offers: [{ name, path }].
@@ -1144,8 +1116,7 @@ ApplicationWindow {
                 vim.showError(c.message);
                 return;
             }
-            openedFrom = target.name;
-            readFile(target.path);
+            readFile(target.path, target.name);
             // Opened, else the status line says why.
             if (!listing)
                 vim.showMessage(c.message);
@@ -1411,7 +1382,6 @@ ApplicationWindow {
     function openDropped(path) {
         askToSave(() => {
             if (doc.isFile(path)) {
-                openedFrom = "";
                 readFile(path);
             } else {
                 openFolder(path);
@@ -1443,7 +1413,6 @@ ApplicationWindow {
         const file = koil.fileAt(path);
         const open = () => {
             if (file) {
-                openedFrom = "";
                 readFile(file);
             } else if (openFolder(path)) {
                 // From the path field too, as Enter there does.
@@ -1511,7 +1480,6 @@ ApplicationWindow {
             return;
         const cursor = vim.cursor;
         const contentY = editorView.flickable.contentY;
-        openedFrom = "";
         readFile(path);
         if (scratchpad)
             return;
@@ -2202,94 +2170,11 @@ ApplicationWindow {
         onTriggered: shortcutsWindow.open()
     }
 
+    footer: StatusLine {
+        id: statusLine
 
-
-
-
-
-
-
-
-
-
-
-
-    footer: Pane {
-        contentHeight: position.implicitHeight
-        padding: 4
-        leftPadding: 8
-        rightPadding: 8
-
-        Label {
-            id: status
-
-            anchors.left: parent.left
-            anchors.right: position.left
-            // A message too long to fit loses its middle, as its end often
-            // says why (a path can be long); the command line its end, as
-            // its cursor is measured from its start.
-            elide: vim.commandLine === "" ? Text.ElideMiddle : Text.ElideRight
-            font.family: vim.fontFamily
-            font.pixelSize: vim.fontSize
-            textFormat: vim.commandLine === "" ? Text.PlainText : Text.StyledText
-            color: vim.commandLine === "" && vim.message !== "" && vim.messageIsError ? "#d33" : theme.windowText
-            text: vim.commandLine ? root.commandLineHtml(vim.commandLine) : vim.message || vim.modeLabel || " "
-
-            // For what's shown here or not (see fitsStatus).
-            TextMetrics {
-                id: statusMetrics
-
-                font: status.font
-            }
-
-            // Measured with TextMetrics, whose widths are properties, so they
-            // follow font size changes (FontMetrics.advanceWidth() is a call).
-            TextMetrics {
-                id: beforeCursor
-
-                font: status.font
-                text: vim.commandLine.slice(0, vim.commandCursor)
-            }
-            TextMetrics {
-                id: underCursor
-
-                font: status.font
-                text: commandCursor.character || " "
-            }
-
-            // Command-line cursor: a block over the character it's on.
-            Rectangle {
-                id: commandCursor
-
-                readonly property string character: vim.commandLine.charAt(vim.commandCursor)
-
-                visible: vim.commandLine !== ""
-                x: beforeCursor.advanceWidth
-                width: underCursor.advanceWidth
-                height: parent.height
-                color: status.color
-
-                Text {
-                    text: commandCursor.character
-                    font: status.font
-                    color: theme.window
-                    textFormat: Text.PlainText
-                }
-            }
-        }
-
-        Label {
-            id: position
-
-            anchors.right: parent.right
-            font.family: vim.fontFamily
-            font.pixelSize: vim.fontSize
-            // A macro's progress while it runs: not the position, which
-            // would be found again at every key it runs. Or what vim waits
-            // for (a shell command).
-            text: vim.waiting || vim.progress ? (vim.waiting || vim.progress) + " (Esc to stop)"
-                : vim.pendingKeys + "    " + vim.positionLabel()
-        }
+        vim: vim
+        theme: theme
     }
 
     FileDialog {
@@ -2299,7 +2184,6 @@ ApplicationWindow {
         onAccepted: {
             const path = doc.urlToPath(selectedFile);
             root.askToSave(() => {
-                root.openedFrom = "";
                 root.readFile(path);
             });
         }
@@ -2335,254 +2219,46 @@ ApplicationWindow {
         onRejected: root.quitAfterSave = false
     }
 
-    // macOS: native menu bar. The Quit/Preferences roles make Qt move those
-    // items into the application ("Koil") menu.
+    // The menus: macOS's own, or in the window elsewhere (see Component.onCompleted).
     Component {
         id: macMenuBar
 
-        Platform.MenuBar {
-            Platform.Menu {
-                title: qsTr("File")
-
-                Platform.MenuItem {
-                    text: qsTr("Open…")
-                    enabled: !root.boxOpen
-                    shortcut: StandardKey.Open
-                    onTriggered: root.openFile()
-                }
-                Platform.MenuItem {
-                    text: qsTr("Open Folder…")
-                    enabled: !root.boxOpen
-                    shortcut: "Ctrl+Shift+O"
-                    onTriggered: folderDialog.open()
-                }
-                // In the listing, Cmd+S updates; applying is its own item,
-                // which always asks first, as Space a does.
-                Platform.MenuItem {
-                    text: root.listing ? qsTr("Update") : qsTr("Save")
-                    enabled: !root.boxOpen
-                    shortcut: StandardKey.Save
-                    onTriggered: root.listing ? root.updateListing() : root.save()
-                }
-                Platform.MenuItem {
-                    text: qsTr("Apply Changes…")
-                    enabled: root.listing && !root.boxOpen
-                    onTriggered: root.applyChanges(false, false, true)
-                }
-                Platform.MenuItem {
-                    text: qsTr("Save As…")
-                    enabled: !root.listing && !root.boxOpen
-                    shortcut: StandardKey.SaveAs
-                    onTriggered: root.saveAs()
-                }
-                Platform.MenuItem {
-                    text: qsTr("Settings…")
-                    role: Platform.MenuItem.PreferencesRole
-                    shortcut: StandardKey.Preferences
-                    onTriggered: settingsWindow.open()
-                }
-                // In the app menu, under Settings.
-                Platform.MenuItem {
-                    text: qsTr("Shortcuts…")
-                    role: Platform.MenuItem.ApplicationSpecificRole
-                    onTriggered: shortcutsWindow.open()
-                }
-                Platform.MenuItem {
-                    text: qsTr("Quit Koil")
-                    role: Platform.MenuItem.QuitRole
-                    shortcut: StandardKey.Quit
-                    onTriggered: Qt.quit()
-                }
-            }
-            Platform.Menu {
-                title: qsTr("Edit")
-
-                Platform.MenuItem {
-                    text: qsTr("Find")
-                    enabled: !confirmDialog.opened
-                    shortcut: StandardKey.Find
-                    onTriggered: root.find(false)
-                }
-                Platform.MenuItem {
-                    text: qsTr("Replace")
-                    enabled: !confirmDialog.opened
-                    shortcut: "Ctrl+Alt+F" // Cmd+Option+F, as in VS Code
-                    onTriggered: root.find(true)
-                }
-                Platform.MenuItem {
-                    text: qsTr("Find Next")
-                    enabled: !confirmDialog.opened
-                    shortcut: StandardKey.FindNext
-                    onTriggered: root.findNext(1)
-                }
-                Platform.MenuItem {
-                    text: qsTr("Find Previous")
-                    enabled: !confirmDialog.opened
-                    shortcut: StandardKey.FindPrevious
-                    onTriggered: root.findNext(-1)
-                }
-            }
-            Platform.Menu {
-                title: qsTr("View")
-
-                Platform.MenuItem {
-                    text: qsTr("Zoom In")
-                    shortcut: StandardKey.ZoomIn
-                    onTriggered: root.zoom(1)
-                }
-                Platform.MenuItem {
-                    text: qsTr("Zoom Out")
-                    shortcut: StandardKey.ZoomOut
-                    onTriggered: root.zoom(-1)
-                }
-                Platform.MenuItem {
-                    text: qsTr("Actual Size")
-                    shortcut: "Ctrl+0" // no StandardKey; Qt maps Ctrl to Cmd
-                    onTriggered: vim.fontSize = settings.fontSize
-                }
-                Platform.MenuSeparator {}
-                // :set wrap, until Koil quits, as :set is. It toggles itself
-                // before it's triggered, which unbinds it.
-                Platform.MenuItem {
-                    text: qsTr("Word Wrap")
-                    shortcut: "Alt+Z" // Option+Z, as in VS Code
-                    checkable: true
-                    checked: vim.wrap
-                    onTriggered: {
-                        vim.wrap = checked;
-                        checked = Qt.binding(() => vim.wrap);
-                    }
-                }
-            }
+        MacMenuBar {
+            app: root
         }
     }
 
-    // Windows / Linux: regular in-window menu bar.
     Component {
         id: windowMenuBar
 
-        MenuBar {
-            Menu {
-                title: qsTr("&File")
-
-                Action {
-                    text: qsTr("&Open…")
-                    enabled: !root.boxOpen
-                    shortcut: StandardKey.Open
-                    onTriggered: root.openFile()
-                }
-                Action {
-                    text: qsTr("Open &Folder…")
-                    enabled: !root.boxOpen
-                    shortcut: "Ctrl+Shift+O"
-                    onTriggered: folderDialog.open()
-                }
-                Action {
-                    text: root.listing ? qsTr("&Update") : qsTr("&Save")
-                    enabled: !root.boxOpen
-                    shortcut: StandardKey.Save
-                    onTriggered: root.listing ? root.updateListing() : root.save()
-                }
-                Action {
-                    text: qsTr("A&pply Changes…")
-                    enabled: root.listing && !root.boxOpen
-                    onTriggered: root.applyChanges(false, false, true)
-                }
-                Action {
-                    text: qsTr("Save &As…")
-                    enabled: !root.listing && !root.boxOpen
-                    shortcut: StandardKey.SaveAs
-                    onTriggered: root.saveAs()
-                }
-                MenuSeparator {}
-                Action {
-                    text: qsTr("Se&ttings")
-                    // Preferences and Quit have no Ctrl binding on Windows.
-                    shortcut: "Ctrl+,"
-                    onTriggered: settingsWindow.open()
-                }
-                Action {
-                    text: qsTr("S&hortcuts…")
-                    onTriggered: shortcutsWindow.open()
-                }
-                MenuSeparator {}
-                Action {
-                    text: qsTr("E&xit")
-                    shortcut: "Ctrl+Q"
-                    onTriggered: Qt.quit()
-                }
-            }
-            Menu {
-                title: qsTr("&Edit")
-
-                Action {
-                    text: qsTr("&Find")
-                    enabled: !confirmDialog.opened
-                    shortcut: StandardKey.Find
-                    onTriggered: root.find(false)
-                }
-                Action {
-                    text: qsTr("&Replace")
-                    enabled: !confirmDialog.opened
-                    shortcut: StandardKey.Replace // Ctrl+H, as in VS Code
-                    onTriggered: root.find(true)
-                }
-                // F3, plus Ctrl+G from findNextShortcut. Written out, since
-                // an Action takes only the first of a StandardKey's keys.
-                Action {
-                    text: qsTr("Find &Next")
-                    enabled: !confirmDialog.opened
-                    shortcut: "F3"
-                    onTriggered: root.findNext(1)
-                }
-                Action {
-                    text: qsTr("Find &Previous")
-                    enabled: !confirmDialog.opened
-                    shortcut: "Shift+F3"
-                    onTriggered: root.findNext(-1)
-                }
-            }
-            Menu {
-                title: qsTr("&View")
-
-                Action {
-                    text: qsTr("Zoom &In")
-                    // StandardKey.ZoomIn is only Ctrl++ (Ctrl+Shift+=) here;
-                    // zoomInShortcut adds that.
-                    shortcut: "Ctrl+="
-                    onTriggered: root.zoom(1)
-                }
-                Action {
-                    text: qsTr("Zoom &Out")
-                    shortcut: StandardKey.ZoomOut
-                    onTriggered: root.zoom(-1)
-                }
-                Action {
-                    text: qsTr("&Actual Size")
-                    shortcut: "Ctrl+0" // no StandardKey for this
-                    onTriggered: vim.fontSize = settings.fontSize
-                }
-                MenuSeparator {}
-                // As on macOS.
-                Action {
-                    text: qsTr("&Word Wrap")
-                    shortcut: "Alt+Z"
-                    checkable: true
-                    checked: vim.wrap
-                    onTriggered: {
-                        vim.wrap = checked;
-                        checked = Qt.binding(() => vim.wrap);
-                    }
-                }
-            }
+        WindowMenuBar {
+            app: root
         }
+    }
+
+    // What the menus do, but for the window's functions.
+    function openFolderDialog() {
+        folderDialog.open();
+    }
+
+    function openSettings() {
+        settingsWindow.open();
+    }
+
+    function actualSize() {
+        vim.fontSize = settings.fontSize;
+    }
+
+    function saveOrUpdate() {
+        if (listing)
+            updateListing();
+        else
+            save();
     }
 
     // Windows / Linux: the menu's Zoom In is Ctrl+=; this keeps Ctrl++ too.
     // On macOS, StandardKey.ZoomIn already covers both.
     Shortcut {
-        id: zoomInShortcut
-
         enabled: !root.isMac
         sequences: [StandardKey.ZoomIn]
         onActivated: root.zoom(1)
@@ -2591,8 +2267,6 @@ ApplicationWindow {
     // Windows / Linux: the menu's Find Next and Find Previous are F3 and
     // Shift+F3; these add Ctrl+G and Ctrl+Shift+G, like Cmd+G on macOS.
     Shortcut {
-        id: findNextShortcut
-
         enabled: !root.isMac && !confirmDialog.opened
         sequence: "Ctrl+G"
         onActivated: root.findNext(1)

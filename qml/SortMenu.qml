@@ -95,26 +95,11 @@ Item {
             anchors.centerIn: parent
             spacing: 6 * menu.theme.zoom
 
-            Rectangle {
+            KeyCap {
                 anchors.verticalCenter: parent.verticalCenter
-                width: keyText.implicitWidth
-                height: keyText.implicitHeight
-                radius: 3 * menu.theme.zoom
-                color: menu.theme.code
-
-                Text {
-                    id: keyText
-
-                    leftPadding: 4 * menu.theme.zoom
-                    rightPadding: 4 * menu.theme.zoom
-                    topPadding: 1 * menu.theme.zoom
-                    bottomPadding: 1 * menu.theme.zoom
-                    text: choice.key
-                    font.family: menu.theme.font.family
-                    font.pixelSize: menu.fontSize
-                    color: menu.theme.text
-                    textFormat: Text.PlainText
-                }
+                theme: menu.theme
+                text: choice.key
+                fontSize: menu.fontSize
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter

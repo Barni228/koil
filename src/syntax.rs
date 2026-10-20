@@ -399,18 +399,19 @@ fn number_at(line: &[u16], i: usize, spans: &mut Vec<Span>) -> usize {
 /// The URL or path in `line` (as `spans` colors it) with the character at
 /// `at` in it, if any: what gf, gx and a click with Cmd open (see link.rs).
 pub fn link_at(line: &[u16], at: usize) -> Option<Span> {
-    let line = &line[..line.len().min(MAX_LENGTH)];
-    let mut spans = Vec::new();
-    links(line, &mut spans);
-    spans.into_iter().find(|s| s.start <= at && at < s.end)
+    colored_links(line).find(|s| s.start <= at && at < s.end)
 }
 
 /// The first URL or path in `line`, as `link_at` finds them.
 pub fn first_link(line: &[u16]) -> Option<Span> {
-    let line = &line[..line.len().min(MAX_LENGTH)];
+    colored_links(line).next()
+}
+
+/// The URLs and paths in the part of `line` that's colored.
+fn colored_links(line: &[u16]) -> impl Iterator<Item = Span> {
     let mut spans = Vec::new();
-    links(line, &mut spans);
-    spans.into_iter().next()
+    links(&line[..line.len().min(MAX_LENGTH)], &mut spans);
+    spans.into_iter()
 }
 
 /// The URLs and paths in `line`, which go over whatever they're in.

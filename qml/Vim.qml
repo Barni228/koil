@@ -426,9 +426,7 @@ QtObject {
     // `entries` (see Hidden text). Leaves other buffers alone (see Buffers).
     function reset(entries) {
         interrupt();
-        keys = [];
-        pendingKeys = "";
-        awaitingReplaceChar = false;
+        forgetKeys();
         // The text a :s's preview replaced isn't the editor's any more.
         substitution = null;
         previewing = false;
@@ -620,9 +618,7 @@ QtObject {
                 Qt.callLater(showColumn);
             return;
         }
-        keys = [];
-        pendingKeys = "";
-        awaitingReplaceChar = false;
+        forgetKeys();
         const s = editor.selectionStart, e = editor.selectionEnd;
         if (s !== e) {
             mode = "visual";
@@ -639,7 +635,7 @@ QtObject {
         // Left for gv, as jumpTo does: a click, or the editor losing the
         // keys to the find bar, which drops its selection.
         if (isVisual) {
-            lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+            lastVisual = visualState();
             mode = "normal";
         }
         const c = clampNormal(t, p);
@@ -648,6 +644,38 @@ QtObject {
             setCursor(c);
         else
             cursor = c;
+    }
+
+    // Forgets the keys typed so far.
+    function forgetKeys() {
+        keys = [];
+        pendingKeys = "";
+        awaitingReplaceChar = false;
+    }
+
+    function closeCommandLine() {
+        if (commandLine !== "")
+            commandLineKey("<Esc>");
+    }
+
+    // Ends a run, the find bar's preview and the command line, for what
+    // comes from outside vim.
+    function endOutside() {
+        interrupt();
+        endReplacements();
+        closeCommandLine();
+    }
+
+    // Back to normal mode from visual mode, on the character the cursor is
+    // on.
+    function leaveVisual() {
+        setMode("normal");
+        setCursor(clampNormal(bufferText(), cursor));
+    }
+
+    // The selection, as lastVisual keeps it for gv.
+    function visualState() {
+        return { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
     }
 
     // Runs an edit made outside vim (e.g. from a menu) as its own undo step,
@@ -665,21 +693,13 @@ QtObject {
 
     // Cmd+Z / Cmd+Shift+Z, in any mode (also from the find bar).
     function nativeUndo(isRedo) {
-        interrupt();
-        endReplacements();
-        if (commandLine !== "")
-            commandLineKey("<Esc>");
+        endOutside();
         const wasInserting = inserting;
         if (wasInserting)
             breakInsert();
-        if (isVisual) {
-            setMode("normal");
-            setCursor(clampNormal(bufferText(), cursor));
-        }
-        if (isRedo)
-            redo(1);
-        else
-            undo(1);
+        if (isVisual)
+            leaveVisual();
+        undo(1, isRedo);
         if (wasInserting)
             beginChange();
     }
@@ -688,18 +708,13 @@ QtObject {
     // cursor, out of visual mode, and a new undo step in insert mode, in
     // the text without the find bar's preview.
     function jumpTo(p) {
-        interrupt();
-        endReplacements();
-        if (commandLine !== "")
-            commandLineKey("<Esc>");
-        keys = [];
-        pendingKeys = "";
-        awaitingReplaceChar = false;
+        endOutside();
+        forgetKeys();
         clearCursors();
         // Leaving the selection for gv (and Find in Selection), as vim
         // does whichever way visual mode ends.
         if (isVisual) {
-            lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+            lastVisual = visualState();
             setMode("normal");
         }
         if (inserting) {
@@ -761,22 +776,15 @@ QtObject {
     // the extra cursors and the find bar's preview, and forgets the keys
     // typed so far.
     function toNormal() {
-        interrupt();
-        endReplacements();
-        if (commandLine !== "")
-            commandLineKey("<Esc>");
+        endOutside();
         // Without the count's repeat, which would go on after (see Runs), as
         // when the cursor moves.
         if (inserting)
             leaveInsert(false);
-        if (isVisual) {
-            setMode("normal");
-            setCursor(clampNormal(bufferText(), cursor));
-        }
+        if (isVisual)
+            leaveVisual();
         clearCursors();
-        keys = [];
-        pendingKeys = "";
-        awaitingReplaceChar = false;
+        forgetKeys();
     }
 
     // Starts a command from outside vim, as if `tokens` were typed in normal
@@ -1128,9 +1136,7 @@ QtObject {
             awaitingReplaceChar = tok === "r" && keys[keys.length - 2] !== "\"";
             return;
         }
-        keys = [];
-        pendingKeys = "";
-        awaitingReplaceChar = false;
+        forgetKeys();
         if (r.status === "ok")
             execute(r.cmd);
         else
@@ -1561,8 +1567,7 @@ QtObject {
             macroFails();
             return;
         }
-        applyOperator(cmd.op, range, cmd.reg, count,
-            range.linewise ? Math.min(cursor, range.target) : range.start);
+        applyOperator(cmd.op, range, cmd.reg, range.linewise ? Math.min(cursor, range.target) : range.start);
     }
 
     // What operator `cmd.op` goes over from the cursor, by cmd's motion or
@@ -1610,7 +1615,7 @@ QtObject {
         return range;
     }
 
-    function applyOperator(op, range, reg, count, yankCursor) {
+    function applyOperator(op, range, reg, yankCursor) {
         const t = bufferText();
         if (!range.linewise && range.end <= range.start && op !== "c")
             return;
@@ -1701,22 +1706,18 @@ QtObject {
             break;
         case "x":
         case "<Del>":
-            executeOperator({ op: "d", reg: cmd.reg, count: cmd.count, motion: { name: "l" } });
-            break;
         case "X":
-            executeOperator({ op: "d", reg: cmd.reg, count: cmd.count, motion: { name: "h" } });
+        case "C":
+        case "D": {
+            const [op, motion] = { x: "dl", "<Del>": "dl", X: "dh", C: "c$", D: "d$" }[cmd.action];
+            executeOperator({ op: op, reg: cmd.reg, count: cmd.count, motion: { name: motion } });
             break;
+        }
         case "s":
             applyOperator("c", { start: p, end: Txt.advance(t, p, count, Txt.lineEnd(t, p)), linewise: false }, cmd.reg);
             break;
         case "S":
             executeOperator({ op: "c", reg: cmd.reg, count: cmd.count, linewise: true });
-            break;
-        case "C":
-            executeOperator({ op: "c", reg: cmd.reg, count: cmd.count, motion: { name: "$" } });
-            break;
-        case "D":
-            executeOperator({ op: "d", reg: cmd.reg, count: cmd.count, motion: { name: "$" } });
             break;
         case "Y":
             // As Neovim's: to the line's end, like D and C (Vim's is yy).
@@ -1731,10 +1732,8 @@ QtObject {
             joinLines(count, cmd.action === "J");
             break;
         case "u":
-            undo(count);
-            break;
         case "<C-r>":
-            redo(count);
+            undo(count, cmd.action === "<C-r>");
             break;
         case ".":
             repeatDot(cmd.count);
@@ -1877,22 +1876,20 @@ QtObject {
             return;
         }
         const a = cmd.action;
-        lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+        lastVisual = visualState();
         if (a === "surround") {
             setMode("normal");
             surroundSelection(lastVisual, cmd.surround);
             return;
         }
         if (a === "<Esc>" || visualModes[a] === mode) {
-            setMode("normal");
-            setCursor(clampNormal(t, cursor));
+            leaveVisual();
             return;
         }
         // m marks its lines (see toggleMarks), leaving visual mode.
         if (a === "m") {
             const lo = Math.min(anchor, cursor), hi = Math.max(anchor, cursor);
-            setMode("normal");
-            setCursor(clampNormal(t, cursor));
+            leaveVisual();
             if (!singleLine)
                 toggleMarks(lineStarts(t, lo, Txt.lineOf(t, hi) - Txt.lineOf(t, lo) + 1));
             return;
@@ -1920,8 +1917,7 @@ QtObject {
         // :, ! and g! leave visual mode, for a command on its lines, as in
         // vim, which still shows them selected while it's typed.
         if (a === ":" || a === "!" || a === "g!") {
-            setMode("normal");
-            setCursor(clampNormal(t, cursor));
+            leaveVisual();
             visualShown = lastVisual;
             if (a === ":")
                 openCommandLine(":", "'<,'>");
@@ -1941,8 +1937,7 @@ QtObject {
         // runOnLines), leaving visual mode.
         if (a === "@" || a === "Q") {
             const lo = Math.min(anchor, cursor), hi = Math.max(anchor, cursor);
-            setMode("normal");
-            setCursor(clampNormal(t, cursor));
+            leaveVisual();
             runOnLines(a === "Q" ? lastRecorded : cmd.ch,
                 lineStarts(t, lo, Txt.lineOf(t, hi) - Txt.lineOf(t, lo) + 1), count);
             return;
@@ -1950,8 +1945,7 @@ QtObject {
         // gf and gx open what's selected (a block's corners, as characters).
         if (a === "gf" || a === "gx") {
             const r = selectedRange(t, mode === "visualLine" ? mode : "visual", anchor, cursor);
-            setMode("normal");
-            setCursor(clampNormal(t, cursor));
+            leaveVisual();
             outside(() => linkRequested(cursor, t.slice(r.start, r.end), a === "gx"));
             return;
         }
@@ -1971,30 +1965,13 @@ QtObject {
         const range = mode === "visualLine" ? lineRange : { start: lo, end: Txt.charEnd(t, hi), linewise: false };
         setMode("normal");
         setCursor(clampNormal(t, lo));
+        // d, c and y on what's selected, or on its lines (in capitals).
+        const op = { d: "d", x: "d", "<Del>": "d", c: "c", s: "c", y: "y", X: "D", D: "D", C: "C", R: "C", Y: "Y" }[a];
+        if (op) {
+            applyOperator(op.toLowerCase(), op === op.toLowerCase() ? range : lineRange, cmd.reg, lo);
+            return;
+        }
         switch (a) {
-        case "d":
-        case "x":
-        case "<Del>":
-            applyOperator("d", range, cmd.reg);
-            break;
-        case "X":
-        case "D":
-            applyOperator("d", lineRange, cmd.reg);
-            break;
-        case "c":
-        case "s":
-            applyOperator("c", range, cmd.reg);
-            break;
-        case "C":
-        case "R":
-            applyOperator("c", lineRange, cmd.reg);
-            break;
-        case "y":
-            applyOperator("y", range, cmd.reg, 0, lo);
-            break;
-        case "Y":
-            applyOperator("y", lineRange, cmd.reg, 0, lo);
-            break;
         case ">":
         case "<":
             shiftLines(range, a === ">" ? 1 : -1, count);
@@ -2004,18 +1981,12 @@ QtObject {
             break;
         case "~":
         case "g~":
-            changeCase(range, "~");
-            break;
         case "u":
         case "gu":
-            changeCase(range, "u");
-            break;
         case "U":
         case "gU":
-            changeCase(range, "U");
-            break;
         case "g?":
-            changeCase(range, "?");
+            changeCase(range, a[a.length - 1]);
             break;
         case "r": {
             if (cmd.ch !== "\n") {
@@ -2746,10 +2717,8 @@ QtObject {
     // Alt+click: adds a cursor at pos, or removes the one there.
     function toggleCursor(pos) {
         interrupt();
-        if (isVisual) {
-            setMode("normal");
-            setCursor(clampNormal(bufferText(), cursor));
-        }
+        if (isVisual)
+            leaveVisual();
         if (mode !== "normal" && mode !== "insert")
             return;
         const t = bufferText();
@@ -2907,14 +2876,8 @@ QtObject {
     // The lines of `blocks` together, as a linewise register holds them: {
     // text, entries }, with their hidden text.
     function linesText(t, blocks) {
-        let text = "";
-        const entries = [];
-        for (const b of blocks) {
-            for (const h of shifted(hiddenIn(hidden, b.start, b.end), text.length))
-                entries.push(h);
-            text += t.slice(b.start, b.end) + "\n";
-        }
-        return { text: text, entries: entries };
+        const r = blockText(t, blocks);
+        return { text: r.text + (blocks.length ? "\n" : ""), entries: r.entries };
     }
 
     // : (and ! and g!) while lines are marked: a command line for them, as
@@ -3101,31 +3064,17 @@ QtObject {
     // and go. The cursor goes where the last one was joined.
     function joinMarked(t, starts, spaces) {
         const le = Txt.lineEnd(t, starts[0]), entries = [];
-        // The line joined so far: whether there's more than its prefix,
-        // and its last character.
-        let filled = le > prefixEnd(t, starts[0]), last = t[le - 1], tail = "", joined = 0;
+        const line = { filled: le > prefixEnd(t, starts[0]), last: t[le - 1] };
+        let tail = "", joined = 0;
         for (const ls of starts.slice(1)) {
             const end = Txt.lineEnd(t, ls);
             // Not its prefix, which goes with it.
-            let s = prefixEnd(t, ls), sep = "";
-            if (spaces) {
-                while (s < end && (t[s] === " " || t[s] === "\t"))
-                    s++;
-                if (filled && s < end && t[s] !== ")" && last !== " " && last !== "\t")
-                    sep = " ";
-            }
+            const part = joinPart(t, prefixEnd(t, ls), end, spaces, line);
             joined = tail.length;
-            tail += sep;
-            for (const h of shifted(hiddenIn(hidden, s, end), tail.length))
+            tail += part.sep;
+            for (const h of shifted(hiddenIn(hidden, part.from, end), tail.length))
                 entries.push(h);
-            tail += t.slice(s, end);
-            if (end > s) {
-                filled = true;
-                last = t[end - 1];
-            } else if (sep) {
-                filled = true;
-                last = sep;
-            }
+            tail += t.slice(part.from, end);
         }
         replaceRanges([{ start: le, end: le, text: tail, entries: entries }]
             .concat(removals(t, markedBlocks(t, starts.slice(1)))));
@@ -3335,9 +3284,7 @@ QtObject {
         batched(() => {
             if (isVisual && s.visual) {
                 interrupt();
-                keys = [];
-                pendingKeys = "";
-                awaitingReplaceChar = false;
+                forgetKeys();
             } else {
                 toNormal();
             }
@@ -3418,13 +3365,10 @@ QtObject {
     // Ends what keys left half done (a command line, an insert, a
     // selection, a command), as :normal ends it after each line.
     function endHalfDone() {
-        if (commandLine !== "")
-            commandLineKey("<Esc>");
+        closeCommandLine();
         if (mode !== "normal")
             runKey("<Esc>", null);
-        keys = [];
-        pendingKeys = "";
-        awaitingReplaceChar = false;
+        forgetKeys();
     }
 
     // A command failed: as in vim, the macros running stop, but one on each
@@ -3620,11 +3564,8 @@ QtObject {
     // Also drops what a macro left half typed (a command, a command line).
     function stopRun() {
         endRun();
-        if (commandLine !== "")
-            commandLineKey("<Esc>");
-        keys = [];
-        pendingKeys = "";
-        awaitingReplaceChar = false;
+        closeCommandLine();
+        forgetKeys();
         showMessage("Interrupted");
     }
 
@@ -3791,20 +3732,7 @@ QtObject {
             editing = false;
             syncing = false;
         }
-        if (hidden.length || entries && entries.length)
-            shiftHidden(start, end, text.length, entries || []);
-        shiftCursors(start, end, text.length);
-        if (marked.length && !placingMarks) {
-            const m = movedMarks(marked, old, start, end, text);
-            if (m !== marked)
-                marked = m;
-        }
-        if (!placingMarks)
-            moveLineRuns(list => movedMarks(list, old, start, end, text));
-        if (findScope)
-            moveScope(start, end, text.length);
-        if (yanked)
-            yanked = null;
+        followEdit(old, start, end, text, entries || []);
         if (!batch && tracking())
             trackedText = editorText();
     }
@@ -3934,47 +3862,32 @@ QtObject {
     }
 
     // u, `count` times, as a long command (see startTask): each step is an
-    // edit, which can be anywhere.
-    function undo(count) {
+    // edit, which can be anywhere. Ctrl-R if `redoing`.
+    function undo(count, redoing) {
         commitChange(true);
         let last = null, n = 0;
-        startTask((count > 1 ? count : "") + "u", count, () => {
-            if (!undoStack.length)
+        // Read at each step, as the stacks are replaced (see mergeEdits).
+        const from = () => redoing ? redoStack : undoStack, to = () => redoing ? undoStack : redoStack;
+        startTask((count > 1 ? count : "") + (redoing ? "^R" : "u"), count, () => {
+            if (!from().length)
                 return false;
-            last = undoStack.pop();
-            replaceRange(last.start, last.start + last.inserted.length, last.removed, last.removedHidden);
-            redoStack.push(last);
-            return ++n < count && undoStack.length > 0;
+            last = from().pop();
+            if (redoing)
+                replaceRange(last.start, last.start + last.removed.length, last.inserted, last.insertedHidden);
+            else
+                replaceRange(last.start, last.start + last.inserted.length, last.removed, last.removedHidden);
+            to().push(last);
+            return ++n < count && from().length > 0;
         }, () => {
             if (!last) {
-                showMessage("Already at oldest change");
-                outside(() => nothingToUndo());
+                showMessage(redoing ? "Already at newest change" : "Already at oldest change");
+                if (!redoing)
+                    outside(() => nothingToUndo());
                 return;
             }
-            const p = Math.min(last.cursor, bufferText().length);
-            setCursor(mode === "normal" ? clampNormal(bufferText(), p) : p);
-            wantCol = Txt.column(bufferText(), cursor);
-        });
-    }
-
-    // Ctrl-R, as undo.
-    function redo(count) {
-        commitChange(true);
-        let last = null, n = 0;
-        startTask((count > 1 ? count : "") + "^R", count, () => {
-            if (!redoStack.length)
-                return false;
-            last = redoStack.pop();
-            replaceRange(last.start, last.start + last.removed.length, last.inserted, last.insertedHidden);
-            undoStack.push(last);
-            return ++n < count && redoStack.length > 0;
-        }, () => {
-            if (!last) {
-                showMessage("Already at newest change");
-                return;
-            }
-            // Land on an inserted line rather than the end of the line above it.
-            const p = last.start + (last.inserted[0] === "\n" ? 1 : 0);
+            // Redone, on an inserted line rather than the end of the line above it.
+            const p = redoing ? last.start + (last.inserted[0] === "\n" ? 1 : 0)
+                : Math.min(last.cursor, bufferText().length);
             setCursor(mode === "normal" ? clampNormal(bufferText(), p) : p);
             wantCol = Txt.column(bufferText(), cursor);
         });
@@ -4266,15 +4179,7 @@ QtObject {
     // length). Entries are sorted, so with thousands of them (a long
     // listing) edits look them up rather than going over them all.
     function firstAt(list, p) {
-        let lo = 0, hi = list.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (list[mid].at < p)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        return lo;
+        return Txt.partition(0, list.length, i => list[i].at < p);
     }
 
     function shifted(list, by) {
@@ -4318,21 +4223,29 @@ QtObject {
             return; // only its colors changed
         trackedText = after;
         const d = diff(before, after, [], []);
-        if (d) {
-            if (hidden.length)
-                shiftHidden(d.start, d.end1, d.end2 - d.start, []);
-            shiftCursors(d.start, d.end1, d.end2 - d.start);
-            if (marked.length) {
-                const m = movedMarks(marked, before, d.start, d.end1, after.slice(d.start, d.end2));
-                if (m !== marked)
-                    marked = m;
-            }
-            moveLineRuns(list => movedMarks(list, before, d.start, d.end1, after.slice(d.start, d.end2)));
-            if (findScope)
-                moveScope(d.start, d.end1, d.end2 - d.start);
-            if (yanked)
-                yanked = null;
+        if (d)
+            followEdit(before, d.start, d.end1, after.slice(d.start, d.end2), []);
+    }
+
+    // Moves what goes with the text (the hidden text, the cursors, the
+    // marked lines, the lines a macro runs on, the find bar's scope) past an
+    // edit of `old` that put `text` in place of [start, end), with `entries`
+    // its hidden text; what was yanked isn't shown any more. Not the marks
+    // while replaceRanges places them (see placingMarks).
+    function followEdit(old, start, end, text, entries) {
+        if (hidden.length || entries.length)
+            shiftHidden(start, end, text.length, entries);
+        shiftCursors(start, end, text.length);
+        if (!placingMarks) {
+            const m = marked.length ? movedMarks(marked, old, start, end, text) : marked;
+            if (m !== marked)
+                marked = m;
+            moveLineRuns(list => movedMarks(list, old, start, end, text));
         }
+        if (findScope)
+            moveScope(start, end, text.length);
+        if (yanked)
+            yanked = null;
     }
 
     // How many characters a and b have in common at their starts (or ends,
@@ -4646,15 +4559,7 @@ QtObject {
     // The index of the last number in the sorted `list` that's at most v,
     // -1 if none is.
     function lastAtMost(list, v) {
-        let lo = 0, hi = list.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (list[mid] <= v)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        return lo - 1;
+        return Txt.partition(0, list.length, i => list[i] <= v) - 1;
     }
 
     // Where p of t is in u's text (u from withoutPrefixes(t)), at the name
@@ -4791,27 +4696,12 @@ QtObject {
     function joinLines(count, spaces) {
         const t = bufferText(), ls = Txt.lineStart(t, cursor), edits = [];
         let le = Txt.lineEnd(t, ls);
-        // The line joined so far: whether there's more than its prefix, and
-        // its last character.
-        let filled = le > prefixEnd(t, ls), last = t[le - 1];
+        const line = { filled: le > prefixEnd(t, ls), last: t[le - 1] };
         for (let i = 1; i < Math.max(count, 2) && le < t.length; i++) {
             const next = le + 1, end = Txt.lineEnd(t, next);
             // The next line's prefix goes with the line break.
-            let e = prefixEnd(t, next), sep = "";
-            if (spaces) {
-                while (e < end && (t[e] === " " || t[e] === "\t"))
-                    e++;
-                if (filled && e < end && t[e] !== ")" && last !== " " && last !== "\t")
-                    sep = " ";
-            }
-            edits.push({ start: le, end: e, text: sep });
-            if (end > e) {
-                filled = true;
-                last = t[end - 1];
-            } else if (sep) {
-                filled = true;
-                last = sep;
-            }
+            const part = joinPart(t, prefixEnd(t, next), end, spaces, line);
+            edits.push({ start: le, end: part.from, text: part.sep });
             le = end;
         }
         if (!edits.length) {
@@ -4821,6 +4711,26 @@ QtObject {
         // On the last line break.
         const ends = replaceRanges(edits);
         setCursor(clampNormal(bufferText(), ends[ends.length - 1] - edits[edits.length - 1].text.length));
+    }
+
+    // What J joins of the line [s, end) (after its blanks, with `spaces`)
+    // to `line`, the line joined so far ({ filled, last }: whether there's
+    // more than its prefix, and its last character), which it updates: {
+    // from, sep }, where sep is a space, unless `line` has nothing or ends
+    // with a blank, or what's joined starts with `)`.
+    function joinPart(t, s, end, spaces, line) {
+        let sep = "";
+        if (spaces) {
+            while (s < end && Txt.isBlank(t[s]))
+                s++;
+            if (line.filled && s < end && t[s] !== ")" && !Txt.isBlank(line.last))
+                sep = " ";
+        }
+        if (end > s || sep) {
+            line.filled = true;
+            line.last = end > s ? t[end - 1] : sep;
+        }
+        return { from: s, sep: sep };
     }
 
     // Adds `delta` to the number under or after the cursor on its line:
@@ -4942,10 +4852,9 @@ QtObject {
     // the selection is kept for it, and stays drawn meanwhile, as for ":".
     function askTag(cmd) {
         if (isVisual) {
-            lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+            lastVisual = visualState();
             cmd = Object.assign({}, cmd, { surround: Object.assign({}, cmd.surround, { selection: lastVisual }) });
-            setMode("normal");
-            setCursor(clampNormal(bufferText(), cursor));
+            leaveVisual();
             visualShown = lastVisual;
         }
         surroundTag = cmd;
@@ -5234,7 +5143,7 @@ QtObject {
         const r = selectedRange(t, mode, anchor, cursor);
         const text = mode === "visualBlock" ? blockShape(t).lines.map(l => part(l.start, l.end)).join("\n")
             : part(r.start, mode === "visualLine" ? Txt.lineEnd(t, Math.max(anchor, cursor)) : r.end);
-        lastVisual = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+        lastVisual = visualState();
         setMode("normal");
         setCursor(clampNormal(t, forward ? Math.max(anchor, cursor) : r.start));
         const line = (forward ? "/" : "?") + Txt.escapeRegExp(text).replace(/\n/g, "\\n");
@@ -5462,10 +5371,8 @@ QtObject {
             return;
         }
         lastShell = command;
-        if (isVisual) {
-            setMode("normal");
-            setCursor(clampNormal(bufferText(), cursor));
-        }
+        if (isVisual)
+            leaveVisual();
         outside(() => shellRequested(command, range, scratchpad));
     }
 
@@ -5609,15 +5516,9 @@ QtObject {
 
     // Whether the match m ({ start, end }) is all in one of region's spans.
     function inRegion(region, m) {
-        let lo = 0, hi = region.length;
-        while (lo < hi) { // the first span that ends at m's start or after
-            const mid = (lo + hi) >> 1;
-            if (region[mid].end < m.start)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        return lo < region.length && region[lo].start <= m.start && m.end <= region[lo].end;
+        // the first span that ends at m's start or after
+        const k = Txt.partition(0, region.length, i => region[i].end < m.start);
+        return k < region.length && region[k].start <= m.start && m.end <= region[k].end;
     }
 
     // ---- Find in Selection -------------------------------------------------
@@ -5630,7 +5531,7 @@ QtObject {
     // one's end. Null if there's none.
     function selectionScope() {
         const t = bufferText();
-        const v = isVisual ? { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol }
+        const v = isVisual ? visualState()
             : marked.length ? markedVisual(marked) : lastVisual;
         if (!v)
             return null;
@@ -5659,14 +5560,8 @@ QtObject {
     // replacement there puts it back in.
     function moveScope(start, end, length) {
         const list = findScope, d = length - (end - start);
-        let lo = 0, hi = list.length;
-        while (lo < hi) { // the first span that ends at the edit or after
-            const mid = (lo + hi) >> 1;
-            if (list[mid].end < start)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
+        // the first span that ends at the edit or after
+        const lo = Txt.partition(0, list.length, i => list[i].end < start);
         if (lo === list.length)
             return;
         const moved = list.slice(0, lo);
@@ -5953,17 +5848,8 @@ QtObject {
         const from = Txt.lineToPos(t, Math.max(1, (inView ? top : line) - previewMargin));
         const last = Math.min(Txt.countLines(t), (inView ? bottom : line) + previewMargin);
         const to = Txt.lineEnd(t, Txt.lineToPos(t, last));
-        const firstFrom = p => { // the first of found that starts at p or after
-            let lo = 0, hi = found.length;
-            while (lo < hi) {
-                const mid = (lo + hi) >> 1;
-                if (found[mid].start < p)
-                    lo = mid + 1;
-                else
-                    hi = mid;
-            }
-            return lo;
-        };
+        // the first of found that starts at p or after
+        const firstFrom = p => Txt.partition(0, found.length, i => found[i].start < p);
         return { from: firstFrom(from), to: firstFrom(to + 1) };
     }
 
@@ -5972,15 +5858,8 @@ QtObject {
     // the same character, or in a match, on the first character of what
     // replaced it (the `last` one, for the end of a selection).
     function previewedAt(u, p, replaced, spans, last) {
-        let lo = 0, hi = replaced.length;
-        while (lo < hi) { // after the last one that starts at p or before
-            const mid = (lo + hi) >> 1;
-            if (replaced[mid].start <= p)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
-        const k = lo - 1;
+        // the last one that starts at p or before
+        const k = Txt.partition(0, replaced.length, i => replaced[i].start <= p) - 1;
         if (k < 0)
             return p;
         if (p >= replaced[k].end)
@@ -6545,16 +6424,10 @@ QtObject {
     // and with `thin`, an empty one as a thin line (see addHighlight).
     function highlightsIn(list, current, thin) {
         const t = bufferText(), v = visibleRange(t);
-        let lo = 0, hi = list.length;
-        while (lo < hi) { // the first one that ends in view
-            const mid = (lo + hi) >> 1;
-            if (list[mid].end < v.from)
-                lo = mid + 1;
-            else
-                hi = mid;
-        }
+        // the first one that ends in view
+        const first = Txt.partition(0, list.length, i => list[i].end < v.from);
         const spans = [];
-        for (let i = lo; i < list.length && list[i].start <= v.to && spans.length < 5000; i++)
+        for (let i = first; i < list.length && list[i].start <= v.to && spans.length < 5000; i++)
             addHighlight(t, spans, list[i].start, list[i].end, i === current, thin);
         return spans;
     }

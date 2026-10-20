@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
-import QtQuick.Templates as T
 
 // The Settings window (Cmd+,): font, font size, line numbers, syntax
 // colors, word wrap, theme, whether folders come first, when applying asks
@@ -50,8 +49,10 @@ Window {
     ]
     readonly property int lineNumberMode: lineNumberModes.findIndex(
         m => m.number === settings.number && m.relative === settings.relativeNumber)
-    // Files' colors (:set syntax), on or off.
-    readonly property var syntaxModes: [
+    // Files' colors (:set syntax), the listing's dirs before its files
+    // (:set dirsfirst) rather than sorted with them, and whether :! gets the
+    // environment read from the user's shell.
+    readonly property var onOff: [
         { label: qsTr("On"), value: true },
         { label: qsTr("Off"), value: false }
     ]
@@ -59,12 +60,6 @@ Window {
     readonly property var wrapModes: [
         { label: qsTr("Off"), value: false },
         { label: qsTr("On"), value: true }
-    ]
-    // The listing's dirs before its files (:set dirsfirst), or sorted with
-    // them.
-    readonly property var dirsFirstModes: [
-        { label: qsTr("On"), value: true },
-        { label: qsTr("Off"), value: false }
     ]
     readonly property var colorSchemes: [
         { label: qsTr("System"), value: "system" },
@@ -76,11 +71,6 @@ Window {
         { label: qsTr("Always"), value: "always" },
         { label: qsTr("When deleting"), value: "deleting" },
         { label: qsTr("Never"), value: "never" }
-    ]
-    // Whether :! gets the environment read from the user's shell.
-    readonly property var shellEnvironmentModes: [
-        { label: qsTr("On"), value: true },
-        { label: qsTr("Off"), value: false }
     ]
 
     // The shortcut of "Open in Koil", the macOS service (see
@@ -94,18 +84,6 @@ Window {
     property bool changingCommand: false
     property string commandError: ""
 
-    readonly property bool customFontFamily: settings.fontFamily !== app.defaultFontFamily
-    readonly property bool customFontSize: settings.fontSize !== app.defaultFontSize
-    readonly property bool customLineNumbers: lineNumberMode !== 0
-    readonly property bool customSyntax: !settings.syntax
-    readonly property bool customWrap: settings.wrap
-    readonly property bool customColorScheme: settings.colorScheme !== "system"
-    readonly property bool customDirsFirst: !settings.dirsFirst
-    readonly property bool customConfirm: settings.confirmChanges !== "always"
-    readonly property bool customStartDir: settings.startDir !== ""
-    readonly property bool customShell: settings.shell !== ""
-    readonly property bool customShellEnvironment: !settings.shellEnvironment
-
     // How tall the settings get before they scroll: about half of them at
     // a time, and never past the screen.
     readonly property real maxListHeight: Math.min(Math.round(440 * zoom), Math.max(200, Screen.desktopAvailableHeight - 200))
@@ -115,9 +93,6 @@ Window {
     // The label of the setting whose tip shows (see SettingLabel).
     property var tipSetting: null
 
-    function scrollTo(y) {
-        scroller.contentY = Math.max(0, Math.min(scroller.maxY, y));
-    }
     // The top and bottom of the row `label` is in: GridLayout puts the
     // children that show three to a row.
     function rowOf(label) {
@@ -146,9 +121,9 @@ Window {
             return;
         const top = item.mapToItem(grid, 0, 0).y, margin = 8 * zoom;
         if (top - margin < scroller.contentY)
-            scrollTo(top - margin);
+            scroller.scrollTo(top - margin);
         else if (top + item.height + margin > scroller.contentY + scroller.height)
-            scrollTo(top + item.height + margin - scroller.height);
+            scroller.scrollTo(top + item.height + margin - scroller.height);
     }
 
     function setFontSize(size) {
@@ -170,18 +145,40 @@ Window {
             return qsTr("`/usr/local/bin/koil` is another program.");
         return qsTr("Lets `koil` in a terminal open Koil.");
     }
+    // The saved settings' defaults. A function, as an object of constants
+    // bound to a property came out undefined in the compiled app (see
+    // Theme.changeColor).
+    function defaults() {
+        return {
+            fontFamily: app.defaultFontFamily,
+            fontSize: app.defaultFontSize,
+            number: false,
+            relativeNumber: false,
+            syntax: true,
+            wrap: false,
+            colorScheme: "system",
+            dirsFirst: true,
+            confirmChanges: "always",
+            startDir: "",
+            shell: "",
+            shellEnvironment: true
+        };
+    }
+    // Whether the saved setting `key` isn't its default.
+    function custom(key) {
+        return settings[key] !== defaults()[key];
+    }
+    // The setting `key` back to its default. The dir Koil starts in only in
+    // the settings, as it's read only at startup.
+    function reset(key) {
+        if (key === "startDir")
+            settings.startDir = "";
+        else
+            app.changeSetting(key, defaults()[key]);
+    }
     function restoreDefaults() {
-        app.changeSetting("fontFamily", app.defaultFontFamily);
-        setFontSize(app.defaultFontSize);
-        setLineNumberMode(0);
-        app.changeSetting("syntax", true);
-        app.changeSetting("wrap", false);
-        app.changeSetting("colorScheme", "system");
-        app.changeSetting("dirsFirst", true);
-        app.changeSetting("confirmChanges", "always");
-        settings.startDir = "";
-        app.changeSetting("shell", "");
-        app.changeSetting("shellEnvironment", true);
+        for (const key in defaults())
+            reset(key);
     }
 
     // Shows the window, centered near the top of the main window the first
@@ -267,6 +264,27 @@ Window {
         opacity: enabled ? 1 : 0
     }
 
+    // The setting `key`, picked from `options` ({ label, value }).
+    component Choice: Segmented {
+        id: choice
+
+        required property string key
+
+        theme: win.theme
+        current: choice.options.findIndex(o => o.value === win.settings[choice.key])
+        onPicked: index => win.app.changeSetting(choice.key, choice.options[index].value)
+    }
+
+    // Resets the setting `key`.
+    component Reset: ResetButton {
+        id: reset
+
+        required property string key
+
+        enabled: win.custom(reset.key)
+        onClicked: win.reset(reset.key)
+    }
+
     // A setting's name, and in `about`, what it does, which shows with the
     // pointer on the name. Only there: anywhere on the row, a tip showed
     // wherever the pointer rested.
@@ -296,29 +314,17 @@ Window {
         y: 16 * win.zoom
         spacing: 16 * win.zoom
 
-        // The settings, which scroll past maxListHeight. Not interactive,
-        // since a drag selects text in a field; the wheel scrolls it.
-        Flickable {
+        // The settings, which scroll past maxListHeight.
+        WheelFlickable {
             id: scroller
-
-            readonly property real maxY: Math.max(0, contentHeight - height)
 
             Layout.preferredWidth: grid.implicitWidth + (win.scrolls ? win.barRoom : 0)
             Layout.preferredHeight: Math.min(grid.implicitHeight, win.maxListHeight)
             contentWidth: width
             contentHeight: grid.implicitHeight
-            clip: true
-            interactive: false
+            wheelStep: 60 * win.zoom
             // The tip would stay where its setting was.
             onContentYChanged: win.tipSetting = null
-
-            ScrollBar.vertical: ScrollBar {}
-
-            // The trackpad too, which a WheelHandler leaves out by default.
-            WheelHandler {
-                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                onWheel: event => win.scrollTo(scroller.contentY - (event.pixelDelta.y || event.angleDelta.y / 120 * 60 * win.zoom))
-            }
 
             // Under the setting's row, or over it if there's no room in
             // view.
@@ -373,7 +379,7 @@ Window {
                         matches = win.app.fontFamilies;
                         highlighted = matches.indexOf(win.settings.fontFamily);
                         fontList.open();
-                        fontListView.positionViewAtIndex(Math.max(0, highlighted), ListView.Center);
+                        fontList.view.positionViewAtIndex(Math.max(0, highlighted), ListView.Center);
                     }
                     function search(query) {
                         win.app.loadFontFamilies();
@@ -382,14 +388,14 @@ Window {
                         highlighted = matches.length ? 0 : -1;
                         searching = true;
                         fontList.open();
-                        fontListView.positionViewAtBeginning();
+                        fontList.view.positionViewAtBeginning();
                     }
                     function move(step) {
                         if (!fontList.visible) {
                             showList();
                         } else if (matches.length) {
                             highlighted = Math.max(0, Math.min(matches.length - 1, highlighted + step));
-                            fontListView.positionViewAtIndex(highlighted, ListView.Contain);
+                            fontList.view.positionViewAtIndex(highlighted, ListView.Contain);
                         }
                     }
                     // Return: picks the highlighted font, or shows the list.
@@ -496,81 +502,45 @@ Window {
                         }
                     }
 
-                    // Its own window, so the list isn't cut off by this one. The
-                    // field keeps the keys, except Esc, which the popup takes.
-                    T.Popup {
+                    DropList {
                         id: fontList
 
-                        y: fontPicker.height + 2 * win.zoom
-                        width: fontPicker.width
-                        height: Math.min(implicitContentHeight + topPadding + bottomPadding, 320 * win.zoom)
-                        padding: 4 * win.zoom
-                        popupType: Popup.Window
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        theme: win.theme
+                        field: fontPicker
+                        model: fontPicker.matches
+                        emptyText: qsTr("No matching fonts")
                         onClosed: {
                             fontPicker.searching = false;
                             fontSearch.text = Qt.binding(() => win.settings.fontFamily);
                         }
 
-                        contentItem: ListView {
-                            id: fontListView
+                        delegate: DropList.Option {
+                            id: fontOption
 
-                            clip: true
-                            implicitHeight: Math.max(contentHeight, 24 * win.zoom)
-                            model: fontPicker.matches
-                            boundsBehavior: Flickable.StopAtBounds
-                            ScrollIndicator.vertical: ScrollIndicator {}
+                            required property string modelData
+                            required property int index
 
-                            delegate: AbstractButton {
-                                id: fontOption
+                            theme: win.theme
+                            lit: fontPicker.highlighted === index
+                            Accessible.name: modelData
+                            onHoveredChanged: if (hovered) fontPicker.highlighted = index
+                            onClicked: fontPicker.finish(modelData)
 
-                                required property string modelData
-                                required property int index
-                                readonly property bool highlighted: fontPicker.highlighted === index
-
-                                width: ListView.view.width
-                                implicitHeight: 24 * win.zoom
-                                focusPolicy: Qt.NoFocus
-                                hoverEnabled: true
-                                Accessible.name: modelData
-                                onHoveredChanged: if (hovered) fontPicker.highlighted = index
-                                onClicked: fontPicker.finish(modelData)
-
-                                background: Rectangle {
-                                    radius: 3 * win.zoom
-                                    color: fontOption.highlighted ? win.accent : "transparent"
-                                }
-                                contentItem: Text {
-                                    leftPadding: 4 * win.zoom
-                                    rightPadding: 4 * win.zoom
-                                    text: fontOption.modelData
-                                    font.family: fontOption.modelData
-                                    font.pixelSize: Math.round(13 * win.zoom)
-                                    color: fontOption.highlighted ? win.theme.highlightedText : win.textColor
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            Text {
-                                anchors.centerIn: parent
-                                visible: !fontPicker.matches.length
-                                text: qsTr("No matching fonts")
+                            contentItem: Text {
+                                leftPadding: 4 * win.zoom
+                                rightPadding: 4 * win.zoom
+                                text: fontOption.modelData
+                                font.family: fontOption.modelData
                                 font.pixelSize: Math.round(13 * win.zoom)
-                                color: win.textColor
-                                opacity: 0.6
+                                color: fontOption.lit ? win.theme.highlightedText : win.textColor
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
                             }
-                        }
-                        background: Rectangle {
-                            radius: 4 * win.zoom
-                            color: win.theme.field
-                            border.color: win.borderColor
                         }
                     }
                 }
-                ResetButton {
-                    enabled: win.customFontFamily
-                    onClicked: win.app.changeSetting("fontFamily", win.app.defaultFontFamily)
+                Reset {
+                    key: "fontFamily"
                 }
 
                 SettingLabel {
@@ -630,9 +600,8 @@ Window {
                         }
                     }
                 }
-                ResetButton {
-                    enabled: win.customFontSize
-                    onClicked: win.setFontSize(win.app.defaultFontSize)
+                Reset {
+                    key: "fontSize"
                 }
 
                 SettingLabel {
@@ -646,7 +615,7 @@ Window {
                     onPicked: index => win.setLineNumberMode(index)
                 }
                 ResetButton {
-                    enabled: win.customLineNumbers
+                    enabled: win.lineNumberMode !== 0
                     onClicked: win.setLineNumberMode(0)
                 }
 
@@ -654,75 +623,60 @@ Window {
                     text: qsTr("Syntax colors")
                     about: qsTr("Colors the strings, numbers, comments, URLs and paths of files and the scratchpad, whatever their language. `:syntax off` turns it off until Koil quits.")
                 }
-                Segmented {
-                    theme: win.theme
-                    options: win.syntaxModes
-                    current: win.syntaxModes.findIndex(m => m.value === win.settings.syntax)
-                    onPicked: index => win.app.changeSetting("syntax", win.syntaxModes[index].value)
+                Choice {
+                    key: "syntax"
+                    options: win.onOff
                 }
-                ResetButton {
-                    enabled: win.customSyntax
-                    onClicked: win.app.changeSetting("syntax", true)
+                Reset {
+                    key: "syntax"
                 }
 
                 SettingLabel {
                     text: qsTr("Word wrap")
                     about: qsTr("Long lines go on in rows under them, rather than past the window's edge. View > Word Wrap and `:set wrap` change it until Koil quits.")
                 }
-                Segmented {
-                    theme: win.theme
+                Choice {
+                    key: "wrap"
                     options: win.wrapModes
-                    current: win.wrapModes.findIndex(m => m.value === win.settings.wrap)
-                    onPicked: index => win.app.changeSetting("wrap", win.wrapModes[index].value)
                 }
-                ResetButton {
-                    enabled: win.customWrap
-                    onClicked: win.app.changeSetting("wrap", false)
+                Reset {
+                    key: "wrap"
                 }
 
                 SettingLabel {
                     text: qsTr("Theme")
                     about: qsTr("Light or dark, or as the system is.")
                 }
-                Segmented {
-                    theme: win.theme
+                Choice {
+                    key: "colorScheme"
                     options: win.colorSchemes
-                    current: win.colorSchemes.findIndex(t => t.value === win.settings.colorScheme)
-                    onPicked: index => win.app.changeSetting("colorScheme", win.colorSchemes[index].value)
                 }
-                ResetButton {
-                    enabled: win.customColorScheme
-                    onClicked: win.app.changeSetting("colorScheme", "system")
+                Reset {
+                    key: "colorScheme"
                 }
 
                 SettingLabel {
                     text: qsTr("Folders first")
                     about: qsTr("Lists folders before files; off, they're sorted together. `:set dirsfirst` changes it until Koil quits.")
                 }
-                Segmented {
-                    theme: win.theme
-                    options: win.dirsFirstModes
-                    current: win.dirsFirstModes.findIndex(m => m.value === win.settings.dirsFirst)
-                    onPicked: index => win.app.changeSetting("dirsFirst", win.dirsFirstModes[index].value)
+                Choice {
+                    key: "dirsFirst"
+                    options: win.onOff
                 }
-                ResetButton {
-                    enabled: win.customDirsFirst
-                    onClicked: win.app.changeSetting("dirsFirst", true)
+                Reset {
+                    key: "dirsFirst"
                 }
 
                 SettingLabel {
                     text: qsTr("Ask before applying")
                     about: qsTr("Whether applying the listing's changes (`Space Space`) lists them for you to confirm first: always, only when something would be deleted, or never. `Space a` always asks.")
                 }
-                Segmented {
-                    theme: win.theme
+                Choice {
+                    key: "confirmChanges"
                     options: win.confirmModes
-                    current: win.confirmModes.findIndex(m => m.value === win.settings.confirmChanges)
-                    onPicked: index => win.app.changeSetting("confirmChanges", win.confirmModes[index].value)
                 }
-                ResetButton {
-                    enabled: win.customConfirm
-                    onClicked: win.app.changeSetting("confirmChanges", "always")
+                Reset {
+                    key: "confirmChanges"
                 }
 
                 SettingLabel {
@@ -788,9 +742,8 @@ Window {
                         onAccepted: win.settings.startDir = win.document.shownPath(win.document.urlToPath(selectedFolder))
                     }
                 }
-                ResetButton {
-                    enabled: win.customStartDir
-                    onClicked: win.settings.startDir = ""
+                Reset {
+                    key: "startDir"
                 }
 
                 SettingLabel {
@@ -855,79 +808,46 @@ Window {
                         onClicked: shellList.visible ? shellList.close() : shellList.open()
                     }
 
-                    // Its own window, as the font list.
-                    T.Popup {
+                    DropList {
                         id: shellList
 
-                        y: shellPicker.height + 2 * win.zoom
-                        width: shellPicker.width
-                        height: Math.min(implicitContentHeight + topPadding + bottomPadding, 320 * win.zoom)
-                        padding: 4 * win.zoom
-                        popupType: Popup.Window
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        theme: win.theme
+                        field: shellPicker
+                        model: shellPicker.shells
+                        emptyText: qsTr("No shells found")
                         onAboutToShow: shellPicker.shells = win.app.shellChoices()
 
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: Math.max(contentHeight, 24 * win.zoom)
-                            model: shellPicker.shells
-                            boundsBehavior: Flickable.StopAtBounds
-                            ScrollIndicator.vertical: ScrollIndicator {}
+                        delegate: DropList.Option {
+                            id: shellOption
 
-                            delegate: AbstractButton {
-                                id: shellOption
+                            required property var modelData
 
-                                required property var modelData
-
-                                width: ListView.view.width
-                                implicitHeight: 24 * win.zoom
-                                focusPolicy: Qt.NoFocus
-                                hoverEnabled: true
-                                Accessible.name: modelData.name
-                                onClicked: {
-                                    win.app.changeSetting("shell", modelData.path);
-                                    shellList.close();
-                                }
-
-                                background: Rectangle {
-                                    radius: 3 * win.zoom
-                                    color: shellOption.hovered ? win.accent : "transparent"
-                                }
-                                // Its name, then where it is, dimmed.
-                                contentItem: Text {
-                                    leftPadding: 4 * win.zoom
-                                    rightPadding: 4 * win.zoom
-                                    text: shellOption.modelData.name + "&nbsp;&nbsp;<font color=\"" + (shellOption.hovered
-                                        ? win.theme.highlightedText : win.theme.dim) + "\">"
-                                        + shellOption.modelData.path.replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                                        + "</font>"
-                                    textFormat: Text.StyledText
-                                    font.pixelSize: Math.round(13 * win.zoom)
-                                    color: shellOption.hovered ? win.theme.highlightedText : win.textColor
-                                    verticalAlignment: Text.AlignVCenter
-                                    elide: Text.ElideRight
-                                }
+                            theme: win.theme
+                            Accessible.name: modelData.name
+                            onClicked: {
+                                win.app.changeSetting("shell", modelData.path);
+                                shellList.close();
                             }
 
-                            Text {
-                                anchors.centerIn: parent
-                                visible: !shellPicker.shells.length
-                                text: qsTr("No shells found")
+                            // Its name, then where it is, dimmed.
+                            contentItem: Text {
+                                leftPadding: 4 * win.zoom
+                                rightPadding: 4 * win.zoom
+                                text: shellOption.modelData.name + "&nbsp;&nbsp;<font color=\"" + (shellOption.lit
+                                    ? win.theme.highlightedText : win.theme.dim) + "\">"
+                                    + shellOption.modelData.path.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                                    + "</font>"
+                                textFormat: Text.StyledText
                                 font.pixelSize: Math.round(13 * win.zoom)
-                                color: win.textColor
-                                opacity: 0.6
+                                color: shellOption.lit ? win.theme.highlightedText : win.textColor
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
                             }
-                        }
-                        background: Rectangle {
-                            radius: 4 * win.zoom
-                            color: win.theme.field
-                            border.color: win.borderColor
                         }
                     }
                 }
-                ResetButton {
-                    enabled: win.customShell
-                    onClicked: win.app.changeSetting("shell", "")
+                Reset {
+                    key: "shell"
                 }
 
                 SettingLabel {
@@ -1078,17 +998,14 @@ Window {
                 // Whether :! gets the environment read from the user's shell
                 // (see shell.rs's `environment`), only on macOS, where an app
                 // opened from Finder has only the system's PATH.
-                Segmented {
+                Choice {
                     visible: win.app.isMac
-                    theme: win.theme
-                    options: win.shellEnvironmentModes
-                    current: win.shellEnvironmentModes.findIndex(m => m.value === win.settings.shellEnvironment)
-                    onPicked: index => win.app.changeSetting("shellEnvironment", win.shellEnvironmentModes[index].value)
+                    key: "shellEnvironment"
+                    options: win.onOff
                 }
-                ResetButton {
+                Reset {
                     visible: win.app.isMac
-                    enabled: win.customShellEnvironment
-                    onClicked: win.app.changeSetting("shellEnvironment", true)
+                    key: "shellEnvironment"
                 }
 
                 Item {
@@ -1115,9 +1032,7 @@ Window {
             theme: win.theme
             Layout.alignment: Qt.AlignRight
             text: qsTr("Restore Defaults")
-            enabled: win.customFontFamily || win.customFontSize || win.customLineNumbers || win.customSyntax
-                || win.customWrap || win.customColorScheme || win.customDirsFirst || win.customConfirm
-                || win.customStartDir || win.customShell || win.customShellEnvironment
+            enabled: Object.keys(win.defaults()).some(key => win.custom(key))
             onClicked: win.restoreDefaults()
         }
     }

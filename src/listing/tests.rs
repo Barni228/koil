@@ -24,14 +24,29 @@ fn action_texts(koil: &Koil) -> Vec<String> {
 /// A temp dir with `dir/`, `.hidden`, `file.rs` and `notes`, and a Koil that
 /// has it open.
 fn koil() -> (TempDir, Koil) {
+    koil_with(&["dir"], &[".hidden", "file.rs", "notes"])
+}
+
+/// A temp dir with `dirs` (and the dirs they're in) and the empty files
+/// `files`, and a Koil that has it open.
+fn koil_with(dirs: &[&str], files: &[&str]) -> (TempDir, Koil) {
     let temp = tempfile::tempdir().unwrap();
-    fs::create_dir(temp.path().join("dir")).unwrap();
-    for name in [".hidden", "file.rs", "notes"] {
-        fs::write(temp.path().join(name), "").unwrap();
+    for dir in dirs {
+        fs::create_dir_all(temp.path().join(dir)).unwrap();
+    }
+    for file in files {
+        fs::write(temp.path().join(file), "").unwrap();
     }
     let mut koil = Koil::default();
     koil.open(temp.path()).unwrap();
     (temp, koil)
+}
+
+/// Updates the listing as it's rendered, with `path` in the path field,
+/// opening `open`.
+fn navigate(koil: &mut Koil, path: &str, settings: &Settings, open: Option<&str>) -> Updated {
+    let rendered = render(koil);
+    update(koil, path, &rendered.text, &rendered.hidden, settings, open)
 }
 
 /// The rendered listing with each line changed by `edit`, which gets the
@@ -113,12 +128,7 @@ fn test_pending_color_apart() {
     assert_eq!(apart("not a color", true), "not a color");
 
     // files devicons gives white icons
-    let temp = tempfile::tempdir().unwrap();
-    for name in ["vercel.json", "gtkrc", "board.kicad_pcb"] {
-        fs::write(temp.path().join(name), "").unwrap();
-    }
-    let mut koil = Koil::default();
-    koil.open(temp.path()).unwrap();
+    let (temp, koil) = koil_with(&[], &["vercel.json", "gtkrc", "board.kicad_pcb"]);
     assert_eq!(icon(temp.path(), "vercel.json").1[0], "#cccccc");
     let rendered = render(&koil);
     assert_eq!(rendered.pending_color, PENDING_COLOR);
@@ -203,9 +213,7 @@ fn test_parse_rendered() {
 
 #[test]
 fn test_render_empty() {
-    let temp = tempfile::tempdir().unwrap();
-    let mut koil = Koil::default();
-    koil.open(temp.path()).unwrap();
+    let (_temp, koil) = koil_with(&[], &[]);
     let rendered = render(&koil);
     assert_eq!(rendered.text, "");
     assert_eq!(rendered.names, Vec::<String>::new());
@@ -332,18 +340,6 @@ fn test_navigate() {
     let (temp, mut koil) = koil();
     let root = koil.current_dir().to_path_buf();
     let settings = Settings::default();
-    // Updates with `path` in the path field, opening `open`.
-    let navigate = |koil: &mut Koil, path: &str, open| {
-        let rendered = render(koil);
-        update(
-            koil,
-            path,
-            &rendered.text,
-            &rendered.hidden,
-            &settings,
-            open,
-        )
-    };
 
     // Enter on a dir
     let rendered = render(&koil);
@@ -351,31 +347,31 @@ fn test_navigate() {
         target_on_line(&koil, &rendered.text, &rendered.hidden, 0),
         Some(Target::Dir("dir".into()))
     );
-    let updated = navigate(&mut koil, &rendered.path, Some("dir"));
+    let updated = navigate(&mut koil, &rendered.path, &settings, Some("dir"));
     assert!(updated.ok && updated.moved, "{updated:?}");
     assert_eq!(koil.current_dir(), root.join("dir"));
     assert_eq!(updated.from, "");
 
     // `-`, which comes from `dir/`
     let path = show_location(&koil);
-    let updated = navigate(&mut koil, &path, Some(".."));
+    let updated = navigate(&mut koil, &path, &settings, Some(".."));
     assert!(updated.ok && updated.moved);
     assert_eq!(koil.current_dir(), root);
     assert_eq!(updated.from, "dir/");
 
     // a changed path, even with spaces around it
     let path = format!("  {}  ", show_path(&temp.path().join("dir")));
-    let updated = navigate(&mut koil, &path, None);
+    let updated = navigate(&mut koil, &path, &settings, None);
     assert!(updated.ok && updated.moved);
     assert_eq!(koil.current_dir(), root.join("dir"));
 
     // the same path reads the listing again, without moving
     let path = show_location(&koil);
-    let updated = navigate(&mut koil, &path, None);
+    let updated = navigate(&mut koil, &path, &settings, None);
     assert!(updated.ok && !updated.moved);
 
     // one that can't be opened, which the path field says
-    let updated = navigate(&mut koil, " [", None);
+    let updated = navigate(&mut koil, " [", &settings, None);
     assert!(!updated.ok);
     assert_eq!(updated.problems, []);
     assert_eq!(updated.path_problems.len(), 1);
@@ -391,7 +387,7 @@ fn test_navigate() {
         ("file.rs/inside", "file.rs", "is a file, not a directory"),
     ];
     for (path, part, problem) in cases {
-        let updated = navigate(&mut koil, &show_path(&root.join(path)), None);
+        let updated = navigate(&mut koil, &show_path(&root.join(path)), &settings, None);
         assert!(!updated.ok, "{path}: {updated:?}");
         let part = show_path(&root.join(part));
         assert_eq!(updated.message, format!("`{part}` {problem}"));
@@ -401,7 +397,7 @@ fn test_navigate() {
     }
 
     // no path at all
-    let updated = navigate(&mut koil, "  ", None);
+    let updated = navigate(&mut koil, "  ", &settings, None);
     assert!(!updated.ok);
     assert_eq!(updated.message, "Write the path to open");
     assert_eq!(updated.path_problems[0].line, 0);
@@ -645,14 +641,7 @@ fn test_settings() {
         show_hidden: true,
         ..Settings::default()
     };
-    let updated = update(
-        &mut koil,
-        &rendered.path,
-        &rendered.text,
-        &rendered.hidden,
-        &settings,
-        None,
-    );
+    let updated = navigate(&mut koil, &rendered.path, &settings, None);
     assert!(updated.ok && updated.moved);
     assert_eq!(render(&koil).names, ["dir/", ".hidden", "file.rs", "notes"]);
 
@@ -662,14 +651,7 @@ fn test_settings() {
         regex: true,
         ..settings
     };
-    let updated = update(
-        &mut koil,
-        &rendered.path,
-        &rendered.text,
-        &rendered.hidden,
-        &settings,
-        None,
-    );
+    let updated = navigate(&mut koil, &rendered.path, &settings, None);
     assert!(updated.ok && !updated.moved);
     assert!(koil.settings().regex);
 
@@ -683,14 +665,7 @@ fn test_settings() {
         },
         ..settings
     };
-    let updated = update(
-        &mut koil,
-        &rendered.path,
-        &rendered.text,
-        &rendered.hidden,
-        &settings,
-        None,
-    );
+    let updated = navigate(&mut koil, &rendered.path, &settings, None);
     assert!(updated.ok && !updated.moved);
     assert_eq!(render(&koil).names, ["dir/", "notes", "file.rs", ".hidden"]);
 }
@@ -937,34 +912,22 @@ fn test_dirs_pattern() {
         regex: true,
         ..Settings::default()
     };
-    // Updates with `path` in the path field.
-    let navigate = |koil: &mut Koil, path: &str| {
-        let rendered = render(koil);
-        update(
-            koil,
-            path,
-            &rendered.text,
-            &rendered.hidden,
-            &settings,
-            None,
-        )
-    };
     let dir = render(&koil).path;
 
     // a pattern ending with `/` keeps it, and shows the dirs
     let path = format!("{dir}/,*/");
-    let updated = navigate(&mut koil, &path);
+    let updated = navigate(&mut koil, &path, &settings, None);
     assert!(updated.ok && updated.moved, "{updated:?}");
     let rendered = render(&koil);
     assert_eq!(rendered.path, path);
     assert_eq!(rendered.names, ["dir/"]);
     // so the same path is what's open
-    assert!(!navigate(&mut koil, &path).moved);
+    assert!(!navigate(&mut koil, &path, &settings, None).moved);
     assert_eq!(render(&koil).path, path);
 
     // without the `/`, it's another listing (the files)
     let path = format!("{dir}/,*");
-    assert!(navigate(&mut koil, &path).moved);
+    assert!(navigate(&mut koil, &path, &settings, None).moved);
     assert_eq!(render(&koil).path, path);
     assert_eq!(render(&koil).names, ["file.rs", "notes"]);
 }
@@ -1197,15 +1160,10 @@ fn test_home_path() {
 /// `🍄/sub/` and the file `script`: where the options start, what it fills
 /// in, and the options.
 fn completed(line: &str) -> (usize, String, Vec<String>) {
-    let temp = tempfile::tempdir().unwrap();
-    for dir in [
+    let dirs = [
         "src", "src-old", "Abc", "aBd", "my_tests", "my_tools", "🍄/sub",
-    ] {
-        fs::create_dir_all(temp.path().join(dir)).unwrap();
-    }
-    fs::write(temp.path().join("script"), "").unwrap();
-    let mut koil = Koil::default();
-    koil.open(temp.path()).unwrap();
+    ];
+    let (_temp, koil) = koil_with(&dirs, &["script"]);
     let cursor = utf16_len(line);
     let c = complete(&koil, line, cursor, &Settings::default());
     for option in &c.options {
