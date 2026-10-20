@@ -1,7 +1,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 
 use cxx_qt::Threading;
@@ -723,7 +723,8 @@ fn reveal(path: &Path) -> io::Result<()> {
         command.arg(path.parent().unwrap_or(path));
         command
     };
-    let mut child = command.spawn()?;
+    // Koil's stdout is the scratchpad's text with -p (see cli.rs).
+    let mut child = command.stdout(Stdio::null()).spawn()?;
     // waited for, so it doesn't stay a zombie once it's done
     thread::spawn(move || child.wait());
     Ok(())
@@ -775,7 +776,10 @@ fn open_in_app(path: &Path) -> Result<(), String> {
             command.arg(path);
             command
         };
+        // Not Koil's stdout, which is the scratchpad's text with -p: the
+        // app would write in it, and keep a pipe reading it from ending.
         let mut child = command
+            .stdout(Stdio::null())
             .spawn()
             .map_err(|e| format!("Can't open “{shown}”: {e}"))?;
         // so it doesn't stay a zombie once it's done

@@ -719,7 +719,8 @@ the scratchpad (see Scratchpad).
   that back; unsaved changes are asked about once it's done.
 - **Scratchpad** (`openScratch`): `_` in the listing (or the path field)
   shows a text of the user's that's never saved, kept until Koil quits
-  (`koil -s` starts in it, and text piped in starts it: see Command line).
+  (`koil -s` starts in it, text piped in starts it, and `koil -p` prints
+  it as Koil quits: see Command line).
   It leaves the listing as a file does (updating it first, `fileSpot`),
   and `_` or `-` there goes back (`leaveFile`) to where the cursor was,
   in the path field if it was there (`scratchFromPath`). In a shell
@@ -870,7 +871,15 @@ the scratchpad (see Scratchpad).
   `/dev/null`, which an app launched from Finder or the Dock has, nor a
   device that never ends, like `/dev/zero`) and has something in it.
   Unlike a file, it's shown whatever it is, with what isn't text as `�`
-  (`document::decode_lossy`). `+N` puts the cursor on line N of what's
+  (`document::decode_lossy`). `-p` (`--print`) starts in the scratchpad
+  too, and prints its text to stdout as Koil quits, however it quits
+  (`onAboutToQuit` in main.qml: `scratchText`, shown or kept, without a
+  `:s` preview; `Document.printScratchpad`, `cli::print_scratchpad`),
+  with a line break after its last line, as `%`'s file has, so Koil can
+  edit text in a pipe (`ls | koil -p | sort`, as `vipe`). Nothing else
+  Koil does writes to stdout, and what it starts that could (Space r,
+  Space o's `xdg-open`) gets a null one: an app given Koil's would keep
+  the pipe open after Koil quits. `+N` puts the cursor on line N of what's
   shown (`+` the last one), in the middle of the view, as vim's
   (`goToLine` types `NGzz`). clap has no `+` options and fills
   positionals in order, so `[PATH]`, `[+N]` and a hidden `more` only
@@ -886,7 +895,7 @@ the scratchpad (see Scratchpad).
   in the status line, since back from the scratchpad the field shows the
   listing's path. A Windows release build is a GUI app, which has no
   console, so `--help` (and an error) attaches to the one it was started
-  from (`attach_console`, untried).
+  from (`attach_console`, untried), as does `-p`'s text.
 - **The koil command**: on macOS, the Settings window's Command line
   button (`Document.changeCommand`) puts a script at `/usr/local/bin/koil`
   (`install::COMMAND`: on the PATH every shell gets, from `/etc/paths`)

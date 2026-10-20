@@ -149,6 +149,11 @@ pub mod qobject {
         #[qinvokable]
         fn take_startup_text(self: &Document) -> QString;
 
+        /// Prints `text`, the scratchpad's as Koil quits, if `-p` on the
+        /// command line asked for it (see `cli::print_scratchpad`).
+        #[qinvokable]
+        fn print_scratchpad(self: &Document, text: &QString);
+
         /// The line `+N` on the command line puts the cursor on: 0 for the
         /// last one, -1 for none.
         #[qinvokable]
@@ -460,6 +465,12 @@ impl qobject::Document {
     fn take_startup_text(&self) -> QString {
         let text = cli::ARGS.lock().unwrap().text.take();
         QString::from(text.unwrap_or_default().as_str())
+    }
+
+    fn print_scratchpad(&self, text: &QString) {
+        if cli::ARGS.lock().unwrap().print {
+            cli::print_scratchpad(&text.to_string());
+        }
     }
 
     fn startup_line(&self) -> i32 {

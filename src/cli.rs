@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::io::{IsTerminal, Read, Stdin};
+use std::io::{self, IsTerminal, Read, Stdin, Write};
 use std::sync::Mutex;
 
 use clap::error::ErrorKind;
@@ -12,9 +12,12 @@ use crate::document;
 pub struct Args {
     /// The dir, pattern or file to open, as written.
     pub path: Option<String>,
-    /// Whether Koil starts in the scratchpad: `-s` (`-t`), or text from
-    /// stdin.
+    /// Whether Koil starts in the scratchpad: `-s` (`-t`), `-p`, or text
+    /// from stdin.
     pub scratchpad: bool,
+    /// Whether Koil prints the scratchpad's text as it quits (`-p`, see
+    /// `print_scratchpad`).
+    pub print: bool,
     /// Whether to read stdin even if it's a terminal (`-`).
     pub stdin: bool,
     /// The line to put the cursor on (`+N`), 0 for the last one (`+`).
@@ -28,6 +31,7 @@ pub struct Args {
 pub static ARGS: Mutex<Args> = Mutex::new(Args {
     path: None,
     scratchpad: false,
+    print: false,
     stdin: false,
     line: None,
     text: None,
@@ -45,6 +49,7 @@ pub fn command() -> Command {
                 .visible_short_alias('t')
                 .visible_alias("temp"),
         )
+        .arg(arg!(-p --print "Print the scratchpad's text when Koil quits (starts in it)"))
         .arg(arg!([PATH] "A directory, or a glob or regex of files, to list, or a file to edit"))
         .arg(arg!([line] "Put the cursor on line N (+ alone: the last line)").value_name("+N"))
         .arg(Arg::new("more").num_args(0..).hide(true))
@@ -52,7 +57,9 @@ pub fn command() -> Command {
         .after_help(
             "Without a PATH, Koil lists the Start in setting's directory, or else your\n\
              home directory. A PATH of - puts the text read from stdin in the\n\
-             scratchpad, as does text piped in (git diff | koil).",
+             scratchpad, as does text piped in (git diff | koil). With -p, what the\n\
+             scratchpad has when Koil quits goes to stdout, so Koil can edit text in\n\
+             a pipe (ls | koil -p | sort).",
         )
 }
 
@@ -70,8 +77,10 @@ pub fn parse(args: impl IntoIterator<Item = impl Into<OsString>>) -> Result<Args
         .filter(|arg| !arg.to_string_lossy().starts_with("-psn_"));
     let mut command = command();
     let matches = command.try_get_matches_from_mut(args)?;
+    let print = matches.get_flag("print");
     let mut parsed = Args {
-        scratchpad: matches.get_flag("scratchpad"),
+        scratchpad: matches.get_flag("scratchpad") || print,
+        print,
         ..Args::default()
     };
     let mut paths = values(&matches, "escaped");
@@ -170,6 +179,27 @@ fn piped(stdin: &Stdin) -> bool {
     !stdin.is_terminal()
 }
 
+/// Prints `text`, the scratchpad's as Koil quits, for `-p` (see
+/// `write_scratchpad`). Nothing else Koil does writes to stdout, nor starts
+/// what could (shell commands' goes to a pipe of their own), so a pipe
+/// reading it gets the text alone.
+pub fn print_scratchpad(text: &str) {
+    attach_console();
+    // A reader that's gone (`| head -1`) isn't Koil's error.
+    let _ = write_scratchpad(&mut io::stdout().lock(), text);
+}
+
+/// Writes `text` to `out`, with a line break after its last line, as the
+/// scratchpad's file for `%` has one (`Document::write_scratchpad`), so a
+/// line typed without one is a line to `wc -l` and `sort`.
+fn write_scratchpad(out: &mut impl Write, text: &str) -> io::Result<()> {
+    out.write_all(text.as_bytes())?;
+    if !text.is_empty() && !text.ends_with('\n') {
+        out.write_all(b"\n")?;
+    }
+    out.flush()
+}
+
 /// Has what's printed next show in the console Koil was started from, on
 /// Windows, where a release build is a GUI app, which has none of its own:
 /// `--help` would show nothing. Not if its output goes somewhere already
@@ -227,6 +257,11 @@ mod tests {
         let args = run(&["src", "-"]);
         assert!(args.stdin);
         assert_eq!(args.path.as_deref(), Some("src"));
+        for flag in ["-p", "--print"] {
+            let args = run(&[flag]);
+            assert!(args.print && args.scratchpad);
+        }
+        assert!(!run(&["-s"]).print);
         assert_eq!(run(&["-psn_0_1234"]), Args::default());
         assert_eq!(error(&["-s", "--help", "--bogus"]), ErrorKind::DisplayHelp);
         assert_eq!(error(&["-h"]), ErrorKind::DisplayHelp);
@@ -240,6 +275,19 @@ mod tests {
         assert_eq!(error(&["a.rs", "b.rs", "c.rs"]), ErrorKind::TooManyValues);
         let message = parse(&["a.rs", "b.rs"]).unwrap_err().to_string();
         assert!(message.contains("one PATH at a time, not 2"), "{message}");
+    }
+
+    #[test]
+    fn test_write_scratchpad() {
+        let written = |text: &str| {
+            let mut out = Vec::new();
+            write_scratchpad(&mut out, text).unwrap();
+            String::from_utf8(out).unwrap()
+        };
+        assert_eq!(written(""), "");
+        assert_eq!(written("a\nb"), "a\nb\n");
+        assert_eq!(written("a\nb\n"), "a\nb\n");
+        assert_eq!(written("\n"), "\n");
     }
 
     #[test]

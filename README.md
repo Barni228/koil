@@ -161,6 +161,7 @@ koil ~/src            # a directory, a glob ('src/**/*.rs'), or a file
 koil +42 notes.txt    # the file, with the cursor on line 42
 koil -s               # the scratchpad
 git diff | koil       # what's piped in opens in the scratchpad
+ls | koil -p | sort   # prints the scratchpad's text when Koil quits
 koil --help           # all the options
 ```
 

@@ -353,6 +353,12 @@ ApplicationWindow {
         scratchpad = false;
     }
 
+    // The scratchpad's text, shown or kept (see keepScratch), as the user
+    // has it (see usersText).
+    function scratchText() {
+        return scratchpad ? usersText().text : scratchState ? scratchState.text : "";
+    }
+
     // Opens the file `path` (see loadFile), or says in the status line why
     // it can't, as vim does (a picture isn't text).
     function readFile(path) {
@@ -1701,6 +1707,16 @@ ApplicationWindow {
 
         onOpenFailed: message => vim.showError(message)
         onShellDone: result => root.shellDone(JSON.parse(result))
+    }
+
+    // -p on the command line prints the scratchpad's text as Koil quits,
+    // however it does (:q, Cmd+Q, the window closed).
+    Connections {
+        target: Qt.application
+
+        function onAboutToQuit() {
+            doc.printScratchpad(root.scratchText());
+        }
     }
 
     Document {
