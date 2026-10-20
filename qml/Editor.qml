@@ -527,24 +527,36 @@ Item {
     }
 
     // What the find bar finds in (Find in Selection, see Vim's findScope)
-    // in the visible lines, as selectionSpans gives the selection. Its
-    // spans are sorted, so the first in view is found by binary search.
+    // in the visible lines, as selectionSpans gives the selection.
     function scopeSpans() {
         const scope = active && findBar.active ? vim.findScope : null;
-        if (!scope)
-            return [];
+        return scope ? spansInView(scope) : [];
+    }
+
+    // What was just yanked (see Vim's `yanked`) in the visible lines, as
+    // selectionSpans gives the selection.
+    function yankedSpans() {
+        const yanked = active ? vim.yanked : null;
+        return yanked ? spansInView(yanked) : [];
+    }
+
+    // `list`, spans of the text in order and apart ({ start, end }), as
+    // far as they're in the visible lines, a span a line (see lineSpans).
+    // The first in view is found by binary search, as there can be
+    // thousands.
+    function spansInView(list) {
         const t = editor.latest.text, v = visibleRange();
-        let lo = 0, hi = scope.length;
+        let lo = 0, hi = list.length;
         while (lo < hi) {
             const mid = (lo + hi) >> 1;
-            if (scope[mid].end < v.from)
+            if (list[mid].end < v.from)
                 lo = mid + 1;
             else
                 hi = mid;
         }
         const spans = [];
-        for (let i = lo; i < scope.length && scope[i].start <= v.to; i++)
-            lineSpans(t, scope[i].start, scope[i].end, v, spans);
+        for (let i = lo; i < list.length && list[i].start <= v.to; i++)
+            lineSpans(t, list[i].start, list[i].end, v, spans);
         return spans;
     }
 
@@ -1375,6 +1387,41 @@ Item {
                         width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
                         height: modelData.rect.height
                         color: view.theme.highlight
+                    }
+                }
+            }
+
+            // What was just yanked, for a moment (see Vim's `yanked`), as
+            // Neovim's vim.hl.on_yank shows it, but under the text, which
+            // keeps its colors. Over the selection, which Cmd+C in insert
+            // mode leaves.
+            Layer {
+                id: yankFlash
+
+                z: -0.5
+                inputs: [view.active, view.vim.yanked, view.layout, view.viewport]
+                // A rectangle a row, the last with the line break, if it
+                // was yanked.
+                compute: () => {
+                    const list = [];
+                    for (const s of view.yankedSpans()) {
+                        for (const r of view.rowSpans(s.start, s.end))
+                            list.push({ rect: r.rect, eol: s.eol && r.end === s.end });
+                    }
+                    return list;
+                }
+
+                Repeater {
+                    model: yankFlash.model
+
+                    Rectangle {
+                        required property var modelData
+
+                        x: modelData.rect.x
+                        y: modelData.rect.y
+                        width: modelData.rect.width + (modelData.eol ? spaceMetrics.advanceWidth : 0)
+                        height: modelData.rect.height
+                        color: view.theme.yanked
                     }
                 }
             }

@@ -3720,6 +3720,57 @@ TestCase {
         compare(vim.registers["a"].text, "a\nc\nb\n");
     }
 
+    // A yank shows what it took for a moment (vim.yanked), as Neovim's
+    // on_yank: yy its line with its line break, a text object its
+    // characters, a block its part of each line, marked lines each, at
+    // every cursor all. Not a delete, a change, nor a yank into "_, and
+    // an edit ends it.
+    function test_yankFlash() {
+        const yanked = () => JSON.stringify(vim.yanked);
+        load("one two\nthree\nfour");
+        keys("yy");
+        compare(yanked(), JSON.stringify([{ start: 0, end: 8 }]));
+        tryCompare(vim, "yanked", null);
+        keys("wyiw");
+        compare(yanked(), JSON.stringify([{ start: 4, end: 7 }]));
+        keys("x");
+        compare(vim.yanked, null);
+        for (const k of ["dd", "ciw<Esc>", "\"_yy"]) {
+            keys(k);
+            compare(vim.yanked, null, k);
+        }
+        load("a\nb\nc\nd");
+        keys("Vjy");
+        compare(yanked(), JSON.stringify([{ start: 0, end: 4 }]));
+        keys("mjjmy");
+        compare(yanked(), JSON.stringify([{ start: 0, end: 2 }, { start: 4, end: 6 }]));
+        load("abc\ndef\nghi");
+        keys("l<C-v>jly");
+        compare(yanked(), JSON.stringify([{ start: 1, end: 3 }, { start: 5, end: 7 }]));
+        load("ab\ncd\nef");
+        vim.toggleCursor(6);
+        keys("yl");
+        compare(yanked(), JSON.stringify([{ start: 0, end: 1 }, { start: 6, end: 7 }]));
+        // Another buffer doesn't show it.
+        keys("yy");
+        verify(vim.yanked);
+        switchTo(other, null);
+        compare(vim.yanked, null);
+    }
+
+    // A macro's yanks don't show, as Neovim's on_yank doesn't show them,
+    // also its last key's, whose frame is gone by then. A shortcut's do.
+    function test_yankFlashMacro() {
+        load("a\nb");
+        keys("qayyq");
+        tryCompare(vim, "yanked", null);
+        keys("@a");
+        compare(vim.yanked, null);
+        vim.shortcuts = [{ keys: " y", macro: "yy", label: "Space y", normal: true, visual: false }];
+        keys(" y");
+        compare(JSON.stringify(vim.yanked), JSON.stringify([{ start: 0, end: 2 }]));
+    }
+
     // c changes them into one line, where the first one was. In the
     // listing, that one keeps its icon (it's renamed).
     function test_markedChange() {

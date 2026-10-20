@@ -299,12 +299,16 @@ QtObject {
     // which runs them one by one; a failing command empties it, as in vim.
     property string recording: ""
     property var recordKeys: []
-    // The keys left to run, as a stack of { keys, next, runs, each }: the
-    // top one's keys[next] is next, and each runs its keys `runs` times
-    // (rather than holding them that many times: 10000@q copied them
+    // The keys left to run, as a stack of { keys, next, runs, each, macro
+    // }: the top one's keys[next] is next, and each runs its keys `runs`
+    // times (rather than holding them that many times: 10000@q copied them
     // 10000 times over), on each line of `each` if it has one (see
-    // runOnLines).
+    // runOnLines). `macro` for a register's keys, and keys they run, not
+    // a shortcut's.
     property var typeahead: []
+    // While a key of a macro runs (see flashYank): its frame may be gone
+    // by then (see nextMacroKey).
+    property bool macroKey: false
     // A long command running in steps (see startTask), before any more
     // keys: { steps, done, step, finish }. Null if none.
     property var task: null
@@ -393,6 +397,16 @@ QtObject {
     // the command line is open, as in vim: lastVisual, in the text as shown
     // (through a :s's preview, see previewedAt). Null otherwise.
     property var visualShown: null
+    // What was just yanked, which the view shows for flashTime ms, as
+    // Neovim's vim.hl.on_yank does: spans of the text, as { start, end },
+    // in order and apart (see flashYank). Null otherwise, and once the
+    // text changes or vim edits another buffer.
+    property var yanked: null
+    property int flashTime: 150
+    readonly property Timer yankTimer: Timer {
+        interval: vim.flashTime
+        onTriggered: vim.yanked = null
+    }
 
     onCommandLineChanged: {
         previewSubstitute();
@@ -431,6 +445,7 @@ QtObject {
         marked = [];
         markedInsert = false;
         findScope = null;
+        yanked = null;
         blockHome = null;
         setMode("normal");
         setCursor(0);
@@ -484,6 +499,8 @@ QtObject {
                     if (event.matches(StandardKey.Cut)) {
                         replaceRange(s, e, "");
                         setCursor(s);
+                    } else {
+                        flashYank("+", [{ start: s, end: e }]);
                     }
                 }
                 return true;
@@ -786,6 +803,7 @@ QtObject {
         lastVisual = s.lastVisual || null;
         marked = s.marked || [];
         findScope = null;
+        yanked = null;
         trackedText = t;
         cursor = clampNormal(t, s.cursor || 0);
         setMode("normal");
@@ -2535,6 +2553,8 @@ QtObject {
         case "C": {
             const r = blockText(t, lines);
             setRegister(cmd.reg, r.text, false, a === "y", r.entries, true);
+            if (a === "y")
+                flashYank(cmd.reg, lines.filter(l => l.end > l.start).map(l => ({ start: l.start, end: l.end })));
             setMode("normal");
             if (a !== "y")
                 deleteBlock(lines);
@@ -2936,6 +2956,7 @@ QtObject {
         case "y":
         case "Y":
             setRegister(cmd.reg, lines.text, true, true, lines.entries);
+            flashYank(cmd.reg, blocks.map(b => ({ start: b.start, end: Math.min(b.end + 1, t.length) })));
             if (n > 2)
                 showMessage(n + " lines yanked");
             break;
@@ -3283,13 +3304,13 @@ QtObject {
         }
         const r = getRegister(reg);
         if (r)
-            runKeys(r.keys || macroKeys(r.text), count, "@" + reg);
+            runKeys(r.keys || macroKeys(r.text), count, "@" + reg, null, true);
     }
 
     // Runs keys as a macro's, `count` times, called `label` on the status
-    // line (see Runs): a register's, or a shortcut's. With `each`, on each
-    // of its lines (see runOnLines).
-    function runKeys(ks, count, label, each) {
+    // line (see Runs): a register's (`macro`), or a shortcut's. With
+    // `each`, on each of its lines (see runOnLines).
+    function runKeys(ks, count, label, each, macro) {
         if (!ks.length)
             return;
         if (typeahead.length >= maxMacroDepth || chainedRuns > maxMacroDepth) {
@@ -3298,7 +3319,8 @@ QtObject {
             return;
         }
         // A macro run from a macro goes before the rest of that one.
-        const frame = { keys: ks, next: 0, runs: count, each: each || null };
+        const frame = { keys: ks, next: 0, runs: count, each: each || null,
+            macro: !!macro || typeahead.some(f => f.macro) };
         typeahead.push(frame);
         if (!running)
             startRun(label, frame, count);
@@ -3364,7 +3386,7 @@ QtObject {
             ks = r ? r.keys || macroKeys(r.text) : [];
         }
         lastMacro = reg;
-        runKeys(ks, count, "@" + reg, { starts: starts, count: count, total: starts.length, due: true });
+        runKeys(ks, count, "@" + reg, { starts: starts, count: count, total: starts.length, due: true }, true);
     }
 
     // Runs the next key of the macros running (see typeahead), or for one
@@ -3372,7 +3394,12 @@ QtObject {
     function macroStep() {
         const f = typeahead[typeahead.length - 1], e = f.each;
         if (!e || !e.due) {
-            runKey(nextMacroKey(), null);
+            macroKey = !!f.macro;
+            try {
+                runKey(nextMacroKey(), null);
+            } finally {
+                macroKey = false;
+            }
             return;
         }
         endHalfDone();
@@ -3776,6 +3803,8 @@ QtObject {
             moveLineRuns(list => movedMarks(list, old, start, end, text));
         if (findScope)
             moveScope(start, end, text.length);
+        if (yanked)
+            yanked = null;
         if (!batch && tracking())
             trackedText = editorText();
     }
@@ -4062,6 +4091,32 @@ QtObject {
             text += "\n";
         setRegister(reg, text, range.linewise, !deleting, hiddenIn(hidden, range.start, range.end), false,
             range.regOne);
+        if (!deleting)
+            flashYank(reg, [{ start: range.start, end: range.end }]);
+    }
+
+    // Shows what a yank into `reg` took, `spans` of the text (see
+    // `yanked`), for a moment, with what yanks at the other cursors took
+    // in the same key (its batch is marked). Not into "_, which takes
+    // nothing, nor in a macro, as Neovim's on_yank doesn't (a shortcut's
+    // keys are a mapping's).
+    function flashYank(reg, spans) {
+        if (reg === "_" || macroKey)
+            return;
+        const all = yanked && batch && batch.yanked ? yanked.concat(spans) : spans;
+        all.sort((a, b) => a.start - b.start);
+        const list = [];
+        for (const s of all) {
+            const last = list[list.length - 1];
+            if (last && s.start <= last.end)
+                last.end = Math.max(last.end, s.end);
+            else
+                list.push({ start: s.start, end: s.end });
+        }
+        yanked = list;
+        if (batch)
+            batch.yanked = true;
+        yankTimer.restart();
     }
 
     function deleteRange(t, range, reg) {
@@ -4275,6 +4330,8 @@ QtObject {
             moveLineRuns(list => movedMarks(list, before, d.start, d.end1, after.slice(d.start, d.end2)));
             if (findScope)
                 moveScope(d.start, d.end1, d.end2 - d.start);
+            if (yanked)
+                yanked = null;
         }
     }
 

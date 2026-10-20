@@ -75,6 +75,10 @@ QtObject {
     // A search match, and the current one, under dark text.
     readonly property color searchMatch: "#f5d547"
     readonly property color currentMatch: "#ff9f1a"
+    // Behind what was just yanked, for a moment (see Editor's yankFlash),
+    // under the text's own colors: VS Code's blue, and in a light theme a
+    // tint of it, under dark text.
+    readonly property color yanked: dark ? "#007ad4" : "#4d007ad4"
     // The name of a key in keys written out, like <CR> (a shortcut's).
     readonly property color specialKey: dark ? "#c586c0" : "#af00db"
     // A dir's name in Koil's listing, and the path it lists.

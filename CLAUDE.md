@@ -79,8 +79,8 @@ the scratchpad (see Scratchpad).
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
   with it: cursors, selection, the marked lines (`markedLines`, see Marked
-  lines), search highlights, the bracket matching the
-  cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
+  lines), search highlights, what was just yanked (`yankFlash`), the
+  bracket matching the cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
   warnings and errors, line numbers, the link under the pointer with Cmd
   held (`link`, see Links), the long lines Qt doesn't draw (`longText`,
   see Long lines), the `HoverBox` and the
@@ -1351,7 +1351,14 @@ the scratchpad (see Scratchpad).
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
   `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
   are read from vim's state and can't be written. `:reg` (`:di`) lists
-  them (`registerList`) in the help box, one line each, cut off. The `TextArea` does nothing on Cmd+Backspace, so on macOS
+  them (`registerList`) in the help box, one line each, cut off. A yank
+  shows what it took for 200 ms, as Neovim's `vim.hl.on_yank` does
+  (`yanked`, `flashYank`: yy its line, a block its part of each line,
+  the marked lines each, every cursor's at once), drawn under the text
+  (`yankFlash`), which keeps its colors, until an edit or another buffer.
+  Not into `"_`, nor a macro's (`macroKey`, set as its key runs, since
+  its frame goes before its last key), as Neovim's `on_macro`, but a
+  shortcut's, as a mapping's. The `TextArea` does nothing on Cmd+Backspace, so on macOS
   it's vim's `<D-BS>`: typed by vim in insert mode (`typedEdit`: back to
   the line's start, the name's in the listing, and there Backspace),
   `Ctrl-U` in the command line, nothing in the other modes. Other Cmd
