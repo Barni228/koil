@@ -25,6 +25,17 @@ pub fn link_at(line: &[u16], at: usize, names: bool) -> Option<Range<usize>> {
     }
 }
 
+/// The first link in `line`, as a click with Cmd underlines them, or else
+/// its first file name, as gf finds one from its start: what `<cfile>`
+/// stands for on each of a range's lines (`git status --short`'s ` M
+/// src/a.rs` is `src/a.rs`).
+pub fn first_link(line: &[u16]) -> Option<Range<usize>> {
+    match syntax::first_link(line) {
+        Some(span) => Some(span.start..span.end),
+        None => name_at(line, 0),
+    }
+}
+
 /// Whether `c` can be in a file name, as vim's `isfname` says by default:
 /// letters, digits and `/.-_+,#$%~=` (and `\`, which separates names on
 /// Windows).

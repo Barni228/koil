@@ -134,9 +134,8 @@ QtObject {
     // cursor never goes into (see Prefixes). A line without one is plain.
     property bool linePrefixes: false
     // Whether ! in visual mode, or on marked lines, is for a command on the
-    // lines' entries (Koil's listing and scratchpad): it types '<,'>! and a
-    // % for them, rather than for vim's filter, which g! types (see
-    // openBang).
+    // lines' entries (Koil's listing): it types '<,'>! and a % for them,
+    // rather than for vim's filter, which g! types (see openBang).
     property bool bangEntries: false
     // What a new line starts with, and a line break that starts one.
     readonly property string blankPrefix: linePrefixes ? "   " : ""
@@ -4370,6 +4369,32 @@ QtObject {
         });
     }
 
+    // Replaces the whole text with `text` as replaceText does, keeping the
+    // hidden text of the lines that stay the same, wherever they go (the
+    // first of lines that are the same takes the first's): the scratchpad,
+    // read back from its file (see Document.writeScratchpad), which has the
+    // icons alone.
+    function replaceTextKeeping(text) {
+        const t = bufferText(), list = hidden, entries = [];
+        // The entries of each line that has any, by its text, in order.
+        const kept = new Map();
+        for (let i = 0; i < list.length;) {
+            const s = t.lastIndexOf("\n", list[i].at - 1) + 1, e = Txt.lineEnd(t, s), line = t.slice(s, e);
+            const j = firstAt(list, e);
+            if (!kept.has(line))
+                kept.set(line, []);
+            kept.get(line).push(shifted(list.slice(i, j), -s));
+            i = j;
+        }
+        for (let s = 0; kept.size && s <= text.length;) {
+            const e = Txt.lineEnd(text, s), lines = kept.get(text.slice(s, e));
+            for (const h of lines && lines.length ? shifted(lines.shift(), s) : [])
+                entries.push(h);
+            s = e + 1;
+        }
+        replaceText(text, entries);
+    }
+
     // Makes `edits` ({ start, end, text, hidden }: in the text as it is, in
     // order and apart, `hidden` the entries for `text`, from its start) as
     // one edit, which isn't the user's (Koil's listing, as it changed on
@@ -5317,14 +5342,14 @@ QtObject {
             if (bang) {
                 add(i, i + bang[0].length, "command");
                 // As shell::expand reads it: \ and the character after it,
-                // where \% is a %.
+                // where \% is a % (and \<cfile> a <cfile>).
                 for (let k = i + bang[0].length; k < line.length; k++) {
                     if (line[k] === "\\") {
-                        if (line[k + 1] === "%")
-                            add(k, k + 2, "escape");
-                        k++;
-                    } else if (line[k] === "%") {
-                        const file = /^%(?::[phtre])*/.exec(line.slice(k))[0];
+                        const escaped = line[k + 1] === "%" ? 2 : line.startsWith("<cfile>", k + 1) ? 8 : 0;
+                        add(k, k + escaped, "escape");
+                        k += Math.max(escaped, 2) - 1;
+                    } else if (line[k] === "%" || line.startsWith("<cfile>", k)) {
+                        const file = /^(?:%|<cfile>)(?::[phtre])*/.exec(line.slice(k))[0];
                         add(k, k + file.length, "file");
                         k += file.length - 1;
                     }

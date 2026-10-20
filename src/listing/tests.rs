@@ -530,20 +530,23 @@ fn test_paths_on_lines() {
 }
 
 #[test]
-fn test_written_paths() {
+fn test_links_on_lines() {
     let (_temp, koil) = koil();
     let root = koil.current_dir().to_path_buf();
     fs::write(root.join("dir/inner.txt"), "").unwrap();
     // an entry pasted with its ID, renamed on its line
-    let text = "file.rs\n\n  inner.txt \n\u{e612}  renamed\nmissing\nhttps://a.b\n~";
+    let text = "file.rs\n\n  inner.txt \n\u{e612}  renamed\nmissing\nhttps://a.b\n~\n M dir/inner.txt\n\
+                see `file.rs`, then";
     let hidden = [Hidden {
         at: 22,
         icon: "\u{e612}".into(),
         text: id_text(&koil, "notes"),
     }];
     let dirs = [root.join("dir"), root.clone()];
-    let paths = |lines: &[(usize, usize)]| written_paths(&koil, text, &hidden, lines, &dirs);
-    // a relative one in the first of the dirs it's in
+    let links =
+        |lines: &[(usize, usize)], at| links_on_lines(&koil, text, &hidden, lines, at, &dirs);
+    let paths = |lines: &[(usize, usize)]| links(lines, None);
+    // each line's first, a relative one in the first of the dirs it's in
     assert_eq!(
         paths(&[(0, 3)]),
         Ok(vec![
@@ -552,18 +555,32 @@ fn test_written_paths() {
             root.join("notes")
         ])
     );
-    assert_eq!(paths(&[(1, 1)]), Err("No path on this line".into()));
+    assert_eq!(paths(&[(1, 1)]), Err("No file name on this line".into()));
     assert_eq!(
         paths(&[(1, 1), (9, 9)]),
-        Err("No paths on these lines".into())
+        Err("No file names on these lines".into())
     );
     assert_eq!(
         paths(&[(0, 0), (4, 4)]),
         Err("E447: Can't find file \"missing\" in path".into())
     );
-    assert_eq!(paths(&[(5, 5)]), Err("“https://a.b” isn't a path".into()));
+    assert_eq!(paths(&[(5, 5)]), Ok(vec![PathBuf::from("https://a.b")]));
     let home = std::env::home_dir().unwrap();
     assert_eq!(paths(&[(6, 6)]), Ok(vec![home]));
+    // a path before a name: not ` M`
+    assert_eq!(paths(&[(7, 7)]), Ok(vec![root.join("dir/inner.txt")]));
+    // at the cursor, as gf takes it: there or after it
+    assert_eq!(links(&[(8, 8)], Some(5)), Ok(vec![root.join("file.rs")]));
+    assert_eq!(links(&[(8, 8)], Some(3)), Ok(vec![root.join("file.rs")]));
+    assert_eq!(
+        links(&[(8, 8)], Some(0)),
+        Err("E447: Can't find file \"see\" in path".into())
+    );
+    let none = Err("E446: No file name under cursor".into());
+    assert_eq!(links(&[(2, 2)], Some(11)), none);
+    assert_eq!(links(&[(1, 1)], Some(0)), none);
+    // the entry, wherever the cursor is on its line
+    assert_eq!(links(&[(3, 3)], Some(5)), Ok(vec![root.join("notes")]));
 }
 
 #[test]

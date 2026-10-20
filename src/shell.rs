@@ -201,10 +201,13 @@ pub struct Request {
     pub command: String,
     /// The dir it runs in: the one Koil has open.
     pub cwd: PathBuf,
-    /// What `%` stands for: the entries (or paths) on the lines it's run
-    /// on, or the file, each an absolute path; or else, why there are none.
-    pub files: Vec<PathBuf>,
-    pub why: String,
+    /// What `%` stands for: the entries on the lines it's run on (in the
+    /// listing), or the file (the scratchpad's own, see
+    /// `Document::write_scratchpad`).
+    pub file: Paths,
+    /// What `<cfile>` stands for: the paths written on the lines it's run
+    /// on (in the listing, their entries).
+    pub cfile: Paths,
     /// The lines a filter (or one for the scratchpad) puts through it,
     /// which it gets on its stdin; none for a command whose output is
     /// shown, which gets nothing there.
@@ -217,6 +220,26 @@ pub struct Request {
     /// `environment`), as the Settings window says; else, in Koil's, in a
     /// login shell on macOS.
     pub environment: bool,
+}
+
+/// The paths `%` or `<cfile>` stands for in a command, each absolute, or
+/// else why there are none, as Koil gives them (`{ paths, message }`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Paths {
+    pub paths: Vec<PathBuf>,
+    pub message: String,
+}
+
+impl Paths {
+    /// `paths`, or if there are none, why: `message`, or else `why`.
+    fn or(&self, why: &str) -> Result<&[PathBuf], String> {
+        match (self.paths.is_empty(), self.message.as_str()) {
+            (false, _) => Ok(&self.paths),
+            (true, "") => Err(why.to_string()),
+            (true, message) => Err(message.to_string()),
+        }
+    }
 }
 
 /// What a command did.
@@ -330,18 +353,16 @@ pub struct Started {
 }
 
 /// Starts `request`'s command: returns the command line as it runs, with
-/// the files `%` stands for, and the command, to `finish` (on another
-/// thread); or else why it can't run.
+/// the files `%` and `<cfile>` stand for, and the command, to `finish`
+/// (on another thread); or else why it can't run.
 pub fn start(request: &Request, running: &Running) -> Result<(String, Started), String> {
     if running.is_running() {
         return Err("A command is still running".to_string());
     }
     let kind = Kind::of(&request.shell);
-    let why = match request.why.as_str() {
-        "" => "E499: Empty file name for '%'",
-        why => why,
-    };
-    let line = expand(&request.command, kind, &request.cwd, &request.files, why)?;
+    let file = request.file.or("E499: Empty file name for '%'");
+    let cfile = request.cfile.or("E446: No file name under cursor");
+    let line = expand(&request.command, kind, &request.cwd, file, cfile)?;
     if !request.cwd.is_dir() {
         let shown = listing::show_path(&request.cwd);
         return Err(format!("“{shown}” isn't there any more"));
@@ -833,24 +854,32 @@ enum Quote {
     Double,
 }
 
+/// What stands for the paths written on the cursor's line in a command,
+/// as in vim (see `expand`).
+const CFILE: &str = "<cfile>";
+
 /// The command line `command` (as typed after `:!`) is in `kind`'s shell,
-/// run in `cwd`: each `%` is `files` (as `written` has them, see `word`),
-/// quoted as they must be where it is (so `"%"` works too), and `\%` is a
-/// `%`. If there are no files where they're wanted, the error is `why`.
+/// run in `cwd`: each `%` is `file`, and each `<cfile>` is `cfile` (as
+/// `written` has them, see `word`), with vim's modifiers after it (`%:p`),
+/// quoted as they must be where it is (so `"%"` works too); if one has
+/// none, the error is why. `\%` is a `%`, and `\<cfile>` a `<cfile>`.
 pub fn expand(
     command: &str,
     kind: Kind,
     cwd: &Path,
-    files: &[PathBuf],
-    why: &str,
+    file: Result<&[PathBuf], String>,
+    cfile: Result<&[PathBuf], String>,
 ) -> Result<String, String> {
-    let words = |modifiers: &[char]| match files.is_empty() {
-        true => Err(why.to_string()),
-        false => Ok((files.iter())
-            .map(|file| word(file, cwd, kind, modifiers))
+    let words = |paths: &Result<&[PathBuf], String>, modifiers: &[char]| match paths {
+        Ok(paths) => Ok((paths.iter())
+            .map(|path| word(path, cwd, kind, modifiers))
             .collect::<Vec<_>>()),
+        Err(why) => Err(why.clone()),
     };
     let chars: Vec<char> = command.chars().collect();
+    let cfile_at = |i: usize| {
+        (chars.get(i..i + CFILE.len())).is_some_and(|s| s.iter().copied().eq(CFILE.chars()))
+    };
     let mut line = String::new();
     let mut quote = Quote::None;
     let mut i = 0;
@@ -862,17 +891,23 @@ pub fn expand(
             i += 2;
             continue;
         }
-        if c == '%' {
-            // vim's modifiers: %:p:h
-            let mut modifiers = Vec::new();
+        if c == '\\' && cfile_at(i + 1) {
+            line.push_str(CFILE);
+            i += 1 + CFILE.len();
+            continue;
+        }
+        let paths = if c == '%' {
             i += 1;
-            while chars.get(i) == Some(&':')
-                && chars.get(i + 1).is_some_and(|m| "phtre".contains(*m))
-            {
-                modifiers.push(chars[i + 1]);
-                i += 2;
-            }
-            line.push_str(&inserted(&words(&modifiers)?, kind, quote));
+            Some(&file)
+        } else if cfile_at(i) {
+            i += CFILE.len();
+            Some(&cfile)
+        } else {
+            None
+        };
+        if let Some(paths) = paths {
+            let modifiers = modifiers(&chars, &mut i);
+            line.push_str(&inserted(&words(paths, &modifiers)?, kind, quote));
             continue;
         }
         let escape = match (kind, quote) {
@@ -884,7 +919,7 @@ pub fn expand(
         line.push(c);
         i += 1;
         if escape {
-            if let Some(next) = next.filter(|&n| n != '%') {
+            if let Some(next) = next.filter(|&n| n != '%' && !cfile_at(i)) {
                 line.push(next);
                 i += 1;
             }
@@ -901,6 +936,17 @@ pub fn expand(
         };
     }
     Ok(line)
+}
+
+/// vim's file name modifiers (`:p:h`) at `chars[*i..]`, which `i` goes
+/// past.
+fn modifiers(chars: &[char], i: &mut usize) -> Vec<char> {
+    let mut modifiers = Vec::new();
+    while chars.get(*i) == Some(&':') && chars.get(*i + 1).is_some_and(|m| "phtre".contains(*m)) {
+        modifiers.push(chars[*i + 1]);
+        *i += 2;
+    }
+    modifiers
 }
 
 /// `words` (paths) put in a command line of `kind`'s, where `quote` is
@@ -958,11 +1004,12 @@ pub fn quoted(word: &str, kind: Kind) -> String {
     }
 }
 
-/// How `%` writes `file` (an absolute path) in a command run in `cwd`:
-/// relative to it if it's in it (`.` for itself), else as it is, with
-/// vim's `modifiers` (see `modified`), and with `/` between its parts, but
-/// for cmd.exe and PowerShell on Windows, `\`. A relative path that starts
-/// with `-` starts with `./`, so it isn't read as an option.
+/// How `%` writes `file` (an absolute path, or a URL for `<cfile>`) in a
+/// command run in `cwd`: relative to it if it's in it (`.` for itself),
+/// else as it is, with vim's `modifiers` (see `modified`), and with `/`
+/// between its parts, but for cmd.exe and PowerShell on Windows, `\`. A
+/// relative path that starts with `-` starts with `./`, so it isn't read
+/// as an option.
 fn word(file: &Path, cwd: &Path, kind: Kind, modifiers: &[char]) -> String {
     let slashes = |path: &Path| match cfg!(windows) {
         true => path.to_string_lossy().replace('\\', "/"),
@@ -980,7 +1027,8 @@ fn word(file: &Path, cwd: &Path, kind: Kind, modifiers: &[char]) -> String {
     if word.starts_with('-') {
         word = format!("./{word}");
     }
-    match cfg!(windows) && kind != Kind::Sh {
+    // A URL (`<cfile>` on one) keeps its `/`s.
+    match cfg!(windows) && kind != Kind::Sh && !full.contains("://") {
         true => word.replace('/', "\\"),
         false => word,
     }

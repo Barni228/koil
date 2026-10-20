@@ -24,8 +24,8 @@ the scratchpad (see Scratchpad).
   opens (`file_at`), what's shown after
   each line when sorted by size or a date (`notes`), what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`),
-  and the entries a shell command runs on (`paths_on_lines`), or the
-  paths written on the scratchpad's lines (`written_paths`). Its tests
+  and the entries a shell command runs on (`paths_on_lines`), or what
+  `<cfile>` stands for on a file's lines (`links_on_lines`). Its tests
   (`src/listing/tests.rs`) use a temp dir.
 - `src/history.rs`: `History`, the undo history kept in a file across
   sessions (see Undo history). Its tests (`src/history/tests.rs`) use a
@@ -44,15 +44,18 @@ the scratchpad (see Scratchpad).
   at a time through ffi.rs, and the URL or path at a place (`link_at`). Its
   tests (`src/syntax/tests.rs`) take lines.
 - `src/link.rs`: what gf, gx and Cmd+click open (see Links): the link at a
-  place in a line (`link_at`) and what its text stands for (`target`). Its
-  tests (`src/link/tests.rs`) use a temp dir.
+  place in a line (`link_at`), or a line's first (`first_link`, for
+  `<cfile>`), and what its text stands for (`target`). Its tests
+  (`src/link/tests.rs`) use a temp dir.
 - `src/koil.rs`: `Koil` (QML element): wraps `koil_core::Koil` and calls
   listing.rs, taking and giving JSON. `showHidden`, `gitignore`, `regex`,
   `sort` and `sortReverse` are properties, bound to vim's `:set` options.
   It also watches the disk (`watch`, `changedOnDisk`; see Changes on disk),
   and counts dirs' sizes (`sizes`, `dirSizes`; see Sorting).
-- `src/document.rs`: `Document` (QML element): reading and writing files, the
-  command line, and installing the `koil` command (on a thread).
+- `src/document.rs`: `Document` (QML element): reading and writing files,
+  watching the one shown (`watchFile`, see Files changed on disk), the
+  scratchpad's file (`writeScratchpad`, see Shell commands), the command
+  line, and installing the `koil` command (on a thread).
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, the editor's
   text, line format and colors, showing a path in Finder or Explorer
@@ -697,14 +700,32 @@ the scratchpad (see Scratchpad).
   (`reloadFile`, `reloading`: `vim.replaceText`, one change `u` takes
   back, with the cursor on its line and column), unless it has unsaved
   changes (E37, which `:e!` drops), and the scratchpad has no file (E32).
+- **Files changed on disk** (`checkFile` in main.qml): `Document.watchFile`
+  watches the file shown (`filePath`) through its dir, as an app may save
+  one by renaming another over it, and `fileChanged` has `fileTimer`
+  check it 100 ms later: `Document.fileChange` compares its size and the
+  time it was modified with what Koil last read or wrote (`Stamp`), so
+  Koil's own saves aren't changes, and tells each change once. A file
+  without unsaved changes is read again as `:e` reads it (`reloadFile`:
+  one change `u` takes back, after which it's modified, as its text
+  isn't the disk's), and the status line says it changed on disk; with
+  unsaved changes, `ConfirmDialog` asks first (Yes reads it, and `u`
+  brings them back, as Koil never drops them unasked). A file gone from
+  disk is modified (`unedited` null), as its text is nowhere else. It
+  waits while the user is halfway through something (insert or visual
+  mode, the command line, a box, a run: `fileTimer` polls), but not after
+  a shell command (`afterShell`, through `endWait`'s `done`), so a macro
+  that ran `!echo hi >> %` goes on with what it wrote, and one `u` takes
+  that back; unsaved changes are asked about once it's done.
 - **Scratchpad** (`openScratch`): `_` in the listing (or the path field)
   shows a text of the user's that's never saved, kept until Koil quits
   (`koil -s` starts in it, and text piped in starts it: see Command line).
   It leaves the listing as a file does (updating it first, `fileSpot`),
   and `_` or `-` there goes back (`leaveFile`) to where the cursor was,
-  in the path field if it was there (`scratchFromPath`). `!` there runs
-  a command on the path on the line (see Shell commands), and `:_!` puts
-  a command's output in it. It's the
+  in the path field if it was there (`scratchFromPath`). In a shell
+  command there, `%` is a file of its text, which goes back in it after,
+  and `<cfile>` the path under the cursor (see Shell commands), and `:_!`
+  puts a command's output in it. It's the
   listing's editor, so whatever shows something else in it saves the
   scratchpad's text, cursor, undo history and view first (`keepScratch`,
   from `showListing` and `load`, as anything shown goes through those),
@@ -730,12 +751,28 @@ the scratchpad (see Scratchpad).
   it's in it), but in the listing the entry on the cursor's line (from the
   path field, the open dir, `.`), where its ID is on disk, as for Space r
   (`listing::paths_on_lines`; a new entry is an error), and in the
-  scratchpad the path written on it (`listing::written_paths`: as gf
-  reads a path, `link::target`, from the open dir; or an entry pasted
-  with its ID, where that is on disk; a line that isn't one on disk is an
-  error, E447), with vim's
-  modifiers (`%:p`, `:h`, `:t`, `:r`, `:e`); `\%` is a `%` (`date +\%F`),
-  as in vim, also in quotes. A path is quoted as the shell's kind needs
+  scratchpad a file of its text (`Document.writeScratchpad`, written
+  before the command runs: `scratchpad.txt` in a dir of Koil's own in the
+  temp dir, made new, so on Linux's shared `/tmp` no one else's can be in
+  its place, and taken away when Koil quits; with a line break after its
+  last line, as vim writes one, so `echo hi >> %` writes a line of its
+  own, which reading it back takes off). Once a command that isn't a
+  filter or `:_!` is done, what's in the file goes in the scratchpad
+  (`afterShell`, if its size or time changed), as a change `u` takes back
+  (`Vim.replaceTextKeeping`: a line that stays keeps its hidden text,
+  wherever it goes, as the file has the icons alone). `<cfile>`, as in
+  vim, is the file name under the cursor as gf takes it, in a file or the
+  scratchpad (`listing::links_on_lines`, `link::link_at`: the URL or path
+  Cmd+click underlines, or else vim's file name there or after it; a path
+  as `link::target` reads it, from the file's dir, then the open dir, and
+  must be on disk, E447, and a URL as it opens; on a line with an entry
+  pasted with its ID, where that is on disk; none is vim's E446), and in
+  the listing the entry, as `%`. With a range, it's each line's first
+  link, or else its first file name (`link::first_link`: `git status
+  --short`'s ` M src/a.rs` is `src/a.rs`, not `M`). Both take vim's
+  modifiers (`%:p`, `:h`, `:t`, `:r`,
+  `:e`); `\%` is a `%` (`date +\%F`), and `\<cfile>` a `<cfile>`, as in
+  vim, also in quotes. A path is quoted as the shell's kind needs
   (`shell::Kind`, by its name: cmd.exe, PowerShell, else sh), only if it
   must be, and escaped instead where the `%` is in quotes (`"%"` works);
   one starting with `-` gets `./`. With a range (`:.,+2!`, `:'<,'>!`),
@@ -746,19 +783,19 @@ the scratchpad (see Scratchpad).
   one was), without the empty line after a file's last line break, which
   `:%!sort` would sort first. In the listing, they go to it without their
   prefixes (`Vim.filterInput`), and its lines get one each
-  (`prefixLines`): new entries, as its output has no IDs. But in the
-  listing and the scratchpad, a command with `%` (one that isn't `\%`)
-  is run on the entries of the range's lines instead, which `%` stands
-  for (blank lines left out; `paths_on_lines` and `written_paths` take
+  (`prefixLines`): new entries, as its output has no IDs. But a command
+  with `<cfile>`, or in the listing with `%` (not escaped), is run on the
+  entries (or paths) of the range's lines instead, which they stand for
+  (blank lines left out; `paths_on_lines` and `links_on_lines` take
   spans of lines, as `'<,'>` after marked lines is only those: see
   Marked lines). `!` everywhere is one of `commandKeys` (`bangLines`),
   typing `:! %` with the command line's cursor before the ` %`
   (`Vim.openBang`), so the command goes there; with a count, the range
   of its lines (`3!`: `:.,.+2!`), and in visual mode or on marked lines
   `:'<,'>!` (`:` types `'<,'>` too, leaving visual mode, as in vim),
-  each with ` %` after it in the listing and the scratchpad
-  (`Vim.bangEntries`), so it's on their entries, but none in a file,
-  where it's vim's filter. `g!` is vim's `!` operator (`g!{motion}`,
+  each with ` %` after it in the listing (`Vim.bangEntries`), so it's on
+  their entries, but none elsewhere, where it's vim's filter (no key
+  types `<cfile>`). `g!` is vim's `!` operator (`g!{motion}`,
   `g!!`, typing the range of the lines it covers, or in visual mode and
   on marked lines `:'<,'>!`), for the filter where `!` isn't; Vim.qml's
   own `!` operator is the same, which Koil's key takes the place of
@@ -770,7 +807,7 @@ the scratchpad (see Scratchpad).
   in place of its text, as a change `u` takes back (`Vim.replaceWhole`):
   stdout and stderr as for `:!`, but all of it (up to `FILTER_BYTES`) and
   with its tabs (`Request::scratchpad`). A range's lines go to its stdin,
-  and stay, or with `%` in the listing or the scratchpad, it's on their
+  and stay, or with `<cfile>`, or `%` in the listing, it's on their
   entries, as for `:!`. It shows the
   scratchpad from the listing as `_` does, updating before the command
   runs (after which the listing might not read: an entry it deleted), and
@@ -1613,8 +1650,9 @@ the scratchpad (see Scratchpad).
 - **Command line colors** (`Vim.commandLineParts`, `commandLineHtml` in
   main.qml, `theme.commandColor`): as a `:` command is typed, the status
   line colors its range, the name of a command `runEx` knows (`exNames`,
-  `substituteNames`, `!`, `_!`), a shell command's `%` and its modifiers
-  (in the dirs' color, as a path) and `\%`, `:set`'s options and `:e`'s
+  `substituteNames`, `!`, `_!`), a shell command's `%` and `<cfile>` with
+  their modifiers (in the dirs' color, as a path) and `\%` and
+  `\<cfile>`, `:set`'s options and `:e`'s
   path. It's styled text (`<font color>`), where spaces are `&nbsp;`, as
   styled text runs spaces together; the cursor block is measured on the
   plain text, which is as wide in a font of one width. `exNames` is apart

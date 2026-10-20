@@ -30,6 +30,22 @@ fn urls_and_paths() {
 }
 
 #[test]
+fn first_links() {
+    let first = |line: &str| {
+        let units: Vec<u16> = line.encode_utf16().collect();
+        first_link(&units).map(|r| String::from_utf16(&units[r]).unwrap())
+    };
+    // a URL or path first, wherever it is, else the first file name
+    assert_eq!(first(" M src/a.rs"), Some("src/a.rs".into()));
+    assert_eq!(
+        first("see https://a.b/c and x/y"),
+        Some("https://a.b/c".into())
+    );
+    assert_eq!(first("  notes.txt, then"), Some("notes.txt".into()));
+    assert_eq!(first(" () "), None);
+}
+
+#[test]
 fn file_names() {
     assert_eq!(link("see READ|ME.md.", true), Some("README.md".into()));
     assert_eq!(link("up to ..|", true), Some("..".into()));

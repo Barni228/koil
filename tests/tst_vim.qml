@@ -1729,6 +1729,8 @@ TestCase {
         compare(parts(":!git add %"), ["!:command", "%:file"]);
         compare(parts(":'<,'>!mv %:p:h \\% x"), ["'<,'>:range", "!:command", "%:p:h:file", "\\%:escape"]);
         compare(parts(":!echo \\\\%"), ["!:command", "%:file"]);
+        compare(parts(":'<,'>!cp <cfile>:t % \\<cfile> <cfil"),
+            ["'<,'>:range", "!:command", "<cfile>:t:file", "%:file", "\\<cfile>:escape"]);
         compare(parts(":.,+2_!sort"), [".,+2:range", "_!:command"]);
         compare(parts(":!!"), ["!!:command"]);
         compare(parts(":%s/a/b/g"), ["%:range", "s:command"]);
@@ -3213,6 +3215,24 @@ TestCase {
         compare(render(), "<M:h1> a\n<C:h2> b");
         keys("<C-r>");
         compare(render(), "<C:h2> b\n<M:h3> c");
+    }
+
+    // The scratchpad read back from its file, which has the icons alone: the
+    // lines that stay keep their hidden text, as one undo step.
+    function test_replaceTextKeeping() {
+        load("M a\nC b\nM c");
+        vim.replaceTextKeeping(mushroom + " a\nx\n" + mushroom + " c\nhi");
+        compare(render(), "<M:h1> a\nx\n<M:h3> c\nhi");
+        // the same: no change
+        vim.replaceTextKeeping(mushroom + " a\nx\n" + mushroom + " c\nhi");
+        keys("u");
+        compare(render(), "<M:h1> a\n<C:h2> b\n<M:h3> c");
+        keys("<C-r>");
+        compare(render(), "<M:h1> a\nx\n<M:h3> c\nhi");
+        // moved, and the same line twice: the first is the first's
+        load("M a\nM a\nM b");
+        vim.replaceTextKeeping(mushroom + " b\n" + mushroom + " a\n" + mushroom + " a\n" + mushroom + " a");
+        compare(render(), "<M:h3> b\n<M:h1> a\n<M:h2> a\nM a");
     }
 
     // An edit that isn't the user's (Koil's listing, as it changed on disk):

@@ -1224,17 +1224,21 @@ pub fn paths_on_lines(
     }
 }
 
-/// The paths written on `lines` of the scratchpad's text, for a shell
-/// command run on them as on the listing's entries (see
-/// [`paths_on_lines`]): each line is a path as gf reads it, a relative one
-/// looked for in each of `dirs` in turn (see `link::target`), or an entry
-/// pasted with its ID, where that is on disk. Blank lines are left out,
-/// and one that isn't a path on disk says why it can't be.
-pub fn written_paths(
+/// What `<cfile>` stands for on `lines` of a file's or the scratchpad's
+/// text, in a shell command run on them (see `shell::expand`), as on the
+/// listing's entries (see [`paths_on_lines`]): with `at` (a column, in
+/// UTF-16, of the only line, the cursor's), the link there, as gf opens it
+/// (see `link::link_at`), and else on each line, its first (see
+/// `link::first_link`). A relative path is looked for in each of `dirs` in
+/// turn, and must be on disk (see `link::target`), and a URL is as it
+/// opens. A line with an entry pasted with its ID is where that is on
+/// disk. Blank lines are left out, and a line without a link says why.
+pub fn links_on_lines(
     koil: &Koil,
     text: &str,
     hidden: &[Hidden],
     lines: &[(usize, usize)],
+    at: Option<usize>,
     dirs: &[PathBuf],
 ) -> Result<Vec<PathBuf>, String> {
     let hidden: HashMap<usize, &Hidden> = hidden.iter().map(|h| (h.at, h)).collect();
@@ -1262,18 +1266,33 @@ pub fn written_paths(
             paths.push(path.to_path_buf());
             continue;
         }
-        match link::target(line, dirs) {
+        let units: Vec<u16> = line.encode_utf16().collect();
+        let link = match at {
+            Some(at) => link::link_at(&units, at, true),
+            None => link::first_link(&units),
+        };
+        let Some(link) = link else {
+            return Err(match at {
+                Some(_) => NO_FILE_NAME.to_string(),
+                None => format!("No file name on line {}", i + 1),
+            });
+        };
+        match link::target(&String::from_utf16_lossy(&units[link]), dirs) {
             link::Target::Path(path) => paths.push(PathBuf::from(path)),
-            link::Target::Url(url) => return Err(format!("“{url}” isn't a path")),
+            link::Target::Url(url) => paths.push(PathBuf::from(url)),
             link::Target::Error(why) => return Err(why),
         }
     }
     match (paths.is_empty(), lines) {
         (false, _) => Ok(paths),
-        (true, [(first, last)]) if first == last => Err("No path on this line".to_string()),
-        (true, _) => Err("No paths on these lines".to_string()),
+        (true, _) if at.is_some() => Err(NO_FILE_NAME.to_string()),
+        (true, [(first, last)]) if first == last => Err("No file name on this line".to_string()),
+        (true, _) => Err("No file names on these lines".to_string()),
     }
 }
+
+/// vim's error for `<cfile>` with no file name under the cursor.
+const NO_FILE_NAME: &str = "E446: No file name under cursor";
 
 /// Where `entry` is on disk (see [`path_on_line`]).
 fn on_disk(koil: &Koil, entry: &Entry) -> Option<OnDisk> {

@@ -133,8 +133,12 @@ ApplicationWindow {
     // Quit once the Save dialog has saved the file (:wq, or Save in the
     // :confirm q dialog, for a file that has no path yet).
     property bool quitAfterSave: false
-    // While :e reads the file again (see reloadFile).
-    property bool reloading: false
+    // While :e reads the file again (see reloadFile): what the status line
+    // then says (none if ""), else null.
+    property var reloading: null
+    // How the file shown changed on disk, still to be dealt with (see
+    // checkFile): "changed", "gone", or "".
+    property string fileChange: ""
     readonly property int defaultFontSize: 16
     readonly property int minFontSize: 6
     readonly property int maxFontSize: 72
@@ -226,6 +230,11 @@ ApplicationWindow {
         if (location)
             pathHistory = pathHistory.filter(p => p !== location).concat([location]).slice(-100);
     }
+    // The file shown is watched for changes on disk (see checkFile).
+    onFilePathChanged: {
+        fileChange = "";
+        doc.watchFile(filePath);
+    }
 
     // Shows `text` as a new document, whose icons hide the texts in
     // `entries` (see Hidden text in Vim.qml). `path` is its file, if any:
@@ -279,14 +288,15 @@ ApplicationWindow {
     // Shows a file that was read, leaving the listing (whose edits Koil
     // keeps, if they can be read).
     function loadFile(text, path) {
-        if (reloading) {
+        if (reloading !== null) {
             const t = editorView.textArea.latest.text, p = vim.cursor;
             const line = Txt.lineOf(t, p), column = Txt.column(t, p);
             vim.replaceText(text, []);
             const u = editorView.textArea.latest.text;
             vim.jumpTo(Txt.atColumn(u, Txt.lineToPos(u, line), column));
             markUnedited();
-            vim.showMessage("“" + fileName + "” read again");
+            if (reloading)
+                vim.showMessage(reloading);
             return;
         }
         if (listing) {
@@ -716,9 +726,8 @@ ApplicationWindow {
     // !: the command line for a shell command on what % stands for (see
     // runShell), with the cursor before it: :!| %. With a count, or on the
     // marked lines, the range of those lines (as many as there are from
-    // the cursor's), with a % for their entries in the listing and the
-    // scratchpad (see Vim.bangEntries), but in a file for vim's filter, as
-    // g! types it.
+    // the cursor's), with a % for their entries in the listing (see
+    // Vim.bangEntries), but elsewhere for vim's filter, as g! types it.
     function bangLines(count) {
         if (vim.marked.length) {
             vim.commandOnMarked(true, vim.bangEntries);
@@ -863,26 +872,32 @@ ApplicationWindow {
     // :!command, and with a range (see Vim.shellRequested): runs it in the
     // shell (:set shell), in the dir Koil has open, while vim waits for it
     // (Esc stops it), then shows what it wrote (see shellDone). % is the
-    // entry on the cursor's line (from the path field, the open dir), in
-    // the scratchpad the path written on it (see Koil.writtenPaths), and in
-    // a file the file. A range is filtered: its lines go through the
-    // command (without their prefixes), whose output replaces them; but in
-    // the listing and the scratchpad, one with % is run on the range's
-    // entries (or paths) instead, which % stands for. With `scratch` (:_!),
-    // the output goes in the scratchpad instead (see showInScratch), and a
-    // filter's lines only go through it. As the scratchpad is shown in the
-    // file's place, its unsaved changes are asked about first (unless
-    // `asked`), as for File > Open. A range of marked lines (with `lines`)
-    // is only those, as if they were together.
+    // entry on the cursor's line (from the path field, the open dir), or
+    // the file: in the scratchpad, its own, which its text is written to
+    // first (see Document.writeScratchpad), and read back from after. And
+    // <cfile> is the path written on the cursor's line (see
+    // Koil.writtenPaths), or in the listing, as %, its entry. A range is
+    // filtered: its lines go through the command (without their
+    // prefixes), whose output replaces them; but one with <cfile>, or in
+    // the listing with %, is run on the range's entries (or paths)
+    // instead, which they stand for. With `scratch` (:_!), the output goes
+    // in the scratchpad instead (see showInScratch), and a filter's lines
+    // only go through it. As the scratchpad is shown in the file's place,
+    // its unsaved changes are asked about first (unless `asked`), as for
+    // File > Open. A range of marked lines (with `lines`) is only those, as
+    // if they were together.
     function runShell(command, range, scratch, asked) {
         if (scratch && !listing && !scratchpad && modified && !asked) {
             askToSave(() => runShell(command, range, scratch, true));
             return;
         }
         const t = activeView.textArea.latest.text;
-        // A % that isn't escaped (\%, see shell::expand).
+        // A % and a <cfile> that aren't escaped (\%, \<cfile>: see
+        // shell::expand).
         const percent = /(^|[^\\])%/.test(command);
-        const filter = !!range && !(percent && (listing || scratchpad));
+        const cfile = /(^|[^\\])<cfile>/.test(command);
+        const onLines = cfile || percent && listing;
+        const filter = !!range && !onLines;
         // A file's last line break ends its last line, as in vim: the empty
         // line after it isn't one to filter (:%!sort would sort it first).
         const end = Txt.countLines(t), past = l => l === end && t.endsWith("\n");
@@ -893,17 +908,24 @@ ApplicationWindow {
         const line = Txt.lineOf(t, vim.cursor) - 1;
         const spans = filter || !range ? [[line, line]] : lines ? lineSpans(lines) : [[range.first - 1, range.last - 1]];
         const hidden = JSON.stringify(editorView.hidden);
-        const found = !percent ? { paths: [], message: "" }
+        // What they stand for, as { paths, message } (why there are none).
+        const none = { paths: [], message: "" };
+        const found = !onLines ? none
             : listing ? JSON.parse(koil.pathsOnLines(editorView.textArea.latest.text, hidden,
                 JSON.stringify(activeView === pathView ? [] : spans)))
-            : scratchpad ? JSON.parse(koil.writtenPaths(t, hidden, JSON.stringify(spans), linkDirs()))
-            : { paths: filePath ? [filePath] : [], message: "" };
+            : JSON.parse(koil.linksOnLines(t, hidden, JSON.stringify(spans),
+                range ? -1 : vim.cursor - Txt.lineStart(t, vim.cursor), linkDirs()));
+        const scratchFile = percent && scratchpad ? doc.writeScratchpad(t) : "";
+        // It couldn't be written (the status line says why).
+        if (percent && scratchpad && !scratchFile)
+            return;
+        const file = listing ? found : { paths: scratchFile ? [scratchFile] : filePath ? [filePath] : [], message: "" };
         const request = JSON.stringify({
             shell: vim.shell || systemShell,
             command: command,
             cwd: koil.currentDir(),
-            files: found.paths,
-            why: found.message,
+            file: file,
+            cfile: cfile ? found : none,
             input: filter ? vim.filterInput(range.first, last, lines) : null,
             scratchpad: scratch,
             environment: shellEnvironment
@@ -922,7 +944,11 @@ ApplicationWindow {
             line: r.line,
             filter: filter && !scratch ? { first: range.first, last: last, lines: lines, text: t, view: activeView,
                 listing: listing, path: filePath, scratchpad: scratchpad } : null,
-            scratch: scratch
+            scratch: scratch,
+            // What it may change on disk that's shown, unless its output
+            // goes in place of the text: the scratchpad's file, which it
+            // was written to, or the file (see afterShell).
+            disk: filter || scratch || listing ? null : scratchFile || (scratchpad ? null : filePath)
         };
         vim.showMessage((scratch ? ":_!" : ":!") + r.line);
         vim.waiting = "Running";
@@ -985,7 +1011,52 @@ ApplicationWindow {
             if (ran.errors)
                 showOutput(title, ran.errors, ran.cut, "");
         }
-        vim.endWait(ran.stopped);
+        vim.endWait(ran.stopped, run.disk ? () => afterShell(run.disk) : null);
+    }
+
+    // What the command that's done may have changed on disk (`path`): the
+    // scratchpad's file, whose text goes in place of the scratchpad's (as
+    // `!echo hi >> %` writes it), or the file's (see checkFile), as a change
+    // `u` takes back, before a macro that ran it goes on.
+    function afterShell(path) {
+        if (!scratchpad)
+            checkFile(true);
+        else if (doc.fileChange(path) === "changed")
+            vim.replaceTextKeeping(doc.readScratchpad());
+    }
+
+    // The file shown changed on disk (see Document.watchFile), or a shell
+    // command may have changed it (`now`, see afterShell): it's read again,
+    // in place of its text, as a change `u` takes back (see reloadFile),
+    // but if it has unsaved changes, only once the user says so. Not while
+    // they're halfway through something (it waits), but after a command,
+    // at once, so a macro that ran it goes on with what it made. Gone, it
+    // has unsaved changes: its text isn't on disk.
+    function checkFile(now) {
+        if (listing || scratchpad || !filePath) {
+            fileChange = "";
+            return;
+        }
+        fileChange = doc.fileChange(filePath) || fileChange;
+        if (!fileChange)
+            return;
+        const busy = boxOpen || vim.running || vim.inserting || vim.isVisual || vim.commandLine !== "";
+        if (busy && !(now && (fileChange === "gone" || !modified))) {
+            fileTimer.start();
+            return;
+        }
+        const change = fileChange;
+        fileChange = "";
+        if (change === "gone") {
+            unedited = null;
+            checkModified();
+            vim.showError("“" + fileName + "” isn't on disk any more");
+        } else if (!modified) {
+            reloadFile(now ? "" : "“" + fileName + "” changed on disk");
+        } else {
+            confirmDialog.ask("“" + fileName + "” changed on disk. Read it again, in place of your changes?",
+                "Undo (u) brings them back.", () => reloadFile());
+        }
     }
 
     // What :_! ran wrote (`text`), in place of the scratchpad's text, as a
@@ -1379,13 +1450,15 @@ ApplicationWindow {
             askToSave(open);
     }
 
-    // :e in a file: reads it from disk again, in place of its text as one
-    // change, so the cursor stays on its line, the view stays, and `u`
-    // brings back what it had.
-    function reloadFile() {
-        reloading = true;
+    // :e in a file (and as it changed on disk, see checkFile): reads it
+    // from disk again, in place of its text as one change, so the cursor
+    // stays on its line, the view stays, and `u` brings back what it had.
+    // The status line then says `message`, if it isn't "", or else that
+    // it was read again.
+    function reloadFile(message) {
+        reloading = message ?? "“" + fileName + "” read again";
         const error = doc.openFile(filePath);
-        reloading = false;
+        reloading = null;
         if (error)
             vim.showError(error);
     }
@@ -1635,6 +1708,10 @@ ApplicationWindow {
 
         onLoaded: (path, text) => root.loadFile(text, path)
         onFailed: message => vim.showError(message)
+        onFileChanged: {
+            if (!fileTimer.running)
+                fileTimer.start();
+        }
         // Finder's Open With on macOS (see watchFileOpens): opened as if
         // dropped on the window, and likewise not while a dialog is open.
         // Later, so Finder isn't kept waiting.
@@ -1690,6 +1767,16 @@ ApplicationWindow {
         onTriggered: root.syncListing()
     }
 
+    // Checks the file shown a moment after it changed on disk (once for a
+    // burst of changes), and again until the user isn't halfway through
+    // something (see checkFile).
+    Timer {
+        id: fileTimer
+
+        interval: 100
+        onTriggered: root.checkFile(false)
+    }
+
     // Polls the dirs' sizes being counted (see pollSizes), and waits to
     // sort the listing by them.
     Timer {
@@ -1720,7 +1807,7 @@ ApplicationWindow {
         completer: root.listing && root.activeView === pathView ? (line, cursor) => JSON.parse(koil.complete(line, cursor)) : null
         lineHistory: root.pathHistory
         linePrefixes: root.listing && root.activeView === editorView
-        bangEntries: root.listing || root.scratchpad
+        bangEntries: root.listing
         clipboard: system
         fileName: root.listing ? root.location : root.filePath
         lineHeight: editorView.lineHeight

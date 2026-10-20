@@ -146,16 +146,19 @@ pub mod qobject {
             lines: &QString,
         ) -> QString;
 
-        /// The paths written on `lines` of the scratchpad's text, for a
-        /// shell command run on them (see
-        /// `listing::written_paths`), relative ones looked for in each of
-        /// `dirs` in turn: `{ paths, message }`, as `paths_on_lines` gives.
+        /// What `<cfile>` stands for on `lines` of a file's or the
+        /// scratchpad's text, for a shell command run on them (see
+        /// `listing::links_on_lines`): with `at` (not negative), the link
+        /// at that column of the cursor's line, else each line's first,
+        /// relative paths looked for in each of `dirs` in turn: `{ paths,
+        /// message }`, as `paths_on_lines` gives.
         #[qinvokable]
-        fn written_paths(
+        fn links_on_lines(
             self: &Koil,
             text: &QString,
             hidden: &QString,
             lines: &QString,
+            at: i32,
             dirs: &QStringList,
         ) -> QString;
 
@@ -636,22 +639,24 @@ impl qobject::Koil {
         found_paths(paths)
     }
 
-    fn written_paths(
+    fn links_on_lines(
         &self,
         text: &QString,
         hidden: &QString,
         lines: &QString,
+        at: i32,
         dirs: &QStringList,
     ) -> QString {
         let lines: Vec<(usize, usize)> =
             serde_json::from_str(&lines.to_string()).unwrap_or_default();
         let dirs: Vec<PathBuf> = dirs.iter().map(|d| PathBuf::from(d.to_string())).collect();
         let text = text.to_string();
-        found_paths(listing::written_paths(
+        found_paths(listing::links_on_lines(
             &self.koil,
             &text,
             &read_hidden(hidden),
             &lines,
+            usize::try_from(at).ok(),
             &dirs,
         ))
     }

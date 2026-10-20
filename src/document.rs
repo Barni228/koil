@@ -1,10 +1,14 @@
 use std::io;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use cxx_qt::casting::{Downcast, Upcast};
-use cxx_qt::{CxxQtType, Threading};
+use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QUrl};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 #[cfg(target_os = "macos")]
 use crate::install;
@@ -48,6 +52,12 @@ pub mod qobject {
         #[qsignal]
         fn failed(self: Pin<&mut Document>, message: QString);
 
+        /// Emitted when the file `watch_file` watches may have changed on
+        /// disk (see `file_change`), on the GUI thread, once for a burst of
+        /// changes.
+        #[qsignal]
+        fn file_changed(self: Pin<&mut Document>);
+
         /// Emitted once `change_command` is done, with why it failed, or
         /// empty (also when the user cancelled macOS's password dialog).
         #[qsignal]
@@ -62,6 +72,17 @@ pub mod qobject {
         /// Has `file_opened` emitted from now on.
         #[qinvokable]
         fn watch_file_opens(self: Pin<&mut Document>);
+
+        /// Watches the file `path` (none, if it's empty) for `file_changed`.
+        #[qinvokable]
+        fn watch_file(self: Pin<&mut Document>, path: &QString);
+
+        /// How the file `path` changed on disk since Koil last read or wrote
+        /// it, as its size and the time it was modified tell: "changed",
+        /// "gone", or "" if it didn't (or Koil read or wrote another one
+        /// since). Each change is told once.
+        #[qinvokable]
+        fn file_change(self: Pin<&mut Document>, path: &QString) -> QString;
 
         /// Has `folder_requested` emitted from now on; call it before the
         /// app runs, so the request that launched it comes. macOS only.
@@ -96,6 +117,22 @@ pub mod qobject {
         /// to the file `path` as UTF-8; or else emits `failed`.
         #[qinvokable]
         fn save_new_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
+
+        /// Writes `text` (the scratchpad's) to the scratchpad's own file, as
+        /// UTF-8, for `%` in a shell command run there, and returns its
+        /// path: `scratchpad.txt` in a dir of this Koil's in the temp dir,
+        /// which goes when it quits. Or else emits `failed`, and returns
+        /// "". A line break ends its last line, as vim writes one, so
+        /// `echo hi >> %` writes a line of its own.
+        #[qinvokable]
+        fn write_scratchpad(self: Pin<&mut Document>, text: &QString) -> QString;
+
+        /// The text in the scratchpad's file (see `write_scratchpad`), as a
+        /// command left it, with what isn't text as `�`, like text piped in,
+        /// and without the line break at its end if the scratchpad had
+        /// none.
+        #[qinvokable]
+        fn read_scratchpad(self: &Document) -> QString;
 
         /// The path passed on the command line, if any: a file to open, or a
         /// dir (or pattern) for Koil to list. Absolute, from the dir Koil was
@@ -158,13 +195,118 @@ pub mod qobject {
 pub struct DocumentRust {
     /// How the file opened last was stored.
     encoding: Encoding,
+    /// The file Koil read or wrote last, as it was then (none if it wasn't
+    /// there), which `file_change` tells changes from.
+    known: Option<(PathBuf, Option<Stamp>)>,
+    /// Watches the file shown, for `file_changed`.
+    watcher: Option<FileWatcher>,
+    /// The dir the scratchpad's file is in, once it's made, and whether
+    /// the line break at its end was added.
+    scratch_dir: Option<PathBuf>,
+    scratch_break: bool,
+}
+
+impl DocumentRust {
+    /// The scratchpad's file (see `Document::write_scratchpad`), making its
+    /// dir the first time: a new one, which only the user can read, so
+    /// nothing else can be in its place (`/tmp` is everyone's on Linux).
+    fn scratchpad_file(&mut self) -> io::Result<PathBuf> {
+        if self.scratch_dir.is_none() {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos());
+            let dir = std::env::temp_dir().join(format!("koil-{}-{nanos}", std::process::id()));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+            builder.create(&dir)?;
+            self.scratch_dir = Some(dir);
+        }
+        Ok(self.scratch_dir.as_ref().unwrap().join(SCRATCHPAD))
+    }
+}
+
+impl Drop for DocumentRust {
+    fn drop(&mut self) {
+        if let Some(dir) = &self.scratch_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// The name of the scratchpad's file.
+const SCRATCHPAD: &str = "scratchpad.txt";
+
+/// What tells that a file changed on disk: its size, and when it was
+/// modified.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Stamp {
+    /// The file `path`'s, or None if it isn't there.
+    fn of(path: &Path) -> Option<Stamp> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Stamp {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        })
+    }
+}
+
+/// Watches a file for changes on disk, through the dir it's in, as an app
+/// may save it by writing another file and renaming that over it.
+struct FileWatcher {
+    path: PathBuf,
+    _watcher: RecommendedWatcher,
+}
+
+impl FileWatcher {
+    /// Watches `path`, emitting `file_changed` once for each burst of
+    /// changes to it. None if it can't.
+    fn new(path: PathBuf, thread: CxxQtThread<qobject::Document>) -> Option<FileWatcher> {
+        // Links followed, as the changes name it.
+        let target = std::fs::canonicalize(&path).ok()?;
+        let dir = target.parent()?.to_path_buf();
+        let queued = Arc::new(AtomicBool::new(false));
+        let handler = move |event: notify::Result<notify::Event>| {
+            let matters = match &event {
+                Ok(event) => {
+                    !matches!(event.kind, EventKind::Access(_))
+                        && (event.need_rescan() || event.paths.contains(&target))
+                }
+                // Changes may have been missed.
+                Err(_) => true,
+            };
+            if matters && !queued.swap(true, Ordering::AcqRel) {
+                let queued = queued.clone();
+                let _ = thread.queue(move |document| {
+                    queued.store(false, Ordering::Release);
+                    document.file_changed();
+                });
+            }
+        };
+        let mut watcher = notify::recommended_watcher(handler).ok()?;
+        watcher.watch(&dir, RecursiveMode::NonRecursive).ok()?;
+        Some(FileWatcher {
+            path,
+            _watcher: watcher,
+        })
+    }
 }
 
 impl qobject::Document {
     fn open_file(mut self: Pin<&mut Self>, path: &QString) -> QString {
+        let file = PathBuf::from(path.to_string());
+        // Before it's read: a change after it is one.
+        let stamp = Stamp::of(&file);
         match read(&path.to_string()) {
             Ok((text, encoding)) => {
-                self.as_mut().rust_mut().encoding = encoding;
+                let mut rust = self.as_mut().rust_mut();
+                rust.encoding = encoding;
+                rust.known = Some((file, stamp));
                 // Not kept while QML shows it: a long file's is a gigabyte.
                 let shown = QString::from(text.as_str());
                 drop(text);
@@ -182,6 +324,33 @@ impl qobject::Document {
             let object: &mut cxx_qt::QObject = Pin::into_inner_unchecked(self.upcast_pin());
             ffi::watch_file_opens(object);
         }
+    }
+
+    fn watch_file(self: Pin<&mut Self>, path: &QString) {
+        let path = PathBuf::from(path.to_string());
+        let thread = self.qt_thread();
+        let mut rust = self.rust_mut();
+        if rust.watcher.as_ref().is_some_and(|w| w.path == path) {
+            return;
+        }
+        rust.watcher = None;
+        if !path.as_os_str().is_empty() {
+            rust.watcher = FileWatcher::new(path, thread);
+        }
+    }
+
+    fn file_change(self: Pin<&mut Self>, path: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        let mut rust = self.rust_mut();
+        let Some((known, was)) = &mut rust.known else {
+            return QString::default();
+        };
+        let now = Stamp::of(&path);
+        if *known != path || now == *was {
+            return QString::default();
+        }
+        *was = now;
+        QString::from(if now.is_some() { "changed" } else { "gone" })
     }
 
     fn watch_finder_service(self: Pin<&mut Self>) {
@@ -216,19 +385,55 @@ impl qobject::Document {
 
     fn save_file(self: Pin<&mut Self>, path: &QString, text: &QString) -> bool {
         let encoding = self.encoding;
-        self.write(path, text, encoding)
+        self.write(path, &text.to_string(), encoding)
     }
 
     fn save_new_file(self: Pin<&mut Self>, path: &QString, text: &QString) -> bool {
-        self.write(path, text, Encoding::Utf8)
+        self.write(path, &text.to_string(), Encoding::Utf8)
+    }
+
+    fn write_scratchpad(mut self: Pin<&mut Self>, text: &QString) -> QString {
+        let mut rust = self.as_mut().rust_mut();
+        let path = match rust.scratchpad_file() {
+            Ok(path) => QString::from(path.to_string_lossy().as_ref()),
+            Err(err) => {
+                self.failed(QString::from(cannot("save", SCRATCHPAD, &err).as_str()));
+                return QString::default();
+            }
+        };
+        let mut text = text.to_string();
+        rust.scratch_break = !text.is_empty() && !text.ends_with('\n');
+        if rust.scratch_break {
+            text.push('\n');
+        }
+        match self.write(&path, &text, Encoding::Utf8) {
+            true => path,
+            false => QString::default(),
+        }
+    }
+
+    fn read_scratchpad(&self) -> QString {
+        let file = self.scratch_dir.as_ref().map(|dir| dir.join(SCRATCHPAD));
+        let bytes = file.and_then(|file| std::fs::read(file).ok());
+        let text = decode_lossy(bytes.unwrap_or_default());
+        let text = match self.scratch_break {
+            true => text.strip_suffix('\n').unwrap_or(&text),
+            false => &text,
+        };
+        QString::from(text)
     }
 
     /// Writes `text` to the file `path`, stored as `encoding` says; or else
     /// emits `failed`.
-    fn write(self: Pin<&mut Self>, path: &QString, text: &QString, encoding: Encoding) -> bool {
+    fn write(mut self: Pin<&mut Self>, path: &QString, text: &str, encoding: Encoding) -> bool {
         let path = path.to_string();
-        match std::fs::write(&path, encode(&text.to_string(), encoding)) {
-            Ok(()) => true,
+        match std::fs::write(&path, encode(text, encoding)) {
+            Ok(()) => {
+                let path = PathBuf::from(path);
+                let stamp = Stamp::of(&path);
+                self.as_mut().rust_mut().known = Some((path, stamp));
+                true
+            }
             Err(err) => {
                 self.failed(QString::from(cannot("save", &path, &err).as_str()));
                 false

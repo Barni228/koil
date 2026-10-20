@@ -33,6 +33,7 @@ until you apply, and your edits stay while you go through other dirs.
 
 - In the path field's regex mode (`gr`), `,` is any character but `/`.
 - In a glob, `*` matches only files and `*/` only dirs (`*{,/}` both).
+- Vim-surround keys work, like `dsb` or `ysiw)`
 - `Cmd+click` a path or URL to open it.
 - `!` runs a shell command on the entry on the line (`g!` is vim's `!`).
 - `:h` and a key or a word shows its help, like `:h g` or `:h gJ`.
@@ -99,7 +100,8 @@ until you apply, and your edits stay while you go through other dirs.
   long name goes on under itself. `gj` and `gk` go a row down or up.
 - **Changes on disk** show in the listing as they happen, keeping your
   edits. If one goes against them (a file you deleted was renamed), Koil
-  asks.
+  asks. A file that changes is read again, as a change `u` takes back (if
+  you changed it too, Koil asks first).
 - **Problems**, like a name written twice or one Windows can't use, are
   underlined as you type. Errors block applying.
 - **Sizes**: sorted by size, each line shows its entry's, and dirs' are
@@ -109,8 +111,10 @@ until you apply, and your edits stay while you go through other dirs.
   quoted, like vim's: `:!mv % old/`, and `!` types `:! %` for it. `!` in
   visual mode (or with lines marked) runs one on every selected entry,
   and `g!` is vim's `!`, which puts the lines through a command (`g!ip`,
-  then `fmt`).
-  `:_!cmd` puts what it writes in the scratchpad, like `:_!git log`.
+  then `fmt`). `<cfile>` is the path or URL under the cursor, as `gf`
+  opens it.
+  `:_!cmd` puts what it writes in the scratchpad, like `:_!git log`, where
+  `%` is a file of its text (`!echo hi >> %` adds a line).
 - **Shortcuts** (`Space q`, _Koil → Shortcuts…_, or Settings): keys of
   yours, like `Space c` or `gc`, run keys as a macro does, like
   `:!echo %:p | pbcopy<CR>` to copy the entry's path. Type the keys, or take

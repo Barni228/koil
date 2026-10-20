@@ -405,6 +405,14 @@ pub fn link_at(line: &[u16], at: usize) -> Option<Span> {
     spans.into_iter().find(|s| s.start <= at && at < s.end)
 }
 
+/// The first URL or path in `line`, as `link_at` finds them.
+pub fn first_link(line: &[u16]) -> Option<Span> {
+    let line = &line[..line.len().min(MAX_LENGTH)];
+    let mut spans = Vec::new();
+    links(line, &mut spans);
+    spans.into_iter().next()
+}
+
 /// The URLs and paths in `line`, which go over whatever they're in.
 fn links(line: &[u16], spans: &mut Vec<Span>) {
     let mut i = 0;

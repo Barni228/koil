@@ -9,7 +9,24 @@ fn sh(command: &str, files: &[&str]) -> Result<String, String> {
 fn expanded(command: &str, kind: Kind, files: &[&str]) -> Result<String, String> {
     let cwd = Path::new("/home/me/dir");
     let files: Vec<PathBuf> = files.iter().map(|f| cwd.join(f)).collect();
-    expand(command, kind, cwd, &files, "no file")
+    let file = match files.is_empty() {
+        true => Err("no file".to_string()),
+        false => Ok(files.as_slice()),
+    };
+    expand(command, kind, cwd, file, Err("no cfile".to_string()))
+}
+
+/// `command` expanded for sh in `/`, with `file` for `%`, and nothing for
+/// `<cfile>`.
+fn in_root(command: &str, file: &str) -> Result<String, String> {
+    let file = [PathBuf::from(file)];
+    expand(
+        command,
+        Kind::Sh,
+        Path::new("/a"),
+        Ok(&file),
+        Err(String::new()),
+    )
 }
 
 #[test]
@@ -49,16 +66,7 @@ fn test_expand() {
     // the dir itself, one outside it, and a name like an option
     assert_eq!(sh("du %", &[""]), Ok("du .".into()));
     assert_eq!(sh("ls %", &["../x"]), Ok("ls ../x".into()));
-    assert_eq!(
-        expand(
-            "ls %",
-            Kind::Sh,
-            Path::new("/a"),
-            &[PathBuf::from("/b/c d")],
-            ""
-        ),
-        Ok("ls '/b/c d'".into())
-    );
+    assert_eq!(in_root("ls %", "/b/c d"), Ok("ls '/b/c d'".into()));
     assert_eq!(sh("rm %", &["-rf"]), Ok("rm ./-rf".into()));
     // no %: as it is, and \% is a %
     assert_eq!(sh("date +\\%s", &[]), Ok("date +%s".into()));
@@ -84,18 +92,38 @@ fn test_expand_modifiers() {
     assert_eq!(sh("echo %:r", &[".bashrc"]), Ok("echo .bashrc".into()));
     assert_eq!(sh("echo %:e", &["Makefile"]), Ok("echo ''".into()));
     assert_eq!(sh("echo %:t:r", &["src/a.rs"]), Ok("echo a".into()));
-    assert_eq!(
-        expand(
-            "echo %:h",
-            Kind::Sh,
-            Path::new("/a"),
-            &[PathBuf::from("/x")],
-            ""
-        ),
-        Ok("echo /".into())
-    );
+    assert_eq!(in_root("echo %:h", "/x"), Ok("echo /".into()));
     // not a modifier: as it is
     assert_eq!(sh("echo %:x %:", &["a"]), Ok("echo a:x a:".into()));
+}
+
+#[test]
+fn test_expand_cfile() {
+    let cwd = Path::new("/home/me/dir");
+    let file = [cwd.join("a b.rs")];
+    let cfile = [cwd.join("src/x.rs"), cwd.join("y")];
+    let sh = |command| expand(command, Kind::Sh, cwd, Ok(&file), Ok(&cfile));
+    assert_eq!(sh("cp <cfile> %:h"), Ok("cp src/x.rs y .".into()));
+    assert_eq!(sh("echo <cfile>:t:r"), Ok("echo x y".into()));
+    assert_eq!(sh("echo \"<cfile>\""), Ok("echo \"\"src/x.rs y\"\"".into()));
+    // \<cfile> is a <cfile>; anything else with < is as it is
+    assert_eq!(
+        sh(r"echo \<cfile> <cfil > \<a <CFILE>"),
+        Ok(r"echo <cfile> <cfil > \<a <CFILE>".into())
+    );
+    // Only what the command has must be there.
+    let none = || Err("E446".to_string());
+    assert_eq!(
+        expand("ls <cfile>", Kind::Sh, cwd, Ok(&file), none()),
+        Err("E446".into())
+    );
+    assert_eq!(
+        expand("ls %", Kind::Sh, cwd, Ok(&file), none()),
+        Ok("ls 'a b.rs'".into())
+    );
+    // after cmd's escape, as %
+    let cmd = expand("type ^<cfile>", Kind::Cmd, cwd, Ok(&file), Ok(&cfile));
+    assert_eq!(cmd, Ok("type ^src/x.rs y".into()));
 }
 
 #[test]
@@ -202,13 +230,32 @@ mod running {
             shell: "/bin/sh".into(),
             command: r"printf '[\%s]' %".into(),
             cwd: temp.path().into(),
-            files: vec![temp.path().join("a b")],
+            file: Paths {
+                paths: vec![temp.path().join("a b")],
+                message: String::new(),
+            },
             ..Request::default()
         };
         let running = Running::default();
         let (line, started) = start(&request, &running).unwrap();
         assert_eq!(line, "printf '[%s]' 'a b'");
         assert_eq!(started.finish(&running).output, "[a b]");
+        // <cfile> with none: vim's error, or why
+        let request = Request {
+            command: "ls <cfile>".into(),
+            ..request
+        };
+        let e446 = "E446: No file name under cursor".to_string();
+        assert_eq!(start(&request, &running).err(), Some(e446));
+        let request = Request {
+            cfile: Paths {
+                paths: Vec::new(),
+                message: "No path on this line".into(),
+            },
+            ..request
+        };
+        let why = "No path on this line".to_string();
+        assert_eq!(start(&request, &running).err(), Some(why));
     }
 
     #[test]
