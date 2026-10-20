@@ -451,10 +451,12 @@ fn test_target_on_line() {
 fn test_file_at() {
     let (_temp, koil) = koil();
     let root = koil.current_dir().to_path_buf();
-    for name in ["my file.txt", "a[1].txt"] {
+    for name in ["my file.txt", "a[1].txt", "~x"] {
         fs::write(root.join(name), "").unwrap();
     }
     let file = |location| file_at(&koil, location);
+    // `~` is the home dir only as a whole part
+    assert_eq!(file("~x"), Some(root.join("~x")));
     assert_eq!(file("file.rs"), Some(root.join("file.rs")));
     assert_eq!(file(" notes "), Some(root.join("notes")));
     assert_eq!(file("dir/../notes"), Some(root.join("notes")));
@@ -467,6 +469,7 @@ fn test_file_at() {
     for location in ["dir", "dir/", ".", "*.rs", "missing.txt", "file.rs/x", ""] {
         assert_eq!(file(location), None, "{location}");
     }
+    assert_eq!(file("~"), None);
 }
 
 #[test]

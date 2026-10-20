@@ -1570,6 +1570,22 @@ TestCase {
         compare(shells.count, 6);
     }
 
+    // A command that takes no argument, or a ! not before blanks, isn't
+    // one; :confirm needs one.
+    function test_exCommandNames() {
+        load("a");
+        editCommands.clear();
+        for (const c of ["w foo", "q x", "noh x", "e!foo", "se!", "h:s", "write!"]) {
+            keys(":" + c + "<CR>");
+            compare(vim.message, "E492: Not an editor command: " + c);
+        }
+        keys(":confirm<CR>");
+        compare(vim.message, "E471: Argument required");
+        compare(editCommands.count, 0);
+        keys(":e!  x<CR>");
+        compare(editCommands.signalArguments.map(a => [a[0], a[1]]), [["x", true]]);
+    }
+
     // :_! is for the scratchpad, with a range too.
     function test_scratchpadCommand() {
         load("one\ntwo\nthree\nfour");

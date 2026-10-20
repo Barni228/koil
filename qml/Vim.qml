@@ -5189,38 +5189,43 @@ QtObject {
             showError("E481: No range allowed");
             return;
         }
-        if (/^conf(i|ir|irm)?(\s|$)/.test(c)) {
-            const rest = c.replace(/^\S+\s*/, "");
-            if (rest)
-                runEx(rest, true);
-            else
-                showError("E471: Argument required");
-            return;
-        }
-        if (["w", "write"].includes(c))
-            outside(() => writeRequested(false, false));
-        else if (["wq", "x", "wq!", "x!", "xit", "exit"].includes(c))
-            outside(() => writeRequested(true, false));
-        else if (["q", "quit", "qa", "qall"].includes(c))
-            outside(() => quitRequested(false, !!confirm, c.startsWith("qa")));
-        else if (["q!", "quit!", "qa!", "qall!"].includes(c))
-            outside(() => quitRequested(true, false, c.startsWith("qa")));
-        else if (["noh", "nohl", "nohlsearch"].includes(c)) {
-            highlightPattern = "";
-            highlightsCleared();
-        }
-        else if (/^se(t)?(\s|$)/.test(c))
-            setOptions(c.replace(/^\S+\s*/, ""));
-        else if (/^sy(n|nt|nta|ntax)?(\s|$)/.test(c))
-            syntaxCommand(c.replace(/^\S+\s*/, ""));
-        else if (/^h(elp)?(\s|$)/.test(c))
-            outside(() => helpRequested(c.replace(/^\S+\s*/, "")));
-        else if (/^e(d|di|dit)?!?(\s|$)/.test(c))
-            outside(() => editRequested(c.replace(/^\S+\s*/, ""), /^\S*!/.test(c)));
-        else if (/^(reg(i|is|ist|iste|ister|isters)?|di(s|sp|spl|spla|splay)?)(\s|$)/.test(c))
-            showRegisters(c.replace(/^\S+\s*/, ""));
+        // Its name (letters, and a ! for those that take one), then after
+        // blanks, its argument, for those that take one.
+        const m = /^([a-zA-Z]+!?)(?:\s+(.*))?$/.exec(c);
+        const arg = m && m[2] || "";
+        const ex = m && exCommands().find(x => x.names.test(m[1]) && (x.takesArg || !arg));
+        if (ex)
+            ex.run(arg, m[1], confirm);
         else
             showError("E492: Not an editor command: " + c);
+    }
+
+    // The Ex commands runEx knows but :s and ! (see substituteParts and
+    // shellCommand): the `names` a command's name (with a ! after it, for
+    // those that take one) is one of, whether it `takesArg`, and what it
+    // does, given the argument, the name and whether :confirm runs it. The
+    // command line colors their names (see commandLineParts).
+    function exCommands() {
+        return [
+            { names: /^w(?:rite)?$/, run: () => outside(() => writeRequested(false, false)) },
+            { names: /^(?:wq!?|x!?|xit|exit)$/, run: () => outside(() => writeRequested(true, false)) },
+            { names: /^q(?:a|uit|all)?$/,
+                run: (arg, name, confirm) => outside(() => quitRequested(false, !!confirm, name.startsWith("qa"))) },
+            { names: /^q(?:a|uit|all)?!$/, run: (arg, name) => outside(() => quitRequested(true, false, name.startsWith("qa"))) },
+            { names: /^noh(?:l|lsearch)?$/, run: () => {
+                highlightPattern = "";
+                highlightsCleared();
+            } },
+            { names: /^conf(?:i|ir|irm)?$/, takesArg: true,
+                run: arg => arg ? runEx(arg, true) : showError("E471: Argument required") },
+            { names: /^set?$/, takesArg: true, run: arg => setOptions(arg) },
+            { names: /^sy(?:n|nt|nta|ntax)?$/, takesArg: true, run: arg => syntaxCommand(arg) },
+            { names: /^h(?:elp)?$/, takesArg: true, run: arg => outside(() => helpRequested(arg)) },
+            { names: /^e(?:d|di|dit)?!?$/, takesArg: true,
+                run: (arg, name) => outside(() => editRequested(arg, name.endsWith("!"))) },
+            { names: /^(?:reg(?:i|is|ist|iste|ister|isters)?|di(?:s|sp|spl|spla|splay)?)$/, takesArg: true,
+                run: arg => showRegisters(arg) }
+        ];
     }
 
     // The range an Ex command starts with, as { first, last, rest } (lines,
@@ -5276,13 +5281,6 @@ QtObject {
         return { first: Math.min(a, b), last: Math.max(a, b), rest: c.slice(i) };
     }
 
-    // The names of the Ex commands runEx knows, as the command line colors
-    // them (see commandLineParts), but :s's (substituteNames), and ! and
-    // _!, which aren't letters.
-    readonly property var exNames: new RegExp("^(?:w|write|wq!?|x!?|xit|exit|qa?!?|quit!?|qall!?"
-        + "|noh(?:l|lsearch)?|set?|sy(?:n|nt|nta|ntax)?|h(?:elp)?|e(?:d|di|dit)?!?"
-        + "|reg(?:i|is|ist|iste|ister|isters)?|di(?:s|sp|spl|spla|splay)?|conf(?:i|ir|irm)?)$")
-
     // The parts of the command line `line` (with its : first) that are
     // colored as it's typed, in order, as { start, end, kind }: its range
     // ("range"), the name of a command runEx knows ("command", and ! and
@@ -5328,7 +5326,7 @@ QtObject {
                 return parts;
             }
             const name = letters + (rest[letters.length] === "!" ? "!" : "");
-            if (!letters || !exNames.test(name))
+            if (!letters || !exCommands().some(x => x.names.test(name)))
                 return parts;
             add(i, i + name.length, "command");
             i += name.length;

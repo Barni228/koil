@@ -124,10 +124,7 @@ pub fn target(link: &str, dirs: &[PathBuf]) -> Target {
         None if cfg!(windows) => PathBuf::from(link),
         None => PathBuf::from(link.replace("\\ ", " ")),
     };
-    let path = match (path.strip_prefix("~"), std::env::home_dir()) {
-        (Ok(rest), Some(home)) => home.join(rest),
-        _ => path,
-    };
+    let path = home_expanded(&path);
     let found = if path.is_absolute() {
         Some(normalized(&path)).filter(|p| p.exists())
     } else {
@@ -138,6 +135,15 @@ pub fn target(link: &str, dirs: &[PathBuf]) -> Target {
     match found {
         Some(path) => Target::Path(with_slashes(&path).to_string_lossy().into_owned()),
         None => Target::Error(format!("E447: Can't find file \"{link}\" in path")),
+    }
+}
+
+/// `path` with a `~` first (`~`, `~/x`, and on Windows `~\x`) as the home
+/// dir.
+pub fn home_expanded(path: &Path) -> PathBuf {
+    match (path.strip_prefix("~"), std::env::home_dir()) {
+        (Ok(rest), Some(home)) => home.join(rest),
+        _ => path.to_path_buf(),
     }
 }
 

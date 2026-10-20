@@ -513,22 +513,8 @@ fn reveal(path: &Path) -> io::Result<()> {
         command.arg("-R").arg(path);
         command
     };
-    #[cfg(windows)]
-    let mut command = {
-        use std::os::windows::process::CommandExt;
-        // Explorer reads its command line itself: the path, with `\` only,
-        // quoted after the comma (Command would quote all of it).
-        let path = path.to_string_lossy().replace('/', "\\");
-        let mut command = Command::new("explorer");
-        command.raw_arg(format!("/select,\"{path}\""));
-        command
-    };
-    #[cfg(not(any(target_os = "macos", windows)))]
-    let mut command = {
-        let mut command = Command::new("xdg-open");
-        command.arg(path.parent().unwrap_or(path));
-        command
-    };
+    #[cfg(not(target_os = "macos"))]
+    let mut command = file_manager(path, true);
     // Koil's stdout is the scratchpad's text with -p (see cli.rs).
     let mut child = command.stdout(Stdio::null()).spawn()?;
     // waited for, so it doesn't stay a zombie once it's done
@@ -568,28 +554,43 @@ fn open_in_app(path: &Path) -> Result<(), String> {
     // checked.
     #[cfg(not(target_os = "macos"))]
     {
-        #[cfg(windows)]
-        let mut command = {
-            use std::os::windows::process::CommandExt;
-            let path = path.to_string_lossy().replace('/', "\\");
-            let mut command = Command::new("explorer");
-            command.raw_arg(format!("\"{path}\""));
-            command
-        };
-        #[cfg(not(windows))]
-        let mut command = {
-            let mut command = Command::new("xdg-open");
-            command.arg(path);
-            command
-        };
         // Not Koil's stdout, which is the scratchpad's text with -p: the
         // app would write in it, and keep a pipe reading it from ending.
-        let mut child = command
+        let mut child = file_manager(path, false)
             .stdout(Stdio::null())
             .spawn()
             .map_err(|e| format!("Can't open “{shown}”: {e}"))?;
         // so it doesn't stay a zombie once it's done
         let _ = child.wait();
         Ok(())
+    }
+}
+
+/// Explorer (or elsewhere xdg-open) opening `path`, or with `select`,
+/// showing it selected in the dir it's in (xdg-open opens that dir).
+#[cfg(not(target_os = "macos"))]
+fn file_manager(path: &Path, select: bool) -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Explorer reads its command line itself: the path, with `\` only,
+        // quoted (after the comma: Command would quote all of it).
+        let path = path.to_string_lossy().replace('/', "\\");
+        let mut command = Command::new("explorer");
+        command.raw_arg(format!(
+            "{}\"{path}\"",
+            if select { "/select," } else { "" }
+        ));
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = Command::new("xdg-open");
+        command.arg(if select {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        });
+        command
     }
 }

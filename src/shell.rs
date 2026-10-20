@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cxx_qt_lib::{QByteArray, QByteArrayBase64Options};
 use serde::{Deserialize, Serialize};
 
 use crate::{document, listing};
@@ -827,20 +828,9 @@ fn msvc_quoted(arg: &str) -> String {
 /// `script` as PowerShell's `-EncodedCommand` takes it: UTF-16LE, in
 /// base64.
 fn encoded(script: &str) -> String {
-    const DIGITS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
-    let mut base64 = String::new();
-    for chunk in bytes.chunks(3) {
-        let n =
-            (chunk.iter().enumerate()).fold(0u32, |n, (i, &b)| n | u32::from(b) << (16 - 8 * i));
-        for i in 0..4 {
-            base64.push(match i <= chunk.len() {
-                true => char::from(DIGITS[(n >> (18 - 6 * i) & 63) as usize]),
-                false => '=',
-            });
-        }
-    }
-    base64
+    let base64 = QByteArray::from(bytes.as_slice()).to_base64(QByteArrayBase64Options::default());
+    String::from_utf8_lossy(base64.as_slice()).into_owned()
 }
 
 /// Which quote a place in a command line is in.

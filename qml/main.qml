@@ -133,9 +133,6 @@ ApplicationWindow {
     readonly property bool asking: confirmDialog.opened
     // :set wrap, which View > Word Wrap toggles.
     property alias wordWrap: vim.wrap
-    // Quit once the Save dialog has saved the file (:wq, or Save in the
-    // :confirm q dialog, for a file that has no path yet).
-    property bool quitAfterSave: false
     // While :e reads the file again (see reloadFile): what the status line
     // then says (none if ""), else null.
     property var reloading: null
@@ -1438,8 +1435,8 @@ ApplicationWindow {
             vim.showError(error);
     }
 
-    // Saves the file, asking for a path if it has none, then quits if
-    // `quit` is set and the save worked (see quitApp, which `orQuit` is
+    // Saves the file (vim's E32 if there's none: nothing is shown), then
+    // quits if `quit` is set and the save worked (see quitApp, which `orQuit` is
     // passed to). The listing's changes are applied instead, once they're
     // confirmed; with `orQuit` (ZZ), No quits without applying.
     function save(quit, orQuit) {
@@ -1456,8 +1453,7 @@ ApplicationWindow {
             return;
         }
         if (!filePath) {
-            saveAs();
-            quitAfterSave = !!quit;
+            vim.showError("E32: No file name");
             return;
         }
         if (doc.saveFile(filePath, editorView.textArea.latest.text)) {
@@ -1468,7 +1464,6 @@ ApplicationWindow {
     }
 
     function saveAs() {
-        quitAfterSave = false;
         saveDialog.open();
     }
 
@@ -2211,12 +2206,8 @@ ApplicationWindow {
             if (doc.saveFile(path, editorView.textArea.latest.text)) {
                 root.filePath = path;
                 root.markUnedited();
-                if (root.quitAfterSave)
-                    root.quitApp(false);
             }
-            root.quitAfterSave = false;
         }
-        onRejected: root.quitAfterSave = false
     }
 
     // The menus: macOS's own, or in the window elsewhere (see Component.onCompleted).

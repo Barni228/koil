@@ -1588,9 +1588,9 @@ the scratchpad (see Scratchpad).
 - **Quitting**: `:q` with unsaved changes fails (E37); `:confirm q` asks
   instead, in a `ConfirmDialog` rather than a `MessageDialog` (which is native
   on macOS, can't use the editor's font or vim's keys). `ConfirmDialog.ask`
-  takes what Yes and No do; without a No action it offers only [Y]es/(N)o. Saving a file that has
-  no path opens the Save dialog, so `root.save(quit)` sets `quitAfterSave` to
-  quit once it's saved (also for `:wq`).
+  takes what Yes and No do; without a No action it offers only [Y]es/(N)o.
+  Every file shown has a path, so with none (nothing is shown: the home
+  dir couldn't be listed) `:w` is vim's E32.
 - **Surround** (Surround in Vim.qml, `parseSurround`): vim-surround's keys,
   `ys{motion}{pair}` (`yss` the line, after its indent), `ds{target}`,
   `cs{target}{pair}` and `S{pair}` in visual mode, which takes the place of
@@ -1677,14 +1677,14 @@ the scratchpad (see Scratchpad).
   drops it without putting the text back, as the new text replaced it.
 - **Command line colors** (`Vim.commandLineParts`, `commandLineHtml` in
   StatusLine.qml, `theme.commandColor`): as a `:` command is typed, the status
-  line colors its range, the name of a command `runEx` knows (`exNames`,
-  `substituteNames`, `!`, `_!`), a shell command's `%` and `<cfile>` with
+  line colors its range, the name of a command `runEx` knows
+  (`exCommands`, `substituteNames`, `!`, `_!`), a shell command's `%` and `<cfile>` with
   their modifiers (in the dirs' color, as a path) and `\%` and
   `\<cfile>`, `:set`'s options and `:e`'s
   path. It's styled text (`<font color>`), where spaces are `&nbsp;`, as
   styled text runs spaces together; the cursor block is measured on the
-  plain text, which is as wide in a font of one width. `exNames` is apart
-  from `runEx`'s matching, so a new command goes in both.
+  plain text, which is as wide in a font of one width. A new command goes
+  in `exCommands`, which both `runEx` and the colors read.
 - **Find bar**: moving to a match moves vim's cursor to its start
   (`vim.jumpTo`, which leaves visual mode and breaks an insert); it doesn't
   select it. Its regex option (`useRegex`) is on at first, so Find's seed

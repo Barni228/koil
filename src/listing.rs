@@ -1155,13 +1155,9 @@ pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -
 /// listed (a dir or a pattern) or can't be opened, as the path field says.
 pub fn file_at(koil: &Koil, location: &str) -> Option<PathBuf> {
     let location = location.trim();
-    let home = match location.strip_prefix('~') {
-        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
-            std::env::home_dir().map(|home| home.join(rest.trim_start_matches('/')))
-        }
-        _ => None,
-    };
-    let written = home.unwrap_or_else(|| koil.current_dir().join(location));
+    let written = koil
+        .current_dir()
+        .join(link::home_expanded(Path::new(location)));
     if written.is_file() {
         return Some(link::normalized(&written));
     }
