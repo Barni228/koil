@@ -708,7 +708,7 @@ ApplicationWindow {
             undoApply: () => undoApply(),
             reveal: () => reveal(),
             openInApp: () => openInApp(),
-            parent: () => updateListing(Array(Math.max(count, 1)).fill("..").join("/")),
+            parent: () => goUp(count),
             open: () => openLine(count),
             openPath: () => openPath(),
             switch: () => activate(activeView === pathView ? editorView : pathView),
@@ -753,6 +753,16 @@ ApplicationWindow {
     function toggleSortMenu() {
         vim.startCommand(sortMenu.visible ? [] : ["g", "s"]);
         activeView.textArea.forceActiveFocus();
+    }
+
+    // -: `count` levels up, where a pattern is a level of its own (see
+    // Koil.up), on the entry it came from: the listing's cursor's, also
+    // from the path field.
+    function goUp(count) {
+        const t = editorView.textArea.text;
+        const p = activeView === editorView ? vim.cursor : editorView.saved?.cursor ?? 0;
+        const up = JSON.parse(koil.up(t, JSON.stringify(editorView.hidden), Txt.lineOf(t, p) - 1, count));
+        updateListing(up.open, up.from);
     }
 
     // Enter in the listing: opens the dir or file on the cursor's line. On a

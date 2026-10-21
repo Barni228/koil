@@ -1228,6 +1228,36 @@ fn test_regex_setting() {
 }
 
 #[test]
+fn test_up() {
+    let (_temp, mut koil) = koil_with(&["dir/src"], &["dir/a.rs", "dir/src/main.rs"]);
+    let settings = koil.settings().clone();
+    let up = |koil: &Koil, name: &str, count| {
+        let rendered = render(koil);
+        let line = rendered.names.iter().position(|n| n == name).unwrap();
+        super::up(koil, &rendered.text, &rendered.hidden, line, count)
+    };
+    let to = |open: &str, from: &str| Up {
+        open: open.to_string(),
+        from: from.to_string(),
+    };
+    // a dir's parents
+    assert_eq!(up(&koil, "dir/", 1), to("..", ""));
+    assert_eq!(up(&koil, "dir/", 3), to("../../..", ""));
+    // a pattern is a level of its own: its base dir, on what the entry is in
+    let path = format!("{}/dir/**/*.rs", render(&koil).path);
+    assert!(navigate(&mut koil, &path, &settings, None).ok);
+    assert_eq!(render(&koil).names, ["a.rs", "src/main.rs"]);
+    assert_eq!(up(&koil, "src/main.rs", 1), to(".", "src/"));
+    assert_eq!(up(&koil, "a.rs", 0), to(".", "a.rs"));
+    assert_eq!(up(&koil, "a.rs", 2), to("..", ""));
+    // which opens the base dir, without the pattern
+    let dir = koil.current_dir().to_path_buf();
+    assert!(navigate(&mut koil, &path, &settings, Some(".")).moved);
+    assert_eq!((koil.current_dir(), koil.pattern()), (dir.as_path(), None));
+    assert_eq!(render(&koil).names, ["src/", "a.rs"]);
+}
+
+#[test]
 fn test_quoted_path() {
     let (temp, mut koil) = koil();
     fs::create_dir(temp.path().join("my dir")).unwrap();

@@ -137,6 +137,11 @@ pub mod qobject {
         #[qinvokable]
         fn target_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
+        /// Where `-` goes, `count` levels up, the cursor on `line` (from
+        /// 0) of the listing `text`, as `listing::Up`: `{ open, from }`.
+        #[qinvokable]
+        fn up(self: &Koil, text: &QString, hidden: &QString, line: i32, count: i32) -> QString;
+
         /// Where the entry on `line` (from 0) is on disk, for Space r and
         /// Space o (see `listing::path_on_line`): `{ path, message }`, where
         /// `message` says why there's none (a new entry); with a negative
@@ -645,6 +650,16 @@ impl qobject::Koil {
             listing::target_on_line(&self.koil, &text.to_string(), &read_hidden(hidden), line)
         });
         to_json(&target)
+    }
+
+    fn up(&self, text: &QString, hidden: &QString, line: i32, count: i32) -> QString {
+        to_json(&listing::up(
+            &self.koil,
+            &text.to_string(),
+            &read_hidden(hidden),
+            usize::try_from(line).unwrap_or(usize::MAX),
+            usize::try_from(count).unwrap_or(0),
+        ))
     }
 
     fn path_on_line(&self, text: &QString, hidden: &QString, line: i32) -> QString {

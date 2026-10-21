@@ -9,7 +9,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use devicons::Theme;
@@ -1167,6 +1167,56 @@ pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -
         },
     };
     Some(target.unwrap_or_else(Target::Error))
+}
+
+/// Where `-` goes (see [`up`]).
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Up {
+    /// What [`update`] opens, relative to the open dir.
+    pub open: String,
+    /// The entry there to put the cursor on, if `update`'s `from` doesn't
+    /// find it (it finds the dir it came from, not the pattern): the dir
+    /// (or file) the entry on the cursor's line is in, else none.
+    pub from: String,
+}
+
+/// Where `-` goes, `count` levels up from what `koil` has open, where a
+/// pattern is a level of its own: `dir/*` goes to `dir` (on the dir or
+/// file there that the entry on `line` is in), then to the dir it's in.
+pub fn up(koil: &Koil, text: &str, hidden: &[Hidden], line: usize, count: usize) -> Up {
+    let levels = count.max(1);
+    let parents = |n: usize| vec![".."; n].join("/");
+    if koil.pattern().is_none() {
+        return Up {
+            open: parents(levels),
+            ..Up::default()
+        };
+    }
+    if levels > 1 {
+        return Up {
+            open: parents(levels - 1),
+            ..Up::default()
+        };
+    }
+    let parsed = read(koil, text, hidden);
+    let i = parsed.spots.iter().position(|&(l, _)| l == line);
+    let from = i.and_then(|i| {
+        let entry = &parsed.entries[i];
+        let mut parts = entry.name.components();
+        let Some(Component::Normal(first)) = parts.next() else {
+            return None;
+        };
+        let slash = if entry.is_dir || parts.next().is_some() {
+            "/"
+        } else {
+            ""
+        };
+        Some(format!("{}{slash}", first.to_string_lossy()))
+    });
+    Up {
+        open: ".".to_string(),
+        from: from.unwrap_or_default(),
+    }
 }
 
 /// The file `:e` opens for `location`, if it's one on disk: read as the

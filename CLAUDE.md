@@ -348,7 +348,10 @@ the scratchpad (see Scratchpad).
   waits while an app launches; on macOS `openFailed` then says why it
   failed, like "No app opens", which Finder would ask about, while
   Explorer asks itself), `-` opens `..`
-  (`3-`: `../../..`), `_` the scratchpad (see Scratchpad), `!` a shell
+  (`3-`: `../../..`), where a pattern is a level of its own (`Koil.up`,
+  `listing::up`): `dir/*` goes to `dir`, on the dir or file there that
+  the cursor's entry is in (`src/` of `src/main.rs`), then to the dir
+  it's in, `_` the scratchpad (see Scratchpad), `!` a shell
   command on the entry (see Shell commands), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
