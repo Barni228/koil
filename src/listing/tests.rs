@@ -1,3 +1,4 @@
+use std::ffi::{OsStr, OsString};
 use std::fs;
 
 use koil_core::{Entry, Koil, Settings, Sort, SortBy};
@@ -14,6 +15,11 @@ fn render(koil: &Koil) -> Rendered {
 /// [`super::sync`], with none of the dirs' sizes counted.
 fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
     super::sync(koil, &DirSizes::new(), text, hidden)
+}
+
+/// `name` in the dir `koil` has open, as QML takes a path.
+fn path_in(koil: &Koil, name: &str) -> String {
+    unicode(&koil.current_dir().join(name)).unwrap()
 }
 
 /// The lines of what applying would do.
@@ -406,7 +412,6 @@ fn test_navigate() {
 #[test]
 fn test_target_on_line() {
     let (_temp, koil) = koil();
-    let root = koil.current_dir().to_path_buf();
     let rendered = render(&koil);
     // file.rs renamed on its line, and a new file
     let (text, hidden) = edited(&rendered, |line, name| match name {
@@ -418,14 +423,14 @@ fn test_target_on_line() {
     assert_eq!(
         target(1),
         Some(Target::File {
-            path: root.join("file.rs"),
+            path: path_in(&koil, "file.rs"),
             name: "main.rs".into()
         })
     );
     assert_eq!(
         target(2),
         Some(Target::New {
-            path: root.join("new.txt"),
+            path: path_in(&koil, "new.txt"),
             name: "new.txt".into()
         })
     );
@@ -475,7 +480,6 @@ fn test_file_at() {
 #[test]
 fn test_path_on_line() {
     let (_temp, koil) = koil();
-    let root = koil.current_dir().to_path_buf();
     let rendered = render(&koil);
     // dir renamed on its line, and a new file and dir
     let (text, hidden) = edited(&rendered, |line, name| match name {
@@ -486,19 +490,24 @@ fn test_path_on_line() {
         _ => Some(line.to_string()),
     });
     let path = |line| path_on_line(&koil, &text, &hidden, line);
-    assert_eq!(path(0), Some(OnDisk::Path(root.join("dir"))));
-    assert_eq!(path(1), Some(OnDisk::New("new.txt".into())));
-    assert_eq!(path(2), Some(OnDisk::New("new/".into())));
-    assert_eq!(path(3), Some(OnDisk::Path(root.join("file.rs"))));
-    assert_eq!(path(5), None);
+    let new = |name| {
+        Err(format!(
+            "“{name}” isn't on disk until the changes are applied"
+        ))
+    };
+    assert_eq!(path(0), Ok(path_in(&koil, "dir")));
+    assert_eq!(path(1), new("new.txt"));
+    assert_eq!(path(2), new("new/"));
+    assert_eq!(path(3), Ok(path_in(&koil, "file.rs")));
+    let none = Err("No entry on this line".to_string());
+    assert_eq!(path(5), none);
     // a blank line
-    assert_eq!(path_on_line(&koil, "\n", &[], 0), None);
+    assert_eq!(path_on_line(&koil, "\n", &[], 0), none);
 }
 
 #[test]
 fn test_paths_on_lines() {
     let (_temp, koil) = koil();
-    let root = koil.current_dir().to_path_buf();
     let rendered = render(&koil);
     // dir renamed on its line, then a blank line and a new file
     let (text, hidden) = edited(&rendered, |line, name| match name {
@@ -506,10 +515,10 @@ fn test_paths_on_lines() {
         _ => Some(line.to_string()),
     });
     let paths = |lines: &[(usize, usize)]| paths_on_lines(&koil, &text, &hidden, lines);
-    assert_eq!(paths(&[(0, 1)]), Ok(vec![root.join("dir")]));
+    assert_eq!(paths(&[(0, 1)]), Ok(vec![path_in(&koil, "dir")]));
     assert_eq!(
         paths(&[(3, 4)]),
-        Ok(vec![root.join("file.rs"), root.join("notes")])
+        Ok(vec![path_in(&koil, "file.rs"), path_in(&koil, "notes")])
     );
     assert_eq!(
         paths(&[(0, 2)]),
@@ -520,7 +529,7 @@ fn test_paths_on_lines() {
     // marked lines, apart: not the new file and file.rs between them
     assert_eq!(
         paths(&[(0, 0), (4, 4)]),
-        Ok(vec![root.join("dir"), root.join("notes")])
+        Ok(vec![path_in(&koil, "dir"), path_in(&koil, "notes")])
     );
     assert_eq!(
         paths(&[(1, 1), (7, 7)]),
@@ -549,9 +558,9 @@ fn test_links_on_lines() {
     assert_eq!(
         paths(&[(0, 3)]),
         Ok(vec![
-            root.join("file.rs"),
-            root.join("dir/inner.txt"),
-            root.join("notes")
+            path_in(&koil, "file.rs"),
+            path_in(&koil, "dir/inner.txt"),
+            path_in(&koil, "notes")
         ])
     );
     assert_eq!(paths(&[(1, 1)]), Err("No file name on this line".into()));
@@ -563,14 +572,20 @@ fn test_links_on_lines() {
         paths(&[(0, 0), (4, 4)]),
         Err("E447: Can't find file \"missing\" in path".into())
     );
-    assert_eq!(paths(&[(5, 5)]), Ok(vec![PathBuf::from("https://a.b")]));
+    assert_eq!(paths(&[(5, 5)]), Ok(vec!["https://a.b".to_string()]));
     let home = std::env::home_dir().unwrap();
-    assert_eq!(paths(&[(6, 6)]), Ok(vec![home]));
+    assert_eq!(paths(&[(6, 6)]), Ok(vec![unicode(&home).unwrap()]));
     // a path before a name: not ` M`
-    assert_eq!(paths(&[(7, 7)]), Ok(vec![root.join("dir/inner.txt")]));
+    assert_eq!(paths(&[(7, 7)]), Ok(vec![path_in(&koil, "dir/inner.txt")]));
     // at the cursor, as gf takes it: there or after it
-    assert_eq!(links(&[(8, 8)], Some(5)), Ok(vec![root.join("file.rs")]));
-    assert_eq!(links(&[(8, 8)], Some(3)), Ok(vec![root.join("file.rs")]));
+    assert_eq!(
+        links(&[(8, 8)], Some(5)),
+        Ok(vec![path_in(&koil, "file.rs")])
+    );
+    assert_eq!(
+        links(&[(8, 8)], Some(3)),
+        Ok(vec![path_in(&koil, "file.rs")])
+    );
     assert_eq!(
         links(&[(8, 8)], Some(0)),
         Err("E447: Can't find file \"see\" in path".into())
@@ -579,7 +594,78 @@ fn test_links_on_lines() {
     assert_eq!(links(&[(2, 2)], Some(11)), none);
     assert_eq!(links(&[(1, 1)], Some(0)), none);
     // the entry, wherever the cursor is on its line
-    assert_eq!(links(&[(3, 3)], Some(5)), Ok(vec![root.join("notes")]));
+    assert_eq!(links(&[(3, 3)], Some(5)), Ok(vec![path_in(&koil, "notes")]));
+}
+
+/// `start` and a part that isn't Unicode, as a name can be on Linux (a
+/// byte that isn't UTF-8) or Windows (a lone surrogate), not on macOS.
+fn not_unicode(start: &str) -> OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        OsString::from_vec([start.as_bytes(), b"\xff"].concat())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        let mut wide: Vec<u16> = start.encode_utf16().collect();
+        wide.push(0xd800);
+        OsString::from_wide(&wide)
+    }
+}
+
+/// `koil` with an entry listed whose name is `name`: through its saved
+/// state, as koil-core gives no other way to have one that isn't on disk,
+/// and no such file can be made on macOS.
+fn with_entry(koil: &Koil, name: &OsStr) -> Koil {
+    let mut state: serde_json::Value = serde_json::from_str(&koil.save_state()).unwrap();
+    let ids = state["ids"].as_array_mut().unwrap();
+    let path = koil.current_dir().join(name);
+    ids.push(serde_json::to_value(path.as_os_str()).unwrap());
+    let id = ids.len() - 1;
+    state["current_listing"]
+        .as_array_mut()
+        .unwrap()
+        .push(id.into());
+    Koil::load_state(&state.to_string()).unwrap()
+}
+
+#[test]
+fn test_name_not_unicode() {
+    // shown with `�`, it's read back as it is, and what QML is given of
+    // it is JSON, but Koil can't open it, nor give a command its path
+    let (_temp, koil) = koil();
+    let name = not_unicode("a");
+    let koil = with_entry(&koil, &name);
+    let rendered = render(&koil);
+    serde_json::to_string(&rendered).unwrap();
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    let line = (rendered.names.iter())
+        .position(|n| *n == name.to_string_lossy())
+        .unwrap();
+    assert_eq!(pending_lines(&koil, text, hidden), Vec::<usize>::new());
+    assert_eq!(check(&koil, text, hidden), []);
+    let path = koil.current_dir().join(&name);
+    let why = format!(
+        "Koil can't use `{}`, as its path isn't valid Unicode",
+        show_path(&path)
+    );
+    let target = target_on_line(&koil, text, hidden, line);
+    assert_eq!(target, Some(Target::Error(why.clone())));
+    assert_eq!(path_on_line(&koil, text, hidden, line), Err(why.clone()));
+    let paths = paths_on_lines(&koil, text, hidden, &[(0, line)]);
+    assert_eq!(paths, Err(why));
+}
+
+#[test]
+fn test_update_name_not_unicode() {
+    // unchanged, it isn't renamed to what it's shown as
+    let (_temp, koil) = koil();
+    let mut koil = with_entry(&koil, &not_unicode("a"));
+    let path = show_location(&koil);
+    let updated = navigate(&mut koil, &path, &Settings::default(), None);
+    assert!(updated.ok, "{}", updated.message);
+    assert_eq!(action_texts(&koil), Vec::<String>::new());
 }
 
 #[test]

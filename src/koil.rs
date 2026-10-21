@@ -71,11 +71,20 @@ pub mod qobject {
             conflicts: &QString,
         ) -> QString;
 
-        /// Opens `location`, a dir or a pattern (see `Koil::open`), dropping
-        /// the listing shown so far (see `update` for keeping it). Returns
-        /// `{ ok, message }`.
+        /// Opens `location`, a dir or a pattern (see `Koil::open`), with the
+        /// settings, dropping the listing shown so far (see `update` for
+        /// keeping it). Returns `{ ok, message }`.
         #[qinvokable]
         fn open(self: Pin<&mut Koil>, location: &QString) -> QString;
+
+        /// Has koil take the settings, if it hasn't them, reading what's
+        /// open again with them: for a listing shown anew, as nothing of
+        /// the text before is read (`update` reads it with the settings it
+        /// was shown with first), like back from a file, where `:set`
+        /// updates nothing. Returns what to tell: something else is open
+        /// now (the open dir is gone), or it can't be read.
+        #[qinvokable]
+        fn take_settings(self: Pin<&mut Koil>) -> QString;
 
         /// The listing of what's open: `{ path, text, hidden, names, colors,
         /// infos, busy }` (see `listing::Rendered`). Counts the sizes of its
@@ -127,10 +136,10 @@ pub mod qobject {
         #[qinvokable]
         fn target_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
-        /// Where the entry on `line` (from 0) is on disk, for Space r, as
-        /// `listing::OnDisk` (like `{ "path": "/a/b" }`, or `{ "new":
-        /// "c.txt" }`), or null; with a negative `line` (the path field),
-        /// the open dir.
+        /// Where the entry on `line` (from 0) is on disk, for Space r and
+        /// Space o (see `listing::path_on_line`): `{ path, message }`, where
+        /// `message` says why there's none (a new entry); with a negative
+        /// `line` (the path field), the open dir.
         #[qinvokable]
         fn path_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
@@ -450,13 +459,13 @@ fn read_hidden(hidden: &QString) -> Vec<Hidden> {
     from_json(hidden)
 }
 
-/// A list, or why there is none, as QML takes it: `{ <key>, message }`
-/// (the paths a shell command runs on, the steps creating a file takes,
-/// the applies that can be undone).
-fn listed(key: &str, list: Result<impl Serialize, String>) -> QString {
+/// A list (or a path), or why there is none (then empty), as QML takes
+/// it: `{ <key>, message }` (the paths a shell command runs on, the steps
+/// creating a file takes, the applies that can be undone).
+fn listed<T: Serialize + Default>(key: &str, list: Result<T, String>) -> QString {
     let (list, message) = match list {
-        Ok(list) => (json!(list), String::new()),
-        Err(message) => (json!([]), message),
+        Ok(list) => (list, String::new()),
+        Err(message) => (T::default(), message),
     };
     to_json(&json!({ key: list, "message": message }))
 }
@@ -525,15 +534,28 @@ impl qobject::Koil {
     fn open(self: Pin<&mut Self>, location: &QString) -> QString {
         let mut rust = self.rust_mut();
         let settings = rust.settings();
-        let koil = &mut rust.koil;
-        // This reopens what was open, if anything, which is left right away.
-        let _ = koil.set_settings(settings);
-        let opened = koil.open(location.to_string());
+        let opened = rust.koil.open_with(location.to_string(), settings);
         outcome(
             opened
                 .map(|()| String::new())
                 .map_err(|e| listing::describe_open(&e)),
         )
+    }
+
+    fn take_settings(self: Pin<&mut Self>) -> QString {
+        let mut rust = self.rust_mut();
+        let settings = rust.settings();
+        if &settings == rust.koil.settings() {
+            return QString::default();
+        }
+        let message = match rust.koil.set_settings(settings) {
+            Ok(warning) => warning.as_ref().map(listing::describe_warning),
+            Err(error) => {
+                let dir = listing::show_path(rust.koil.current_dir());
+                Some(format!("Can't read `{dir}`: {}", listing::describe(&error)))
+            }
+        };
+        QString::from(message.unwrap_or_default().as_str())
     }
 
     fn render(self: Pin<&mut Self>) -> QString {
@@ -616,19 +638,19 @@ impl qobject::Koil {
     }
 
     fn path_on_line(&self, text: &QString, hidden: &QString, line: i32) -> QString {
-        let on_disk = match usize::try_from(line) {
+        let path = match usize::try_from(line) {
             Ok(line) => {
                 listing::path_on_line(&self.koil, &text.to_string(), &read_hidden(hidden), line)
             }
-            Err(_) => Some(listing::OnDisk::Path(self.koil.current_dir().to_path_buf())),
+            Err(_) => listing::unicode(self.koil.current_dir()),
         };
-        to_json(&on_disk)
+        listed("path", path)
     }
 
     fn paths_on_lines(&self, text: &QString, hidden: &QString, lines: &QString) -> QString {
         let lines: Vec<(usize, usize)> = from_json(lines);
         let paths = if lines.is_empty() {
-            Ok(vec![self.koil.current_dir().to_path_buf()])
+            listing::unicode(self.koil.current_dir()).map(|dir| vec![dir])
         } else {
             let text = text.to_string();
             listing::paths_on_lines(&self.koil, &text, &read_hidden(hidden), &lines)
@@ -678,7 +700,7 @@ impl qobject::Koil {
     }
 
     fn has_changes(&self) -> bool {
-        !self.koil.compute_actions().is_empty()
+        self.koil.has_changes()
     }
 
     fn apply(self: Pin<&mut Self>, picked: &QString) -> QString {

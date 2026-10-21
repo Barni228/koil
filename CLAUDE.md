@@ -17,8 +17,9 @@ the scratchpad (see Scratchpad).
   and `ARGS`, which `Document` gives QML (see Command line).
 - `src/install.rs`: the `koil` command on macOS, which the Settings window
   installs and removes (see The koil command). Its tests use a temp dir.
-- `src/listing.rs`: the listing as text, without Qt: `render`, `parse`,
-  `check`, `update` (read it into koil, then navigate), the confirmations'
+- `src/listing.rs`: the listing as text, without Qt: `render`, `parse`
+  (and `read`, through koil-core's `read_shown`), `check`, `update` (read
+  it into koil, then navigate), a path as QML takes it (`unicode`), the confirmations'
   lines (`actions`, `history`), the path field's regex parts
   (`path_syntax`), what Tab completes in it (`complete`), the file `:e`
   opens (`file_at`), what's shown after
@@ -338,7 +339,8 @@ the scratchpad (see Scratchpad).
   the applies to undo (see Undo history), `Space r` shows the entry on
   the cursor's line in Finder or Explorer, selected (`reveal`: where its
   ID is on disk, as Enter opens it; from the path field, the open dir; a
-  new entry isn't on disk yet, so the status line says so; `System.reveal`
+  new entry isn't on disk yet, so the status line says so, as
+  `Koil.pathOnLine` gives `{ path, message }`; `System.reveal`
   runs `open -R`, or `explorer /select,`, or on Linux opens the dir it's
   in), `Space o` opens the same path (`entryPath`) as a double-click in
   Finder or Explorer does, a file in its default app (`System.openInApp`:
@@ -373,7 +375,14 @@ the scratchpad (see Scratchpad).
 - **Update** (`updateListing`): koil reads the entries with the settings they
   were shown with, then takes vim's `:set hidden/gitignore/regex`, then opens
   the Enter/`-` target, else the path field's path if it changed (like
-  koil-cli, where it's the first line). The field is read with the listing
+  koil-cli, where it's the first line). `:set` while a file is open
+  reaches koil only once a listing is shown: `Koil.open` (back to a file's
+  dir, a folder opened) opens with the settings (koil-core's `open_with`,
+  so what was open isn't read again for them first), and `showListing`
+  of a new listing (`moved`, which no text of the one before is read
+  into: `-` back to it) has koil take them (`Koil.takeSettings`), else it
+  came back unsorted and without hidden entries, as vim said otherwise.
+  The field is read with the listing
   wherever the update comes from, so a path typed there and left without
   Enter is opened by the next update. koil-core does all of it as one step
   (`Koil::update_and_open`), so if opening fails, koil stays as it was, since
@@ -641,7 +650,8 @@ the scratchpad (see Scratchpad).
   can take back.
 - **Quitting**: `modified` (the title's dot) is the file's unsaved
   changes, or in the listing, edits or pending changes
-  (`pendingChanges`: `koil.hasChanges()` after each update). An edit
+  (`pendingChanges`: `koil.hasChanges()` after each update, koil-core's
+  `has_changes`, from the diff alone). An edit
   makes it only if the text isn't what it was (`unedited`, as the file
   was opened or saved, or the listing shown, with its hidden text;
   `checkModified`), so `a` typed and deleted, or undone, leaves it off.
@@ -1213,6 +1223,20 @@ the scratchpad (see Scratchpad).
   Koil's hidden texts (IDs, which mean other paths there) are dropped on
   paste, so its lines become new entries rather than copies of whatever has
   that ID here.
+- **Paths that aren't Unicode** (only on Linux, or a malformed name on
+  Windows; macOS keeps only UTF-8 names): a name shows with `�`
+  (`to_string_lossy`), and the listing is read back through koil-core's
+  `Koil::read_shown` (`listing::read`), which takes a part shown so for its
+  ID's, so an unchanged line isn't a rename (`MOVE a� -> a�`, which applying
+  made). QML's strings can't hold one, so Koil's JSON gives QML only
+  strings, and where it would act on such a path (Enter, gf, Space r,
+  Space o, a shell command's `%` or `<cfile>` on an entry) it says it can't
+  (`listing::unicode`: `Target::Error`, the `message` of `{ path, message }`
+  and `{ paths, message }`), rather than give another path; a dir's name
+  is the same (the dir can't be entered). koil-core's types that QML hands
+  back (a question's `Conflict`s) and the undo history's file keep it, as
+  koil-core keeps paths in JSON (`serde_path`); serde's own `Path` fails on
+  it, which made `to_json`'s `expect` abort Koil.
 
 ## Non-obvious decisions
 

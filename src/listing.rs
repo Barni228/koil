@@ -466,6 +466,18 @@ pub fn parse(text: &str, hidden: &[Hidden]) -> Parsed {
     parsed
 }
 
+/// [`parse`], with each entry as `koil` reads it back (`Koil::read_shown`):
+/// a name that isn't Unicode (only on Linux, or a malformed one on Windows)
+/// is shown with `�`, which would otherwise read as a rename to that.
+fn read(koil: &Koil, text: &str, hidden: &[Hidden]) -> Parsed {
+    let mut parsed = parse(text, hidden);
+    let entries = std::mem::take(&mut parsed.entries);
+    parsed.entries = (entries.into_iter())
+        .map(|entry| koil.read_shown(entry))
+        .collect();
+    parsed
+}
+
 /// The icon hiding something that `line` (which starts at `start`) starts
 /// with, after its indent, if any, and the line after its indent.
 fn line_icon<'a, 'l>(
@@ -495,7 +507,7 @@ fn utf16_len(s: &str) -> usize {
 /// The warnings and errors in the edited listing (see `Koil::check`), sorted
 /// by line.
 pub fn check(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<Problem> {
-    let parsed = parse(text, hidden);
+    let parsed = read(koil, text, hidden);
     let mut problems = parsed.problems.clone();
     match koil.check(&parsed.entries) {
         Ok(warnings) => problems.extend(warning_problems(&parsed, &warnings)),
@@ -544,7 +556,7 @@ fn problem(parsed: &Parsed, entry: usize, severity: Severity, message: String) -
 /// ones whose path isn't their ID's (renamed, copied, or moved here from
 /// another dir). Their icons get `PENDING_COLOR`.
 pub fn pending_lines(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
-    let parsed = parse(text, hidden);
+    let parsed = read(koil, text, hidden);
     let entries = parsed.entries.iter().zip(&parsed.spots);
     entries
         .filter(|(entry, _)| koil.is_pending(entry))
@@ -586,7 +598,7 @@ pub fn update(
     settings: &Settings,
     open: Option<&str>,
 ) -> Updated {
-    let parsed = parse(text, hidden);
+    let parsed = read(koil, text, hidden);
     let failed = |problems: Vec<Problem>, path_problems: Vec<Problem>, message: String| Updated {
         problems,
         path_problems,
@@ -707,7 +719,7 @@ pub struct Question {
 /// changes to show what changed there, and what to ask about. `sizes` are
 /// its dirs' as far as they're counted.
 pub fn sync(koil: &mut Koil, sizes: &dyn SizeOf, text: &str, hidden: &[Hidden]) -> Synced {
-    let parsed = parse(text, hidden);
+    let parsed = read(koil, text, hidden);
     let synced = match koil.sync(&parsed.entries) {
         Ok(synced) => synced,
         Err(error) => {
@@ -752,7 +764,7 @@ pub fn resolve(
     conflicts: &[Conflict],
 ) -> Merge {
     let edits: Vec<Edit> = conflicts.iter().flat_map(|c| koil.resolve(c)).collect();
-    merge(koil, sizes, text, &parse(text, hidden), &edits)
+    merge(koil, sizes, text, &read(koil, text, hidden), &edits)
 }
 
 /// `edits` to the entries of the listing `text` (read as `parsed`) as
@@ -1114,11 +1126,13 @@ pub enum Target {
     /// A dir, relative to the open one.
     Dir(String),
     /// A file on disk, and its name on the line.
-    File { path: PathBuf, name: String },
+    File { path: String, name: String },
     /// A new file, which isn't there until the changes are applied (or
     /// until it's created on its own, see [`create_steps`]): where it goes,
     /// and its name on the line.
-    New { path: PathBuf, name: String },
+    New { path: String, name: String },
+    /// Why it can't be opened (see [`unicode`]).
+    Error(String),
 }
 
 /// What Enter on `line` opens: the dir of an entry whose name ends with `/`,
@@ -1126,26 +1140,23 @@ pub enum Target {
 /// line renames it). None on a line without an entry, or with an ID koil
 /// doesn't know.
 pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> Option<Target> {
-    let parsed = parse(text, hidden);
+    let parsed = read(koil, text, hidden);
     let i = parsed.spots.iter().position(|&(l, _)| l == line)?;
     let entry = &parsed.entries[i];
     let name = entry.name.to_string_lossy().into_owned();
-    if entry.is_dir {
-        return Some(Target::Dir(name));
-    }
-    let Some(id) = entry.id else {
-        let path = koil.current_dir().join(&entry.name);
-        return Some(Target::New { path, name });
-    };
-    let path = koil.path_of(id)?;
-    Some(match path.is_dir() {
-        // a dir with the `/` taken off its name
-        true => Target::Dir(name),
-        false => Target::File {
-            path: path.to_path_buf(),
-            name,
+    let target = match entry.id {
+        _ if entry.is_dir => unicode(&entry.name).map(Target::Dir),
+        None => {
+            let path = koil.current_dir().join(&entry.name);
+            unicode(&path).map(|path| Target::New { path, name })
+        }
+        Some(id) => match koil.path_of(id)? {
+            // a dir with the `/` taken off its name
+            path if path.is_dir() => unicode(&entry.name).map(Target::Dir),
+            path => unicode(path).map(|path| Target::File { path, name }),
         },
-    })
+    };
+    Some(target.unwrap_or_else(Target::Error))
 }
 
 /// The file `:e` opens for `location`, if it's one on disk: read as the
@@ -1169,25 +1180,20 @@ pub fn file_at(koil: &Koil, location: &str) -> Option<PathBuf> {
     }
 }
 
-/// What Space r on a line of the listing shows in Finder (or Explorer)
-/// (see [`path_on_line`]).
-#[derive(Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum OnDisk {
-    /// Where the entry is on disk.
-    Path(PathBuf),
-    /// A new entry's name (with `/` after a dir's), which isn't on disk
-    /// until the changes are applied.
-    New(String),
-}
-
 /// Where the entry on `line` is on disk, for Space r to show: where its ID
-/// points, even if the line renames it (as Enter opens it). None on a line
-/// without an entry, or with an ID koil doesn't know.
-pub fn path_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> Option<OnDisk> {
-    let parsed = parse(text, hidden);
-    let i = parsed.spots.iter().position(|&(l, _)| l == line)?;
-    on_disk(koil, &parsed.entries[i])
+/// points, even if the line renames it (as Enter opens it); or else why
+/// there's none (see [`on_disk`]), or no entry on the line (or one with an
+/// ID koil doesn't know).
+pub fn path_on_line(
+    koil: &Koil,
+    text: &str,
+    hidden: &[Hidden],
+    line: usize,
+) -> Result<String, String> {
+    let parsed = read(koil, text, hidden);
+    let i = parsed.spots.iter().position(|&(l, _)| l == line);
+    let path = i.and_then(|i| on_disk(koil, &parsed.entries[i]));
+    path.unwrap_or_else(|| Err(NO_ENTRY.to_string()))
 }
 
 /// Where the entries on `lines` are on disk, as [`path_on_line`] finds
@@ -1200,24 +1206,19 @@ pub fn paths_on_lines(
     text: &str,
     hidden: &[Hidden],
     lines: &[(usize, usize)],
-) -> Result<Vec<PathBuf>, String> {
-    let parsed = parse(text, hidden);
+) -> Result<Vec<String>, String> {
+    let parsed = read(koil, text, hidden);
     let mut paths = Vec::new();
     for (&(line, _), entry) in parsed.spots.iter().zip(&parsed.entries) {
-        match on_disk(koil, entry) {
-            _ if !on_lines(lines, line) => {}
-            Some(OnDisk::Path(path)) => paths.push(path),
-            Some(OnDisk::New(name)) => {
-                return Err(format!(
-                    "“{name}” isn't on disk until the changes are applied"
-                ));
-            }
-            None => {}
+        if on_lines(lines, line)
+            && let Some(path) = on_disk(koil, entry)
+        {
+            paths.push(path?);
         }
     }
     match (paths.is_empty(), lines) {
         (false, _) => Ok(paths),
-        (true, [(first, last)]) if first == last => Err("No entry on this line".to_string()),
+        (true, [(first, last)]) if first == last => Err(NO_ENTRY.to_string()),
         (true, _) => Err("No entries on these lines".to_string()),
     }
 }
@@ -1238,7 +1239,7 @@ pub fn links_on_lines(
     lines: &[(usize, usize)],
     at: Option<usize>,
     dirs: &[PathBuf],
-) -> Result<Vec<PathBuf>, String> {
+) -> Result<Vec<String>, String> {
     let hidden: HashMap<usize, &Hidden> = hidden.iter().map(|h| (h.at, h)).collect();
     let end = lines.last().map_or(0, |&(_, last)| last + 1);
     let mut paths = Vec::new();
@@ -1255,7 +1256,7 @@ pub fn links_on_lines(
         let (icon, _) = line_icon(&hidden, line, start);
         let entry = icon.and_then(|h| koil.path_of(Id(h.text.parse().ok()?)));
         if let Some(path) = entry {
-            paths.push(path.to_path_buf());
+            paths.push(unicode(path)?);
             continue;
         }
         let units: Vec<u16> = line.encode_utf16().collect();
@@ -1270,8 +1271,7 @@ pub fn links_on_lines(
             });
         };
         match link::target(&String::from_utf16_lossy(&units[link]), dirs) {
-            link::Target::Path(path) => paths.push(PathBuf::from(path)),
-            link::Target::Url(url) => paths.push(PathBuf::from(url)),
+            link::Target::Path(path) | link::Target::Url(path) => paths.push(path),
             link::Target::Error(why) => return Err(why),
         }
     }
@@ -1292,13 +1292,21 @@ fn on_lines(lines: &[(usize, usize)], line: usize) -> bool {
 /// vim's error for `<cfile>` with no file name under the cursor.
 const NO_FILE_NAME: &str = "E446: No file name under cursor";
 
-/// Where `entry` is on disk (see [`path_on_line`]).
-fn on_disk(koil: &Koil, entry: &Entry) -> Option<OnDisk> {
-    let path = match entry.id {
-        Some(id) => koil.path_of(id)?,
-        None => return Some(OnDisk::New(entry_name(entry))),
-    };
-    Some(OnDisk::Path(path.to_path_buf()))
+/// Why the cursor's line stands for no entry on disk.
+const NO_ENTRY: &str = "No entry on this line";
+
+/// Where `entry` is on disk, as QML takes it: where its ID points, even if
+/// the line renames it; or else why there's none to give: it's new, so it
+/// isn't on disk until the changes are applied, or its path isn't Unicode
+/// (see [`unicode`]). None if its ID isn't one koil knows.
+fn on_disk(koil: &Koil, entry: &Entry) -> Option<Result<String, String>> {
+    match entry.id {
+        Some(id) => Some(unicode(koil.path_of(id)?)),
+        None => Some(Err(format!(
+            "“{}” isn't on disk until the changes are applied",
+            entry_name(entry)
+        ))),
+    }
 }
 
 /// The path the ID `id` (an icon's hidden text) stands for, as the hover
@@ -1735,11 +1743,22 @@ fn repetition_end(chars: &[(usize, char)], i: usize) -> Option<usize> {
 }
 
 /// `path` as the confirmations show it: relative to the open dir if it's in
-/// it (`Koil::relative`), else as [`show_path`] does.
+/// it (as `Koil::relative` gives it), else as [`show_path`] does.
 fn relative(koil: &Koil, path: &Path) -> String {
-    match koil.relative(path) {
-        Some(rest) => rest.to_string_lossy().into_owned(),
-        None => show_path(path),
+    shown_in(koil.current_dir(), path)
+}
+
+/// `path` as QML takes it, a string (as it is, with `\` on Windows), or
+/// else why it can't be: it isn't Unicode (only on Linux, or a malformed
+/// name on Windows), which a string can't hold, so Koil only shows it, with
+/// `�` (see [`read`]), and can neither open it nor put it in a command.
+pub fn unicode(path: &Path) -> Result<String, String> {
+    match path.to_str() {
+        Some(path) => Ok(path.to_string()),
+        None => Err(format!(
+            "Koil can't use `{}`, as its path isn't valid Unicode",
+            show_path(path)
+        )),
     }
 }
 

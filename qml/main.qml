@@ -403,6 +403,9 @@ ApplicationWindow {
     function showListing(moved, from, keep) {
         // Before it's the listing, whose prefixes vim would keep out of.
         keepScratch();
+        // Vim's :set options, as one typed in a file left them: nothing of
+        // the listing shown before is read now.
+        const warning = moved ? koil.takeSettings() : "";
         const r = JSON.parse(koil.render());
         if (listing && !keep && (!moved || r.path === location))
             keep = listingSpot();
@@ -443,6 +446,8 @@ ApplicationWindow {
         if (inPath)
             activate(pathView);
         koil.watch();
+        if (warning)
+            vim.showMessage(warning);
         // What changed while a file was open.
         if (diskChanged)
             Qt.callLater(syncListing);
@@ -764,6 +769,8 @@ ApplicationWindow {
         const target = JSON.parse(koil.targetOnLine(t, JSON.stringify(vim.hidden), line));
         if (!target) {
             return false;
+        } else if (target.error !== undefined) {
+            vim.showError(target.error);
         } else if (target.dir !== undefined) {
             updateListing(target.dir);
         } else if (target.new !== undefined) {
@@ -837,13 +844,10 @@ ApplicationWindow {
     function entryPath() {
         const t = editorView.textArea.text;
         const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
-        const target = JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
-        const why = !target ? "No entry on this line"
-            : target.new !== undefined ? "“" + target.new + "” isn't on disk until the changes are applied"
-            : "";
-        if (why)
-            vim.showError(why);
-        return why ? "" : target.path;
+        const r = JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
+        if (r.message)
+            vim.showError(r.message);
+        return r.path;
     }
 
     // Space r: shows the entry on the cursor's line in Finder (Explorer on
