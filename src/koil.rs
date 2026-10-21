@@ -81,8 +81,9 @@ pub mod qobject {
         /// open again with them: for a listing shown anew, as nothing of
         /// the text before is read (`update` reads it with the settings it
         /// was shown with first), like back from a file, where `:set`
-        /// updates nothing. Returns what to tell: something else is open
-        /// now (the open dir is gone), or it can't be read.
+        /// updates nothing (a pattern is read again as `:set regex` says,
+        /// see `listing::rereads`). Returns what to tell: something else
+        /// is open now (the open dir is gone), or it can't be read.
         #[qinvokable]
         fn take_settings(self: Pin<&mut Koil>) -> QString;
 
@@ -547,6 +548,15 @@ impl qobject::Koil {
         let settings = rust.settings();
         if &settings == rust.koil.settings() {
             return QString::default();
+        }
+        // A pattern to read the other way is opened again; if it can't be,
+        // koil stays as it was, and the next update says why too.
+        if listing::rereads(&rust.koil, &settings) {
+            let location = rust.koil.location();
+            match rust.koil.open_with(location, settings.clone()) {
+                Ok(()) => return QString::default(),
+                Err(error) => return QString::from(listing::describe_open(&error).as_str()),
+            }
         }
         let message = match rust.koil.set_settings(settings) {
             Ok(warning) => warning.as_ref().map(listing::describe_warning),

@@ -1193,6 +1193,41 @@ fn test_pasted_path() {
 }
 
 #[test]
+fn test_regex_setting() {
+    let (_temp, mut koil) = koil();
+    let dir = render(&koil).path;
+    let glob = koil.settings().clone();
+    let regex = Settings {
+        regex: true,
+        ..glob.clone()
+    };
+    // a regex written while patterns are globs matches nothing
+    let updated = navigate(&mut koil, &format!("{dir}/.*rs"), &glob, None);
+    assert!(updated.ok, "{updated:?}");
+    assert!(render(&koil).names.is_empty());
+    // the setting reads it again as a regex, though the path didn't change
+    let path = render(&koil).path;
+    let updated = navigate(&mut koil, &path, &regex, None);
+    assert!(updated.ok && updated.moved, "{updated:?}");
+    assert_eq!(koil.pattern(), Some(&Pattern::Regex(".*rs".into())));
+    assert_eq!(render(&koil).names, ["file.rs"]);
+    // and back
+    let path = render(&koil).path;
+    assert!(navigate(&mut koil, &path, &glob, None).moved);
+    assert_eq!(koil.pattern(), Some(&Pattern::Glob(".*rs".into())));
+    // one that isn't a regex is the path field's error, and koil stays
+    let updated = navigate(&mut koil, &format!("{dir}/*.rs"), &glob, None);
+    assert!(updated.ok, "{updated:?}");
+    let path = render(&koil).path;
+    let updated = navigate(&mut koil, &path, &regex, None);
+    assert!(
+        !updated.ok && !updated.path_problems.is_empty(),
+        "{updated:?}"
+    );
+    assert_eq!(koil.pattern(), Some(&Pattern::Glob("*.rs".into())));
+}
+
+#[test]
 fn test_quoted_path() {
     let (temp, mut koil) = koil();
     fs::create_dir(temp.path().join("my dir")).unwrap();

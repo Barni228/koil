@@ -587,9 +587,10 @@ pub struct Updated {
 
 /// Reads the edited listing into `koil`, then uses `settings`, and then opens
 /// `open` (a dir, relative to the open one) if given, else `path` (the path
-/// field, as written) if it changed, all in `Koil::update_and_open`, which
-/// reads the entries with the settings they were listed with. If anything
-/// fails, `koil` is left as it was.
+/// field, as written) if it changed, or if the pattern open must be read
+/// again with `settings` (see [`rereads`]), all in `Koil::update_and_open`,
+/// which reads the entries with the settings they were listed with. If
+/// anything fails, `koil` is left as it was.
 pub fn update(
     koil: &mut Koil,
     path: &str,
@@ -614,7 +615,8 @@ pub fn update(
         return failed(Vec::new(), vec![path_problem(path, &message)], message);
     }
     let before_dir = koil.current_dir().to_path_buf();
-    let target = open.or((location != show_location(koil)).then_some(location));
+    let changed = location != show_location(koil) || rereads(koil, settings);
+    let target = open.or(changed.then_some(location));
     let entries = &parsed.entries;
     let updated = match koil.update_and_open(entries, settings.clone(), target.map(Path::new)) {
         Ok(updated) => updated,
@@ -651,6 +653,14 @@ pub fn update(
             .unwrap_or_default(),
         ..Updated::default()
     }
+}
+
+/// Whether the pattern `koil` has open must be read again for `settings`:
+/// it's a glob and they read patterns as regexes, or the other way round.
+/// Koil keeps a pattern as it was read when only the settings change, so
+/// `:set regex` would leave the field's pattern read as it wasn't anymore.
+pub fn rereads(koil: &Koil, settings: &Settings) -> bool {
+    (koil.pattern()).is_some_and(|p| matches!(p, Pattern::Regex(_)) != settings.regex)
 }
 
 /// An error about the path field (`path`, as written), underlined from
@@ -1603,16 +1613,11 @@ pub struct Span {
 }
 
 /// The parts of the pattern in the path field `line`, to color. None unless
-/// it has one. It's read as a regex if it's the regex that's open, or it
-/// changed and `regex` (the setting the next update uses) is on, else as a
-/// glob. The pattern starts where `Koil::open` would read it from (see
-/// [`pattern_start`]).
+/// it has one. It's read as a regex if `regex` (the setting the next update
+/// reads it with, see [`rereads`]) is on, else as a glob. The pattern
+/// starts where `Koil::open` would read it from (see [`pattern_start`]).
 pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
     let path = line.trim();
-    let regex = match path == show_location(koil) {
-        true => matches!(koil.pattern(), Some(Pattern::Regex(_))),
-        false => regex,
-    };
     let Some(start) = pattern_start(koil, path, regex) else {
         return Vec::new();
     };

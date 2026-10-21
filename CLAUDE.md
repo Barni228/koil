@@ -375,7 +375,12 @@ the scratchpad (see Scratchpad).
 - **Update** (`updateListing`): koil reads the entries with the settings they
   were shown with, then takes vim's `:set hidden/gitignore/regex`, then opens
   the Enter/`-` target, else the path field's path if it changed (like
-  koil-cli, where it's the first line). `:set` while a file is open
+  koil-cli, where it's the first line), or if the pattern open was read
+  as a glob and `:set regex` is on, or the other way round
+  (`listing::rereads`): koil-core keeps a pattern as it was read when only
+  the settings change, so `gr` left a regex written as a glob a glob,
+  matching nothing, and Enter didn't open it again, as it hadn't changed
+  (`takeSettings` reads it again too). `:set` while a file is open
   reaches koil only once a listing is shown: `Koil.open` (back to a file's
   dir, a folder opened) opens with the settings (koil-core's `open_with`,
   so what was open isn't read again for them first), and `showListing`
@@ -1022,7 +1027,7 @@ the scratchpad (see Scratchpad).
   (`listing::path_syntax`: from where `Koil::read_location` says the
   pattern starts, after the longest existing dir, at the first part with a
   special character that isn't quoted; a regex's, `regex_parts`, with
-  `:set regex` and the path changed, or a regex open, else a glob's,
+  `:set regex`, which the next update reads it with, else a glob's,
   `glob_parts`), in `theme.patternColors`.
 - **Syntax** (syntax.rs, `setTextColors` in native.cpp): a file (and the
   scratchpad) is colored by what most files share, not by its language
