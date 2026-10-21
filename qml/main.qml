@@ -82,7 +82,7 @@ ApplicationWindow {
         MOVE: "rename",
         COPY: "copy"
     })
-    // The parts of the regex in the path field (see Editor.pathSyntax), and
+    // The parts of the pattern in the path field (see Editor.pathSyntax), and
     // the path they're for.
     property var pathSyntax: []
     property string pathLine: ""
@@ -620,7 +620,7 @@ ApplicationWindow {
         }, null, () => Qt.callLater(askConflicts, questions.slice(1)));
     }
 
-    // Finds the parts of the regex in the path field again, if the path
+    // Finds the parts of the pattern in the path field again, if the path
     // changed (or `force`, when the regex setting did).
     function updatePathSyntax(force) {
         const line = listing ? pathView.textArea.text : "";

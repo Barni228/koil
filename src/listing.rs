@@ -1591,9 +1591,10 @@ fn byte_index(s: &str, at: usize) -> usize {
 }
 
 /// A part of the path field to color: the `pattern` (all of it, after the
-/// dirs it's in), then its regex's parts: an `escape`, a `class`, a
-/// `quantifier`, a `group` (or `|`), or an `anchor` (`.`, `,`, `^` and `$`,
-/// which match any character, or a place).
+/// dirs it's in, so it's told apart from them), then its parts: an
+/// `escape`, a `class`, a regex's `quantifier`, a `group` (or a regex's
+/// `|`, a glob's `{a,b}`), or an `anchor` (a regex's `.`, `,`, `^` and `$`,
+/// a glob's `*` and `?`, which match any character, or a place).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Span {
     pub start: usize,
@@ -1601,17 +1602,18 @@ pub struct Span {
     pub kind: &'static str,
 }
 
-/// The parts of the regex in the path field `line`, to color. None unless
-/// the path is read as a regex: it's the regex that's open, or it changed
-/// and `regex` (the setting the next update uses) is on. The regex starts
-/// where `Koil::open` would read it from (see [`pattern_start`]).
+/// The parts of the pattern in the path field `line`, to color. None unless
+/// it has one. It's read as a regex if it's the regex that's open, or it
+/// changed and `regex` (the setting the next update uses) is on, else as a
+/// glob. The pattern starts where `Koil::open` would read it from (see
+/// [`pattern_start`]).
 pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
     let path = line.trim();
-    let is_regex = match path == show_location(koil) {
+    let regex = match path == show_location(koil) {
         true => matches!(koil.pattern(), Some(Pattern::Regex(_))),
         false => regex,
     };
-    let Some(start) = is_regex.then(|| pattern_start(koil, path)).flatten() else {
+    let Some(start) = pattern_start(koil, path, regex) else {
         return Vec::new();
     };
     let pattern = &path[start..];
@@ -1621,22 +1623,74 @@ pub fn path_syntax(koil: &Koil, line: &str, regex: bool) -> Vec<Span> {
         length: utf16_len(&pattern[s..e]),
         kind,
     };
-    let parts = regex_parts(pattern)
-        .into_iter()
-        .map(|(s, e, kind)| span(s, e, kind));
+    let parts = match regex {
+        true => regex_parts(pattern),
+        false => glob_parts(pattern),
+    };
+    let parts = parts.into_iter().map(|(s, e, kind)| span(s, e, kind));
     [span(0, pattern.len(), "pattern")]
         .into_iter()
         .chain(parts)
         .collect()
 }
 
-/// Where the regex starts in `path` (the path field, as written), as
-/// `Koil::read_location` says: after the longest part of the path that's a
-/// dir, at the first part with a special character that isn't quoted. None
-/// if it isn't a pattern.
-fn pattern_start(koil: &Koil, path: &str) -> Option<usize> {
-    let start = koil.read_location(path, true).pattern_start?;
+/// Where the pattern (a regex if `regex`, else a glob) starts in `path`
+/// (the path field, as written), as `Koil::read_location` says: after the
+/// longest part of the path that's a dir, at the first part with a special
+/// character that isn't quoted. None if it isn't a pattern.
+fn pattern_start(koil: &Koil, path: &str, regex: bool) -> Option<usize> {
+    let start = koil.read_location(path, regex).pattern_start?;
     path.is_char_boundary(start).then_some(start)
+}
+
+/// The parts of `glob` to color, as byte ranges and their kinds (see
+/// [`Span`]), as globset reads it: a `,` is a `group` only in `{...}`, and
+/// a class ends at its first `]` (but one first in it). One that isn't
+/// valid (yet) is colored too, as [`regex_parts`] colors a regex.
+fn glob_parts(glob: &str) -> Vec<(usize, usize, &'static str)> {
+    let chars: Vec<(usize, char)> = glob.char_indices().collect();
+    let at = |i: usize| chars.get(i).map_or(glob.len(), |&(at, _)| at);
+    let is = |i: usize, c: char| chars.get(i).is_some_and(|&(_, d)| d == c);
+    let mut parts = Vec::new();
+    let mut braces = 0;
+    let mut i = 0;
+    while i < chars.len() {
+        let start = i;
+        i += 1;
+        let kind = match chars[start].1 {
+            '\\' => {
+                i += 1;
+                "escape"
+            }
+            '[' => {
+                // `!` or `^` negates it, and a `]` first is in it
+                if is(i, '!') || is(i, '^') {
+                    i += 1;
+                }
+                if is(i, ']') {
+                    i += 1;
+                }
+                while i < chars.len() && !is(i, ']') {
+                    i += 1;
+                }
+                i += 1;
+                "class"
+            }
+            '*' | '?' => "anchor",
+            '{' => {
+                braces += 1;
+                "group"
+            }
+            '}' if braces > 0 => {
+                braces -= 1;
+                "group"
+            }
+            ',' if braces > 0 => "group",
+            _ => continue,
+        };
+        parts.push((at(start), at(i), kind));
+    }
+    parts
 }
 
 /// The parts of `regex` to color, as byte ranges and their kinds (see

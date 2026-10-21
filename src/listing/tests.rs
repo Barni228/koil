@@ -1065,6 +1065,38 @@ fn test_regex_parts() {
     assert_eq!(parts(r"(?P<n[a\"), [("(?P<n[a\\", "group")]);
 }
 
+/// The parts of `glob` as (text, kind).
+fn glob(glob: &str) -> Vec<(&str, &str)> {
+    let parts = glob_parts(glob).into_iter();
+    parts.map(|(s, e, kind)| (&glob[s..e], kind)).collect()
+}
+
+#[test]
+fn test_glob_parts() {
+    assert_eq!(
+        glob(r"src/**/?\*.rs"),
+        [
+            ("*", "anchor"),
+            ("*", "anchor"),
+            ("?", "anchor"),
+            (r"\*", "escape")
+        ]
+    );
+    // a `,` only between braces, and a `]` first in a class
+    assert_eq!(
+        glob("a,{b,[]}]}[!x]"),
+        [
+            ("{", "group"),
+            (",", "group"),
+            ("[]}]", "class"),
+            ("}", "group"),
+            ("[!x]", "class")
+        ]
+    );
+    // unfinished, as it is while it's typed
+    assert_eq!(glob("[a{"), [("[a{", "class")]);
+}
+
 #[test]
 fn test_path_syntax() {
     let (_temp, koil) = koil();
@@ -1087,8 +1119,19 @@ fn test_path_syntax() {
             ("\\.".to_string(), "escape")
         ]
     );
-    // only when it's read as a regex
+    // as a glob, it has no special character, so it's a path
     assert_eq!(spans(&line, false), []);
+    // a glob's, in the dirs
+    assert_eq!(
+        spans(&format!("{dir}/dir/*.{{rs,md}}"), false),
+        [
+            ("*.{rs,md}".to_string(), "pattern"),
+            ("*".to_string(), "anchor"),
+            ("{".to_string(), "group"),
+            (",".to_string(), "group"),
+            ("}".to_string(), "group")
+        ]
+    );
     // a dir, even with a special character, and the path that's open
     assert_eq!(spans(&dir, true), []);
     assert_eq!(spans("dir", true), []);

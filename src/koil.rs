@@ -99,8 +99,8 @@ pub mod qobject {
         #[qinvokable]
         fn dir_sizes(self: &Koil) -> QString;
 
-        /// The parts of the regex in the path field `line` to color, as a
-        /// list of `listing::Span`: none unless it's read as a regex.
+        /// The parts of the pattern in the path field `line` to color, as a
+        /// list of `listing::Span`: none unless it has one.
         #[qinvokable]
         fn path_syntax(self: &Koil, line: &QString) -> QString;
 

@@ -1016,12 +1016,14 @@ the scratchpad (see Scratchpad).
   more than a few lines (`QSyntaxHighlighter` lays the document out after
   each line, so coloring a 3000-line listing again took a second, and `-`
   out of it two). The path field's document has one too
-  (`setPathColors`, `isPath`): all of it in `theme.directory`, and while the
-  path is read as a regex (`:set regex` and the path changed, or a regex is
-  open), `pathSyntax` gives its parts (`listing::path_syntax`: from where
-  `Koil::read_location` says the regex starts, after the longest existing
-  dir, at the first part with a special character that isn't quoted),
-  drawn over that in `theme.regexColors`.
+  (`setPathColors`, `isPath`): all of it in `theme.directory`, and if the
+  path has a pattern, `pathSyntax` gives it in the text's color, so it's
+  told apart from the dirs before it (`dir/*`), and its parts over that
+  (`listing::path_syntax`: from where `Koil::read_location` says the
+  pattern starts, after the longest existing dir, at the first part with a
+  special character that isn't quoted; a regex's, `regex_parts`, with
+  `:set regex` and the path changed, or a regex open, else a glob's,
+  `glob_parts`), in `theme.patternColors`.
 - **Syntax** (syntax.rs, `setTextColors` in native.cpp): a file (and the
   scratchpad) is colored by what most files share, not by its language
   (unless `:set nosyntax`, a vim setting, `vim.syntax`, which `:syntax
@@ -2046,7 +2048,7 @@ the scratchpad (see Scratchpad).
   use a sorted array or an object of keys. A `var`
   property bound to objects of constants (`dark ? { create: "#73c991" } :
   { … }`) came out undefined in the compiled app, though qmltestrunner had
-  it (`regexColors`, with a `String(text)` in it, works), so
+  it (`patternColors`, with a `String(text)` in it, works), so
   `theme.changeColor` is a function. Compiled, a `var` property's `({})`
   is a `QVariantMap`, not a JS object, and in Qt 6.10 (Windows' CI)
   taking a key after one was `delete`d crashed (the help's `textItems`,

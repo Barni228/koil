@@ -34,7 +34,7 @@ Item {
     property var pendingLines: []
     // Whether this is the path field over the listing: one line, in the
     // dirs' color, with no line numbers. `pathSyntax` holds the parts of it
-    // to color (a regex's), as { start, length, kind } (see listing::Span).
+    // to color (a pattern's), as { start, length, kind } (see listing::Span).
     property bool pathField: false
     property var pathSyntax: []
     // The file the text is, if any (not in the scratchpad), whose name says
@@ -199,7 +199,7 @@ Item {
         if (pathField) {
             const spans = [];
             for (const s of pathSyntax)
-                spans.push(String(s.start), String(s.length), theme.regexColors[s.kind]);
+                spans.push(String(s.start), String(s.length), theme.patternColors[s.kind]);
             system.setPathColors(editor.textDocument, String(theme.directory), spans);
             return;
         }

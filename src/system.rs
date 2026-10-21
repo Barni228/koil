@@ -283,7 +283,7 @@ pub mod qobject {
         );
 
         /// Colors the path field's `textDocument`: all of it in
-        /// `directory_color`, and parts of it (a regex's) over that: `spans`
+        /// `directory_color`, and parts of it (a pattern's) over that: `spans`
         /// holds a start, a length and a color for each part.
         #[qinvokable]
         unsafe fn set_path_colors(
