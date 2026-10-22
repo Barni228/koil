@@ -211,10 +211,11 @@ function sections(help) {
                 ["`g!`", "Vim's `!`: `g!!` or `g!ip` types the range of those lines (in visual mode, the "
                     + "selection's), which go through the command you type, like `sort`, and its output "
                     + "takes their place (in the listing, as new entries)."],
-                ["`%`", "The entry on the line (from the path field, the open dir), or in a file, the "
-                    + "file, quoted for the shell. In the scratchpad, a file of its text, which then goes "
-                    + "back in it (`!echo hi >> %`: `u` takes it back). With a range, in the listing, the "
-                    + "entries on its lines. `\\%` is a `%`, as in `:!date +\\%F`."],
+                ["`%`", "The entry on the line (from the path field, the open dir, or a pattern's "
+                    + "entries, as a shell's glob gives them), or in a file, the file, quoted for the shell. "
+                    + "In the scratchpad, a file of its text, which then goes back in it (`!echo hi >> %`: "
+                    + "`u` takes it back). With a range, in the listing, the entries on its lines. `\\%` is a "
+                    + "`%`, as in `:!date +\\%F`."],
                 ["`<cfile>`", "The path or URL under the cursor, as `gf` opens it (`" + cmdKey + "click` "
                     + "underlines it), or else the file name there; in the listing, the entry, as `%`. With a "
                     + "range, the first on each line, like `:'<,'>!rm <cfile>` on what `:_!find` wrote. "

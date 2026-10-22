@@ -35,6 +35,13 @@ ModalBox {
     readonly property real lineStep: Math.round(20 * zoom)
     // What it shows: the help, or a list (see showList).
     property string heading: "Koil Help"
+    // The heading as the title shows it, and its rows: one too long for
+    // `headingRows` (a shell command on many paths) loses its middle, as
+    // the status line's message does, or it took all of the box, and the
+    // text under it couldn't be scrolled to.
+    readonly property string shownHeading: headingMetrics.elidedText
+    readonly property int shownHeadingRows: title.lineCount
+    readonly property int headingRows: 3
     property var shownSections: sections
 
     // What it says, section by section (see help.js).
@@ -528,13 +535,26 @@ ModalBox {
                 id: title
 
                 // A long one (a shell command) wraps, clear of the keys.
-                width: Math.min(implicitWidth, parent.width - keysHint.implicitWidth - 12 * help.zoom)
+                readonly property real room: parent.width - keysHint.implicitWidth - 12 * help.zoom
+
+                width: Math.min(implicitWidth, room)
                 wrapMode: TextEdit.WrapAnywhere
                 leftPadding: help.codePadding // as CodeText's
-                text: help.heading
+                text: help.shownHeading
                 font.pixelSize: Math.round(18 * help.zoom)
                 font.bold: true
                 color: help.theme.text
+            }
+            TextMetrics {
+                id: headingMetrics
+
+                font: title.font
+                text: help.heading
+                elide: Qt.ElideMiddle
+                // A row wrapped anywhere ends short of its room by less
+                // than a character, which the em taken off each makes up.
+                elideWidth: help.headingRows
+                    * (title.room - title.leftPadding - title.rightPadding - title.font.pixelSize)
             }
             CodeText {
                 id: keysHint

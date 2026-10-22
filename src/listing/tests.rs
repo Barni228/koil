@@ -538,6 +538,40 @@ fn test_paths_on_lines() {
 }
 
 #[test]
+fn test_paths_in_field() {
+    let (_temp, mut koil) = koil_with(&["dir"], &["a.rs", "b.rs", "c.rs", "notes"]);
+    // a plain dir: the dir itself
+    let rendered = render(&koil);
+    let paths = paths_in_field(&koil, &rendered.text, &rendered.hidden);
+    assert_eq!(paths, Ok(vec![unicode(koil.current_dir()).unwrap()]));
+    // a pattern: the entries listed, where their IDs are on disk
+    koil.open("*.rs").unwrap();
+    let rendered = render(&koil);
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "a.rs" => Some(line.replace("a.rs", "renamed.rs")),
+        "b.rs" => None,
+        _ => Some(line.to_string()),
+    });
+    let paths = paths_in_field(&koil, &text, &hidden);
+    assert_eq!(
+        paths,
+        Ok(vec![path_in(&koil, "a.rs"), path_in(&koil, "c.rs")])
+    );
+    // a new one isn't on disk yet, as for a range
+    let (text, hidden) = edited(&rendered, |line, _| Some(format!("{line}\nnew.rs")));
+    assert_eq!(
+        paths_in_field(&koil, &text, &hidden),
+        Err("“new.rs” isn't on disk until the changes are applied".into())
+    );
+    koil.open("*.txt").unwrap();
+    let rendered = render(&koil);
+    assert_eq!(
+        paths_in_field(&koil, &rendered.text, &rendered.hidden),
+        Err("No entries are listed".into())
+    );
+}
+
+#[test]
 fn test_links_on_lines() {
     let (_temp, koil) = koil();
     let root = koil.current_dir().to_path_buf();

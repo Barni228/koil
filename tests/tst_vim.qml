@@ -4414,6 +4414,30 @@ TestCase {
         tryCompare(help, "opened", false);
     }
 
+    // A title too long for its rows (a shell command on many paths) loses
+    // its middle, so the text under it still has room; a short one doesn't.
+    function test_helpLongHeading() {
+        const names = [];
+        for (let i = 0; i < 300; i++)
+            names.push("file" + i + ".rs");
+        const long = ":!wc -l " + names.join(" ");
+        help.showText(long, "output", "");
+        tryCompare(help, "opened", true);
+        verify(help.shownHeading.length < long.length);
+        verify(help.shownHeading.startsWith(":!wc -l file0.rs"));
+        verify(help.shownHeading.endsWith("file299.rs"));
+        verify(help.shownHeading.includes("…"));
+        verify(help.shownHeadingRows <= help.headingRows, help.shownHeadingRows);
+        verify(help.shownHeadingRows > 1, help.shownHeadingRows);
+        help.close();
+        tryCompare(help, "opened", false);
+        help.showText(":!ls", "output", "");
+        tryCompare(help, "opened", true);
+        compare(help.shownHeading, ":!ls");
+        help.close();
+        tryCompare(help, "opened", false);
+    }
+
     // :h goes to a topic's section, and to the row of a key in it, or
     // else to the first row of that key.
     function test_helpTopics() {

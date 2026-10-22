@@ -1267,6 +1267,38 @@ pub fn paths_on_lines(
     hidden: &[Hidden],
     lines: &[(usize, usize)],
 ) -> Result<Vec<String>, String> {
+    let paths = entries_on_lines(koil, text, hidden, lines)?;
+    match (paths.is_empty(), lines) {
+        (false, _) => Ok(paths),
+        (true, [(first, last)]) if first == last => Err(NO_ENTRY.to_string()),
+        (true, _) => Err("No entries on these lines".to_string()),
+    }
+}
+
+/// What a shell command's `%` is from the path field: the open dir, or if
+/// a pattern is open, the entries it lists, as [`paths_on_lines`] finds
+/// those of every line, so `wc -l %` with `src/**/*.rs` open counts the
+/// files it matches, as a shell's glob would, rather than failing on
+/// `src`, where the command runs anyway.
+pub fn paths_in_field(koil: &Koil, text: &str, hidden: &[Hidden]) -> Result<Vec<String>, String> {
+    if koil.pattern().is_none() {
+        return unicode(koil.current_dir()).map(|dir| vec![dir]);
+    }
+    let paths = entries_on_lines(koil, text, hidden, &[(0, usize::MAX)])?;
+    match paths.is_empty() {
+        false => Ok(paths),
+        true => Err("No entries are listed".to_string()),
+    }
+}
+
+/// Where the entries on `lines` are on disk, as [`paths_on_lines`] says,
+/// but none if there are none.
+fn entries_on_lines(
+    koil: &Koil,
+    text: &str,
+    hidden: &[Hidden],
+    lines: &[(usize, usize)],
+) -> Result<Vec<String>, String> {
     let parsed = read(koil, text, hidden);
     let mut paths = Vec::new();
     for (&(line, _), entry) in parsed.spots.iter().zip(&parsed.entries) {
@@ -1276,11 +1308,7 @@ pub fn paths_on_lines(
             paths.push(path?);
         }
     }
-    match (paths.is_empty(), lines) {
-        (false, _) => Ok(paths),
-        (true, [(first, last)]) if first == last => Err(NO_ENTRY.to_string()),
-        (true, _) => Err("No entries on these lines".to_string()),
-    }
+    Ok(paths)
 }
 
 /// Where the entry pasted with its ID on a line of a file's or the

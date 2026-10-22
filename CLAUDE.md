@@ -25,9 +25,10 @@ the scratchpad (see Scratchpad).
   opens (`file_at`), what's shown after
   each line when sorted by size or a date (`notes`), what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`),
-  and the entries a shell command runs on (`paths_on_lines`), or what
-  `<cfile>` stands for on a file's lines (`links_on_lines`). Its tests
-  (`src/listing/tests.rs`) use a temp dir.
+  and the entries a shell command runs on (`paths_on_lines`, or from the
+  path field `paths_in_field`), or what `<cfile>` stands for on a file's
+  lines (`links_on_lines`). Its tests (`src/listing/tests.rs`) use a temp
+  dir.
 - `src/history.rs`: `History`, the undo history kept in a file across
   sessions (see Undo history). Its tests (`src/history/tests.rs`) use a
   temp dir.
@@ -803,9 +804,12 @@ the scratchpad (see Scratchpad).
   `$SHELL`, or `%ComSpec%` on Windows, as vim's) in the dir koil has open
   (`Koil.currentDir`, also while a file is, as vim's cwd), with nothing on
   its stdin. `%` in it is, as in vim, the file (relative to that dir if
-  it's in it), but in the listing the entry on the cursor's line (from the
-  path field, the open dir, `.`), where its ID is on disk, as for Space r
-  (`listing::paths_on_lines`; a new entry is an error), and in the
+  it's in it), but in the listing the entry on the cursor's line, where
+  its ID is on disk, as for Space r (`listing::paths_on_lines`; a new
+  entry is an error). From the path field, it's the open dir, `.`, or if
+  a pattern is open, every line's entry, as `:%` gives them
+  (`listing::paths_in_field`), so `wc -l %` with `src/**/*.rs` counts
+  what it matches, as a shell's glob would, not fail on `src`. And in the
   scratchpad a file of its text (`Document.writeScratchpad`, written
   before the command runs: `scratchpad.txt` in a dir of Koil's own in the
   temp dir, made new, so on Linux's shared `/tmp` no one else's can be in
@@ -907,7 +911,10 @@ the scratchpad (see Scratchpad).
   as spaces), the first `SHOWN_LINES` (1000: the help box took half a
   second to lay out 3000): a line that fits goes in the status line
   (`StatusLine.fits`), more in the help box (`help.showText`, plain, where `/`
-  searches it, and Enter closes it, as vim's "Press ENTER"). A failure
+  searches it, and Enter closes it, as vim's "Press ENTER"), under the
+  command, which loses its middle past three rows (`shownHeading`), as
+  the status line's message does: `%` on 100 entries took all of the box,
+  and the output under it couldn't be scrolled to. A failure
   ("shell returned 1") is an error, which stops a macro. What it starts
   with `&` keeps its output open, which is read only `AFTER_EXIT` longer.
   Koil quitting stops it (`SystemRust`'s `Drop`). The Settings window's

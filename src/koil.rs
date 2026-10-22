@@ -153,7 +153,8 @@ pub mod qobject {
         /// run on them (see `listing::paths_on_lines`), `lines` being a
         /// list of `[first, last]` spans of lines (from 0), in order and
         /// apart: `{ paths, message }`, where `message` says why there are
-        /// none. With no lines (the path field), the open dir.
+        /// none. With no lines (the path field), the open dir, or a
+        /// pattern's entries (see `listing::paths_in_field`).
         #[qinvokable]
         fn paths_on_lines(
             self: &Koil,
@@ -681,11 +682,11 @@ impl qobject::Koil {
 
     fn paths_on_lines(&self, text: &QString, hidden: &QString, lines: &QString) -> QString {
         let lines: Vec<(usize, usize)> = from_json(lines);
+        let (text, hidden) = (text.to_string(), read_hidden(hidden));
         let paths = if lines.is_empty() {
-            listing::unicode(self.koil.current_dir()).map(|dir| vec![dir])
+            listing::paths_in_field(&self.koil, &text, &hidden)
         } else {
-            let text = text.to_string();
-            listing::paths_on_lines(&self.koil, &text, &read_hidden(hidden), &lines)
+            listing::paths_on_lines(&self.koil, &text, &hidden, &lines)
         };
         listed("paths", paths)
     }
