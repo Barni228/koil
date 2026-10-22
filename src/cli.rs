@@ -61,16 +61,17 @@ pub fn command() -> Command {
         .arg(arg!([line] "Put the cursor on line N (+ alone: the last line)").value_name("+N"))
         .arg(Arg::new("more").num_args(0..).hide(true))
         .arg(Arg::new("escaped").num_args(0..).last(true).hide(true))
-        .after_help(
-            "Without a PATH, Koil lists the Start in setting's directory, or else your\n\
-             home directory. A PATH of - puts the text read from stdin in the\n\
-             scratchpad, as does text piped in (git diff | koil). With -p, what the\n\
-             scratchpad has when Koil quits goes to stdout, so Koil can edit text in\n\
-             a pipe (ls | koil -p | sort).\n\n\
-             Each -c runs a command as typed after a : (after +N), in turn, so\n\
-             anything Koil does can be done as it starts, and normal presses keys:\n\
-             koil ~/src -c 'set sort=size wrap' -c 'normal G'. One that fails stops\n\
-             the rest.",
+        .after_long_help(
+            "Without a PATH, Koil lists the folder from the `Start in` setting.\n\
+             `-` as a PATH puts the text read from stdin in the scratchpad.\n\
+             Piped text also goes to the scratchpad, `git diff | koil`.\n\
+             `-p` prints the scratchpad after exiting, so text can be edited in a pipe:\n\
+             \x20 ls | koil -p | sort\n\
+             \n\
+             Each `-c` runs a command as if typed after `:` (after `+N`), for example:\n\
+             \x20 koil ~/src -c 'set sort=size wrap' -c 'norm G'\n\
+             opens ~/src, sorting by size, wrap enabled, cursor on last line.\n\
+             If one command fails, the rest don't run.",
         )
 }
 
