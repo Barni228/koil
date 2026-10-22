@@ -1110,6 +1110,20 @@ TestCase {
         verify(!Txt.ignoresCase("\\S", false));
     }
 
+    // A search reads its pattern with the u flag where it can, as the find
+    // bar does: . is a whole emoji, and \u{…} is a code point. One that
+    // isn't valid with it (\-) is read without it.
+    function test_searchUnicode() {
+        load("a😀b x-y ab");
+        keys("$/a.b<CR>");
+        compare(vim.cursor, 0);
+        keys("$/\\u{1F600}<CR>");
+        compare(vim.cursor, 1);
+        keys("/x\\-y<CR>");
+        compare(vim.cursor, 5);
+        verify(!vim.messageIsError);
+    }
+
     // & goes back to the defaults Koil gives (the saved settings).
     function test_setDefault() {
         load("a");
@@ -4041,6 +4055,27 @@ TestCase {
         compare(render(), "b <M:h1> b <C:h2> b");
         vim.nativeUndo(false);
         compare(render(), "a <M:h1> a <C:h2> a");
+        findBar.close();
+    }
+
+    // The replacement, as VS Code's: $1, $&, $$, \u before a group; & is
+    // itself. \0 to \9 are the match and its groups too, as :s's are, and
+    // one that isn't a group stays as it is.
+    function test_replacementSyntax() {
+        load("ab cd");
+        findBar.open(true);
+        findBar.useRegex = true;
+        findBar.query = "(\\w)(\\w)";
+        findBar.replacement = "$2&$$\\u$1[\\0]\\2\\3";
+        findBar.replaceAll();
+        compare(render(), "b&$A[ab]b\\3 d&$C[cd]d\\3");
+        vim.nativeUndo(false);
+        findBar.useRegex = false;
+        findBar.query = "ab";
+        findBar.replacement = "\\0$&";
+        findBar.replaceAll();
+        compare(render(), "\\0$& cd");
+        findBar.useRegex = true;
         findBar.close();
     }
 

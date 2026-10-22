@@ -244,6 +244,11 @@ function sections(help) {
                 [isMac ? "`⌘G`  `⇧⌘G`" : "`F3`  `Shift+F3`  `Ctrl+G`  `Ctrl+Shift+G`",
                     "Next or previous find bar match."],
                 [isMac ? "`⌘⌥F`" : "`Ctrl+H`", "Find and replace."],
+                ["`$&`  `$1`  `\\1`", "In the find bar's replacement, with a regex: the match (`$0` and `\\0` "
+                    + "too), or its first group. `$$` is a `$`, `\\n` and `\\t` a line break and a tab, and `&` "
+                    + "itself, as in VS Code."],
+                ["`\\u`  `\\l`  `\\U`  `\\L`", "In the find bar's replacement: uppercase or lowercase the group "
+                    + "after it, its first character or all of it (`\\u$1`)."],
                 [isMac ? "`⌘⌥C`  `⌘⌥W`  `⌘⌥R`" : "`Alt+C`  `Alt+W`  `Alt+R`",
                     "In the find bar: match case, whole word, regular expression."],
                 [isMac ? "`⌘⌥L`" : "`Alt+L`",

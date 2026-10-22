@@ -969,12 +969,19 @@ function ignoresCase(pattern, regex) {
     return s === s.toLowerCase();
 }
 
-// What a search for pattern (vim's, the help's) looks for. A pattern that
-// isn't a valid regular expression (e.g. while it's still being typed) is
-// searched for literally. Either way, one without an uppercase letter
-// ignores case (smart case), unless `ignoreCase` says (:s's i and I).
+// What a search for pattern (vim's, the help's) looks for: with the u flag
+// if it can be (so . is an emoji, not half of one, and \u{1F600} works), as
+// the find bar's. A pattern that isn't a valid regular expression (e.g.
+// while it's still being typed) is searched for literally. Either way, one
+// without an uppercase letter ignores case (smart case), unless
+// `ignoreCase` says (:s's i and I).
 function searchRegExp(pattern, ignoreCase) {
     const flags = regex => (ignoreCase === undefined ? ignoresCase(pattern, regex) : ignoreCase) ? "gmi" : "gm";
+    try {
+        return new RegExp(pattern, flags(true) + "u");
+    } catch (e) {
+        // e.g. "\-" or vim's "\<", which are fine without the u flag
+    }
     try {
         return new RegExp(pattern, flags(true));
     } catch (e) {

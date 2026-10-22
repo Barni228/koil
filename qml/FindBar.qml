@@ -313,7 +313,9 @@ FocusScope {
 
     // The replacement for match m: with a regular expression, $1 or $<name>
     // for a group, $& or $0 for the match, $$ for $, \n and \t, and \u, \l,
-    // \U and \L to change the case of the group that follows.
+    // \U and \L to change the case of the group that follows. \0 to \9 are
+    // the match and its groups too, as :s's are (one that isn't a group
+    // stays as it is, as $ does).
     function replacementFor(m) {
         const r = replacement;
         if (!useRegex)
@@ -342,6 +344,11 @@ FocusScope {
                         one = d;
                     else
                         all = d;
+                    i++;
+                    continue;
+                }
+                if (d >= "0" && d <= "9" && +d < m.length) {
+                    out += group(m[+d]);
                     i++;
                     continue;
                 }
