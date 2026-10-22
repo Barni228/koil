@@ -49,18 +49,6 @@ Window {
     ]
     readonly property int lineNumberMode: lineNumberModes.findIndex(
         m => m.number === settings.number && m.relative === settings.relativeNumber)
-    // Files' colors (:set syntax), the listing's dirs before its files
-    // (:set dirsfirst) rather than sorted with them, and whether :! gets the
-    // environment read from the user's shell.
-    readonly property var onOff: [
-        { label: qsTr("On"), value: true },
-        { label: qsTr("Off"), value: false }
-    ]
-    // Long lines (:set wrap), wrapped or not.
-    readonly property var wrapModes: [
-        { label: qsTr("Off"), value: false },
-        { label: qsTr("On"), value: true }
-    ]
     readonly property var colorSchemes: [
         { label: qsTr("System"), value: "system" },
         { label: qsTr("Light"), value: "light" },
@@ -300,6 +288,20 @@ Window {
         theme: win.theme
         current: choice.options.findIndex(o => o.value === win.settings[choice.key])
         onPicked: index => win.app.changeSetting(choice.key, choice.options[index].value)
+    }
+
+    // The setting `key`, on or off: files' colors (:set syntax), long lines
+    // wrapped (:set wrap), the listing's dirs before its files (:set
+    // dirsfirst), and whether :! gets the environment read from the
+    // user's shell.
+    component OnOff: Toggle {
+        id: onOff
+
+        required property string key
+
+        theme: win.theme
+        checked: win.settings[onOff.key]
+        onClicked: win.app.changeSetting(onOff.key, !onOff.checked)
     }
 
     // Resets the setting `key`.
@@ -650,9 +652,8 @@ Window {
                     text: qsTr("Syntax colors")
                     about: qsTr("Colors the strings, numbers, comments, URLs and paths of files and the scratchpad, whatever their language. `:syntax off` turns it off until Koil quits.")
                 }
-                Choice {
+                OnOff {
                     key: "syntax"
-                    options: win.onOff
                 }
                 Reset {
                     key: "syntax"
@@ -662,9 +663,8 @@ Window {
                     text: qsTr("Word wrap")
                     about: qsTr("Long lines go on in rows under them, rather than past the window's edge. View > Word Wrap and `:set wrap` change it until Koil quits.")
                 }
-                Choice {
+                OnOff {
                     key: "wrap"
-                    options: win.wrapModes
                 }
                 Reset {
                     key: "wrap"
@@ -686,9 +686,8 @@ Window {
                     text: qsTr("Folders first")
                     about: qsTr("Lists folders before files; off, they're sorted together. `:set dirsfirst` changes it until Koil quits.")
                 }
-                Choice {
+                OnOff {
                     key: "dirsFirst"
-                    options: win.onOff
                 }
                 Reset {
                     key: "dirsFirst"
@@ -1025,10 +1024,9 @@ Window {
                 // Whether :! gets the environment read from the user's shell
                 // (see shell.rs's `environment`), only on macOS, where an app
                 // opened from Finder has only the system's PATH.
-                Choice {
+                OnOff {
                     visible: win.app.isMac
                     key: "shellEnvironment"
-                    options: win.onOff
                 }
                 Reset {
                     visible: win.app.isMac

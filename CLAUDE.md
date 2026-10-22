@@ -131,7 +131,8 @@ the scratchpad (see Scratchpad).
   `ModalBox.qml` (:help's and the questions' box), `WheelFlickable.qml`
   (see Scrolling boxes) and `SelectableText.qml`, the boxes'; and
   `TextButton.qml`, `Segmented.qml` and `DropList.qml`, the buttons and
-  lists the Settings and Shortcuts windows share.
+  lists the Settings and Shortcuts windows share, and `Toggle.qml`, the
+  switch of a setting that's on or off.
 - `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml, the find bar and the
   help's search; `tests/tst_shortcuts.qml`, the Shortcuts window with the
   keys alone.
