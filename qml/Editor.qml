@@ -62,7 +62,8 @@ Item {
     property var saved: null
     // While Cmd (Ctrl elsewhere) is held with the pointer on a link, the
     // link, as { start, end }, drawn underlined, with a pointing hand: a
-    // URL or a path (see link.rs), or in the listing, the name on the line.
+    // URL or a path (see link.rs), or in the listing, the name on the line,
+    // as elsewhere on a line with an entry pasted with its ID.
     // A click on it opens it (see linkClicked). `linkKey` is whether Cmd is
     // held, and `pointer` where the pointer is in the editor (null if it's
     // off it), which `link` follows.
@@ -262,8 +263,11 @@ Item {
         if (c < 0)
             return null;
         const ls = Txt.lineStart(t, c), le = Txt.lineEnd(t, c);
-        if (listing) {
-            const start = ls + vim.prefixLength(t, ls, hiddenAt);
+        // Where a pasted entry's icon is, after the line's indent (see
+        // listing::pasted_entry).
+        const icon = ls + t.slice(ls, le).search(/\S|$/);
+        if (listing || hiddenAt(icon)) {
+            const at = listing ? ls : icon, start = at + vim.prefixLength(t, at, hiddenAt);
             return t.slice(start, le).trim() ? { start: start, end: le } : null;
         }
         const span = JSON.parse(system.linkAt(t.slice(ls, le), c - ls, false));

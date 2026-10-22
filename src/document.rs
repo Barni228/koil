@@ -79,7 +79,9 @@ pub mod qobject {
         /// How the file `path` changed on disk since Koil last read or wrote
         /// it, as its size and the time it was modified tell: "changed",
         /// "gone", or "" if it didn't (or Koil read or wrote another one
-        /// since). Each change is told once.
+        /// since). The scratchpad's file (see `write_scratchpad`) is told
+        /// apart, so writing it doesn't hide a change to the file kept under
+        /// the scratchpad. Each change is told once.
         #[qinvokable]
         fn file_change(self: Pin<&mut Document>, path: &QString) -> QString;
 
@@ -205,8 +207,10 @@ pub struct DocumentRust {
     /// How the file opened last was stored.
     encoding: Encoding,
     /// The file Koil read or wrote last, as it was then (none if it wasn't
-    /// there), which `file_change` tells changes from.
+    /// there), which `file_change` tells changes from, and the
+    /// scratchpad's file as it was written last.
     known: Option<(PathBuf, Option<Stamp>)>,
+    scratch_known: Option<(PathBuf, Option<Stamp>)>,
     /// Watches the file shown, for `file_changed`.
     watcher: Option<FileWatcher>,
     /// The dir the scratchpad's file is in, once it's made, and whether
@@ -350,7 +354,17 @@ impl qobject::Document {
     fn file_change(self: Pin<&mut Self>, path: &QString) -> QString {
         let path = PathBuf::from(path.to_string());
         let mut rust = self.rust_mut();
-        let Some((known, was)) = &mut rust.known else {
+        let rust = &mut *rust;
+        let scratch = rust
+            .scratch_known
+            .as_ref()
+            .is_some_and(|(file, _)| *file == path);
+        let known = if scratch {
+            &mut rust.scratch_known
+        } else {
+            &mut rust.known
+        };
+        let Some((known, was)) = known else {
             return QString::default();
         };
         let now = Stamp::of(&path);
@@ -399,21 +413,25 @@ impl qobject::Document {
 
     fn write_scratchpad(mut self: Pin<&mut Self>, text: &QString) -> QString {
         let mut rust = self.as_mut().rust_mut();
-        let path = match rust.scratchpad_file() {
-            Ok(path) => path_string(&path),
-            Err(err) => {
-                self.failed(QString::from(cannot("save", SCRATCHPAD, &err).as_str()));
-                return QString::default();
-            }
-        };
         let mut text = text.to_string();
         rust.scratch_break = !text.is_empty() && !text.ends_with('\n');
         if rust.scratch_break {
             text.push('\n');
         }
-        match self.write(&path, &text, Encoding::Utf8) {
-            true => path,
-            false => QString::default(),
+        // Not through `write`: the file `known` is may be kept under the
+        // scratchpad, to go back to.
+        let written = rust
+            .scratchpad_file()
+            .and_then(|path| std::fs::write(&path, encode(&text, Encoding::Utf8)).map(|()| path));
+        match written {
+            Ok(path) => {
+                rust.scratch_known = Some((path.clone(), Stamp::of(&path)));
+                path_string(&path)
+            }
+            Err(err) => {
+                self.failed(QString::from(cannot("save", SCRATCHPAD, &err).as_str()));
+                QString::default()
+            }
         }
     }
 

@@ -1283,6 +1283,27 @@ pub fn paths_on_lines(
     }
 }
 
+/// Where the entry pasted with its ID on a line of a file's or the
+/// scratchpad's text is on disk, as `<cfile>` takes it (see
+/// [`links_on_lines`]), for gf, wherever the cursor is on the line:
+/// `hidden` is the line's, from its start. None if it has none.
+pub fn pasted_entry(koil: &Koil, line: &str, hidden: &[Hidden]) -> Option<Result<String, String>> {
+    let hidden = hidden.iter().map(|h| (h.at, h)).collect();
+    entry_on_line(koil, &hidden, line, 0).map(unicode)
+}
+
+/// Where the entry on `line` (which starts at `start` in the text) is on
+/// disk, if its icon hides an ID koil knows.
+fn entry_on_line<'a>(
+    koil: &'a Koil,
+    hidden: &HashMap<usize, &Hidden>,
+    line: &str,
+    start: usize,
+) -> Option<&'a Path> {
+    let (icon, _) = line_icon(hidden, line, start);
+    icon.and_then(|h| koil.path_of(Id(h.text.parse().ok()?)))
+}
+
 /// What `<cfile>` stands for on `lines` of a file's or the scratchpad's
 /// text, in a shell command run on them (see `shell::expand`), as on the
 /// listing's entries (see [`paths_on_lines`]): with `at` (a column, in
@@ -1313,9 +1334,7 @@ pub fn links_on_lines(
         if !on_lines(lines, i) || line.trim().is_empty() {
             continue;
         }
-        let (icon, _) = line_icon(&hidden, line, start);
-        let entry = icon.and_then(|h| koil.path_of(Id(h.text.parse().ok()?)));
-        if let Some(path) = entry {
+        if let Some(path) = entry_on_line(koil, &hidden, line, start) {
             paths.push(unicode(path)?);
             continue;
         }

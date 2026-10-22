@@ -98,10 +98,13 @@ ApplicationWindow {
     // Whether the editor shows the scratchpad (see openScratch), and what
     // it had when it was left, for when it's back: { text, buffer (see
     // Vim.leaveBuffer), contentY }, null until it's first left. Whether vim
-    // was in the path field when it opened, to go back there.
+    // was in the path field when it opened, to go back there, or the file
+    // it opened over, to go back to, as it was left: { path, text, buffer,
+    // contentY, unedited, modified, openedFrom, fileSpot }, or null.
     property bool scratchpad: false
     property var scratchState: null
     property bool scratchFromPath: false
+    property var scratchFromFile: null
     // A file's unsaved changes, or the listing's edits and changes that
     // aren't applied: only while the text isn't what it was (see
     // checkModified), so not once an edit is taken back (`a` typed and
@@ -183,10 +186,11 @@ ApplicationWindow {
         { keys: "  ", name: qsTr("Apply the changes (in a file, save)"), mode: "normal", where: "" },
         { keys: " a", name: qsTr("Apply, listing the changes first"), mode: "normal", where: qsTr("Listing") },
         { keys: " u", name: qsTr("List the applies to undo"), mode: "normal", where: qsTr("Listing") },
-        { keys: " r", name: isMac ? qsTr("Show the entry in Finder") : Qt.platform.os === "windows"
-            ? qsTr("Show the entry in Explorer") : qsTr("Show the entry in the file manager"), mode: "normal",
-            where: qsTr("Listing") },
-        { keys: " o", name: qsTr("Open the entry in its default app"), mode: "normal", where: qsTr("Listing") },
+        { keys: " r", name: (isMac ? qsTr("Show the entry in Finder") : Qt.platform.os === "windows"
+            ? qsTr("Show the entry in Explorer") : qsTr("Show the entry in the file manager"))
+            + qsTr(" (in a file, the file)"), mode: "normal", where: "" },
+        { keys: " o", name: qsTr("Open the entry in its default app (in a file, the file)"), mode: "normal",
+            where: "" },
         { keys: " q", name: qsTr("List your shortcuts"), mode: "both", where: "" },
         { keys: "<CR>", name: qsTr("Open the dir or file on the line"), mode: "normal", where: qsTr("Listing") },
         { keys: "<S-CR>", name: qsTr("Update, staying in the path field"), mode: "normal",
@@ -198,7 +202,7 @@ ApplicationWindow {
         { keys: "gi", name: qsTr("Toggle hiding what git ignores"), mode: "normal", where: qsTr("Listing") },
         { keys: "gr", name: qsTr("Toggle reading the path as a regex"), mode: "normal", where: qsTr("Listing") },
         { keys: "gs", name: qsTr("Sort the listing, by the key after it"), mode: "normal", where: qsTr("Listing") },
-        { keys: "_", name: qsTr("The scratchpad (in it, back)"), mode: "normal", where: qsTr("Listing, scratchpad") },
+        { keys: "_", name: qsTr("The scratchpad (in it, back)"), mode: "normal", where: "" },
         { keys: "!", name: qsTr("Run a shell command on the entry"), mode: "normal", where: "" }
     ]
     // The keys Koil's menus (and the editor's copy, paste and undo) take
@@ -310,21 +314,34 @@ ApplicationWindow {
         updatePathSyntax();
     }
 
-    // _ in the listing: the scratchpad, a text of the user's that's never
-    // saved, as it was left (its cursor, undo history and view: see
-    // keepScratch), until Koil quits. Like a file, it leaves the listing
-    // (whose edits Koil keeps), and _ or - goes back to where the cursor
-    // was (see leaveFile).
+    // _ in the listing or a file: the scratchpad, a text of the user's
+    // that's never saved, as it was left (its cursor, undo history and
+    // view: see keepScratch), until Koil quits. Like a file, it leaves the
+    // listing (whose edits Koil keeps), and _ or - goes back to where the
+    // cursor was (see leaveFile), or to the file, as it was left.
     function openScratch() {
-        if (updateListing())
+        if (!listing || updateListing())
             showScratch();
     }
 
     // The scratchpad, once Koil has the listing's edits (see openScratch;
-    // at startup, there are none yet).
+    // at startup, there are none yet), or over the file, which it keeps as
+    // it is, unsaved changes and all (see askToSave and quitCommand, which
+    // ask about them).
     function showScratch() {
-        fileSpot = listingSpot();
-        scratchFromPath = activeView === pathView;
+        if (listing)
+            fileSpot = listingSpot();
+        scratchFromPath = listing && activeView === pathView;
+        scratchFromFile = filePath ? {
+            path: filePath,
+            text: editorView.textArea.latest.text,
+            buffer: vim.leaveBuffer(),
+            contentY: editorView.flickable.contentY,
+            unedited: unedited,
+            modified: modified,
+            openedFrom: openedFrom,
+            fileSpot: fileSpot
+        } : null;
         listing = false;
         problems = [];
         const s = scratchState || { text: "", buffer: null, contentY: 0 };
@@ -341,7 +358,8 @@ ApplicationWindow {
     }
 
     // Keeps what the scratchpad has as it's left (anything else shown in
-    // the editor goes through showListing or load), for openScratch.
+    // the editor goes through showListing or load), for openScratch. The
+    // file it opened over is shown again (see backToFile), or else left.
     function keepScratch() {
         if (!scratchpad)
             return;
@@ -351,6 +369,25 @@ ApplicationWindow {
             contentY: editorView.flickable.contentY
         };
         scratchpad = false;
+        scratchFromFile = null;
+    }
+
+    // _ or - in the scratchpad opened over a file: the file `file` (see
+    // scratchFromFile), as it was left: its unsaved changes, cursor, undo
+    // history and view. What changed on disk meanwhile is then read again,
+    // or asked about (see checkFile), as the file wasn't watched.
+    function backToFile(file) {
+        load(file.text, [], file.path);
+        unedited = file.unedited;
+        modified = file.modified;
+        openedFrom = file.openedFrom;
+        fileSpot = file.fileSpot;
+        // Before vim's cursor, which then scrolls only if it's out of view.
+        const f = editorView.flickable;
+        f.contentY = Math.max(0, Math.min(file.contentY, f.contentHeight + f.bottomMargin - f.height));
+        vim.enterBuffer(file.buffer);
+        updatePathSyntax();
+        checkFile();
     }
 
     // The scratchpad's text, shown or kept (see keepScratch), as the user
@@ -702,9 +739,9 @@ ApplicationWindow {
         }
         const commands = {
             update: () => updateListing(),
-            apply: () => applyChanges(false, false),
+            apply: () => applyChanges(false),
             save: () => save(false),
-            applyAsking: () => applyChanges(false, false, true),
+            applyAsking: () => applyChanges(false, true),
             undoApply: () => undoApply(),
             reveal: () => reveal(),
             openInApp: () => openInApp(),
@@ -715,8 +752,8 @@ ApplicationWindow {
             hidden: () => vim.showHidden = !vim.showHidden,
             gitignore: () => vim.gitignore = !vim.gitignore,
             regex: () => vim.regex = !vim.regex,
-            back: () => leaveFile(false),
-            scratch: () => openScratch(),
+            back: () => leaveFile(false, count),
+            scratch: () => scratchpad ? leaveFile(false) : openScratch(),
             shell: () => bangLines(count),
             shortcuts: () => openShortcuts(true)
         };
@@ -797,10 +834,9 @@ ApplicationWindow {
     // (see clickLink). In the listing, the entry on the cursor's line: gf
     // opens it as Enter does, and gx as Space o (from the path field, gf
     // opens the path, and gx the open dir). In a file or the scratchpad,
-    // the link at `at` (a URL or a path, or else the file name there or
-    // after it on the line, as vim's gf takes it), or `text`, what visual
-    // mode selected (see link.rs): gf opens a file or dir in Koil, as a
-    // drop does, and gx in its default app, and either opens a URL in the
+    // the link at `at` (see linkTargetAt), or `text`, what visual mode
+    // selected (see link.rs): gf opens a file or dir in Koil, as a drop
+    // does, and gx in its default app, and either opens a URL in the
     // browser. A relative path is the file's dir's, or else the open dir's.
     function openLink(at, text, external) {
         if (listing) {
@@ -812,13 +848,8 @@ ApplicationWindow {
                 vim.showError("No entry on this line");
             return;
         }
-        const t = editorView.textArea.text;
-        if (!text) {
-            const ls = Txt.lineStart(t, at);
-            const span = JSON.parse(system.linkAt(t.slice(ls, Txt.lineEnd(t, at)), at - ls, true));
-            text = span ? t.slice(ls + span.start, ls + span.end) : "";
-        }
-        const target = JSON.parse(system.linkTarget(text, linkDirs()));
+        const target = text ? JSON.parse(system.linkTarget(text, linkDirs()))
+            : linkTargetAt(editorView.textArea.text, at);
         if (target.error !== undefined) {
             vim.showError(target.error);
         } else if (target.url !== undefined) {
@@ -831,6 +862,22 @@ ApplicationWindow {
         } else {
             openDropped(target.path);
         }
+    }
+
+    // What gf opens at `at` in a file's or the scratchpad's text `t`, as
+    // System.linkTarget gives it: on a line with an entry pasted with its
+    // ID, wherever `at` is, where that is on disk, as <cfile> and the
+    // listing's gf take it (see Koil.pastedEntry); else the URL or path
+    // there, or the file name there or after it, as vim's gf takes it.
+    function linkTargetAt(t, at) {
+        const ls = Txt.lineStart(t, at), le = Txt.lineEnd(t, at), line = t.slice(ls, le);
+        const entry = JSON.parse(koil.pastedEntry(line, JSON.stringify(vim.hiddenIn(vim.hidden, ls, le))));
+        if (entry.message)
+            return { error: entry.message };
+        if (entry.path)
+            return { path: entry.path };
+        const span = JSON.parse(system.linkAt(line, at - ls, true));
+        return JSON.parse(system.linkTarget(span ? line.slice(span.start, span.end) : "", linkDirs()));
     }
 
     // Where a relative path in a file or the scratchpad is looked for, in
@@ -848,10 +895,17 @@ ApplicationWindow {
         openLink(at, "", false);
     }
 
-    // Space r and Space o: where the entry on the cursor's line is on disk,
-    // even if the line renames it, or from the path field, the open dir; or
-    // else "", once the status line says why there's none.
+    // Space r and Space o: what % stands for in a shell command: where the
+    // entry on the cursor's line is on disk, even if the line renames it,
+    // or from the path field, the open dir, and in a file, the file; or
+    // else "", once the status line says why there's none (the scratchpad
+    // isn't on disk).
     function entryPath() {
+        if (!listing) {
+            if (!filePath)
+                vim.showError("The scratchpad isn't a file on disk");
+            return filePath;
+        }
         const t = editorView.textArea.text;
         const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
         const r = JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
@@ -860,8 +914,8 @@ ApplicationWindow {
         return r.path;
     }
 
-    // Space r: shows the entry on the cursor's line in Finder (Explorer on
-    // Windows).
+    // Space r: shows the entry on the cursor's line (the file, in one) in
+    // Finder (Explorer on Windows).
     function reveal() {
         const path = entryPath();
         const why = path && system.reveal(path);
@@ -869,8 +923,8 @@ ApplicationWindow {
             vim.showError(why);
     }
 
-    // Space o: opens the entry on the cursor's line as a double-click in
-    // Finder (Explorer) does: a file in its default app.
+    // Space o: opens the entry on the cursor's line (the file, in one) as a
+    // double-click in Finder (Explorer) does: a file in its default app.
     function openInApp() {
         const path = entryPath();
         const why = path && system.openInApp(path);
@@ -891,15 +945,9 @@ ApplicationWindow {
     // the listing with %, is run on the range's entries (or paths)
     // instead, which they stand for. With `scratch` (:_!), the output goes
     // in the scratchpad instead (see showInScratch), and a filter's lines
-    // only go through it. As the scratchpad is shown in the file's place,
-    // its unsaved changes are asked about first (unless `asked`), as for
-    // File > Open. A range of marked lines (with `lines`) is only those, as
-    // if they were together.
-    function runShell(command, range, scratch, asked) {
-        if (scratch && !listing && !scratchpad && modified && !asked) {
-            askToSave(() => runShell(command, range, scratch, true));
-            return;
-        }
+    // only go through it. A range of marked lines (with `lines`) is only
+    // those, as if they were together.
+    function runShell(command, range, scratch) {
         const t = activeView.textArea.latest.text;
         // A % and a <cfile> that aren't escaped (\%, \<cfile>: see
         // shell::expand).
@@ -1055,19 +1103,12 @@ ApplicationWindow {
     }
 
     // What :_! ran wrote (`text`), in place of the scratchpad's text, as a
-    // change undo takes back, which shows it: from the listing as _ does
-    // (Koil took its edits before it ran), and from a file over its dir's
-    // listing, as - from it would show. Nothing changes if it wrote
+    // change undo takes back, which shows it as _ does (from the listing,
+    // Koil took its edits before it ran). Nothing changes if it wrote
     // nothing. `exit` says why it failed, if it did (see shellDone).
     function showInScratch(title, text, exit) {
-        if (text && !scratchpad) {
-            if (!listing)
-                leaveFile(true);
-            // Its dir can't be listed (the status line says why).
-            if (!listing)
-                return;
+        if (text && !scratchpad)
             showScratch();
-        }
         if (text)
             vim.replaceWhole(text);
         if (exit)
@@ -1149,18 +1190,30 @@ ApplicationWindow {
     }
 
     // `-` in a file: back to the listing it was opened from, or else its
-    // dir's, with the cursor on its entry. Unsaved changes are saved (or
-    // dropped) first, if the user says so. From the scratchpad (also _),
-    // back to where the cursor was, in the path field if it was there.
-    function leaveFile(force) {
-        if (!force) {
-            askToSave(() => leaveFile(true));
+    // dir's, with the cursor on its entry, which is a level up, so with a
+    // `count` over 1 (`3-`), the others go up from there (see goUp).
+    // Unsaved changes are saved (or dropped) first, if the user says so.
+    // From the scratchpad (also _, with no count), back to where the cursor
+    // was, in the path field if it was there, or to the file it opened over
+    // (see backToFile), which is a level too, so `3-` is `-` twice more
+    // from there.
+    function leaveFile(force, count) {
+        if (!force && !scratchpad) {
+            askToSave(() => leaveFile(true, count));
+            return;
+        }
+        if (scratchpad && scratchFromFile) {
+            backToFile(scratchFromFile);
+            if (count > 1)
+                leaveFile(false, count - 1);
             return;
         }
         if (scratchpad) {
             showListing(true, "", fileSpot);
             if (scratchFromPath)
                 activate(pathView);
+            if (count > 1)
+                goUp(count - 1);
             return;
         }
         if (!openedFrom) {
@@ -1171,19 +1224,22 @@ ApplicationWindow {
             }
         }
         showListing(true, openedFrom || fileName, openedFrom ? fileSpot : null);
+        if (count > 1)
+            goUp(count - 1);
     }
 
     // Applies the listing's changes once the user confirms them (Space
-    // Space, Space a, :w, File > Apply Changes…), those they leave picked
-    // (the others are forgotten), then quits if `quit` is set. When
-    // confirmChanges says not to ask (asksFirst), it applies them all,
-    // unless `ask` is set (Space a, File > Apply Changes…). With `orQuit` (:confirm q, ZZ), it
-    // always asks, and No quits without applying; if the listing can't be read (its errors, or a path that
-    // can't be opened), it asks to quit without the changes, saying why (the
-    // status line's error, which updateListing just showed).
-    function applyChanges(quit, orQuit, ask) {
+    // Space, Space a, File > Apply Changes…), those they leave picked (the
+    // others are forgotten). When confirmChanges says not to ask
+    // (asksFirst), it applies them all, unless `ask` is set (Space a, File
+    // > Apply Changes…). With `quit` (:confirm q, ZZ), it always asks, then
+    // quits, and No quits without applying; if the listing can't be read
+    // (its errors, or a path that can't be opened), it asks to quit without
+    // the changes, saying why (the status line's error, which updateListing
+    // just showed).
+    function applyChanges(quit, ask) {
         if (!updateListing()) {
-            if (orQuit)
+            if (quit)
                 confirmDialog.ask("The changes can't be applied. Quit without them?", vim.message, () => Qt.quit());
             return;
         }
@@ -1203,7 +1259,7 @@ ApplicationWindow {
             if (r.ok && quit)
                 Qt.quit();
         };
-        if (!ask && !orQuit && !asksFirst(actions.some(a => a.deletes))) {
+        if (!ask && !quit && !asksFirst(actions.some(a => a.deletes))) {
             apply(actions.map((a, i) => i));
             return;
         }
@@ -1212,8 +1268,8 @@ ApplicationWindow {
         const these = total === 1 ? "this change" : "these " + total + " changes";
         const what = picked => !picked ? "Discard " + these : picked === total ? "Apply " + these
             : "Apply " + picked + " of " + these;
-        confirmDialog.ask(picked => what(picked) + (orQuit ? " before quitting?" : "?"), actions, apply,
-            orQuit ? () => Qt.quit() : null, null, { keywords: changeKeywords });
+        confirmDialog.ask(picked => what(picked) + (quit ? " before quitting?" : "?"), actions, apply,
+            quit ? () => Qt.quit() : null, null, { keywords: changeKeywords });
     }
 
     // Space u: lists the applies Koil can undo, of every session (see
@@ -1361,6 +1417,33 @@ ApplicationWindow {
         return listing ? !updateListing() || koil.hasChanges() : modified || koil.hasChanges();
     }
 
+    // :q (see Vim.quitRequested): quits, unless what's open has unsaved
+    // changes (E37), which with `confirm` (:confirm q) it asks about, and
+    // `force` (:q!) drops, and with `all` (:qa!) the listing's changes
+    // too. In the scratchpad opened over a file, it goes back to the file
+    // first, whose unsaved changes it kept.
+    function quitCommand(force, confirm, all) {
+        if (force && all) {
+            Qt.quit();
+            return;
+        }
+        if (scratchpad && scratchFromFile)
+            leaveFile(true);
+        if (force || !unsaved()) {
+            quitApp(false);
+        } else if (!listing && !modified) {
+            // The listing's changes, while a file is open.
+            quitApp(confirm);
+        } else if (confirm) {
+            if (listing)
+                applyChanges(true);
+            else
+                confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => save(true, true), () => quitApp(true));
+        } else {
+            vim.showError("E37: No write since last change (add ! to override)");
+        }
+    }
+
     // Quits, unless a file is open while the listing has changes that
     // aren't applied: then it goes back to the listing instead (dropping
     // the file's unsaved changes), so they aren't lost, and with `confirm`
@@ -1374,7 +1457,7 @@ ApplicationWindow {
         if (!listing)
             return;
         if (confirm)
-            applyChanges(true, true);
+            applyChanges(true);
         else
             vim.showMessage("Not quitting: the listing has changes that aren't applied");
     }
@@ -1386,17 +1469,26 @@ ApplicationWindow {
     // Runs `open`, which shows something else in place of the file, once
     // the file's unsaved changes are saved or dropped, as the user says
     // (Cancel keeps the file open). At once in the listing, whose edits
-    // Koil keeps.
+    // Koil keeps. In the scratchpad, the file it opened over is asked
+    // about (see showScratch), as it's left too.
     function askToSave(open) {
-        if (listing || !modified) {
+        const kept = scratchpad ? scratchFromFile : null;
+        if (listing || !(kept ? kept.modified : modified)) {
             open();
             return;
         }
-        confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => {
-            if (!doc.saveFile(filePath, editorView.textArea.latest.text))
+        const path = kept ? kept.path : filePath;
+        confirmDialog.ask("Save changes to “" + path.split(/[\\/]/).pop() + "”?", "", () => {
+            const text = kept ? kept.text : editorView.textArea.latest.text;
+            if (!doc.saveFile(path, text))
                 return;
             // Saved, even if what's opened next can't be.
-            markUnedited();
+            if (kept) {
+                kept.unedited = { text: text, hidden: null };
+                kept.modified = false;
+            } else {
+                markUnedited();
+            }
             open();
         }, open);
     }
@@ -1464,17 +1556,15 @@ ApplicationWindow {
 
     // Saves the file (vim's E32 if there's none: nothing is shown), then
     // quits if `quit` is set and the save worked (see quitApp, which `orQuit` is
-    // passed to). The listing's changes are applied instead, once they're
-    // confirmed; with `orQuit` (ZZ), No quits without applying.
+    // passed to). Nothing is written in the listing, whose changes only
+    // Space Space and Space a apply (:w updates, as Cmd+S does), nor in the
+    // scratchpad: there :wq and ZZ quit as :q and :confirm q do.
     function save(quit, orQuit) {
-        if (listing) {
-            applyChanges(!!quit, !!orQuit);
-            return;
-        }
-        // Nothing to write: :wq and ZZ quit as :q does.
-        if (scratchpad) {
+        if (listing || scratchpad) {
             if (quit)
-                quitApp(orQuit);
+                quitCommand(false, orQuit, false);
+            else if (listing)
+                updateListing();
             else
                 vim.showMessage("The scratchpad isn't saved: it's kept until Koil quits");
             return;
@@ -1863,10 +1953,15 @@ ApplicationWindow {
             " q": "shortcuts",
             "!": "shell"
         }, root.filePath ? {
-            "-": "back"
-        } : root.scratchpad ? {
+            " r": "reveal",
+            " o": "openInApp",
             "-": "back",
-            "_": "back"
+            "_": "scratch"
+        } : root.scratchpad ? {
+            " r": "reveal",
+            " o": "openInApp",
+            "-": "back",
+            "_": "scratch"
         } : {})
         // With a selection too, so the list can run a shortcut on it.
         visualCommandKeys: ({
@@ -1877,23 +1972,7 @@ ApplicationWindow {
 
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: (quit, confirm) => root.save(quit, confirm)
-        onQuitRequested: (force, confirm, all) => {
-            if (force && all) {
-                Qt.quit();
-            } else if (force || !root.unsaved()) {
-                root.quitApp(false);
-            } else if (!root.listing && !root.modified) {
-                // The listing's changes, while a file is open.
-                root.quitApp(confirm);
-            } else if (confirm) {
-                if (root.listing)
-                    root.applyChanges(true, true);
-                else
-                    confirmDialog.ask("Save changes to “" + root.fileName + "”?", "", () => root.save(true, true), () => root.quitApp(true));
-            } else {
-                vim.showError("E37: No write since last change (add ! to override)");
-            }
-        }
+        onQuitRequested: (force, confirm, all) => root.quitCommand(force, confirm, all)
         onKeyCommand: (name, count) => root.runKeyCommand(name, count)
         onLinkRequested: (at, text, external) => root.openLink(at, text, external)
         onEditRequested: (path, force) => root.edit(path, force)
@@ -2226,8 +2305,9 @@ ApplicationWindow {
         fileMode: FileDialog.SaveFile
         onAccepted: {
             const path = doc.urlToPath(selectedFile);
+            // Shown in its place, as File > Open shows one.
             if (root.scratchpad) {
-                root.saveScratch(path);
+                root.askToSave(() => root.saveScratch(path));
                 return;
             }
             if (doc.saveFile(path, editorView.textArea.latest.text)) {
@@ -2318,37 +2398,37 @@ ApplicationWindow {
     // file; anything else (a dir, a pattern) Koil lists, and with nothing
     // given, the dir the Settings window's "Start in" says (which, like the
     // path field, can't be a file), else the home dir. The scratchpad (-s,
-    // or text from stdin) opens over that listing (a file's dir, on its
-    // entry). +N puts the cursor on line N of what's shown, and then -c's
-    // commands run (see shown).
+    // or text from stdin) opens over that file or listing. +N puts the
+    // cursor on line N of what's shown, and then -c's commands run (see
+    // shown).
     function startUp() {
         const arg = doc.startupPath();
         const start = arg || doc.startDir(settings.startDir);
         const scratch = doc.startupScratchpad();
         const line = doc.startupLine();
         const file = arg && doc.isFile(arg);
-        if (file && !scratch) {
+        if (file) {
             // Once the editor is done: before its own onCompleted, it doesn't
             // have the line numbers' padding, and adding it then had Qt lay
             // out all of a long file again (100,000 lines took a second).
             Qt.callLater(() => {
                 const error = doc.openFile(start);
-                if (!error) {
-                    shown(line);
-                    return;
-                }
                 // One it can't read: its dir, on its entry, as `-` from it
                 // would show, and why.
-                showFileDir(start);
-                vim.showError(error);
-                shown(-1);
+                if (error)
+                    showFileDir(start);
+                if (scratch) {
+                    startScratch(error, line);
+                    return;
+                }
+                if (error)
+                    vim.showError(error);
+                shown(error ? -1 : line);
             });
             return;
         }
         let error = "";
-        if (file) {
-            showFileDir(start);
-        } else if (!openFolder(start || doc.homeDir()) && start) {
+        if (!openFolder(start || doc.homeDir()) && start) {
             error = vim.message; // why, which openFolder showed
             if (openFolder(doc.homeDir()) && !scratch) {
                 // One that isn't there: the home dir, with it in the path
@@ -2366,17 +2446,22 @@ ApplicationWindow {
         // Once the editor is done, as a file (a long text piped in). Back
         // from it, the path field shows the listing's path, not one that
         // can't be opened, so only the status line says why.
+        Qt.callLater(() => startScratch(error, line));
+    }
+
+    // The scratchpad at startup (-s, or text from stdin), with that text,
+    // over what's shown, then `error` (why what was asked for can't be
+    // shown, if it can't) in the status line, and +N and -c (see shown).
+    function startScratch(error, line) {
         scratchState = {
             text: doc.takeStartupText(),
             buffer: null,
             contentY: 0
         };
-        Qt.callLater(() => {
-            showScratch();
-            if (error)
-                vim.showError(error);
-            shown(line);
-        });
+        showScratch();
+        if (error)
+            vim.showError(error);
+        shown(line);
     }
 
     // What the command line asked for is shown: +N's line, if any (see

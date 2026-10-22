@@ -33,7 +33,7 @@ MenuBar {
         Action {
             text: qsTr("A&pply Changes…")
             enabled: menus.app.listing && !menus.app.boxOpen
-            onTriggered: menus.app.applyChanges(false, false, true)
+            onTriggered: menus.app.applyChanges(false, true)
         }
         Action {
             text: qsTr("Save &As…")

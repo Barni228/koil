@@ -188,6 +188,13 @@ pub mod qobject {
         #[qinvokable]
         fn file_at(self: &Koil, location: &QString) -> QString;
 
+        /// Where the entry pasted with its ID on `line` of a file's or the
+        /// scratchpad's text is on disk (see `listing::pasted_entry`),
+        /// `hidden` being the line's: `{ path, message }`, as
+        /// `path_on_line` gives, both "" if it has none.
+        #[qinvokable]
+        fn pasted_entry(self: &Koil, line: &QString, hidden: &QString) -> QString;
+
         /// The path the ID `id` (an icon's hidden text) stands for (see
         /// `listing::id_path`), or "" if koil doesn't know it.
         #[qinvokable]
@@ -702,6 +709,11 @@ impl qobject::Koil {
             &paths(dirs),
         );
         listed("paths", links)
+    }
+
+    fn pasted_entry(&self, line: &QString, hidden: &QString) -> QString {
+        let entry = listing::pasted_entry(&self.koil, &line.to_string(), &read_hidden(hidden));
+        listed("path", entry.unwrap_or(Ok(String::new())))
     }
 
     fn current_dir(&self) -> QString {

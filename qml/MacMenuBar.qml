@@ -36,7 +36,7 @@ Platform.MenuBar {
         Platform.MenuItem {
             text: qsTr("Apply Changes…")
             enabled: menus.app.listing && !menus.app.boxOpen
-            onTriggered: menus.app.applyChanges(false, false, true)
+            onTriggered: menus.app.applyChanges(false, true)
         }
         Platform.MenuItem {
             text: qsTr("Save As…")

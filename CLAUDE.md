@@ -356,7 +356,9 @@ the scratchpad (see Scratchpad).
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the
   buttons), and `gs` and a key sort it (see Sorting). Cmd+S (File > Save,
-  named Update in the listing) updates.
+  named Update in the listing) and `:w` update: only `Space Space` and
+  `Space a` apply (`save`), as a `:w` typed out of habit mustn't change
+  files.
   Enter in the listing opens the dir or file on its line
   (`listing::target_on_line`: a dir if the name ends with `/`, else the file
   its ID points to on disk, even if the line renames it; a new file is
@@ -365,8 +367,11 @@ the scratchpad (see Scratchpad).
   path field (`openPath`, also from insert mode: see `singleLine`) updates
   and goes to the listing, unless the update fails; Shift+Enter there only
   updates, so vim stays in the field. In a file, `Space Space` saves (as
-  `:w`: `save`), `!` is Koil's too, and with a path, so is `-`
-  (`leaveFile`): back to the listing, on the file's line. `Space q` lists the user's shortcuts
+  `:w`: `save`), `!` is Koil's too, and with a path, so are `-`
+  (`leaveFile`): back to the listing, on the file's line, a level up, so
+  `3-` goes two up from there (`goUp`), `_`: the scratchpad over the
+  file, and `Space r` and `Space o`, which take the file, as `%` does
+  (`entryPath`; in the scratchpad, they say it isn't on disk). `Space q` lists the user's shortcuts
   (see Shortcuts) everywhere, in visual mode too (`visualCommandKeys`), so
   the list can run one on the selection.
   They're only matched at the start of a normal-mode command (so `d-` and
@@ -411,7 +416,7 @@ the scratchpad (see Scratchpad).
   `gitignore`, a sort), the cursor stays on the same line (`listingSpot`),
   even if the update moved its entry (a rename or a new entry goes where
   it sorts), at the same column and the same place in the view.
-- **Apply and undo**: `Space Space`, `:w`, File > Apply Changes… update,
+- **Apply and undo**: `Space Space`, `Space a`, File > Apply Changes… update,
   then `ConfirmDialog` lists `listing::actions` (paths relative to
   the open dir; `Koil::changes`, so a swap is its two renames, not the
   three steps through a temp name), each with a checked box before it
@@ -674,12 +679,12 @@ the scratchpad (see Scratchpad).
   `ZZ` in the listing) asks to
   apply the changes, where No quits without them; if the listing can't be
   read (errors, or a path that can't be opened), they ask instead whether
-  to quit without them, under the update's error. `:wq` applies, then
-  quits; it only fails then, as a write that fails does in vim.
+  to quit without them, under the update's error. `:wq` updates, as `:w`
+  does, then quits as `:q` (`quitCommand`), so it doesn't apply either.
 - **Files**: Enter on a file, File > Open (and a file on the command line)
   leave the listing (updating it first, so its edits stay in koil) for a
-  plain editor: no colors or problems, only `-`, `!` and `Space Space`
-  (a save) of `commandKeys`, and `:w` saves. `-` goes back to what's still open in koil, on `openedFrom` (the
+  plain editor: no colors or problems, only `-`, `_`, `!`, `Space r`,
+  `Space o` and `Space Space` (a save) of `commandKeys`, and `:w` saves. `-` goes back to what's still open in koil, on `openedFrom` (the
   entry Enter was on), with the column and view it had (`fileSpot`), or
   for a file opened otherwise, opens its dir. Enter
   on a new file (`createFile`) updates, then asks to create it, listing the
@@ -751,12 +756,25 @@ the scratchpad (see Scratchpad).
   that ran `!echo hi >> %` goes on with what it wrote, and one `u` takes
   that back; unsaved changes are asked about once it's done.
 - **Scratchpad** (`openScratch`): `_` in the listing (or the path field)
-  shows a text of the user's that's never saved, kept until Koil quits
-  (`koil -s` starts in it, text piped in starts it, and `koil -p` prints
-  it as Koil quits: see Command line).
+  or a file shows a text of the user's that's never saved, kept until
+  Koil quits (`koil -s` starts in it, text piped in starts it, and `koil
+  -p` prints it as Koil quits: see Command line).
   It leaves the listing as a file does (updating it first, `fileSpot`),
   and `_` or `-` there goes back (`leaveFile`) to where the cursor was,
-  in the path field if it was there (`scratchFromPath`). In a shell
+  in the path field if it was there (`scratchFromPath`), which is a
+  level, as from a file, so `3-` is `-` twice more from there (`_` takes
+  no count). From a file, it
+  keeps the file as it is (`scratchFromFile`: its text, unsaved changes
+  and all, cursor, undo history, view and `openedFrom`), and `_` or `-`
+  gives it back (`backToFile`), then reads what changed on disk meanwhile
+  (`checkFile`), as it wasn't watched: so the scratchpad's own file
+  (see Shell commands) has a stamp of its own in Document
+  (`scratch_known`), as writing it made `fileChange` forget the file's.
+  Anything else shown from the scratchpad asks about the file's unsaved
+  changes first (`askToSave`, which saves the kept text), as from the
+  file, and leaves it (`keepScratch`); a quit command goes back to the
+  file first (`quitCommand`), so `:q` fails there on them (E37), and
+  `ZZ` asks. In a shell
   command there, `%` is a file of its text, which goes back in it after,
   and `<cfile>` the path under the cursor (see Shell commands), and `:_!`
   puts a command's output in it. It's the
@@ -769,11 +787,13 @@ the scratchpad (see Scratchpad).
   and `gh` shows their paths. An ID means the same path all session, so
   one pasted back after its file is gone is an error (`NotOnDisk` in
   koil-core), not another file. Edits don't make it modified, `:w`,
-  `Space Space` and Cmd+S only say it isn't saved, `:wq` and `ZZ` quit as `:q` does
-  (`quitApp`: back to the listing while it has changes). Save As
+  `Space Space` and Cmd+S only say it isn't saved, `:wq` and `ZZ` quit as
+  `:q` and `:confirm q` do (`quitApp`: back to the listing while it has
+  changes). Save As
   (`saveScratch`) writes its text to a file, as UTF-8
   (`Document.saveNewFile`: `saveFile` would store it as the file opened
-  last was), and opens that in its place as File > Open does, with the
+  last was), and opens that in its place as File > Open does (asking
+  about the unsaved changes of a file it's over first), with the
   cursor and the view where they were; the scratchpad keeps its text, as
   it does when anything else is shown.
 - **Shell commands** (shell.rs, `runShell` in main.qml, vim's
@@ -844,10 +864,9 @@ the scratchpad (see Scratchpad).
   with its tabs (`Request::scratchpad`). A range's lines go to its stdin,
   and stay, or with `<cfile>`, or `%` in the listing, it's on their
   entries, as for `:!`. It shows the
-  scratchpad from the listing as `_` does, updating before the command
+  scratchpad as `_` does: from the listing, updating before the command
   runs (after which the listing might not read: an entry it deleted), and
-  from a file over its dir's listing, as `-` from it would, asking about
-  the file's unsaved changes first (`askToSave`). If it writes nothing,
+  from a file over the file, which keeps its unsaved changes. If it writes nothing,
   nothing changes. A macro running it goes on in the scratchpad:
   `endWait`'s `done` shows it as a step of the run (`inChunk`), which
   `vim.reset` would otherwise interrupt. It runs on a thread
@@ -897,8 +916,9 @@ the scratchpad (see Scratchpad).
   2), printed by `clap::Error::exit` once `attach_console` ran. The path
   is as under Files (one: more is most likely a pattern the shell
   expanded, which the error's tip says to quote). `-s` (`--scratchpad`,
-  aliases `-t`, `--temp`) starts in the scratchpad, over the listing of
-  the path (a file's dir, on its entry: `startUp` in main.qml). Text from
+  aliases `-t`, `--temp`) starts in the scratchpad, over the file or the
+  listing of the path (`startUp` in main.qml, `startScratch`; over a
+  file that can't be read, its dir's listing, on its entry). Text from
   stdin goes in it too (`Document.takeStartupText`), read to its end
   before the window opens, as vim's `-`: with `-` (from a terminal too,
   until Ctrl-D), or else if stdin is a pipe or a file (`piped`: not
@@ -1111,12 +1131,16 @@ the scratchpad (see Scratchpad).
   path is looked for in the file's dir, then in Koil's (`currentDir`), as
   vim's `path` (`.,,`), and must be on disk (vim's E447 otherwise); its
   `..`s are taken away as written (`normalized`), so the title shows
-  `README.md`, not `src/../README.md`. In the listing, gf opens the entry
+  `README.md`, not `src/../README.md`. On a line with an entry pasted with
+  its ID (see Scratchpad), wherever the cursor is, it's that entry, where
+  its ID is on disk, as `<cfile>` takes it (`linkTargetAt`,
+  `listing::pasted_entry`), not its name read from the open dir, as in the
+  listing. In the listing, gf opens the entry
   on the cursor's line as Enter does (`openEntry`, but with no vim's Enter
   on a line without one), gx as Space o, and from the path field gf opens
   the path and gx the open dir. Cmd (Ctrl elsewhere) held with the pointer
-  on a link (Editor's `link`: in the listing, the name on the line; not
-  the path field) underlines it in `theme.directory` and makes the pointer
+  on a link (Editor's `link`: in the listing, and on a line with a pasted
+  entry, the name on the line; not the path field) underlines it in `theme.directory` and makes the pointer
   a hand; a press there and a release on the same link moves the cursor
   to the character clicked (`vim.jumpTo`) and opens it as gf does
   (`linkClicked`, `clickLink`; not while `boxOpen`). Whether Cmd is held

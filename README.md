@@ -9,7 +9,7 @@ until you apply, and your edits stay while you go through other dirs.
 
 | Key            | Does                                                                              |
 | -------------- | --------------------------------------------------------------------------------- |
-| `Cmd+S`        | Update: read your edits and show the listing again (doesn't change anything)      |
+| `Cmd+S` `:w`   | Update: read your edits and show the listing again (doesn't change anything)      |
 | `Space Space`  | Apply, Deletes go to the trash. In a file, save                                   |
 | `u`            | Undo                                                                              |
 | `Enter`        | Open the dir or file on the line                                                  |
@@ -18,8 +18,8 @@ until you apply, and your edits stay while you go through other dirs.
 | `g.` `gi` `gr` | Toggle hidden files, hiding what git ignores, and reading the path as a regex     |
 | `gs`           | Change sort order, (sort by size, size on disk, last modified, natural, and more) |
 | `_`            | The scratchpad                                                                    |
-| `Space r`      | Show the entry in Finder or Explorer                                              |
-| `Space o`      | Open the entry in its default app                                                 |
+| `Space r`      | Show the entry (in a file, the file) in Finder or Explorer                        |
+| `Space o`      | Open the entry (in a file, the file) in its default app                           |
 | `Space q`      | Your shortcuts: run one, edit them or make one                                    |
 | `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
 | `m`            | Mark lines anywhere, then `d`, `y`, `!` or `A` act on all of them at once         |
@@ -83,8 +83,9 @@ until you apply, and your edits stay while you go through other dirs.
   copies them there), `!git add` runs on all of them, `A.bak<Esc>` types
   after each, and `:s` changes only them. `Esc` unmarks them.
 - **The scratchpad** (`_`, or `koil -s`) is a text that's never saved, kept
-  until Koil quits. Lines pasted there keep their IDs, so you can put
-  entries aside and paste them into a listing later.
+  until Koil quits. `_` opens it from a file too, and `_` again goes back
+  to the file, unsaved changes and all. Lines pasted there keep their IDs,
+  so you can put entries aside and paste them into a listing later.
 - **Colors in a file** (and the scratchpad) suit any file rather than its
   language: strings, numbers, comments, paths and URLs, and the bracket
   that matches the one at the cursor. In Markdown, `#` starts a heading,

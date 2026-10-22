@@ -597,6 +597,26 @@ fn test_links_on_lines() {
     assert_eq!(links(&[(3, 3)], Some(5)), Ok(vec![path_in(&koil, "notes")]));
 }
 
+#[test]
+fn test_pasted_entry() {
+    let (_temp, koil) = koil();
+    let icon = |at, text: String| Hidden {
+        at,
+        icon: "\u{e612}".into(),
+        text,
+    };
+    let notes = Some(Ok(path_in(&koil, "notes")));
+    // renamed on its line, indented
+    let hidden = [icon(0, id_text(&koil, "notes"))];
+    assert_eq!(pasted_entry(&koil, "\u{e612}  renamed", &hidden), notes);
+    let hidden = [icon(2, id_text(&koil, "notes"))];
+    assert_eq!(pasted_entry(&koil, "  \u{e612}  notes", &hidden), notes);
+    // none: no icon, or one hiding what isn't an ID koil knows
+    assert_eq!(pasted_entry(&koil, "notes", &[]), None);
+    let hidden = [icon(0, "999999".into())];
+    assert_eq!(pasted_entry(&koil, "\u{e612}  notes", &hidden), None);
+}
+
 /// `start` and a part that isn't Unicode, as a name can be on Linux (a
 /// byte that isn't UTF-8) or Windows (a lone surrogate), not on macOS.
 fn not_unicode(start: &str) -> OsString {

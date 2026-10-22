@@ -23,9 +23,10 @@ function sections(help) {
                 + "and pasted in another dir moves. Nothing changes on disk until you apply, and changes "
                 + "stay while you go to other dirs.",
             rows: [
-                ["`" + cmdKey + "S`", "Update: read the edits and show the listing again."],
-                ["`Space Space`  `:w`", "Apply the changes, listing them first (Settings can skip that). `:wq` "
-                    + "then quits. In a file: save."],
+                ["`" + cmdKey + "S`  `:w`", "Update: read the edits and show the listing again. Only "
+                    + "`Space Space` and `Space a` apply them."],
+                ["`Space Space`", "Apply the changes, listing them first (Settings can skip that). In a file: "
+                    + "save."],
                 ["`Space a`", "Apply, always listing the changes first (so does File > Apply Changes…)."],
                 ["󰄲", "In that list: `j` and `k` move, `Space`, `x` or a click picks or leaves out a change "
                     + "(with what it needs), and `a` picks all or none. What's left out is discarded."],
@@ -37,16 +38,18 @@ function sections(help) {
                     + "does."],
                 ["`Enter`", "Open the dir or file on the line. A new file is created first, after asking."],
                 ["`Space r`", "Show the entry on the line in " + fileManager + " (from the path field, the "
-                    + "open dir)."],
+                    + "open dir; in a file, the file)."],
                 ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
-                    + fileManager + " does (from the path field, the open dir)."],
+                    + fileManager + " does (from the path field, the open dir; in a file, the file)."],
                 ["`!`", "Run a shell command on the entry on the line (or the marked ones: see `:h m`): "
                     + "`!git add` or `!rm`, then `Enter` (see `:h !`)."],
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
-                ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing."],
-                ["`_`", "The scratchpad: text of your own, never saved, kept as you left it until Koil "
-                    + "quits. `_` or `-` there goes back to where you were. In a command, `%` is a file of "
-                    + "its text (`!wc -w`), and `<cfile>` the path under the cursor (`:!rm <cfile>`)."],
+                ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing, and in the "
+                    + "scratchpad, to where you were (`3-`: and `-` twice more from there)."],
+                ["`_`", "The scratchpad (from a file too): text of your own, never saved, kept as you left "
+                    + "it until Koil quits. `_` or `-` there goes back to where you were, a file with its "
+                    + "unsaved changes. In a command, `%` is a file of its text (`!wc -w`), and `<cfile>` "
+                    + "the path under the cursor (`:!rm <cfile>`)."],
                 ["icons", "The cursor skips each line's icon and the spaces after it, so `0` goes to the "
                     + "name. `Backspace` there clears the icon (the entry becomes new), then joins lines."],
                 ["quitting", "`:conf q` and `ZZ` ask to apply the changes first. In a file, quitting goes "
@@ -151,8 +154,8 @@ function sections(help) {
                 ["`:e`  `:e!`", "Read the file again from disk (`:e!` dropping its unsaved changes, which `u` "
                     + "brings back). In the listing: update. A file that changes on disk is read again "
                     + "by itself, as a change `u` takes back, and if you changed it too, Koil asks first."],
-                ["`:w`", "Save (in the listing: apply)."],
-                ["`:wq`  `:x`", "Save and quit."],
+                ["`:w`", "Save (in the listing: update, as `" + cmdKey + "S`; `Space Space` applies)."],
+                ["`:wq`  `:x`", "Save and quit (in the listing: update and quit, as `:q`)."],
                 ["`ZZ`", "Save and quit (in the listing: `:confirm q`)."],
                 ["`:q`  `:qa`", "Quit, unless there are unsaved changes."],
                 ["`:q!`  `ZQ`", "Quit without saving."],
@@ -183,11 +186,12 @@ function sections(help) {
             rows: [
                 ["`gf`", "Open the file or dir under the cursor in Koil (a dir is listed), or a URL in the browser. "
                     + "Not on a URL or a path, it takes the file name there or after it, like vim's. In the "
-                    + "listing: the entry on the line, as `Enter`."],
-                ["`gx`", "Open the file, dir or URL under the cursor in its default app. In the listing: the entry "
-                    + "on the line, as `Space o`."],
+                    + "listing (and on a line pasted from it): the entry on the line, as `Enter`."],
+                ["`gx`", "Open the file, dir or URL under the cursor in its default app. In the listing (and on a "
+                    + "line pasted from it): the entry on the line, as `Space o`."],
                 ["`" + cmdKey + "click`", "Open the URL or path under the pointer, as `gf`. Holding `" + cmdKey.replace("+", "")
-                    + "` underlines the one under the pointer. In the listing: the entry."],
+                    + "` underlines the one under the pointer. In the listing (and on a line pasted from it): "
+                    + "the entry."],
                 ["visual", "In visual mode, `gf` and `gx` open what's selected."]
             ]
         },
@@ -432,15 +436,15 @@ function sections(help) {
         {
             title: "Keys starting with Space",
             tags: ["space", "<space>", "leader"],
-            intro: "Koil's own, in the listing and the path field. In a file, `Space Space` saves, and "
-                + "`Space q` works everywhere, in visual mode too.",
+            intro: "Koil's own, in the listing and the path field. In a file, `Space Space` saves, `Space r` "
+                + "and `Space o` take the file, and `Space q` works everywhere, in visual mode too.",
             rows: [
                 ["`Space Space`", "Apply the changes, listing them first (Settings can skip that). In a "
                     + "file: save."],
                 ["`Space a`", "Apply, always listing the changes first."],
                 ["`Space u`", "Undo applies, picked from all of them, newest first."],
-                ["`Space r`", "Show the entry on the line in " + fileManager + "."],
-                ["`Space o`", "Open the entry on the line in its default app."],
+                ["`Space r`", "Show the entry on the line (in a file, the file) in " + fileManager + "."],
+                ["`Space o`", "Open the entry on the line (in a file, the file) in its default app."],
                 ["`Space q`", "List your shortcuts, and the built-in ones (see `:h shortcuts`)."]
             ],
             note: "Shortcuts of yours can start with `Space` too, like `Space c`."

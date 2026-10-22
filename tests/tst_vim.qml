@@ -4372,8 +4372,9 @@ TestCase {
         help.show("");
         tryCompare(help, "opened", true);
         keys("/Space Space<CR>");
-        compare(help.matches.length, 3);
-        compare(help.matchMarks["0/1k"], "0,11,1");
+        compare(help.matches.length, 5);
+        compare(help.matchMarks["0/0t"], "56,67,1");
+        compare(help.matchMarks["0/1k"], "0,11,0");
         keys("<Esc><Esc>");
         tryCompare(help, "opened", false);
     }
