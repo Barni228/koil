@@ -145,6 +145,33 @@ Window {
             return qsTr("`/usr/local/bin/koil` is another program.");
         return qsTr("Lets `koil` in a terminal open Koil.");
     }
+    // What the Shell environment row says under it: off, the files that
+    // the shell :! runs in reads as a login shell (see shell.rs's
+    // `command`), by its name.
+    function environmentNote() {
+        if (settings.shellEnvironment)
+            return qsTr("`:!` gets your shell's `PATH`, as in a terminal.");
+        const shell = settings.shell || app.systemShell;
+        let files = "";
+        switch (shell.split("/").pop()) {
+        case "zsh":
+            files = "`.zshenv`, `.zprofile` and `.zlogin`";
+            break;
+        case "bash":
+            files = "`.bash_profile` (or `.profile`)";
+            break;
+        case "sh":
+        case "dash":
+        case "ksh":
+            files = "`.profile`";
+            break;
+        case "fish":
+            files = "`config.fish`";
+            break;
+        }
+        const off = files ? qsTr("Off, `:!` reads only %1.").arg(files) : qsTr("Off, `:!` gets the system's `PATH`.");
+        return off + " " + qsTr("Turn it on if it can't find a command on your `PATH`, like Homebrew's.");
+    }
     // The saved settings' defaults. A function, as an object of constants
     // bound to a property came out undefined in the compiled app (see
     // Theme.changeColor).
@@ -161,7 +188,7 @@ Window {
             confirmChanges: "always",
             startDir: "",
             shell: "",
-            shellEnvironment: true
+            shellEnvironment: false
         };
     }
     // Whether the saved setting `key` isn't its default.
@@ -993,7 +1020,7 @@ Window {
                 SettingLabel {
                     visible: win.app.isMac
                     text: qsTr("Shell environment")
-                    about: qsTr("Shell commands (`:!`) get the `PATH` and other variables your shell has in a terminal, `.zshrc`'s too, read once as Koil opens: an app opened from Finder has only the system's `PATH`. Off, they get only the profile's (`.zprofile`), which may miss Homebrew.")
+                    about: qsTr("Shell commands (`:!`) get the `PATH` and other variables your shell has in a terminal, `.zshrc`'s too, read once as Koil opens (which runs your shell): an app opened from Finder has only the system's `PATH`. Off, they run in a login shell, which reads only the profile (`.zprofile`, not `.zshrc`): turn it on if a command your terminal finds isn't found, like Homebrew's.")
                 }
                 // Whether :! gets the environment read from the user's shell
                 // (see shell.rs's `environment`), only on macOS, where an app
@@ -1017,7 +1044,7 @@ Window {
                     Layout.preferredWidth: 0
                     Layout.topMargin: -4 * win.zoom
                     theme: win.theme
-                    markup: qsTr("Gives `:!` your shell's `PATH`, Homebrew's too.")
+                    markup: win.environmentNote()
                     font.pixelSize: Math.round(12 * win.zoom)
                     color: win.textColor
                     opacity: 0.6

@@ -1763,8 +1763,9 @@ ApplicationWindow {
         // empty for the system's (root.systemShell).
         property string shell: ""
         // Whether :! commands get the environment the user's shell sets
-        // up (root.shellEnvironment).
-        property bool shellEnvironment: true
+        // up (root.shellEnvironment), off at first, as reading it runs
+        // their rc file.
+        property bool shellEnvironment: false
         // The dir Koil lists when no path is given (see Document.startDir),
         // read only at startup; empty for the home dir.
         property string startDir: ""

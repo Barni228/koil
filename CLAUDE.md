@@ -885,9 +885,12 @@ the scratchpad (see Scratchpad).
   slow. Commands then get it (`env_clear`, so its PATH finds the shell
   too) and no `-l`, which would run `path_helper` again and put
   `/usr/bin` first. If it can't be read, or the Settings window's Shell
-  environment (`shellEnvironment`, on at first, the last row, macOS
+  environment (`shellEnvironment`, off at first, the last row, macOS
   only; `Request::environment`) is off, which doesn't run the user's shell
-  at all, those in `LOGIN_SHELLS` get `-l`, as before. Sh and the like run
+  at all, those in `LOGIN_SHELLS` get `-l`, as before. Its note then names
+  the files that login shell reads (`environmentNote`, by the shell's
+  name: zsh's `.zprofile`, not `.zshrc`), and says to turn it on if a
+  command isn't found, like Homebrew's. Sh and the like run
   with `-c`, cmd.exe
   with `/d /s /c "…"` as a raw argument, PowerShell with
   `-EncodedCommand`, and Git Bash with its command line always quoted (its
