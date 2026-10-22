@@ -131,9 +131,12 @@ the scratchpad (see Scratchpad).
   `KeyCap.qml`: the look the app's own controls share (see Theme);
   `ModalBox.qml` (:help's and the questions' box), `WheelFlickable.qml`
   (see Scrolling boxes) and `SelectableText.qml`, the boxes'; and
-  `TextButton.qml`, `Segmented.qml` and `DropList.qml`, the buttons and
-  lists the Settings and Shortcuts windows share, and `Toggle.qml`, the
-  switch of a setting that's on or off.
+  `TextButton.qml`, `Segmented.qml` and `DropList.qml` (with
+  `DropOption.qml`, a row of it), the buttons and lists the Settings and
+  Shortcuts windows share, and `Toggle.qml`, the switch of a setting
+  that's on or off. A delegate other files use is a file of its own: an
+  inline component of a file with `ComponentBehavior: Bound` is bound to
+  it, and Qt makes none from another file (the lists were empty).
 - `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml, the find bar and the
   help's search; `tests/tst_shortcuts.qml`, the Shortcuts window with the
   keys alone.
@@ -1303,10 +1306,12 @@ the scratchpad (see Scratchpad).
 ## Non-obvious decisions
 
 - **Menus**: QtQuick Controls menus have no `role` property, so macOS uses
-  `Qt.labs.platform` MenuBar with `PreferencesRole`/`QuitRole`, which moves the
-  items into the app menu (`MacMenuBar.qml`). Windows and Linux use an
-  in-window Controls `MenuBar` (`WindowMenuBar.qml`), with the same items,
-  so a change to one goes in both. One is created in main.qml's
+  `Qt.labs.platform` MenuBar with `AboutRole`/`PreferencesRole`/`QuitRole`,
+  which moves the items into the app menu (`MacMenuBar.qml`). Windows and
+  Linux use an in-window Controls `MenuBar` (`WindowMenuBar.qml`), with the
+  same items (About in a Help menu), so a change to one goes in both. About
+  Koil (main.qml's `about`) shows the version (`Qt.application.version`,
+  which main.rs sets from Cargo's) in the help's box. One is created in main.qml's
   `Component.onCompleted`, so only one exists at a time. Qt titles the PreferencesRole item "Preferences..."; a `QTranslator`
   for the `MAC_APPLICATION_MENU` context renames it to "Settings…".
 - **Shortcuts**: use `StandardKey` where Qt has a binding. On macOS
@@ -2065,8 +2070,11 @@ the scratchpad (see Scratchpad).
   puts the children that show three to a row), from the label's `about`,
   so its note (if any) is a short line. Only the name: anywhere on the row
   (and its note's), a tip showed wherever the pointer rested. They're
-  stored in `~/Library/Preferences/com.koil.Koil.plist` on macOS, the registry
-  (`HKEY_CURRENT_USER\Software\Koil\Koil`) on Windows.
+  stored in `~/Library/Preferences/io.github.barni228.Koil.plist` on macOS
+  (Qt's name for it, from the organization domain main.rs sets and the
+  app's name, is the bundle ID, so they're the app's own defaults: one
+  that differed only in case would be the same file under two names), the
+  registry (`HKEY_CURRENT_USER\Software\Koil\Koil`) on Windows.
 - **Fonts**: the editor offers only monospaced fonts
   (`System.monospaceFamilies`), since visual block and the overlays count
   columns. A font counts if its Latin text has one width, not by

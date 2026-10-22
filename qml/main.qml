@@ -2344,6 +2344,20 @@ ApplicationWindow {
         settingsWindow.open();
     }
 
+    // About Koil: its version (for a bug report) and where it's from, in
+    // the help's box.
+    function about() {
+        help.showPlain(qsTr("About Koil"), {
+            title: "",
+            intro: "Koil edits a directory as text, like oil.nvim, with vim's keys. `:h` shows the help.",
+            keyColumns: 8,
+            rows: [
+                ["version", Qt.application.version],
+                ["source", "`https://github.com/Barni228/koil`"]
+            ]
+        });
+    }
+
     function actualSize() {
         vim.fontSize = settings.fontSize;
     }

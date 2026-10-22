@@ -6,7 +6,7 @@ import QtQuick.Templates as T
 
 // A list under `field`, in a window of its own, so the window the field is
 // in doesn't cut it off: the Settings window's fonts and shells, and the
-// macros a shortcut can run. Its delegates are DropList.Option. Unless it
+// macros a shortcut can run. Its delegates are DropOptions. Unless it
 // `takesKeys`, the field keeps them, but for Esc, which closes it.
 T.Popup {
     id: drop
@@ -24,25 +24,6 @@ T.Popup {
 
     // A key pressed while it `takesKeys`.
     signal keyPressed(var event)
-
-    // An option in the list, in the accent color while it's `lit` (the
-    // pointer on it, or the one Return takes).
-    component Option: AbstractButton {
-        id: option
-
-        required property Theme theme
-        property bool lit: hovered
-
-        width: ListView.view.width
-        implicitHeight: 24 * theme.zoom
-        focusPolicy: Qt.NoFocus
-        hoverEnabled: true
-
-        background: Rectangle {
-            radius: 3 * option.theme.zoom
-            color: option.lit ? option.theme.accent : "transparent"
-        }
-    }
 
     y: field.height + 2 * theme.zoom
     width: field.width

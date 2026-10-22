@@ -10,20 +10,20 @@ until you apply, and your edits stay while you go through other dirs.
 | Key            | Does                                                                              |
 | -------------- | --------------------------------------------------------------------------------- |
 | `Cmd+S` `:w`   | Update: read your edits and show the listing again (doesn't change anything)      |
-| `Space Space`  | Apply, Deletes go to the trash. In a file, save                                   |
+| `Space Space`  | Apply (deletes go to the trash). In a file, save                                  |
 | `u`            | Undo                                                                              |
 | `Enter`        | Open the dir or file on the line                                                  |
 | `-`            | The dir above (`3-`: three up). In a file, back to the listing                    |
 | `Tab`          | Go between the listing and the path field over it                                 |
 | `g.` `gi` `gr` | Toggle hidden files, hiding what git ignores, and reading the path as a regex     |
-| `gs`           | Change sort order, (sort by size, size on disk, last modified, natural, and more) |
+| `gs`           | Change the sort order (by size, size on disk, last modified, natural, and more)   |
 | `_`            | The scratchpad                                                                    |
 | `Space r`      | Show the entry (in a file, the file) in Finder or Explorer                        |
 | `Space o`      | Open the entry (in a file, the file) in its default app                           |
 | `Space q`      | Your shortcuts: run one, edit them or make one                                    |
 | `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
 | `m`            | Mark lines anywhere, then `d`, `y`, `!` or `A` act on all of them at once         |
-| `:h`           | Show help page (`:h g`: the keys starting with `g`; `:h gJ`: a key)               |
+| `:h`           | Show the help (`:h g`: the keys starting with `g`; `:h gJ`: a key)                |
 
 `Cmd` is `Ctrl` on Windows.
 
@@ -33,11 +33,12 @@ until you apply, and your edits stay while you go through other dirs.
 
 - In the path field's regex mode (`gr`), `,` is any character but `/`.
 - In a glob, `*` matches only files and `*/` only dirs (`*{,/}` both).
-- Vim-surround keys work, like `dsb` or `ysiw)`
+- Vim-surround keys work, like `dsb` or `ysiw)`.
 - `Cmd+click` a path or URL to open it.
 - `!` runs a shell command on the entry on the line (`g!` is vim's `!`).
 - `:h` and a key or a word shows its help, like `:h g` or `:h gJ`.
-- `koil` cli command opens koil, useful for automation (`-c` is especially useful)
+- The `koil` command opens Koil from a terminal, which is useful for
+  automation (especially `-c`: see Command line).
 
 ### In detail
 
@@ -51,9 +52,9 @@ until you apply, and your edits stay while you go through other dirs.
   `*` skips names starting with `.`, but `.*` or `**/.env` shows them even
   while hidden entries are off (`g.`).
 - **Regex paths** (`gr`) must match the whole path below the dir they start
-  in. For convenience, `,` is same as `.` except it does not match `/`, which
-  is useful to list things without going into subdirectories
-  (`dir/,*` matches `dir/file.txt` but not `dir/subdir/file.txt`)
+  in. For convenience, `,` is the same as `.` except it doesn't match `/`,
+  which is useful to list things without going into subdirectories
+  (`dir/,*` matches `dir/file.txt` but not `dir/subdir/file.txt`).
 - **Smart case**: search, `:s` and `Tab` completion ignore case unless you
   type an uppercase letter. Search takes JavaScript regexes (`\d{3}`,
   `\bword\b`), not vim's.
@@ -196,3 +197,7 @@ cargo run -- path            # a directory, a pattern, or a file to edit
 cargo test                   # the listing's tests
 qmltestrunner -input tests   # the editor's tests
 ```
+
+## License
+
+[MIT](LICENSE)

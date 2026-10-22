@@ -43,7 +43,15 @@ fn main() {
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {
         app.as_mut().set_application_name(&QString::from("Koil"));
-        app.set_organization_name(&QString::from("Koil"));
+        app.as_mut().set_organization_name(&QString::from("Koil"));
+        // macOS keeps the settings by it and the app's name, as
+        // `io.github.barni228.Koil`: the bundle ID, so they're the app's
+        // own defaults (a name that differed only in case would be the
+        // same file under two names).
+        app.as_mut()
+            .set_organization_domain(&QString::from("barni228.github.io"));
+        // About Koil shows it (`Qt.application.version`).
+        app.set_application_version(&QString::from(env!("CARGO_PKG_VERSION")));
     }
     ffi::use_settings_menu_title();
     ffi::use_nerd_font(&QByteArray::from(NERD_FONT));

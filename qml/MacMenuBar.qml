@@ -1,9 +1,9 @@
 import QtQuick
 import Qt.labs.platform as Platform
 
-// The menus on macOS: its native menu bar. The Quit and Preferences roles
-// have Qt move those items into the app's ("Koil") menu. WindowMenuBar has
-// the same items elsewhere.
+// The menus on macOS: its native menu bar. The About, Quit and Preferences
+// roles have Qt move those items into the app's ("Koil") menu.
+// WindowMenuBar has the same items elsewhere (About in a Help menu).
 Platform.MenuBar {
     id: menus
 
@@ -43,6 +43,13 @@ Platform.MenuBar {
             enabled: !menus.app.listing && !menus.app.boxOpen
             shortcut: StandardKey.SaveAs
             onTriggered: menus.app.saveAs()
+        }
+        // First in the app menu, as macOS puts About.
+        Platform.MenuItem {
+            text: qsTr("About Koil")
+            role: Platform.MenuItem.AboutRole
+            enabled: !menus.app.boxOpen
+            onTriggered: menus.app.about()
         }
         Platform.MenuItem {
             text: qsTr("Settings…")

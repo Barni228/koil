@@ -100,6 +100,23 @@ TestCase {
         theme: theme
     }
 
+    // The list the macros (and Settings' fonts and shells) are in, with
+    // its rows made in another file, as the windows' are.
+    DropList {
+        id: drop
+
+        theme: theme
+        field: editor
+        model: ["a", "b"]
+
+        delegate: DropOption {
+            required property string modelData
+
+            theme: theme
+            text: modelData
+        }
+    }
+
     function init() {
         app.shortcuts = [
             { name: "Copy", keys: " c", macro: "yy", mode: "normal", enabled: true },
@@ -506,6 +523,18 @@ TestCase {
         compare(app.shortcuts.map(s => s.name), ["Copy", "", "New"]);
         compare(focused(), "Search shortcuts");
         compare(win.currentShortcut(), 2);
+    }
+
+    // A DropList's rows are made: an inline component of DropList.qml,
+    // which binds them to it (ComponentBehavior: Bound), Qt made none from
+    // another file, so the lists were empty.
+    function test_dropRows() {
+        drop.open();
+        tryVerify(() => drop.opened);
+        tryVerify(() => drop.view.itemAtIndex(1) !== null);
+        const row = drop.view.itemAtIndex(1) as DropOption;
+        compare(row.text, "b");
+        drop.close();
     }
 
     // + makes a new one, and Esc goes back to the list.

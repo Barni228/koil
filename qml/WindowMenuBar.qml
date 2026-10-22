@@ -122,4 +122,14 @@ MenuBar {
             }
         }
     }
+    // On macOS, About is in the app's menu.
+    Menu {
+        title: qsTr("&Help")
+
+        Action {
+            text: qsTr("&About Koil")
+            enabled: !menus.app.boxOpen
+            onTriggered: menus.app.about()
+        }
+    }
 }

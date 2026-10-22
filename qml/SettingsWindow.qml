@@ -543,7 +543,7 @@ Window {
                             fontSearch.text = Qt.binding(() => win.settings.fontFamily);
                         }
 
-                        delegate: DropList.Option {
+                        delegate: DropOption {
                             id: fontOption
 
                             required property string modelData
@@ -843,7 +843,7 @@ Window {
                         emptyText: qsTr("No shells found")
                         onAboutToShow: shellPicker.shells = win.app.shellChoices()
 
-                        delegate: DropList.Option {
+                        delegate: DropOption {
                             id: shellOption
 
                             required property var modelData

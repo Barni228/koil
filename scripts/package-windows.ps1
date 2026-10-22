@@ -20,7 +20,8 @@ $version = (cargo metadata --no-deps --format-version 1 --manifest-path "$root\C
 $stage = "$root\target\release\deploy"
 $dist = "$root\dist"
 
-cargo build --release --manifest-path "$root\Cargo.toml"
+# --locked: what Cargo.lock has (koil-core's commit too), or fail.
+cargo build --release --locked --manifest-path "$root\Cargo.toml"
 if ($LASTEXITCODE) { throw "cargo build failed" }
 
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }

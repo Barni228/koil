@@ -916,7 +916,7 @@ Window {
                                 view.positionViewAtIndex(highlighted, ListView.Contain);
                         }
 
-                        delegate: DropList.Option {
+                        delegate: DropOption {
                             id: macro
 
                             required property var modelData

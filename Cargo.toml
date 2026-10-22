@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "File manager that works like a text editor, with vim"
 repository = "https://github.com/Barni228/koil"
+license = "MIT"
 publish = false
 
 [dependencies]

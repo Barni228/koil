@@ -12,7 +12,8 @@ app="$root/target/release/Koil.app"
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 
-cargo build --release --manifest-path "$root/Cargo.toml"
+# --locked: what Cargo.lock has (koil-core's commit too), or fail.
+cargo build --release --locked --manifest-path "$root/Cargo.toml"
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
