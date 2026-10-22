@@ -1334,12 +1334,25 @@ ApplicationWindow {
 
     // :set hidden, gitignore, regex, sort, sortreverse or dirsfirst. As in
     // koil-cli, the listing is read with the settings it was shown with, and
-    // then shown with the new ones.
+    // then shown with the new ones. In a run (a macro's gss, -c's set
+    // sort=size), vim waits for it, as a step of the run (see updateInRun).
     function settingChanged() {
-        if (listing)
+        if (listing && vim.running) {
+            vim.waiting = "Updating";
+            Qt.callLater(updateInRun);
+        } else if (listing) {
             Qt.callLater(updateListing);
+        }
         // Even if the listing can't be read yet.
         Qt.callLater(updatePathSyntax, true);
+    }
+
+    // The update a run's setting asks for, as a step of it, so its next
+    // keys have the listing sorted, and the update doesn't stop it, as it
+    // did when the run's chunk ended before it (a startup's -c after the
+    // layout of `set wrap`).
+    function updateInRun() {
+        vim.endWait(false, () => updateListing());
     }
 
     // Whether quitting would lose something: a file's unsaved changes, or
@@ -2306,7 +2319,8 @@ ApplicationWindow {
     // given, the dir the Settings window's "Start in" says (which, like the
     // path field, can't be a file), else the home dir. The scratchpad (-s,
     // or text from stdin) opens over that listing (a file's dir, on its
-    // entry). +N puts the cursor on line N of what's shown.
+    // entry). +N puts the cursor on line N of what's shown, and then -c's
+    // commands run (see shown).
     function startUp() {
         const arg = doc.startupPath();
         const start = arg || doc.startDir(settings.startDir);
@@ -2320,13 +2334,14 @@ ApplicationWindow {
             Qt.callLater(() => {
                 const error = doc.openFile(start);
                 if (!error) {
-                    goToLine(line);
+                    shown(line);
                     return;
                 }
                 // One it can't read: its dir, on its entry, as `-` from it
                 // would show, and why.
                 showFileDir(start);
                 vim.showError(error);
+                shown(-1);
             });
             return;
         }
@@ -2345,7 +2360,7 @@ ApplicationWindow {
             }
         }
         if (!scratch) {
-            goToLine(line);
+            shown(line);
             return;
         }
         // Once the editor is done, as a file (a long text piped in). Back
@@ -2360,8 +2375,17 @@ ApplicationWindow {
             showScratch();
             if (error)
                 vim.showError(error);
-            goToLine(line);
+            shown(line);
         });
+    }
+
+    // What the command line asked for is shown: +N's line, if any (see
+    // goToLine), then -c's commands, as a macro runs them, so a setting or
+    // keys (`-c 'set sort=size'`, `-c 'norm G'`) apply to it, and Koil
+    // needn't have an option for each.
+    function shown(line) {
+        goToLine(line);
+        vim.runCommands(JSON.parse(doc.startupCommands()), "-c");
     }
 
     // Lists the dir the file `path` is in, on its entry, as `-` from it

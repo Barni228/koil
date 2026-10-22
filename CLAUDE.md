@@ -501,7 +501,12 @@ the scratchpad (see Scratchpad).
   `:set sort` and `sortreverse` (`vim.sort`, `vim.sortReverse`, which
   `Koil` binds; `settingChanged` updates, and an update with only the sort
   changed isn't `moved`, so it's one change undo can take back, with the
-  cursor and the view where they were). Back from a file, sorted another
+  cursor and the view where they were). In a run (a macro's `gss`, `-c`'s
+  `set sort=size`), vim waits for the update (`waiting`), which is a step
+  of the run (`updateInRun`, through `endWait`'s `done`), so the keys
+  after it have the listing sorted: updated once the event loop ran, as
+  it is otherwise, it landed between the run's chunks (`-c` after `set
+  wrap`'s layout) and stopped the run. Back from a file, sorted another
   way meanwhile, the view stays too (`shownSort`: every line moved, so
   following the file's would scroll the rest away), scrolling only to
   show the cursor. Sorted by size or a date, each line
@@ -830,7 +835,8 @@ the scratchpad (see Scratchpad).
   own `!` operator is the same, which Koil's key takes the place of
   (only the tests have it). Ex commands take vim's ranges (`exRange`: numbers,
   `.`, `$`, `'<`, `'>`, `+N`, `-N`, `%`): one alone goes to its last line,
-  and commands other than `!` refuse one (E481). A `!` first is the last
+  and commands other than `!`, `:s` and `:normal` (`takesRange` in
+  `exCommands`) refuse one (E481). A `!` first is the last
   command (`:!!`). `:_!cmd` (Koil's, after the scratchpad's key; `:%_!`
   with a range) puts what it writes in the scratchpad (`showInScratch`),
   in place of its text, as a change `u` takes back (`Vim.replaceWhole`):
@@ -909,7 +915,18 @@ the scratchpad (see Scratchpad).
   Space o's `xdg-open`) gets a null one: an app given Koil's would keep
   the pipe open after Koil quits. `+N` puts the cursor on line N of what's
   shown (`+` the last one), in the middle of the view, as vim's
-  (`goToLine` types `NGzz`). clap has no `+` options and fills
+  (`goToLine` types `NGzz`). Then each `-c` (`--command`, `Args::commands`,
+  `Document.startupCommands`) runs, in order, as typed after a `:`
+  (`shown` in main.qml, `Vim.runCommands`: all of them one run, the keys
+  `:`, the command's characters and `<CR>` each, as `@:` types it), so
+  anything Koil does can be done at startup without an option of its own
+  (`-c 'set sort=size wrap'`, and keys with `-c 'norm G'`). As a macro's,
+  a command that fails stops the rest (keys that fail in `:normal` too),
+  and they go in the command line's history. Keys run one after another
+  in the run, and what `_` shows is shown before its key is done
+  (`keyCommand` goes through `outside`), so `-c 'norm _ihi'` types in the
+  scratchpad, however long the listing took to show. They
+  run after the file can't be read too, over its dir's listing. clap has no `+` options and fills
   positionals in order, so `[PATH]`, `[+N]` and a hidden `more` only
   collect them, and `parse` tells `-`, `+N` and the path apart by what
   they are; after `--` they're all paths (`escaped`, a `last`
@@ -1432,7 +1449,20 @@ the scratchpad (see Scratchpad).
   frames under it go on too, as after `:normal`. The lines left move
   with the edits as the marked lines do (`moveLineRuns`, through
   `movedMarks`), rather than by number as `:normal`'s do, which has `yyp`
-  copy the copies.
+  copy the copies. Koil's `:normal` (`:norm`, `normalCommand`) is such a
+  frame too, and so goes by the lines the same way: with a range, on each
+  of its lines, and without one, at the cursor, with no lines (`starts`
+  empty, not `due`), ending what its keys left half done, as vim's. That
+  one is `whole`: keys that fail in it fail it as a command (`macroFails`
+  goes past it), stopping what runs it, unlike vim's, which stops only its
+  keys: `-c 'norm _' -c 'norm ihi'` typed `hi` in the listing when `_`
+  couldn't show the scratchpad (an update that failed). With a range, a
+  line they fail on is skipped, as `@q`'s in visual mode. Its
+  keys are written as a shortcut's (`macroKeys`: `<CR>`, `<Esc>`), not
+  typed as they are, as vim's, since Koil has no `:exe` to write those
+  keys with. `:normal!`'s frame is `plain`, whose keys no shortcut takes
+  (`plainKey`, in `commandFor`), as no mapping takes vim's; a macro they
+  run isn't, as vim's `@` maps its keys.
 - **Batches and runs** (Vim.qml): each edit of the `TextArea` has Qt go over
   all the text, so while a key runs (`handleKey` through `batched`) vim edits
   a copy (`batch`; everything reads the text through `bufferText()`), and

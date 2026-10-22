@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal, Read, Stdin, Write};
 use std::sync::Mutex;
 
 use clap::error::ErrorKind;
-use clap::{Arg, ArgMatches, Command, arg, command};
+use clap::{Arg, ArgAction, ArgMatches, Command, arg, command};
 
 use crate::document;
 
@@ -22,6 +22,8 @@ pub struct Args {
     pub stdin: bool,
     /// The line to put the cursor on (`+N`), 0 for the last one (`+`).
     pub line: Option<u32>,
+    /// The Ex commands to run once what's shown is (`-c`), in order.
+    pub commands: Vec<String>,
     /// The scratchpad's text, from stdin (see `read_stdin`).
     pub text: Option<String>,
 }
@@ -34,6 +36,7 @@ pub static ARGS: Mutex<Args> = Mutex::new(Args {
     print: false,
     stdin: false,
     line: None,
+    commands: Vec::new(),
     text: None,
 });
 
@@ -50,6 +53,10 @@ pub fn command() -> Command {
                 .visible_alias("temp"),
         )
         .arg(arg!(-p --print "Print the scratchpad's text when Koil quits (starts in it)"))
+        .arg(
+            arg!(-c --command <COMMAND> "Run an Ex command once PATH is shown, like 'set sort=size'")
+                .action(ArgAction::Append),
+        )
         .arg(arg!([PATH] "A directory, or a glob or regex of files, to list, or a file to edit"))
         .arg(arg!([line] "Put the cursor on line N (+ alone: the last line)").value_name("+N"))
         .arg(Arg::new("more").num_args(0..).hide(true))
@@ -59,7 +66,11 @@ pub fn command() -> Command {
              home directory. A PATH of - puts the text read from stdin in the\n\
              scratchpad, as does text piped in (git diff | koil). With -p, what the\n\
              scratchpad has when Koil quits goes to stdout, so Koil can edit text in\n\
-             a pipe (ls | koil -p | sort).",
+             a pipe (ls | koil -p | sort).\n\n\
+             Each -c runs a command as typed after a : (after +N), in turn, so\n\
+             anything Koil does can be done as it starts, and normal presses keys:\n\
+             koil ~/src -c 'set sort=size wrap' -c 'normal G'. One that fails stops\n\
+             the rest.",
         )
 }
 
@@ -81,6 +92,7 @@ pub fn parse(args: impl IntoIterator<Item = impl Into<OsString>>) -> Result<Args
     let mut parsed = Args {
         scratchpad: matches.get_flag("scratchpad") || print,
         print,
+        commands: values(&matches, "command"),
         ..Args::default()
     };
     let mut paths = values(&matches, "escaped");
@@ -324,5 +336,22 @@ mod tests {
         assert_eq!(run(&["+1", "+7"]).line, Some(7));
         assert_eq!(error(&["+x"]), ErrorKind::ValueValidation);
         assert_eq!(error(&["+-1"]), ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn test_parse_commands() {
+        let args = run(&[
+            "-c",
+            "set sort=size",
+            "src",
+            "--command",
+            "normal G",
+            "-c=set wrap",
+        ]);
+        assert_eq!(args.commands, ["set sort=size", "normal G", "set wrap"]);
+        assert_eq!(args.path.as_deref(), Some("src"));
+        assert_eq!(run(&["+3", "-c", "set nu"]).line, Some(3));
+        assert_eq!(run(&["--", "-c"]).path.as_deref(), Some("-c"));
+        assert_eq!(error(&["-c"]), ErrorKind::InvalidValue);
     }
 }

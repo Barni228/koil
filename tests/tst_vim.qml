@@ -1206,6 +1206,66 @@ TestCase {
         compare(editCommands.count, 5);
     }
 
+    // :normal presses keys as a macro does (in one undo step), and ends
+    // what they leave half done; with a range, on each line from its
+    // start. Keys are written as a shortcut's.
+    function test_normalCommand() {
+        load("a\nb\nc");
+        keys(":norm Ax<CR>");
+        compare(render(), "ax\nb\nc");
+        compare(vim.mode, "normal");
+        compare(vim.running, null);
+        keys("u");
+        compare(render(), "a\nb\nc");
+        keys(":%norm A;<CR>");
+        compare(render(), "a;\nb;\nc;");
+        keys(":2,3normal I-<CR>");
+        compare(render(), "a;\n-b;\n-c;");
+        keys("ggVj:norm! x<CR>");
+        compare(render(), ";\nb;\n-c;");
+        load("a");
+        vim.runCommands(["norm ihi<Esc>x"], "-c");
+        compare(render(), "ha");
+        keys(":norm<CR>");
+        compare(vim.message, "E471: Argument required");
+        keys(":2norm x<CR>");
+        compare(vim.message, "E16: Invalid range");
+        compare(render(), "ha");
+    }
+
+    // With a !, no shortcut takes :normal's keys, as no mapping takes
+    // vim's.
+    function test_normalCommandShortcuts() {
+        load("ab");
+        vim.shortcuts = [{ keys: "x", macro: "A!<Esc>", label: "x", normal: true, visual: false }];
+        keys(":norm x<CR>");
+        compare(render(), "ab!");
+        keys(":norm! 0x<CR>");
+        compare(render(), "b!");
+        vim.shortcuts = [];
+    }
+
+    // -c's commands run in turn, as a macro's: one that fails stops the
+    // rest, and so does :normal whose keys fail, but with a range, only on
+    // the line they fail on.
+    function test_runCommands() {
+        load("a\nb");
+        vim.runCommands(["s/a/x/", "bogus", "s/x/y/"], "-c");
+        compare(render(), "x\nb");
+        compare(vim.message, "E492: Not an editor command: bogus");
+        compare(vim.running, null);
+        keys("u");
+        compare(render(), "a\nb");
+        vim.runCommands(["norm fzx", "norm Ay"], "-c");
+        compare(render(), "a\nb");
+        compare(vim.running, null);
+        load("a,1\nb\nc,3");
+        vim.runCommands(["%norm f,r;", "norm Ay"], "-c");
+        compare(render(), "a;1\nb\nc;3y");
+        vim.runCommands([], "-c");
+        compare(render(), "a;1\nb\nc;3y");
+    }
+
     // ---- Surround ------------------------------------------------------------
 
     // vim-surround's ys, ds and cs, with the cursor on the pair's start,

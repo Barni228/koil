@@ -243,7 +243,8 @@ QtObject {
     // runs it again).
     property string lastShell: ""
     // While Koil waits for something vim can't go on without (a shell
-    // command, see shellRequested): what the status line calls it. Keys do
+    // command, see shellRequested, or the update a run's :set asks for):
+    // what the status line calls it. Keys do
     // nothing then, but Esc or Ctrl-C, which emit stopRequested. A run
     // waits too, and goes on once it's done (see endWait).
     property string waiting: ""
@@ -299,16 +300,18 @@ QtObject {
     // which runs them one by one; a failing command empties it, as in vim.
     property string recording: ""
     property var recordKeys: []
-    // The keys left to run, as a stack of { keys, next, runs, each, macro
-    // }: the top one's keys[next] is next, and each runs its keys `runs`
-    // times (rather than holding them that many times: 10000@q copied them
-    // 10000 times over), on each line of `each` if it has one (see
-    // runOnLines). `macro` for a register's keys, and keys they run, not
-    // a shortcut's.
+    // The keys left to run, as a stack of { keys, next, runs, each, macro,
+    // plain }: the top one's keys[next] is next, and each runs its keys
+    // `runs` times (rather than holding them that many times: 10000@q
+    // copied them 10000 times over), on each line of `each` if it has one
+    // (see runOnLines). `macro` for a register's keys, and keys they run,
+    // not a shortcut's; `plain` for :normal!'s, which no shortcut takes.
     property var typeahead: []
     // While a key of a macro runs (see flashYank): its frame may be gone
     // by then (see nextMacroKey).
     property bool macroKey: false
+    // While a key of :normal! runs (see commandFor), as macroKey.
+    property bool plainKey: false
     // A long command running in steps (see startTask), before any more
     // keys: { steps, done, step, finish }. Null if none.
     property var task: null
@@ -1293,7 +1296,7 @@ QtObject {
             if (typing(ks))
                 return keys.length === ks.length ? { name: own[k] } : {};
         }
-        for (const s of shortcuts) {
+        for (const s of plainKey ? [] : shortcuts) {
             const ks = macroKeys(s.keys);
             if ((visual ? s.visual : s.normal) && typing(ks))
                 return keys.length === ks.length ? { shortcut: s } : {};
@@ -3257,9 +3260,10 @@ QtObject {
     }
 
     // Runs keys as a macro's, `count` times, called `label` on the status
-    // line (see Runs): a register's (`macro`), or a shortcut's. With
-    // `each`, on each of its lines (see runOnLines).
-    function runKeys(ks, count, label, each, macro) {
+    // line (see Runs): a register's (`macro`), a shortcut's, or :normal's
+    // (`plain` for :normal!'s). With `each`, on each of its lines (see
+    // runOnLines).
+    function runKeys(ks, count, label, each, macro, plain) {
         if (!ks.length)
             return;
         if (typeahead.length >= maxMacroDepth || chainedRuns > maxMacroDepth) {
@@ -3269,7 +3273,7 @@ QtObject {
         }
         // A macro run from a macro goes before the rest of that one.
         const frame = { keys: ks, next: 0, runs: count, each: each || null,
-            macro: !!macro || typeahead.some(f => f.macro) };
+            macro: !!macro || typeahead.some(f => f.macro), plain: !!plain };
         typeahead.push(frame);
         if (!running)
             startRun(label, frame, count);
@@ -3342,10 +3346,12 @@ QtObject {
         const f = typeahead[typeahead.length - 1], e = f.each;
         if (!e || !e.due) {
             macroKey = !!f.macro;
+            plainKey = !!f.plain;
             try {
                 runKey(nextMacroKey(), null);
             } finally {
                 macroKey = false;
+                plainKey = false;
             }
             return;
         }
@@ -3373,10 +3379,11 @@ QtObject {
 
     // A command failed: as in vim, the macros running stop, but one on each
     // line (see runOnLines) stops only on its line, and goes on with the
-    // next, as :normal does, with the macros it ran.
+    // next, as :normal does, with the macros it ran. Not a :normal without
+    // a range (`whole`), which fails as a command, stopping what runs it.
     function macroFails() {
         let i = typeahead.length - 1;
-        while (i >= 0 && !typeahead[i].each)
+        while (i >= 0 && !(typeahead[i].each && !typeahead[i].each.whole))
             i--;
         if (i < 0) {
             typeahead = [];
@@ -5185,26 +5192,25 @@ QtObject {
                 substitute(range, sub);
             return;
         }
-        if (r.first !== undefined) {
-            showError("E481: No range allowed");
-            return;
-        }
         // Its name (letters, and a ! for those that take one), then after
         // blanks, its argument, for those that take one.
         const m = /^([a-zA-Z]+!?)(?:\s+(.*))?$/.exec(c);
         const arg = m && m[2] || "";
         const ex = m && exCommands().find(x => x.names.test(m[1]) && (x.takesArg || !arg));
-        if (ex)
-            ex.run(arg, m[1], confirm);
+        if (r.first !== undefined && !(ex && ex.takesRange))
+            showError("E481: No range allowed");
+        else if (ex)
+            ex.run(arg, m[1], confirm, r);
         else
             showError("E492: Not an editor command: " + c);
     }
 
     // The Ex commands runEx knows but :s and ! (see substituteParts and
     // shellCommand): the `names` a command's name (with a ! after it, for
-    // those that take one) is one of, whether it `takesArg`, and what it
-    // does, given the argument, the name and whether :confirm runs it. The
-    // command line colors their names (see commandLineParts).
+    // those that take one) is one of, whether it `takesArg` and
+    // `takesRange`, and what it does, given the argument, the name,
+    // whether :confirm runs it and the range (see exRange). The command
+    // line colors their names (see commandLineParts).
     function exCommands() {
         return [
             { names: /^w(?:rite)?$/, run: () => outside(() => writeRequested(false, false)) },
@@ -5224,8 +5230,53 @@ QtObject {
             { names: /^e(?:d|di|dit)?!?$/, takesArg: true,
                 run: (arg, name) => outside(() => editRequested(arg, name.endsWith("!"))) },
             { names: /^(?:reg(?:i|is|ist|iste|ister|isters)?|di(?:s|sp|spl|spla|splay)?)$/, takesArg: true,
-                run: arg => showRegisters(arg) }
+                run: arg => showRegisters(arg) },
+            { names: /^norm(?:a|al)?!?$/, takesArg: true, takesRange: true,
+                run: (arg, name, confirm, r) => normalCommand(arg, name.endsWith("!"), r) }
         ];
+    }
+
+    // :normal (:norm), as vim's: `keys` run as a macro's, written as a
+    // shortcut's are (<CR>, <Esc>: Koil has no :exe to type them with),
+    // and what they leave half done is ended, as if Esc were typed (see
+    // endHalfDone). With a range (`r`, see exRange), on each of its lines,
+    // from its start, as @q in visual mode runs one (see runOnLines), so
+    // the lines go with the edits, rather than by their numbers, and a line
+    // its keys fail on is skipped. Without one, keys that fail fail it, as
+    // a command, unlike vim's, which stops only its keys: so -c's next
+    // commands don't run (`-c 'norm _' -c 'norm ihi'` typed in the listing
+    // when the scratchpad couldn't be shown). With a ! (`plain`), no
+    // shortcut takes them, as no mapping takes vim's.
+    function normalCommand(keys, plain, r) {
+        if (!keys) {
+            showError("E471: Argument required");
+            return;
+        }
+        let starts = [];
+        if (r.first !== undefined) {
+            const t = bufferText();
+            if (r.first < 1 || r.last > Txt.countLines(t)) {
+                showError("E16: Invalid range");
+                return;
+            }
+            const lines = r.lines || Array.from({ length: r.last - r.first + 1 }, (_, i) => r.first + i);
+            starts = lines.map(l => Txt.lineToPos(t, l));
+        }
+        // Without a range, at the cursor, and done once its keys ran.
+        const whole = r.first === undefined;
+        runKeys(macroKeys(keys), 1, ":normal", { starts: starts, count: 1, total: Math.max(1, starts.length),
+            due: !whole, whole: whole }, false, plain);
+    }
+
+    // Runs Ex commands one after another, each as if typed after a :, as
+    // a macro does (Koil's -c on its command line, `label` on the status
+    // line): one that fails stops the rest.
+    function runCommands(commands, label) {
+        let ks = [];
+        for (const c of commands)
+            ks = ks.concat([":"], Array.from(c), ["<CR>"]);
+        chainedRuns = 0;
+        batched(() => runKeys(ks, 1, label));
     }
 
     // The range an Ex command starts with, as { first, last, rest } (lines,

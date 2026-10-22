@@ -143,7 +143,7 @@ function sections(help) {
             title: "Commands",
             tags: ["commands", "command", "ex", "w", "write", "quit", "wq", "x", "confirm", "conf", "noh",
                 "nohlsearch", "help", "h", "history", "e", "edit", "e!", "edit!", "reload", "favorite", "favorites",
-                "bookmark", "bookmarks"],
+                "bookmark", "bookmarks", "norm", "normal", "norm!", "normal!", "-c", "startup"],
             rows: [
                 ["`:e path`", "Open a file, or list a dir or pattern, like `:e ~/src`, read as the path field "
                     + "reads it, from the open dir. As a shortcut (`:e ~/src<CR>`: see `:h shortcuts`), a key "
@@ -163,6 +163,11 @@ function sections(help) {
                 ["`:s/old/new/`  `:%s/old/new/g`", "Replace on the line, or every match in the file (see `:h s`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
+                ["`:norm keys`", "Press keys, as a macro does, like `:norm gss` (keys such as `<CR>` and `<Esc>` "
+                    + "written as in a shortcut). With a range, on each line, from its start (`:%norm A;`). "
+                    + "`:norm!` leaves your shortcuts out."],
+                ["`koil -c 'cmd'`", "Run a command once Koil has opened, like `koil ~/src -c 'set sort=size'`. "
+                    + "Several `-c`s run in turn."],
                 ["`:h`  `:help [topic]`", "This help, e.g. `:h set`, `:h macros`, `:h g` (the keys starting "
                     + "with `g`), or a key, like `:h gJ`."],
                 ["`↑`  `↓`", "In the command line: earlier and later commands (or searches)."],

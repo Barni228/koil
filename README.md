@@ -37,6 +37,7 @@ until you apply, and your edits stay while you go through other dirs.
 - `Cmd+click` a path or URL to open it.
 - `!` runs a shell command on the entry on the line (`g!` is vim's `!`).
 - `:h` and a key or a word shows its help, like `:h g` or `:h gJ`.
+- `koil` cli command opens koil, useful for automation (`-c` is especially useful)
 
 ### In detail
 
@@ -163,6 +164,15 @@ koil -s               # the scratchpad
 git diff | koil       # what's piped in opens in the scratchpad
 ls | koil -p | sort   # prints the scratchpad's text when Koil quits
 koil --help           # all the options
+```
+
+`-c` runs a command once Koil has opened, as if typed after `:`, so
+anything Koil does can be done from the command line. Each `-c` runs in
+turn, and `:normal` presses keys:
+
+```sh
+koil ~/src -c 'set sort=size wrap' -c 'set gfn=Menlo fs=16'
+koil ~/src -c 'norm G'
 ```
 
 To have `koil` in your terminal:

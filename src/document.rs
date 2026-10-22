@@ -8,7 +8,7 @@ use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QUrl};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-use crate::convert::{Coalesced, path_string};
+use crate::convert::{Coalesced, path_string, to_json};
 #[cfg(target_os = "macos")]
 use crate::install;
 use crate::{cli, ffi, listing};
@@ -157,6 +157,11 @@ pub mod qobject {
         /// last one, -1 for none.
         #[qinvokable]
         fn startup_line(self: &Document) -> i32;
+
+        /// The Ex commands `-c` on the command line runs once what's shown
+        /// is, in order, as JSON: a list of strings.
+        #[qinvokable]
+        fn startup_commands(self: &Document) -> QString;
 
         /// The dir (or pattern) Koil lists when no path is given, as the
         /// Settings window's "Start in" `setting` has it: read from the home
@@ -471,6 +476,10 @@ impl qobject::Document {
     fn startup_line(&self) -> i32 {
         let line = cli::ARGS.lock().unwrap().line;
         line.map_or(-1, |line| i32::try_from(line).unwrap_or(i32::MAX))
+    }
+
+    fn startup_commands(&self) -> QString {
+        to_json(&cli::ARGS.lock().unwrap().commands)
     }
 
     fn start_dir(&self, setting: &QString) -> QString {
