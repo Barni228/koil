@@ -30,6 +30,8 @@ Copy-Item "$root\target\release\koil.exe" $stage
 
 windeployqt --release --qmldir "$root\qml" --no-compiler-runtime --no-opengl-sw "$stage\koil.exe"
 if ($LASTEXITCODE) { throw "windeployqt failed" }
+# Qt's database drivers, if it copied them: Koil opens no database.
+if (Test-Path "$stage\sqldrivers") { Remove-Item "$stage\sqldrivers" -Recurse -Force }
 
 # Ship the MSVC runtime DLLs app-locally so a fresh Windows install doesn't
 # need the Visual C++ Redistributable.

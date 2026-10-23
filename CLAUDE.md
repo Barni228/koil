@@ -1374,7 +1374,22 @@ the scratchpad (see Scratchpad).
 - **macOS**: `MACOSX_DEPLOYMENT_TARGET` is set to 13.0 in `bundle-macos.sh`.
   Without it, cc and rustc target the build machine's macOS version.
   `macdeployqt` breaks signatures, so the bundle is re-signed ad hoc. The
-  Homebrew-only `macdeployqt` errors about QtSvg are harmless.
+  Homebrew-only `macdeployqt` errors about QtSvg are harmless. It copies
+  more than Koil loads, which `bundle-macos.sh` deletes (the `.dmg` went
+  from 64 MB to 48 MB): every Controls style (macOS's falls back to Fusion,
+  then Basic; the others are never loaded), QML modules no import of
+  Koil's reaches (Particles, VectorImage, LocalStorage and the QtSql it
+  links, …), and the plugins for images, TLS, network information, the
+  widgets' style and databases (whose client libraries it can't find in
+  CI: its "ERROR: no file at" lines, which it still prints).
+  `package-windows.ps1` deletes only windeployqt's database drivers, as
+  the rest is untried there. To check the list, build the bundle with
+  CI's Qt (`aqt install-qt mac desktop 6.11.3 clang_64`, its `bin` first
+  on `PATH`) and a temporary `Timer` that opens the windows and dialogs,
+  run `Contents/MacOS/Koil` with `DYLD_PRINT_LIBRARIES=1`, and compare
+  what's loaded from the bundle with and without the deletes. A new
+  import (`QtQuick.Particles`), a picture (an `Image`) or a network
+  request needs what's deleted for it put back.
 - **Windows**: `main.rs` sets the Fusion style (`QQuickStyle::setStyle`, unless
   `QT_QUICK_CONTROLS_STYLE` is set; setting that variable from Rust doesn't
   reach Qt, which reads the C runtime's startup copy), because the default
