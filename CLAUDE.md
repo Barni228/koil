@@ -2046,11 +2046,15 @@ the scratchpad (see Scratchpad).
   notes (sorted by size or a date) none reaches into the notes' room on
   the right (`noteRoom`, the blocks' right margin), so each note fits
   after its line, lined up as in a table. Qt fits a `TextArea` to its
-  view's width only as the view or the text's size changes, which a new
-  wrap mode doesn't do, so `fitWidth` gives it the width. On macOS the
-  vertical scroll bar is `AlwaysOn` while lines wrap: one showing up
-  narrowed the view inside Qt's own resize, whose new size Qt doesn't
-  tell then (`contentSizeChanged`), which left the content a row short.
+  view's width only as the view or the text's size changes, and a new
+  wrap mode had it do that inside its own resize, so the wrapped text's
+  height went untold (`contentSizeChanged`, see below): the view kept the
+  unwrapped height, and `j` and `G` went past its end without scrolling.
+  So `applyWrapMode` gives it the view's width before the wrap mode. On
+  macOS the vertical scroll bar is `AlwaysOn` while lines wrap: one
+  showing up narrowed the view inside Qt's own resize, whose new size Qt
+  doesn't tell then (`contentSizeChanged`), which left the content a row
+  short.
   The overlays draw a span in a part a row (`rowSpans`, finding where
   rows start by `cellAt`, only those in view: a line can have thousands),
   the current line's band covers all its rows, a line number is on its
@@ -2071,6 +2075,16 @@ the scratchpad (see Scratchpad).
   again on a format change and laid the document out after each one, so
   turning wrapping off took five minutes in a colored file of 100,000
   lines (a file's `TextColors` doesn't color them again, see Syntax).
+  The TextEdit takes the text's size as the change is told, while the
+  layout is off, and nothing tells it the size it's laid out to after, so
+  `setLineFormat` then runs its `updateSize` (a slot of Qt's, not
+  public): the view kept the height from before, so in a listing sorted
+  by size or a date (the notes' room changes the rows names wrap to), or
+  zoomed, the cursor went past its end without the view following.
+  `fixLineFormat` then keeps the cursor in view, if it was, as Qt scrolls
+  to it only when it moves; and `showListing` gives the new format (the
+  notes' room) before it places the view, then shows the cursor, whose
+  line a sort can move with the rows above it while its place stays.
 - **Line numbers** (`:set nu`/`rnu`): the `gutter` is a child of the
   `TextArea` (so it scrolls with the text), kept at `contentX` and drawn over
   text scrolled under it. The styles hard-code `leftPadding` (7 on macOS,

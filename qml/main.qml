@@ -466,6 +466,9 @@ ApplicationWindow {
             listing = true;
             load(r.text, r.hidden, "");
         }
+        // The notes' room (sorted by size or a date) before the view is
+        // placed: while lines wrap, it changes the rows names go on to.
+        editorView.fixLineFormat();
         vim.markTexts(keep?.marks ?? []);
         const i = from ? r.names.indexOf(from) : -1;
         const line = i >= 0 ? i : keep ? keep.line : 0;
@@ -478,6 +481,10 @@ ApplicationWindow {
         if (y !== f.contentY)
             f.contentY = Math.max(0, Math.min(y, f.contentHeight + f.bottomMargin - f.height));
         vim.jumpTo(Txt.atColumn(t, ls, column));
+        // Qt scrolls to the cursor only if it moved, and while lines wrap,
+        // its line can move with it where it was (the rows of the names
+        // above it, sorted another way).
+        vim.showCursor();
         showPath(r.path);
         pendingChanges = koil.hasChanges();
         markUnedited();

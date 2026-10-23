@@ -310,18 +310,25 @@ Item {
     // line taller. Give every line the same height instead. Qt puts a
     // fixed-height line's baseline at 4/5 of it, so to center the text, the
     // line is made shorter and a bottom margin makes up the rest. Qt counts
-    // the new block format as an edit, but it isn't one.
+    // the new block format as an edit, but it isn't one. The cursor stays
+    // in view if it was: the lines move with their new height, and while
+    // lines wrap, with the rows they wrap to (a zoom, the notes' room), and
+    // Qt scrolls to the cursor only when it moves.
     function fixLineFormat() {
         const f = lineFormat(), key = JSON.stringify(f);
         if (key === formatted)
             return;
         formatted = key;
+        const c = cellAt(editor.cursorPosition);
+        const shown = c.y + c.height > flickable.contentY && c.y < flickable.contentY + flickable.height;
         quiet = true;
         formatting = true;
         system.setLineFormat(editor.textDocument, f.height, f.bottomMargin, f.indent, f.rightMargin);
         formatting = false;
         quiet = false;
         placeLongLines();
+        if (shown)
+            ensureCursorVisible();
     }
 
     // Puts the long lines Qt doesn't lay out (see longLength) on the line
@@ -642,21 +649,18 @@ Item {
 
     // Gives the TextArea the wrap mode for what it shows, which lays out
     // all its text again. Not a binding: the listing turns into a file
-    // before the file's text comes (see setText).
+    // before the file's text comes (see setText). To wrap, it's as wide as
+    // the view first: Qt fits it to the view only as the text's size
+    // changes, and then, inside its own resize, it doesn't tell the
+    // wrapped text's height, so the view kept the unwrapped one (and
+    // didn't follow the cursor past it).
     function applyWrapMode() {
         const mode = wrapModeOf(listing);
         if (editor.wrapMode === mode)
             return;
-        editor.wrapMode = mode;
-        Qt.callLater(fitWidth);
-    }
-
-    // Qt fits a TextArea to its view's width while it wraps, but only as
-    // the view or the text's size changes, which a new wrap mode doesn't
-    // do (the text stayed as wide as it was unwrapped).
-    function fitWidth() {
         if (wrapping)
             editor.width = flickable.width;
+        editor.wrapMode = mode;
     }
     Component.onCompleted: {
         fixLineFormat();

@@ -957,11 +957,19 @@ setLineFormat(QObject* textDocument,
   // A highlighter colors every line again, and lays the document out after
   // each one it has colors for, as recolor says: turning wrapping off took
   // minutes in a colored file of 100,000 lines. So the layout waits.
-  const FormatOnly formatting(document);
-  const LayoutPaused paused(document);
-  QTextCursor cursor(document);
-  cursor.select(QTextCursor::Document);
-  cursor.mergeBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
+  {
+    const FormatOnly formatting(document);
+    const LayoutPaused paused(document);
+    QTextCursor cursor(document);
+    cursor.select(QTextCursor::Document);
+    cursor.mergeBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
+  }
+  // The TextEdit (the document's parent) takes the text's new size as the
+  // change is told, while the layout waits, and nothing tells it the size
+  // it's laid out to after: the view kept the old height (the rows a name
+  // wraps to as the notes take room), and didn't follow the cursor past
+  // it. updateSize is a slot of Qt's, not public.
+  QMetaObject::invokeMethod(textDocument->parent(), "updateSize");
 }
 
 void
