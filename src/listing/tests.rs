@@ -1,5 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::time::Duration;
 
 use koil_core::{Entry, Koil, Settings, Sort, SortBy};
 use tempfile::TempDir;
@@ -867,10 +868,43 @@ fn test_infos() {
 
     koil.set_settings(sorted_by(SortBy::Modified)).unwrap();
     let rendered = render(&koil);
-    let date = &rendered.notes.infos[&id_text(&koil, "notes")];
-    // like 2026-10-06 14:03
-    let digits: String = date.chars().filter(char::is_ascii_digit).collect();
-    assert_eq!((date.len(), digits.len()), (16, 12), "{date}");
+    // how long ago, which changes as time goes on
+    assert_eq!(rendered.notes.infos[&id_text(&koil, "notes")], "just now");
+    assert_eq!(rendered.notes.times.len(), 3);
+    assert!(rendered.notes.times_change.is_some_and(|secs| secs <= 60));
+}
+
+#[test]
+fn test_time_ago() {
+    const HOUR: u64 = 60 * 60;
+    const DAY: u64 = 24 * HOUR;
+    let now = SystemTime::now();
+    let ago = |secs| {
+        let (shown, change) = time_ago(now - Duration::from_secs(secs), now);
+        (shown, change.unwrap_or(0))
+    };
+    let shown = |secs| ago(secs).0;
+    // rounded down, with how long till it changes
+    assert_eq!(ago(0), ("just now".to_string(), 60));
+    assert_eq!(ago(59), ("just now".to_string(), 1));
+    assert_eq!(ago(5 * 60 + 30), ("5 min ago".to_string(), 30));
+    assert_eq!(shown(HOUR - 1), "59 min ago");
+    assert_eq!(ago(HOUR), ("1 hour ago".to_string(), HOUR));
+    assert_eq!(shown(3 * HOUR), "3 hours ago");
+    assert_eq!(ago(2 * DAY + HOUR), ("2 days ago".to_string(), DAY - HOUR));
+    assert_eq!(shown(7 * DAY), "1 week ago");
+    // a month is 30 days, so 4 weeks are a month in a day
+    assert_eq!(ago(29 * DAY), ("4 weeks ago".to_string(), DAY));
+    assert_eq!(shown(30 * DAY), "1 month ago");
+    assert_eq!(shown(5 * 30 * DAY), "5 months ago");
+    assert_eq!(ago(363 * DAY), ("11 months ago".to_string(), 2 * DAY));
+    // a year or more is the time itself, like 2025-10-22 14:03
+    let (year, change) = time_ago(now - Duration::from_secs(365 * DAY), now);
+    let digits: String = year.chars().filter(char::is_ascii_digit).collect();
+    assert_eq!((year.len(), digits.len(), change), (16, 12, None), "{year}");
+    // a clock a moment off is now, more is the time too
+    assert_eq!(time_ago(now + Duration::from_secs(5), now).0, "just now");
+    assert_eq!(time_ago(now + Duration::from_secs(HOUR), now).1, None);
 }
 
 #[test]

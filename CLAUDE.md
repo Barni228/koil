@@ -521,9 +521,16 @@ the scratchpad (see Scratchpad).
   following the file's would scroll the rest away), scrolling only to
   show the cursor. Sorted by size or a date, each line
   shows it, dimmed, after its end (`listing::notes`: `1.2 KB`,
-  KB as 1000 bytes like macOS; `2026-10-06 14:03`, local time
-  through chrono), before a warning's or an error's message (`notes` in
-  Editor.qml), lined up (see Notes after lines). They come as `infos`, `{ id: text }` (`Rendered`, and
+  KB as 1000 bytes like macOS; a time as how long ago it was,
+  `listing::time_ago`: `just now`, `5 min ago`, `2 days ago`, `3 weeks
+  ago`, `5 months ago`, rounded down, or a year ago or more (or ahead
+  of the clock), `2024-10-06 14:03`, local time through chrono, as the
+  undo history shows its times too), before a warning's or an error's
+  message (`notes` in Editor.qml), lined up (see Notes after lines).
+  As time goes on, the listing has Koil give them again (`Koil.times`,
+  `refreshTimes` in main.qml) once the first of them changes
+  (`Notes::times_change`, which `timesDue` keeps by the clock, checked
+  every 5 s: a `Timer` doesn't count the time the computer sleeps). They come as `infos`, `{ id: text }` (`Rendered`, and
   `Synced` with what sync read), so a line's goes with its ID wherever it's
   moved or copied, and a new entry has none. Only the lines in view are
   looked up (`firstAt` in the sorted hidden text). While the listing shows

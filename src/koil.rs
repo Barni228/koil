@@ -100,6 +100,13 @@ pub mod qobject {
         #[qinvokable]
         fn dir_sizes(self: &Koil) -> QString;
 
+        /// What's shown after the lines that are times, as they are now:
+        /// `{ infos }` (see `listing::Notes`), for the entries of the last
+        /// `render` or `sync`. A time says how long ago it was (`5 min
+        /// ago`), so the listing asks again as time goes on.
+        #[qinvokable]
+        fn times(self: &Koil) -> QString;
+
         /// The parts of the pattern in the path field `line` to color, as a
         /// list of `listing::Span`: none unless it has one.
         #[qinvokable]
@@ -280,6 +287,8 @@ pub struct KoilRust {
     /// keeps them, and the IDs of the dirs listed.
     sizes: Sizes,
     sized: Vec<Id>,
+    /// The IDs of the entries listed whose notes are times (see `times`).
+    timed: Vec<Id>,
 }
 
 /// Watches dirs for changes on disk, and emits `changedOnDisk` for those
@@ -519,6 +528,7 @@ impl qobject::Koil {
         // Moved, the listing is rendered again.
         if !synced.failed && !synced.moved {
             rust.count_sizes(&mut synced.notes);
+            rust.timed = synced.notes.times.clone();
         }
         // The undo steps follow what was renamed on disk.
         rust.history.merge_changed(&mut rust.koil);
@@ -589,6 +599,7 @@ impl qobject::Koil {
         let sizes = rust.sizes.known(rust.measure());
         let mut rendered = listing::render(&rust.koil, &sizes);
         rust.count_sizes(&mut rendered.notes);
+        rust.timed = rendered.notes.times.clone();
         to_json(&rendered)
     }
 
@@ -596,6 +607,12 @@ impl qobject::Koil {
         let sized = self.sized.iter().copied();
         let sizes = self.sizes.known(self.measure());
         to_json(&listing::notes(&self.koil, &sizes, sized))
+    }
+
+    fn times(&self) -> QString {
+        let timed = self.timed.iter().copied();
+        let sizes = self.sizes.known(self.measure());
+        to_json(&listing::notes(&self.koil, &sizes, timed))
     }
 
     fn path_syntax(&self, line: &QString) -> QString {

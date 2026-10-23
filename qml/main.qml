@@ -39,6 +39,10 @@ ApplicationWindow {
     // pollSizes), whose notes show `infoDots` of their three dots.
     property var infos: ({})
     property var busyInfos: ({})
+    // When the first of the notes that are times changes ("5 min ago"
+    // becomes "6 min ago"), by Date.now(), or 0 if none will (see
+    // refreshTimes).
+    property real timesDue: 0
     property bool counting: false
     property int infoDots: 1
     // How the listing shown is sorted (see showListing), and whether it
@@ -573,6 +577,7 @@ ApplicationWindow {
             busy[id] = true;
         if (!sizes) {
             infos = notes.infos;
+            setTimesDue(notes);
         } else {
             // A dir that can't be read has none.
             const changed = Object.keys(busyInfos).some(id => infos[id] !== notes.infos[id]);
@@ -597,6 +602,21 @@ ApplicationWindow {
         }
         if (!counting && sortedCounting)
             sortCounted();
+    }
+
+    // Shows the times after the lines again once one of them changes
+    // (timesTimer), as "just now" becomes "1 min ago".
+    function refreshTimes() {
+        if (Date.now() < timesDue)
+            return;
+        const notes = JSON.parse(koil.times());
+        const ids = Object.keys(notes.infos);
+        if (ids.length !== Object.keys(infos).length || ids.some(id => infos[id] !== notes.infos[id]))
+            infos = notes.infos;
+        setTimesDue(notes);
+    }
+    function setTimesDue(notes) {
+        timesDue = notes.timesChange === null ? 0 : Date.now() + notes.timesChange * 1000;
     }
 
     // Sorts the listing again once every dir's size is counted (an update,
@@ -1883,6 +1903,19 @@ ApplicationWindow {
         repeat: true
         running: root.listing && (root.counting || root.sortedCounting)
         onTriggered: root.pollSizes()
+    }
+
+    // Has the times after the lines say how long ago they were as time
+    // goes on (see refreshTimes), while the listing shows them. It checks
+    // the clock rather than waiting till they change, as a timer doesn't
+    // count the time the computer sleeps.
+    Timer {
+        id: timesTimer
+
+        interval: 5000
+        repeat: true
+        running: root.listing && root.timesDue > 0
+        onTriggered: root.refreshTimes()
     }
 
     // Checks the listing for problems once typing stops for a moment.

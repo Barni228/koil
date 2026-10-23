@@ -275,6 +275,7 @@ const COUNTING: &str = "...";
 /// What the editor shows after the listing's lines: what it's sorted by
 /// (see [`notes`]).
 #[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Notes {
     /// By the ID as its icon hides it.
     pub infos: HashMap<String, String>,
@@ -285,6 +286,13 @@ pub struct Notes {
     /// (see sizes.rs).
     #[serde(skip)]
     pub dirs: Vec<(Id, PathBuf)>,
+    /// The IDs whose infos are times, which say how long ago they were
+    /// (see [`time_ago`]), so they're given again as time goes on.
+    #[serde(skip)]
+    pub times: Vec<Id>,
+    /// In how many seconds the first of them changes (`5 min ago` becomes
+    /// `6 min ago`), None if none will.
+    pub times_change: Option<u64>,
 }
 
 /// The dirs whose sizes the listing of what `koil` has open shows (see
@@ -309,6 +317,7 @@ pub fn notes(koil: &Koil, sizes: &dyn SizeOf, ids: impl IntoIterator<Item = Id>)
     if !by.reads_metadata() {
         return notes;
     }
+    let now = SystemTime::now();
     for id in ids {
         let key = id.0.to_string();
         if notes.infos.contains_key(&key) {
@@ -329,7 +338,15 @@ pub fn notes(koil: &Koil, sizes: &dyn SizeOf, ids: impl IntoIterator<Item = Id>)
                 }
                 dir_info(size)
             }
-            None => info(by, &meta),
+            None => match time_of(by, &meta) {
+                Some(time) => {
+                    let (ago, change) = time_ago(time, now);
+                    notes.times.push(id);
+                    notes.times_change = [notes.times_change, change].into_iter().flatten().min();
+                    Some(ago)
+                }
+                None => info(by, &meta),
+            },
         };
         if let Some(info) = info {
             notes.infos.insert(key, info);
@@ -338,19 +355,26 @@ pub fn notes(koil: &Koil, sizes: &dyn SizeOf, ids: impl IntoIterator<Item = Id>)
     notes
 }
 
-/// What the listing is sorted by, for an entry with `meta` on disk: a
-/// file's size or size on disk, or when it was modified, created or
-/// accessed. None if it isn't known, and for a dir's size (see
-/// [`dir_info`]).
+/// What the listing is sorted by, for an entry with `meta` on disk, if
+/// it's a file's size or size on disk. None if it isn't known, for a dir's
+/// size (see [`dir_info`]), and for a time (see [`time_of`]).
 fn info(by: SortBy, meta: &Metadata) -> Option<String> {
     match by {
         SortBy::Size | SortBy::Disk if meta.is_dir => None,
         SortBy::Size => Some(show_size(meta.size)),
         SortBy::Disk => meta.disk_size.map(show_size),
-        SortBy::Modified => meta.modified.map(show_time),
-        SortBy::Created => meta.created.map(show_time),
-        SortBy::Accessed => meta.accessed.map(show_time),
-        SortBy::Name | SortBy::Natural | SortBy::Extension => None,
+        _ => None,
+    }
+}
+
+/// When the entry with `meta` on disk was modified, created or accessed,
+/// if the listing is sorted by that, and it's known.
+fn time_of(by: SortBy, meta: &Metadata) -> Option<SystemTime> {
+    match by {
+        SortBy::Modified => meta.modified,
+        SortBy::Created => meta.created,
+        SortBy::Accessed => meta.accessed,
+        _ => None,
     }
 }
 
@@ -392,10 +416,52 @@ fn show_size(bytes: u64) -> String {
     shown
 }
 
-/// `time` in the local time zone, like `2026-10-06 14:03`.
+/// How long ago `time` was (see [`time_ago`]).
 fn show_time(time: SystemTime) -> String {
-    let time = chrono::DateTime::<chrono::Local>::from(time);
-    time.format("%Y-%m-%d %H:%M").to_string()
+    time_ago(time, SystemTime::now()).0
+}
+
+/// How long before `now` `time` was, as people say it, rounded down:
+/// `just now`, `5 min ago`, `3 hours ago`, `2 days ago`, `3 weeks ago`,
+/// `5 months ago`, and in how many seconds after `now` that changes. A
+/// year or more before (where months say too little), or later than a
+/// moment after it (a clock that's wrong), it's the time in the local time
+/// zone, like `2026-10-06 14:03`, which doesn't change.
+fn time_ago(time: SystemTime, now: SystemTime) -> (String, Option<u64>) {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    const WEEK: u64 = 7 * DAY;
+    const MONTH: u64 = 30 * DAY;
+    const YEAR: u64 = 365 * DAY;
+    let ago = match now.duration_since(time) {
+        Ok(ago) => ago.as_secs(),
+        // A file written as the listing was read can be a moment ahead.
+        Err(ahead) if ahead.duration().as_secs() < MINUTE => 0,
+        Err(_) => u64::MAX,
+    };
+    // What it counts in, up to when, and its name.
+    let (unit, until, name) = match ago {
+        ..HOUR => (MINUTE, HOUR, "min"),
+        HOUR..DAY => (HOUR, DAY, "hour"),
+        DAY..WEEK => (DAY, WEEK, "day"),
+        WEEK..MONTH => (WEEK, MONTH, "week"),
+        MONTH..YEAR => (MONTH, YEAR, "month"),
+        YEAR.. => {
+            let time = chrono::DateTime::<chrono::Local>::from(time);
+            return (time.format("%Y-%m-%d %H:%M").to_string(), None);
+        }
+    };
+    let count = ago / unit;
+    let shown = match (name, count) {
+        (_, 0) => "just now".to_string(),
+        ("min", _) => format!("{count} min ago"),
+        // 11 at most: 360 days aren't a year, but 12 months are.
+        ("month", 12) => "11 months ago".to_string(),
+        (_, 1) => format!("1 {name} ago"),
+        _ => format!("{count} {name}s ago"),
+    };
+    (shown, Some((unit - ago % unit).min(until - ago)))
 }
 
 /// A listing as the user edited it.
