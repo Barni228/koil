@@ -87,28 +87,24 @@ Item {
     readonly property alias textArea: editor
     readonly property Flickable flickable: scrollView.contentItem as Flickable
     readonly property alias metrics: metrics
-    // Every line is this tall, even one with an emoji (see fixLineFormat).
-    // The extra space keeps an emoji clear of the lines around it.
+    // Every row is this tall, even one with an emoji (see fixLineFormat).
+    // The extra space keeps an emoji clear of the rows around it.
     readonly property int lineHeight: Math.ceil(metrics.lineSpacing * 1.25)
     // How wide a column is: every character advances one (see Icon font).
     readonly property real charWidth: spaceMetrics.advanceWidth
-    // Where the baseline is in a line: the font's characters sit in the
+    // Where the baseline is in a row: the font's characters sit in the
     // middle of it (see fixLineFormat).
     readonly property real textBaseline: (lineHeight + metrics.ascent - metrics.descent) / 2
     // Whether lines wrap (vim's :set wrap, never in the path field): one
     // too long for the view goes on in rows under it, each lineHeight tall
     // (see lineFormat), and the view doesn't scroll sideways.
     readonly property bool wrapping: vim.wrap && !pathField
-    // Where the first line's row starts in the editor, and how much room
-    // is under the last: the style's padding (none in the path field),
-    // `paddingTop` and `paddingBottom`. While lines wrap, Qt puts the
-    // baseline lower in a row than textBaseline (at 4/5 of it), and the
-    // rows start lower by `textShift`, so that the text is in their middle.
+    // Where the first row starts in the editor, and how much room is under
+    // the last: the style's padding (none in the path field).
     property real paddingTop: 0
     property real paddingBottom: 0
-    readonly property real textShift: wrapping ? Math.floor(lineHeight * 256 / 5) / 64 - textBaseline : 0
-    readonly property real textTop: paddingTop + textShift
-    readonly property real textBottom: paddingBottom - textShift
+    readonly property real textTop: paddingTop
+    readonly property real textBottom: paddingBottom
     // While lines wrap, the columns kept free right of the rows for the
     // notes after the lines (`infos`): the longest's, and the spaces before
     // it (see aside), so that each fits after its line, as in a table.
@@ -126,17 +122,17 @@ Item {
     readonly property var viewport: [flickable.contentY, flickable.height]
     // Set while the text changes in a way that isn't an edit.
     property bool quiet: false
-    // Set while only the text's format changes (its line format, colors or
-    // margins), which Qt reports as a change to the text, but which leaves
+    // Set while only the text's format changes (its colors, which Qt
+    // reports as a change to the text, or its line format), which leaves
     // the text as it was, so it isn't read again (a long one took 100 ms).
     property bool formatting: false
     // The line format the text was given last (see lineFormat), so it
-    // isn't given the same again: Qt lays all of it out for each.
+    // isn't given the same again.
     property string formatted: ""
     // Lines longer than this Qt doesn't lay out or draw, as it would all
     // of one in view (a line of a megabyte took seconds to open, and as
     // long for each edit), but `longText` draws what's in view of them,
-    // on the line grid (see watchLongLines in native.h). `longest` is the
+    // on the line grid (see setLineFormat in native.h). `longest` is the
     // longest one's length, or 0 if there's none.
     readonly property int longLength: 10000
     property int longest: 0
@@ -152,31 +148,29 @@ Item {
     // A click with Cmd on a link (see `link`), on the character `at`.
     signal linkClicked(int at)
 
-    // Replaces the text (a file or a listing was opened); not an edit. Qt
-    // lays out all of a text again when its format or the editor's padding
-    // changes (100,000 lines took most of a second each), so the text comes
-    // with its line format (see fixLineFormat), and the line numbers get
-    // their width for it first.
+    // Replaces the text (a file or a listing was opened); not an edit. All
+    // of a text is laid out again when its line format changes, and while
+    // lines wrap, when the editor's padding does (100,000 lines took most of
+    // a second each), so the text comes after its line format (see
+    // fixLineFormat), and the line numbers get their width for it first.
     function setText(text) {
         system.redrawText(editor); // or it may show none of a shorter text
         if (gutter.shown)
             gutter.fit(Txt.countLines(text));
-        const f = lineFormat();
-        formatted = JSON.stringify(f);
         quiet = true;
-        // A new wrap mode and new colors (a file after the listing) go in
-        // with no text, which they would lay out or color again.
-        if (editor.wrapMode !== wrapModeOf(listing) || listingColors !== listing) {
-            system.setText(editor, "", f.height, f.bottomMargin, f.indent, f.rightMargin);
-            applyWrapMode();
+        // New colors and a new line format (a file after the listing) go
+        // in with no text, which they would color or lay out again.
+        if (listingColors !== listing) {
+            system.setText(editor, "");
             listingColors = listing;
         }
+        applyLineFormat();
         // The editor's text will be this string (see `latest`), unless Qt
         // changes it as it goes in: then it isn't made again from Qt's,
         // nor compared with this one (each took seconds for a gigabyte).
         if (editor.latest && system.keptAsIs(text))
             editor.latest.expected = text;
-        system.setText(editor, text, f.height, f.bottomMargin, f.indent, f.rightMargin);
+        system.setText(editor, text);
         if (editor.latest)
             editor.latest.expected = null;
         quiet = false;
@@ -290,13 +284,11 @@ Item {
         updateLink();
     }
 
-    // The listing's names are indented where they wrap (see lineFormat),
-    // wrap anywhere (see wrapModeOf) and get its colors, once the text is
-    // replaced, which takes the format, the wrap mode and the colors with
-    // it (see setText).
+    // The listing's names are indented where they wrap (see lineFormat)
+    // and get its colors, once the text is replaced, which takes the
+    // format and the colors with it (see setText).
     onListingChanged: {
         Qt.callLater(fixLineFormat);
-        Qt.callLater(applyWrapMode);
         Qt.callLater(colorAsShown);
     }
     // What the colors are made of: when any changes, they're given again.
@@ -306,46 +298,45 @@ Item {
     onColorInputsChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
 
-    // An emoji comes from a taller font than the editor's, which makes its
-    // line taller. Give every line the same height instead. Qt puts a
-    // fixed-height line's baseline at 4/5 of it, so to center the text, the
-    // line is made shorter and a bottom margin makes up the rest. Qt counts
-    // the new block format as an edit, but it isn't one. The cursor stays
-    // in view if it was: the lines move with their new height, and while
+    // Lays the text out on the grid lineFormat gives (see setLineFormat in
+    // native.h), which Koil's layout does in place of Qt's: every row the
+    // same height, even one with an emoji (from a taller font), with the
+    // text in its middle. Not a change to the text. The cursor stays in
+    // view if it was: the lines move with their new height, and while
     // lines wrap, with the rows they wrap to (a zoom, the notes' room), and
     // Qt scrolls to the cursor only when it moves.
     function fixLineFormat() {
-        const f = lineFormat(), key = JSON.stringify(f);
-        if (key === formatted)
-            return;
-        formatted = key;
         const c = cellAt(editor.cursorPosition);
         const shown = c.y + c.height > flickable.contentY && c.y < flickable.contentY + flickable.height;
-        quiet = true;
-        formatting = true;
-        system.setLineFormat(editor.textDocument, f.height, f.bottomMargin, f.indent, f.rightMargin);
-        formatting = false;
-        quiet = false;
-        placeLongLines();
-        if (shown)
+        if (applyLineFormat() && shown)
             ensureCursorVisible();
     }
 
-    // Puts the long lines Qt doesn't lay out (see longLength) on the line
-    // grid, after a change to the text or its format: a line after them
-    // gets a margin as tall as their rows.
-    function placeLongLines() {
-        if (pathField)
-            return;
-        formatOnly(() => system.placeLongLines(editor.textDocument, lineHeight, lineFormat().bottomMargin,
-            wrapping ? rowLength() : 0));
+    // fixLineFormat's line format, without the view: whether it was new.
+    function applyLineFormat() {
+        const f = lineFormat(), key = JSON.stringify(f);
+        if (key === formatted)
+            return false;
+        formatted = key;
+        const wasQuiet = quiet, wasFormatting = formatting;
+        quiet = true;
+        formatting = true;
+        system.setLineFormat(editor, f.lineHeight, f.baseline, f.rightMargin, f.listing, longLength);
+        quiet = wasQuiet;
+        formatting = wasFormatting;
+        editor.revision++; // the overlays' places
         longest = system.longestLine(editor.textDocument);
+        fitWidth();
+        return true;
     }
 
-    // While lines wrap, how many characters a row of a long line has: as
-    // many as fit (see longLength).
-    function rowLength() {
-        return Math.max(1, Math.floor((editor.width - editor.leftPadding - editor.rightPadding) / charWidth) - noteRoom);
+    // While lines don't wrap, the TextArea is as wide as its widest line,
+    // or as the view: Qt gives a TextArea its text's width as its content's,
+    // which Koil's layout leaves to this (see layoutWidth in native.h).
+    // While they wrap, Qt makes it as wide as the view.
+    function fitWidth() {
+        if (!wrapping)
+            editor.width = Math.max(flickable.width, system.layoutWidth(editor.textDocument) + editor.leftPadding + editor.rightPadding);
     }
 
     // The position closest to point x, y in the editor, in a long line too
@@ -403,29 +394,26 @@ Item {
         }
     }
 
-    // The format fixLineFormat gives every line: { height, bottomMargin,
-    // indent, rightMargin }. While lines wrap, each of a line's rows is
-    // `height` tall, and the margin comes after the last, so the rows are
-    // lineHeight and there's no margin (the rows start lower instead:
-    // textShift). In the listing, a name's rows after its first are
-    // indented (`indent`) to start under it, not under its icon, and none
-    // reaches into the notes' room (`rightMargin`, see noteRoom).
+    // The grid fixLineFormat lays the text out on: { lineHeight, baseline,
+    // rightMargin, listing }. In the listing, a name's rows after its first
+    // start under it, not under its icon, and a row never ends in a line's
+    // prefix. While lines wrap, none reaches into the notes' room
+    // (`rightMargin`, see noteRoom). Not textBaseline, which may not have
+    // caught up with the font yet. The font itself (its columns' width) the
+    // layout takes from the editor.
     function lineFormat() {
-        if (wrapping)
-            return { height: lineHeight, bottomMargin: 0, indent: listing ? 3 * charWidth : 0, rightMargin: noteRoom * charWidth };
-        // Not textBaseline, which may not have caught up with the font yet.
-        const baseline = (lineHeight + metrics.ascent - metrics.descent) / 2;
-        // In whole 64ths of a pixel, as Qt keeps both and drops the rest:
-        // else each line comes out a 64th short, and in a long file the
-        // text drifts off the line grid the overlays are drawn on.
-        const height = Math.floor(Math.min(lineHeight, baseline * 5 / 4) * 64) / 64;
-        return { height: height, bottomMargin: lineHeight - height, indent: 0, rightMargin: 0 };
+        return {
+            lineHeight: lineHeight,
+            baseline: (lineHeight + metrics.ascent - metrics.descent) / 2,
+            rightMargin: noteRoom * charWidth,
+            listing: listing
+        };
     }
 
-    // The rectangle of the character at pos, as tall as the line (the row,
-    // while lines wrap). The cursors and highlights use it rather than
-    // positionToRectangle, which gives a line with an emoji its natural
-    // height, while every line is lineHeight tall (see fixLineFormat).
+    // The rectangle of the character at pos, as tall as its row. The
+    // cursors and highlights use it rather than positionToRectangle, which
+    // gives a line with an emoji its natural height, while every row is
+    // lineHeight tall (see fixLineFormat).
     function cellAt(pos) {
         const r = editor.rectAt(pos);
         const h = lineHeight;
@@ -634,33 +622,41 @@ Item {
     onTextBaselineChanged: fixLineFormat()
     onCharWidthChanged: Qt.callLater(fixLineFormat)
     onNoteRoomChanged: Qt.callLater(fixLineFormat) // after the listing it's for
+    // The wrap mode and, while lines wrap, the notes' room each have all
+    // the text laid out again: the one that ends wrapping goes first, after
+    // which the other doesn't.
     onWrappingChanged: {
-        fixLineFormat();
-        applyWrapMode();
+        if (wrapping) {
+            fixLineFormat();
+            applyWrapMode();
+        } else {
+            applyWrapMode();
+            fixLineFormat();
+        }
         flickable.contentX = 0;
+        // Both scroll bars change, and Qt doesn't tell the room the vertical
+        // one takes (effectiveScrollBarWidth) if it changes while it tells
+        // the horizontal one's (QQuickScrollViewPrivate's
+        // isUpdatingScrollBar): the macOS style's padding kept none, and
+        // the text went under the bar. So it's told again, once both did.
+        Qt.callLater(scrollView.effectiveScrollBarWidthChanged);
     }
 
-    // How the text wraps while lines do: at a word's start where it can,
-    // but anywhere in the listing, as vim wraps oil.nvim's: a name of one
-    // word too long for a row would leave its icon alone on the row before.
-    function wrapModeOf(listing) {
-        return !wrapping ? TextEdit.NoWrap : listing ? TextEdit.WrapAnywhere : TextEdit.Wrap;
-    }
-
-    // Gives the TextArea the wrap mode for what it shows, which lays out
-    // all its text again. Not a binding: the listing turns into a file
-    // before the file's text comes (see setText). To wrap, it's as wide as
-    // the view first: Qt fits it to the view only as the text's size
-    // changes, and then, inside its own resize, it doesn't tell the
-    // wrapped text's height, so the view kept the unwrapped one (and
-    // didn't follow the cursor past it).
+    // Gives the TextArea the wrap mode, which lays out all its text again
+    // (see setLineFormat in native.h). Not a binding: to wrap, the TextArea
+    // is as wide as the view first. Qt fits it to the view only as the
+    // text's size changes, and then, inside its own resize, it doesn't tell
+    // the wrapped text's height, so the view kept the unwrapped one (and
+    // didn't follow the cursor past it). Not wrapping, it's as wide as the
+    // text after (see fitWidth).
     function applyWrapMode() {
-        const mode = wrapModeOf(listing);
+        const mode = wrapping ? TextEdit.Wrap : TextEdit.NoWrap;
         if (editor.wrapMode === mode)
             return;
         if (wrapping)
             editor.width = flickable.width;
         editor.wrapMode = mode;
+        fitWidth();
     }
     Component.onCompleted: {
         fixLineFormat();
@@ -711,6 +707,7 @@ Item {
         // the view either way: the window made bigger showed none of the
         // text past the old edges until something drew it.
         function onWidthChanged() {
+            view.fitWidth();
             editor.update();
         }
         function onHeightChanged() {
@@ -838,10 +835,9 @@ Item {
 
     // Room right of the text for the view to scroll into, as far as the
     // notes and messages after the lines reach (see `aside`), so one that
-    // ends past the view can be read, and the long lines, which Qt doesn't
-    // count in the text's width (see longLength), with the cursor after
-    // their end. A margin, as `scrollRoom` is: padding would have Qt lay
-    // out all of the text again whenever it changed. None while lines wrap,
+    // ends past the view can be read, and the long lines, which the layout
+    // doesn't count in the text's width (see longLength), with the cursor
+    // after their end. A margin, as `scrollRoom` is. None while lines wrap,
     // when one that would end past the view is cut off.
     Binding {
         id: sideScrollRoom
@@ -924,6 +920,7 @@ Item {
                 // text of a gigabyte took seconds.
                 const change = view.system.takeTextChange(textDocument, !view.formatting && !known);
                 if (view.formatting) {
+                    view.fitWidth();
                     revision++;
                     return;
                 }
@@ -958,44 +955,30 @@ Item {
                 latest = { text: t, expected: expected };
                 // Only the lines in view built, if the text grew long.
                 view.system.followTextLength(editor);
+                view.longest = view.system.longestLine(textDocument);
+                view.fitWidth();
                 if (!view.quiet && changed)
                     view.edited();
                 revision++;
-                // After it's done: the margins it gives are a change too.
-                view.placeLongLines();
             }
             // Not while the text is replaced (setText), whose cursor Qt
             // moves before `text` has the new text, which vim would read:
             // vim starts over after.
             onCursorPositionChanged: {
-                if (view.longest && selectionStart !== selectionEnd)
-                    view.system.rebuildTextNodes(editor);
                 if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
             }
             onSelectedTextChanged: {
-                // Qt draws again the lines a selection changes, which
-                // moves the lines after a long one (see rebuildTextNodes).
-                if (view.longest)
-                    view.system.rebuildTextNodes(editor);
                 if (view.active && !view.quiet)
                     view.vim.syncFromEditor();
             }
-            // While lines wrap, a long line has as many characters a row as
-            // fit (see rowLength). Once Qt is done resizing: placed while
-            // it was, the text's new height went nowhere.
-            onWidthChanged: {
-                if (view.wrapping)
-                    Qt.callLater(view.placeLongLines);
-            }
-            onLeftPaddingChanged: {
-                if (view.wrapping)
-                    Qt.callLater(view.placeLongLines);
-            }
+            // The line numbers' room (see fitWidth).
+            onLeftPaddingChanged: view.fitWidth()
             // Not Qt's, which doesn't know where a long line is (see
-            // scrollToCursorInQml).
+            // scrollToCursorInQml). Not as the line format changes, which
+            // keeps the cursor in view only if it was (see fixLineFormat).
             onCursorRectangleChanged: {
-                if (!view.pathField)
+                if (!view.pathField && !view.formatting)
                     view.ensureCursorVisible();
             }
             onRevisionChanged: {
@@ -1038,10 +1021,8 @@ Item {
                 view.system.watchTextChanges(textDocument);
                 // Qt never lays out a long line (see longLength), nor
                 // scrolls to it.
-                if (!view.pathField) {
-                    view.system.watchLongLines(textDocument, view.longLength);
+                if (!view.pathField)
                     view.system.scrollToCursorInQml(editor);
-                }
             }
 
             // positionToRectangle and positionAt, in a long line too, which
@@ -1342,10 +1323,11 @@ Item {
                         return [];
                     const f = view.flickable, h = view.lineHeight, w = view.charWidth;
                     const x = f.contentX - editor.leftPadding;
+                    // While lines wrap, all of a row.
                     return JSON.parse(view.system.longLineRuns(editor.textDocument,
                         Math.floor((f.contentY - view.textTop) / h), Math.floor((f.contentY + f.height - view.textTop) / h),
                         view.wrapping ? 0 : Math.max(0, Math.floor(x / w) - 1),
-                        view.wrapping ? view.rowLength() : Math.ceil((x + f.width) / w) + 1));
+                        view.wrapping ? 1 << 30 : Math.ceil((x + f.width) / w) + 1));
                 }
 
                 Repeater {

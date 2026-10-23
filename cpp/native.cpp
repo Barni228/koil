@@ -23,6 +23,7 @@
 #include <QtGui/QIcon>
 #include <QtGui/QImage>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QPainter>
 #include <QtGui/QPixmap>
 #include <QtGui/QSyntaxHighlighter>
 #include <QtGui/QTextBlockFormat>
@@ -317,8 +318,9 @@ formatOnly(const QTextDocument* document)
 }
 
 // While it lives, the changes to `document` are only to its format: its
-// line format, or the margins of LongLines. So the text isn't colored again
-// (see TextColors), nor taken as changed (see TextChanges).
+// colors, or the layout it's laid out by (see setLineFormat). So the text
+// isn't colored again (see TextColors), nor taken as changed (see
+// TextChanges).
 class FormatOnly
 {
 public:
@@ -507,267 +509,624 @@ recolor(QSyntaxHighlighter* highlighter, const std::optional<QSet<int>>& lines =
   }
 }
 
-// The format setLineFormat gives every line.
-QTextBlockFormat
-lineFormat(double height, double bottomMargin, double indent, double rightMargin)
-{
-  QTextBlockFormat format;
-  format.setLineHeight(height, QTextBlockFormat::FixedHeight);
-  format.setBottomMargin(bottomMargin);
-  // A hanging indent: the first row at the margin less the indent.
-  format.setLeftMargin(indent);
-  format.setTextIndent(-indent);
-  format.setRightMargin(rightMargin);
-  return format;
-}
-
 // A TextEdit with more characters than this builds only the lines in view
 // (QQuickTextEditPrivate::largeTextSizeThreshold).
 constexpr qsizetype largeTextSize = 10000;
 
-class LongLines;
+// The code point at `i` of `text`, and the one before it.
+char32_t
+codePointAt(QStringView text, qsizetype i)
+{
+  const QChar c = text.at(i);
+  if (c.isHighSurrogate() && i + 1 < text.size() && text.at(i + 1).isLowSurrogate())
+    return QChar::surrogateToUcs4(c, text.at(i + 1));
+  return c.unicode();
+}
 
-// A line too long for Qt (see LongLines), as its block's user data, which
-// Qt deletes with the block: its length, which LongLines keeps the longest
+char32_t
+codePointBefore(QStringView text, qsizetype i)
+{
+  const QChar c = text.at(i - 1);
+  if (c.isLowSurrogate() && i >= 2 && text.at(i - 2).isHighSurrogate())
+    return QChar::surrogateToUcs4(text.at(i - 2), c);
+  return c.unicode();
+}
+
+// A space a row can end after: not a no-break one.
+bool
+isBlank(char32_t c)
+{
+  return QChar::isSpace(c) && c != 0xa0 && c != 0x2007 && c != 0x202f;
+}
+
+// A character of a word, as a regex's \w: a letter, a digit or `_`.
+bool
+isWord(char32_t c)
+{
+  return QChar::isLetterOrNumber(c) || QChar::isMark(c) || c == u'_';
+}
+
+// What ends something (a `,`, a `.`, a closing bracket or quote) or joins
+// two words (a `-`, a `/`), which stays with the word before it.
+bool
+staysBefore(char32_t c)
+{
+  switch (QChar::category(c)) {
+    case QChar::Punctuation_Close:
+    case QChar::Punctuation_FinalQuote:
+      return true;
+    default:
+      return c < 0x80 && QStringView(u",.;:!?%'\"-/").contains(QChar(c));
+  }
+}
+
+// Whether a row may end before the character at `i` of `text`, so that it
+// starts the next one: after a space, or where a word starts or ends, as a
+// regex's \b does, but not before a space (which ends the row it's on), nor
+// before what stays with the word before it (see staysBefore).
+bool
+breaksBefore(QStringView text, qsizetype i)
+{
+  const char32_t c = codePointAt(text, i), before = codePointBefore(text, i);
+  if (isBlank(c))
+    return false;
+  if (isBlank(before))
+    return true;
+  return isWord(before) != isWord(c) && !staysBefore(c);
+}
+
+// Where the name starts on a line of the listing, after its prefix: an
+// icon (one character) and two spaces, or three spaces (see Prefixes in
+// Vim.qml). 0 if it has none.
+qsizetype
+prefixEnd(QStringView text)
+{
+  if (text.isEmpty())
+    return 0;
+  const qsizetype icon = text.at(0).isHighSurrogate() && text.size() > 1 ? 2 : 1;
+  return text.mid(icon).startsWith(u"  ") ? icon + 2 : 0;
+}
+
+// How many rows each line of a document takes, by line number, with how
+// many come before a line, found in O(log n) (a Fenwick tree, `tree`): the
+// layout gives a line's place each time Qt asks, many times a frame, and an
+// edit changes the counts of its own lines only. A line has a row at least.
+class RowCounts
+{
+public:
+  int size() const { return int(counts.size()); }
+  qint64 total() const { return sum; }
+  int at(int line) const { return counts.at(line); }
+
+  void reset(std::vector<int> all)
+  {
+    counts = std::move(all);
+    rebuild();
+  }
+
+  // Replaces the counts of `removed` lines from `line` with `added`.
+  void replace(int line, int removed, const std::vector<int>& added)
+  {
+    if (removed == int(added.size())) {
+      for (int i = 0; i < removed; ++i)
+        set(line + i, added.at(i));
+      return;
+    }
+    counts.erase(counts.begin() + line, counts.begin() + line + removed);
+    counts.insert(counts.begin() + line, added.begin(), added.end());
+    rebuild();
+  }
+
+  // The rows of the lines before `line`.
+  qint64 before(int line) const
+  {
+    qint64 rows = 0;
+    for (int i = line; i > 0; i -= i & -i)
+      rows += tree.at(i);
+    return rows;
+  }
+
+  // The line row `row` is on (the last one, past the end).
+  int lineAt(qint64 row) const
+  {
+    int line = 0;
+    int step = 1;
+    while (step * 2 <= size())
+      step *= 2;
+    for (; step; step /= 2) {
+      if (line + step <= size() && tree.at(line + step) <= row) {
+        line += step;
+        row -= tree.at(line);
+      }
+    }
+    return qBound(0, line, size() - 1);
+  }
+
+private:
+  void set(int line, int rows)
+  {
+    const int change = rows - counts.at(line);
+    if (!change)
+      return;
+    counts.at(line) = rows;
+    sum += change;
+    for (int i = line + 1; i <= size(); i += i & -i)
+      tree.at(i) += change;
+  }
+
+  void rebuild()
+  {
+    tree.assign(counts.size() + 1, 0);
+    sum = 0;
+    for (int i = 1; i <= size(); ++i) {
+      tree.at(i) += counts.at(i - 1);
+      sum += counts.at(i - 1);
+      if (const int up = i + (i & -i); up <= size())
+        tree.at(up) += tree.at(i);
+    }
+  }
+
+  std::vector<int> counts;
+  std::vector<qint64> tree;
+  qint64 sum = 0;
+};
+
+class TextLayout;
+
+// A line too long for Qt (see TextLayout), as its block's user data, which
+// Qt deletes with the block: its length, which the layout keeps the longest
 // of.
 struct LongLine : QTextBlockUserData
 {
-  explicit LongLine(LongLines* lines);
+  explicit LongLine(TextLayout* layout);
   ~LongLine() override;
 
-  LongLines* lines;
+  TextLayout* layout;
   int length = 0;
 };
 
-// The lines of a document longer than `longLength` characters (see
-// watchLongLines). Qt lays out and draws all of a line in view, however
-// long, so they're hidden from it (QTextBlock::setVisible), which skips
-// them, and a line after them gets a top margin as tall as their rows, so
-// the lines Qt lays out stay on the grid, a row each (see place).
-class LongLines : public QObject
+// Koil's layout of a TextEdit's document, in place of Qt's (see
+// setLineFormat). Every line's rows are on a grid of rows `lineHeight`
+// tall, with the text's baseline `baseline` down each, however tall its
+// characters are (an emoji's font is taller). While lines wrap, a row ends
+// where breaksBefore lets it, the last place that fits, or else where the
+// next character doesn't fit; in the listing (`prefixed`), not in a line's
+// prefix nor right after it, which would leave its icon alone, and the rows
+// after a line's first start under its name (see indent). None reaches
+// into the `rightMargin`. A line longer than `longLength` is hidden from Qt
+// (QTextBlock::setVisible), which neither lays it out nor draws it (a
+// megabyte took seconds, and as long for each edit): it's given its rows
+// here, `rowLength` characters a row while lines wrap, and Koil draws what's
+// in view of it (see longLineRuns). Qt's own layout can do none of this: its
+// rows break where Unicode's line breaking says, it places a line by its
+// characters' heights, and it gives a hidden line no room, so the lines
+// after hidden ones had to be given margins as tall as their rows.
+class TextLayout : public QAbstractTextDocumentLayout
 {
 public:
-  LongLines(QTextDocument* document, int longLength)
-    : QObject(document)
-    , longLength(longLength)
-    , start(document)
-    , end(document)
+  TextLayout(QTextDocument* document, QQuickItem* textEdit)
+    : QAbstractTextDocumentLayout(document)
+    , textEdit(textEdit)
   {
     setObjectName(name);
-    connect(document, &QTextDocument::contentsChange, this, &LongLines::changed);
-    changed(0, 0, document->characterCount());
+    // Told before each change to the text, but not before one to what it's
+    // laid out by (see documentChanged).
+    connect(document, &QTextDocument::contentsChange, this, [this] { textChanged = true; });
   }
 
-  ~LongLines() override
+  ~TextLayout() override
   {
-    for (auto* line : std::as_const(lines))
-      line->lines = nullptr;
+    for (auto* line : std::as_const(longLines))
+      line->layout = nullptr;
   }
 
-  static inline const QString name = QStringLiteral("koilLongLines");
+  static inline const QString name = QStringLiteral("koilTextLayout");
 
-  QTextDocument* document() const { return static_cast<QTextDocument*>(parent()); }
+  double lineHeight = 1;
+  double baseline = 0;
+  double rightMargin = 0;
+  bool prefixed = false;
+  int longLength = largeTextSize;
+  QSet<LongLine*> longLines;
 
-  int longLength;
-  QSet<LongLine*> lines;
-  // The grid, as place was last given it.
-  double lineHeight = 0;
-  double bottomMargin = 0;
-  int rowLength = 0;
-  // Where the edits since the last place were, as cursors, which move with
-  // the text, while `dirty`.
-  QTextCursor start;
-  QTextCursor end;
-  bool dirty = false;
-  // Whether a line may have a margin of place's.
-  bool placed = false;
-
-  // An edit from `from`, `added` long: the lines in it that are too long
-  // are hidden from Qt, the others shown. It's called before Qt lays them
-  // out, so it never lays out a long one. The lines around it are placed
-  // later (see place), as a change to the format here would go into the
-  // edit Qt is making.
-  void changed(int from, int removed, int added)
+  // Takes a new grid (see setLineFormat), and lays the text out again as
+  // far as it changes it.
+  void setFormat(double height, double base, double margin, bool listing, int longAt)
   {
-    Q_UNUSED(removed);
-    if (formatOnly(document()))
+    const bool rows = rightMargin != margin || prefixed != listing;
+    const bool grid = lineHeight != height || baseline != base;
+    const bool hiding = longLength != longAt;
+    if (!rows && !grid && !hiding)
       return;
-    auto* doc = document();
-    const int to = from + added;
-    bool any = false;
-    for (QTextBlock block = doc->findBlock(from); block.isValid() && block.position() <= to;
-         block = block.next()) {
-      const int length = block.length() - 1;
-      const bool isLong = length > longLength;
-      auto* line = dynamic_cast<LongLine*>(block.userData());
-      if (isLong && !line && !block.userData()) {
-        line = new LongLine(this);
-        block.setUserData(line);
-      } else if (!isLong && line) {
-        block.setUserData(nullptr); // which deletes it
-        line = nullptr;
-      }
-      if (line)
-        line->length = length;
-      if (block.isVisible() == isLong)
-        block.setVisible(!isLong);
-      any = any || isLong;
-    }
-    if (!any && !placed && lines.isEmpty())
-      return;
-    const int last = doc->characterCount() - 1;
-    if (!dirty) {
-      start.setPosition(qMin(from, last));
-      end.setPosition(qMin(to, last));
-      dirty = true;
+    lineHeight = height;
+    baseline = base;
+    rightMargin = margin;
+    prefixed = listing;
+    longLength = longAt;
+    if (!canLayout()) {
+      stale = true;
       return;
     }
-    if (from < start.position())
-      start.setPosition(qMin(from, last));
-    if (to > end.position())
-      end.setPosition(qMin(to, last));
+    // A line's rows depend on these only while lines wrap.
+    if (hiding || (rows && wrapping()))
+      layoutAll();
+    else
+      placeAll();
+    // The TextEdit hears of no change to the text, so its size, its lines
+    // (drawn again where they are now) and its cursor's place are told
+    // here, through slots of Qt's that aren't public.
+    for (const char* slot : { "updateSize", "updateWholeDocument", "moveCursorDelegate" })
+      QMetaObject::invokeMethod(textEdit, slot);
   }
 
-  // How many rows `block` takes: one, unless lines wrap (`rowLength`
-  // characters a row, in a line Qt doesn't lay out).
-  int rowsOf(const QTextBlock& block) const
+  // How wide a column is: every character of the font advances one (see
+  // Icon font in CLAUDE.md), as far as a hidden line goes.
+  qreal charWidth() const
   {
-    if (!rowLength)
-      return 1;
-    if (!block.isVisible())
-      return qMax(1, (block.length() - 1 + rowLength - 1) / rowLength);
-    document()->documentLayout()->blockBoundingRect(block); // laid out
-    return qMax(1, block.layout()->lineCount());
+    return qMax<qreal>(1, QFontMetricsF(document()->defaultFont()).horizontalAdvance(u' '));
   }
 
-  // The row `block` starts on, counted from 0.
-  int rowOf(const QTextBlock& block) const
+  // How much further right the rows a line wraps to start: in the listing,
+  // under a name rather than its icon, past the prefix (three columns).
+  qreal indent() const { return prefixed ? 3 * charWidth() : 0; }
+
+  bool wrapping() const
   {
-    if (!rowLength)
-      return block.blockNumber();
-    if (block.isVisible())
-      return qRound(document()->documentLayout()->blockBoundingRect(block).top() / lineHeight);
-    int rows = 0;
-    QTextBlock before = block.previous();
-    for (; before.isValid() && !before.isVisible(); before = before.previous())
-      rows += rowsOf(before);
-    return before.isValid() ? rowOf(before) + rowsOf(before) + rows : rows;
+    const auto mode = document()->defaultTextOption().wrapMode();
+    return mode != QTextOption::NoWrap && mode != QTextOption::ManualWrap;
   }
+
+  // How many characters a row of a hidden line has while lines wrap (as
+  // many as fit), else 0.
+  int rowLength() const
+  {
+    if (!wrapping())
+      return 0;
+    return qMax(1, int(std::floor((textWidth() - rightMargin) / charWidth())));
+  }
+
+  int rowsOf(const QTextBlock& block) const { return rows.at(block.blockNumber()); }
+  qint64 rowOf(const QTextBlock& block) const { return rows.before(block.blockNumber()); }
 
   // The block row `row` is in (the last one, past the end).
-  QTextBlock blockAtRow(int row) const
+  QTextBlock blockAtRow(qint64 row) const
   {
-    auto* doc = document();
-    if (!rowLength)
-      return doc->findBlockByNumber(qBound(0, row, doc->blockCount() - 1));
-    int lo = 0, hi = doc->blockCount() - 1;
-    while (lo < hi) {
-      const int mid = (lo + hi + 1) / 2;
-      if (rowOf(doc->findBlockByNumber(mid)) <= row)
-        lo = mid;
-      else
-        hi = mid - 1;
-    }
-    return doc->findBlockByNumber(lo);
+    return rows.size() ? document()->findBlockByNumber(rows.lineAt(row)) : QTextBlock();
   }
+
+  // How wide the widest line Qt lays out is, unwrapped.
+  qreal width() const { return widest; }
 
   int longest() const
   {
     int n = 0;
-    for (const auto* line : std::as_const(lines))
+    for (const auto* line : std::as_const(longLines))
       n = qMax(n, line->length);
     return n;
   }
 
-  // Gives each line Qt lays out after hidden ones a top margin as tall as
-  // their rows (and the end of the document one after the last of them),
-  // on a grid of rows `lineHeight` tall, of which Qt's lines are `height`
-  // and the `bottomMargin` after it (see lineFormat), with `rowLength`
-  // characters in a row of a hidden line while lines wrap (0 while they
-  // don't). Only around the edits since it was last called, unless the
-  // grid is new.
-  void place(double height, double margin, int length)
+  // The position closest to `column` (a UTF-16 index) in row `row` of
+  // `block`, a hidden line.
+  int positionInRow(const QTextBlock& block, int row, double column) const
   {
-    const bool all = height != lineHeight || margin != bottomMargin || length != rowLength;
-    lineHeight = height;
-    bottomMargin = margin;
-    rowLength = length;
-    if (!placed && lines.isEmpty()) {
-      dirty = false;
-      return;
+    const int length = block.length() - 1, n = rowLength();
+    const int rowCount = rowsOf(block);
+    int from = 0, to = length;
+    if (n) {
+      row = qBound(0, row, rowCount - 1);
+      from = row * n;
+      // Not past a row's last character but in the last row: the position
+      // after it is the next row's.
+      to = row == rowCount - 1 ? length : from + n - 1;
     }
-    if (!all && !dirty)
-      return;
-    auto* doc = document();
-    QTextBlock block = all ? doc->begin() : doc->findBlock(start.position());
-    const int last = all ? doc->characterCount() : end.position();
-    dirty = false;
-    // The rows of the hidden lines right before, and whether a line Qt
-    // lays out is before those.
-    int rows = 0;
-    QTextBlock before = block.previous();
-    for (; before.isValid() && !before.isVisible(); before = before.previous())
-      rows += rowsOf(before);
-    bool after = before.isValid();
-    const FormatOnly formatting(doc);
-    // As one edit, if there's any: an edit block, even one with nothing in
-    // it, has the TextEdit take all of its text as changed.
-    QTextCursor cursor(doc);
-    bool editing = false;
-    const auto change = [&] {
-      if (!editing)
-        cursor.beginEditBlock();
-      editing = true;
-    };
-    for (; block.isValid(); block = block.next()) {
-      if (!block.isVisible()) {
-        rows += rowsOf(block);
-        continue;
-      }
-      // After a line Qt lays out, the margin between them is the larger
-      // of its bottom margin and this one.
-      const double top = rows ? (after ? bottomMargin : 0) + rows * lineHeight : 0;
-      if (block.blockFormat().topMargin() != top) {
-        change();
-        QTextBlockFormat format;
-        format.setTopMargin(top);
-        QTextCursor(block).mergeBlockFormat(format);
-      }
-      after = true;
-      rows = 0;
-      if (block.position() > last)
-        break; // the first line after the edits
-    }
-    if (!block.isValid()) {
-      // Qt adds a line's bottom margin only before the next line it lays
-      // out, so the end's has it too, else a long last line ended past the
-      // text, and the view didn't scroll to it. In whole pixels, as Qt
-      // rounds a frame's margins: up, so the text reaches the grid's end.
-      const double bottom = rows ? std::ceil((after ? bottomMargin : 0) + rows * lineHeight) : 0;
-      auto* root = doc->rootFrame();
-      QTextFrameFormat format = root->frameFormat();
-      if (format.bottomMargin() != bottom) {
-        change();
-        format.setBottomMargin(bottom);
-        root->setFrameFormat(format);
-      }
-    }
-    if (editing)
-      cursor.endEditBlock();
-    placed = !lines.isEmpty();
+    int position = block.position() + from + qBound(0, qRound(column), to - from);
+    if (position > block.position() && document()->characterAt(position).isLowSurrogate())
+      --position;
+    return position;
   }
+
+  void draw(QPainter* painter, const PaintContext& context) override
+  {
+    Q_UNUSED(context);
+    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
+      if (block.isVisible())
+        block.layout()->draw(painter, blockBoundingRect(block).topLeft());
+    }
+  }
+
+  int hitTest(const QPointF& point, Qt::HitTestAccuracy accuracy) const override
+  {
+    Q_UNUSED(accuracy);
+    if (!rows.size())
+      return 0;
+    const qreal margin = document()->documentMargin();
+    const qint64 row =
+      qBound<qint64>(0, qint64(std::floor((point.y() - margin) / lineHeight)), rows.total() - 1);
+    const QTextBlock block = blockAtRow(row);
+    const int r = int(row - rowOf(block));
+    const qreal x = point.x() - margin;
+    if (!block.isVisible())
+      return positionInRow(block, r, x / charWidth());
+    const QTextLayout* layout = block.layout();
+    if (!layout->lineCount())
+      return block.position();
+    return block.position() + layout->lineAt(qMin(r, layout->lineCount() - 1)).xToCursor(x);
+  }
+
+  int pageCount() const override { return 1; }
+
+  QSizeF documentSize() const override
+  {
+    const qreal margin = document()->documentMargin();
+    const qreal width = wrapping() ? qMax<qreal>(0, textWidth()) : widest;
+    return { width + 2 * margin, qreal(rows.total()) * lineHeight + 2 * margin };
+  }
+
+  QRectF frameBoundingRect(QTextFrame* frame) const override
+  {
+    return frame == document()->rootFrame() ? QRectF(QPointF(), documentSize()) : QRectF();
+  }
+
+  // Also a hidden line's, where it is: Qt's is empty, so a TextEdit put
+  // the lines it draws after one in the wrong place as they moved (it moves
+  // what it drew by how much the first line of it moved).
+  QRectF blockBoundingRect(const QTextBlock& block) const override
+  {
+    const int line = block.blockNumber();
+    if (!block.isValid() || line >= rows.size())
+      return {};
+    const qreal margin = document()->documentMargin();
+    return { margin,
+             margin + qreal(rows.before(line)) * lineHeight,
+             documentSize().width() - 2 * margin,
+             rows.at(line) * lineHeight };
+  }
+
+protected:
+  // Qt's QTextDocument calls this with the part of the text that changed
+  // (an edit, or new colors: what a highlighter colors while an edit is
+  // told is in the edit's part), after it tells the change (contentsChange),
+  // and with (0, 0, its length) when what the text is laid out by changes
+  // (its width, font or wrap mode, or the layout is enabled again), which it
+  // doesn't tell: so a resize while lines don't wrap lays out nothing. Also
+  // while the layout is disabled (setLayoutEnabled), when it waits.
+  void documentChanged(int from, int removed, int added) override
+  {
+    const bool told = std::exchange(textChanged, false);
+    auto* doc = document();
+    // Made now, in this thread, if clearing the text deleted it: Qt Quick
+    // asks for it as it draws, in its render thread (where a QObject of the
+    // document can't be made), and Qt's layout asked first.
+    doc->rootFrame();
+    if (!canLayout()) {
+      stale = true;
+      return;
+    }
+    const Settings now = settings();
+    if (!told && from == 0 && removed == 0 && added == doc->characterCount()) {
+      if (stale || !rows.size() || now.relayoutsAfter(laidOutBy))
+        layoutAll();
+      laidOutBy = now;
+      return;
+    }
+    if (stale || now.relayoutsAfter(laidOutBy)) {
+      layoutAll();
+      laidOutBy = now;
+      return;
+    }
+    const QTextBlock first = doc->findBlock(qMin(from, doc->characterCount() - 1));
+    const QTextBlock last = doc->findBlock(qMin(from + added, doc->characterCount() - 1));
+    if (!first.isValid() || !last.isValid()) {
+      layoutAll();
+      return;
+    }
+    const int line = first.blockNumber(), count = last.blockNumber() - line + 1;
+    // The lines that were where these are.
+    const int was = count - (doc->blockCount() - rows.size());
+    if (was < 1 || line + was > rows.size()) {
+      layoutAll();
+      return;
+    }
+    std::vector<int> counts;
+    std::vector<qreal> widths;
+    counts.reserve(count);
+    widths.reserve(count);
+    for (QTextBlock block = first;; block = block.next()) {
+      const auto [blockRows, blockWidth] = layoutBlock(block);
+      counts.push_back(blockRows);
+      widths.push_back(blockWidth);
+      if (block == last)
+        break;
+    }
+    rows.replace(line, was, counts);
+    // The widest line again, from all of them only if it was one of these.
+    bool wasWidest = false;
+    for (int i = line; i < line + was; ++i)
+      wasWidest = wasWidest || lineWidths.at(i) >= widest;
+    lineWidths.erase(lineWidths.begin() + line, lineWidths.begin() + line + was);
+    lineWidths.insert(lineWidths.begin() + line, widths.begin(), widths.end());
+    const qreal widestHere = widths.empty() ? 0 : *std::max_element(widths.begin(), widths.end());
+    if (wasWidest && widestHere < widest)
+      widest = lineWidths.empty() ? 0 : *std::max_element(lineWidths.begin(), lineWidths.end());
+    else
+      widest = qMax(widest, widestHere);
+  }
+
+private:
+  // What the text is laid out by, other than this layout's own grid.
+  struct Settings
+  {
+    QFont font;
+    bool wrap = false;
+    qreal width = 0;
+    qreal tabs = 0;
+    bool designMetrics = false;
+
+    // Whether text laid out by `was` must be laid out again: the width
+    // matters only while lines wrap.
+    bool relayoutsAfter(const Settings& was) const
+    {
+      return font != was.font || wrap != was.wrap || tabs != was.tabs ||
+             designMetrics != was.designMetrics || (wrap && width != was.width);
+    }
+  };
+
+  Settings settings() const
+  {
+    const auto option = document()->defaultTextOption();
+    return { document()->defaultFont(),
+             wrapping(),
+             textWidth(),
+             option.tabStopDistance(),
+             option.useDesignMetrics() };
+  }
+
+  bool canLayout() const
+  {
+    return document()->isLayoutEnabled() && !document()->pageSize().isNull();
+  }
+
+  qreal textWidth() const { return document()->textWidth() - 2 * document()->documentMargin(); }
+
+  void layoutAll()
+  {
+    std::vector<int> counts;
+    lineWidths.clear();
+    counts.reserve(document()->blockCount());
+    lineWidths.reserve(document()->blockCount());
+    widest = 0;
+    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
+      const auto [blockRows, blockWidth] = layoutBlock(block);
+      counts.push_back(blockRows);
+      lineWidths.push_back(blockWidth);
+      widest = qMax(widest, blockWidth);
+    }
+    rows.reset(std::move(counts));
+    stale = false;
+    laidOutBy = settings();
+  }
+
+  // Puts the rows of the lines Qt lays out on the grid as it is now.
+  void placeAll()
+  {
+    const qreal rowIndent = indent();
+    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
+      auto* layout = block.layout();
+      if (!block.isVisible())
+        continue;
+      for (int i = 0; i < layout->lineCount(); ++i)
+        place(layout->lineAt(i), i, rowIndent);
+    }
+  }
+
+  void place(QTextLine line, int row, qreal rowIndent) const
+  {
+    line.setPosition(QPointF(row ? rowIndent : 0, row * lineHeight + baseline - line.ascent()));
+  }
+
+  // Lays out a line (a block), or hides it from Qt if it's too long, and
+  // gives how many rows it takes and how wide it is.
+  std::pair<int, qreal> layoutBlock(QTextBlock block)
+  {
+    const int length = block.length() - 1;
+    const bool isLong = length > longLength;
+    auto* line = dynamic_cast<LongLine*>(block.userData());
+    if (isLong && !line && !block.userData()) {
+      line = new LongLine(this);
+      block.setUserData(line);
+    } else if (!isLong && line) {
+      block.setUserData(nullptr); // which deletes it
+      line = nullptr;
+    }
+    if (line)
+      line->length = length;
+    if (block.isVisible() == isLong)
+      block.setVisible(!isLong);
+    auto* layout = block.layout();
+    if (isLong) {
+      layout->clearLayout();
+      const int n = rowLength();
+      return { n ? qMax(1, (length + n - 1) / n) : 1, 0 };
+    }
+    const bool wrap = wrapping();
+    QTextOption option = document()->defaultTextOption();
+    option.setWrapMode(wrap ? QTextOption::WrapAnywhere : QTextOption::NoWrap);
+    option.setTextDirection(block.textDirection());
+    layout->setTextOption(option);
+    // As the layout has it: with what an input method is typing.
+    QString text = block.text();
+    if (layout->preeditAreaPosition() >= 0)
+      text.insert(layout->preeditAreaPosition(), layout->preeditAreaText());
+    const qsizetype after = prefixed ? prefixEnd(text) : 0;
+    const qreal room = textWidth() - rightMargin, column = charWidth(), rowIndent = indent();
+    int row = 0;
+    qreal width = 0;
+    layout->beginLayout();
+    for (;; ++row) {
+      QTextLine textLine = layout->createLine();
+      if (!textLine.isValid())
+        break;
+      const qreal x = row ? rowIndent : 0;
+      const qreal rowWidth = qMax(room - x, column);
+      textLine.setLineWidth(rowWidth);
+      if (wrap)
+        breakRow(layout, textLine, text, after, rowWidth);
+      place(textLine, row, rowIndent);
+      width = qMax(width, x + textLine.horizontalAdvance());
+    }
+    layout->endLayout();
+    return { qMax(1, row), width };
+  }
+
+  // Ends `line`, laid out to break anywhere, where breaksBefore lets it
+  // (the last place in it), not before `after` (a listing line's prefix):
+  // else it breaks where the next character doesn't fit. It's laid out
+  // again as wide as up to that place, and halfway into the character
+  // after it, which then doesn't fit.
+  static void breakRow(QTextLayout* layout,
+                       QTextLine& line,
+                       QStringView text,
+                       qsizetype after,
+                       qreal rowWidth)
+  {
+    const int start = line.textStart(), end = start + line.textLength();
+    if (end >= text.size())
+      return; // the last row
+    int at = end;
+    while (at > start && at > after &&
+           !(layout->isValidCursorPosition(at) && breaksBefore(text, at)))
+      --at;
+    if (at == end || at <= start || at <= after)
+      return;
+    const qreal x = line.cursorToX(at), next = line.cursorToX(layout->nextCursorPosition(at));
+    line.setLineWidth((x + next) / 2);
+    if (line.textStart() + line.textLength() != at)
+      line.setLineWidth(rowWidth); // as it was, if that didn't end it there (right to left)
+  }
+
+  QQuickItem* textEdit;
+  RowCounts rows;
+  // How wide each line is, by number, and the widest of them.
+  std::vector<qreal> lineWidths;
+  qreal widest = 0;
+  // Whether the text must be laid out again (the layout was disabled).
+  bool stale = true;
+  // Whether the document told of a change to the text since the last
+  // documentChanged.
+  bool textChanged = false;
+  Settings laidOutBy;
 };
 
-LongLine::LongLine(LongLines* lines)
-  : lines(lines)
+LongLine::LongLine(TextLayout* layout)
+  : layout(layout)
 {
-  lines->lines.insert(this);
+  layout->longLines.insert(this);
 }
 
 LongLine::~LongLine()
 {
-  if (lines)
-    lines->lines.remove(this);
+  if (layout)
+    layout->longLines.remove(this);
 }
 
 // What changed in a document's text since it was last taken (see
@@ -945,40 +1304,46 @@ setClipboardText(const QString& text, const QString& data)
 }
 
 void
-setLineFormat(QObject* textDocument,
-              double height,
-              double bottomMargin,
-              double indent,
-              double rightMargin)
+setLineFormat(QObject* textEdit,
+              double lineHeight,
+              double baseline,
+              double rightMargin,
+              bool listing,
+              int longLength)
 {
+  auto* item = qobject_cast<QQuickItem*>(textEdit);
+  auto* textDocument = item ? item->property("textDocument").value<QObject*>() : nullptr;
   auto* document = documentOf(textDocument);
   if (!document)
     return;
-  // A highlighter colors every line again, and lays the document out after
-  // each one it has colors for, as recolor says: turning wrapping off took
-  // minutes in a colored file of 100,000 lines. So the layout waits.
-  {
-    const FormatOnly formatting(document);
-    const LayoutPaused paused(document);
-    QTextCursor cursor(document);
-    cursor.select(QTextCursor::Document);
-    cursor.mergeBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
+  if (auto* layout = childOf<TextLayout>(textDocument)) {
+    layout->setFormat(lineHeight, baseline, rightMargin, listing, longLength);
+    return;
   }
-  // The TextEdit (the document's parent) takes the text's new size as the
-  // change is told, while the layout waits, and nothing tells it the size
-  // it's laid out to after: the view kept the old height (the rows a name
-  // wraps to as the notes take room), and didn't follow the cursor past
-  // it. updateSize is a slot of Qt's, not public.
-  QMetaObject::invokeMethod(textDocument->parent(), "updateSize");
+  auto* layout = new TextLayout(document, item);
+  layout->lineHeight = lineHeight;
+  layout->baseline = baseline;
+  layout->rightMargin = rightMargin;
+  layout->prefixed = listing;
+  layout->longLength = longLength;
+  {
+    // Which Qt tells as a change to all the text, which it isn't.
+    const FormatOnly formatting(document);
+    document->setDocumentLayout(layout); // which deletes Qt's
+  }
+  for (const char* slot : { "updateSize", "updateWholeDocument" })
+    QMetaObject::invokeMethod(item, slot);
+}
+
+double
+layoutWidth(QObject* textDocument)
+{
+  auto* layout = childOf<TextLayout>(textDocument);
+  return layout ? layout->width() : 0;
 }
 
 void
-setText(QObject* textEdit,
-        const QString& text,
-        double height,
-        double bottomMargin,
-        double indent,
-        double rightMargin)
+setText(QObject* textEdit, const QString& text)
 {
   auto* item = qobject_cast<QQuickItem*>(textEdit);
   if (!item)
@@ -987,11 +1352,10 @@ setText(QObject* textEdit,
   auto* document = documentOf(textDocument);
   if (!document)
     return;
-  // The old text out and the new one in, after a line in the format (which
-  // every line it makes takes on), in an edit block: the document tells its
-  // layout and the TextEdit when it ends. Emptying the TextEdit first (the
-  // way setting its text does) changed its width, as the scroll bar went,
-  // and that laid out the new text again.
+  // The old text out and the new one in, in an edit block: the document
+  // tells its layout and the TextEdit when it ends. Emptying the TextEdit
+  // first (the way setting its text does) changed its width, as the scroll
+  // bar went, and that laid out the new text again.
   // The new text is colored as it goes in, with the colors as they are now.
   if (auto* colors = childOf<TextColors>(textDocument))
     colors->stale = false;
@@ -1005,7 +1369,6 @@ setText(QObject* textEdit,
   // positions are ints, so a gigabyte's file opened again after the
   // listing went past them, and crashed.
   document->clear();
-  cursor.setBlockFormat(lineFormat(height, bottomMargin, indent, rightMargin));
   cursor.insertText(text);
   cursor.endEditBlock();
   document->setUndoRedoEnabled(undo);
@@ -1070,46 +1433,31 @@ redrawText(QObject* textEdit)
     Qt::SingleShotConnection);
 }
 
-void
-watchLongLines(QObject* textDocument, int longLength)
-{
-  auto* document = documentOf(textDocument);
-  if (document && !childOf<LongLines>(textDocument))
-    new LongLines(document, longLength);
-}
-
-void
-placeLongLines(QObject* textDocument, double lineHeight, double bottomMargin, int rowLength)
-{
-  if (auto* lines = childOf<LongLines>(textDocument))
-    lines->place(lineHeight, bottomMargin, rowLength);
-}
-
 int
 longestLine(QObject* textDocument)
 {
-  auto* lines = childOf<LongLines>(textDocument);
-  return lines ? lines->longest() : 0;
+  auto* layout = childOf<TextLayout>(textDocument);
+  return layout ? layout->longest() : 0;
 }
 
 QString
 longLineSpot(QObject* textDocument, int position)
 {
-  auto* lines = childOf<LongLines>(textDocument);
-  if (!lines || lines->lines.isEmpty())
+  auto* layout = childOf<TextLayout>(textDocument);
+  if (!layout || layout->longLines.isEmpty())
     return {};
-  const QTextBlock block = lines->document()->findBlock(position);
+  const QTextBlock block = layout->document()->findBlock(position);
   if (!block.isValid() || block.isVisible())
     return {};
   int column = position - block.position();
-  int row = lines->rowOf(block);
-  if (lines->rowLength) {
+  qint64 row = layout->rowOf(block);
+  if (const int n = layout->rowLength()) {
     // Where a row ends is where the next one starts, but at the line's end.
-    int rows = column / lines->rowLength;
-    if (rows && rows * lines->rowLength == column && column == block.length() - 1)
+    int rows = column / n;
+    if (rows && rows * n == column && column == block.length() - 1)
       --rows;
     row += rows;
-    column -= rows * lines->rowLength;
+    column -= rows * n;
   }
   return QString::number(row) + u' ' + QString::number(column);
 }
@@ -1117,47 +1465,36 @@ longLineSpot(QObject* textDocument, int position)
 int
 longLinePosition(QObject* textDocument, int row, double column)
 {
-  auto* lines = childOf<LongLines>(textDocument);
-  if (!lines || lines->lines.isEmpty() || row < 0)
+  auto* layout = childOf<TextLayout>(textDocument);
+  if (!layout || layout->longLines.isEmpty() || row < 0)
     return -1;
-  const QTextBlock block = lines->blockAtRow(row);
+  const QTextBlock block = layout->blockAtRow(row);
   if (!block.isValid() || block.isVisible())
     return -1;
-  const int first = lines->rowOf(block), rows = lines->rowsOf(block);
-  if (row >= first + rows)
+  const qint64 first = layout->rowOf(block);
+  if (row >= first + layout->rowsOf(block))
     return -1;
-  const int length = block.length() - 1;
-  int from = 0, to = length;
-  if (lines->rowLength) {
-    from = (row - first) * lines->rowLength;
-    // Not past a row's last character but in the last row: the position
-    // after it is the next row's.
-    to = row - first == rows - 1 ? length : from + lines->rowLength - 1;
-  }
-  int position = block.position() + from + qBound(0, qRound(column), to - from);
-  if (position > block.position() && lines->document()->characterAt(position).isLowSurrogate())
-    --position;
-  return position;
+  return layout->positionInRow(block, int(row - first), column);
 }
 
 QString
 longLineRuns(QObject* textDocument, int firstRow, int lastRow, int firstColumn, int lastColumn)
 {
   QJsonArray runs;
-  auto* lines = childOf<LongLines>(textDocument);
-  if (!lines || lines->lines.isEmpty())
+  auto* layout = childOf<TextLayout>(textDocument);
+  if (!layout || layout->longLines.isEmpty())
     return QStringLiteral("[]");
-  auto* doc = lines->document();
-  const int rowLength = lines->rowLength;
-  QTextBlock block = lines->blockAtRow(qMax(0, firstRow));
-  for (int row = lines->rowOf(block); block.isValid() && row <= lastRow; block = block.next()) {
-    const int rows = lines->rowsOf(block);
+  auto* doc = layout->document();
+  const int rowLength = layout->rowLength();
+  QTextBlock block = layout->blockAtRow(qMax(0, firstRow));
+  for (qint64 row = layout->rowOf(block); block.isValid() && row <= lastRow; block = block.next()) {
+    const int rows = layout->rowsOf(block);
     if (!block.isVisible()) {
       const int position = block.position(), length = block.length() - 1;
       // The highlighter's colors, in order.
       const auto formats = block.layout()->formats();
-      for (int r = qMax(0, firstRow - row); r < rows && row + r <= lastRow; ++r) {
-        const int rowStart = r * rowLength;
+      for (qint64 r = qMax<qint64>(0, firstRow - row); r < rows && row + r <= lastRow; ++r) {
+        const int rowStart = int(r) * rowLength;
         const int rowEnd = rowLength ? qMin(length, rowStart + rowLength) : length;
         int from = qMin(rowEnd, rowStart + qMax(0, firstColumn));
         int to = qMin(rowEnd, rowStart + qMax(0, lastColumn));
@@ -1216,18 +1553,11 @@ takeTextChange(QObject* textDocument, bool withText)
 }
 
 void
-rebuildTextNodes(QObject* textEdit)
-{
-  if (textEdit)
-    QMetaObject::invokeMethod(textEdit, "updateWholeDocument");
-}
-
-void
 scrollToCursorInQml(QObject* textArea)
 {
   // Qt's TextArea scrolls its Flickable to show its cursor rectangle (in a
-  // private slot of its own), which is at the document's start in a line
-  // it doesn't lay out (see LongLines).
+  // private slot of its own), which is at the line's start in a line it
+  // doesn't lay out (see TextLayout), however far into it the cursor is.
   if (textArea)
     QObject::disconnect(textArea, SIGNAL(cursorRectangleChanged()), textArea, nullptr);
 }

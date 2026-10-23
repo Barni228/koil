@@ -112,31 +112,31 @@ pub mod qobject {
         #[qsignal]
         fn shell_done(self: Pin<&mut System>, result: QString);
 
-        /// Gives every line of a TextEdit's `textDocument` the same height,
-        /// plus a margin below it, and the rows a wrapped line goes on to an
-        /// indent and a margin on their right.
+        /// Lays out a TextEdit's text as Koil does: every line's rows
+        /// `line_height` tall, its baseline `baseline` down a row, clear of
+        /// the `right_margin`, broken after spaces or at a word's edge (not
+        /// in a `listing` line's prefix), and lines longer than
+        /// `long_length` hidden from Qt (see native.h).
         #[qinvokable]
         unsafe fn set_line_format(
             self: &System,
-            text_document: *mut QObject,
-            height: f64,
-            bottom_margin: f64,
-            indent: f64,
+            text_edit: *mut QObject,
+            line_height: f64,
+            baseline: f64,
             right_margin: f64,
+            listing: bool,
+            long_length: i32,
         );
 
-        /// Sets a TextEdit's text, every line with the format
-        /// `set_line_format` gives, laying it out once (see native.h).
+        /// How wide the widest line `set_line_format` lays out is,
+        /// unwrapped, which the TextEdit is made as wide as while lines
+        /// don't wrap (see native.h).
         #[qinvokable]
-        unsafe fn set_text(
-            self: &System,
-            text_edit: *mut QObject,
-            text: &QString,
-            height: f64,
-            bottom_margin: f64,
-            indent: f64,
-            right_margin: f64,
-        );
+        unsafe fn layout_width(self: &System, text_document: *mut QObject) -> f64;
+
+        /// Sets a TextEdit's text as one edit (see native.h).
+        #[qinvokable]
+        unsafe fn set_text(self: &System, text_edit: *mut QObject, text: &QString);
 
         /// Call after each change to a TextEdit's text: has it build only
         /// the lines in view while the text is long (see native.h).
@@ -171,25 +171,6 @@ pub mod qobject {
         /// `===` does.
         #[qinvokable]
         fn same_text(self: &System, a: &QString, b: &QString) -> bool;
-
-        /// Hides the lines of a TextEdit's `textDocument` longer than
-        /// `long_length` from Qt, as they're edited, which Koil places and
-        /// draws itself (see native.h).
-        #[qinvokable]
-        unsafe fn watch_long_lines(self: &System, text_document: *mut QObject, long_length: i32);
-
-        /// Call after each change to the text or the line format of a
-        /// `textDocument` with hidden lines: places them on the grid of
-        /// rows `line_height` tall, `row_length` characters a row while
-        /// lines wrap, else 0 (see native.h).
-        #[qinvokable]
-        unsafe fn place_long_lines(
-            self: &System,
-            text_document: *mut QObject,
-            line_height: f64,
-            bottom_margin: f64,
-            row_length: i32,
-        );
 
         /// The length of the longest hidden line, or 0 for none.
         #[qinvokable]
@@ -249,11 +230,6 @@ pub mod qobject {
         /// takeTextChange in native.h).
         #[qinvokable]
         fn kept_as_is(self: &System, text: &QString) -> bool;
-
-        /// Has a TextEdit build all its lines in view again, after its
-        /// selection changed in a text with long lines (see native.h).
-        #[qinvokable]
-        unsafe fn rebuild_text_nodes(self: &System, text_edit: *mut QObject);
 
         /// Has a TextArea in a ScrollView leave scrolling to its cursor to
         /// its QML (see native.h).
@@ -466,17 +442,14 @@ impl qobject::System {
 
     forward! {
         set_line_format(
-            text_document, height: f64, bottom_margin: f64, indent: f64, right_margin: f64
+            text_edit, line_height: f64, baseline: f64, right_margin: f64, listing: bool,
+            long_length: i32
         );
-        set_text(
-            text_edit, text: &QString, height: f64, bottom_margin: f64, indent: f64,
-            right_margin: f64
-        );
+        layout_width(text_document) -> f64;
+        set_text(text_edit, text: &QString);
         follow_text_length(text_edit);
         redraw_text(text_edit);
         replace_text(text_edit, start: i32, end: i32, text: &QString);
-        watch_long_lines(text_document, long_length: i32);
-        place_long_lines(text_document, line_height: f64, bottom_margin: f64, row_length: i32);
         longest_line(text_document) -> i32;
         long_line_spot(text_document, position: i32) -> QString;
         long_line_position(text_document, row: i32, column: f64) -> i32;
@@ -485,7 +458,6 @@ impl qobject::System {
         ) -> QString;
         watch_text_changes(text_document);
         take_text_change(text_document, with_text: bool) -> QStringList;
-        rebuild_text_nodes(text_edit);
         scroll_to_cursor_in_qml(text_area);
         set_listing_colors(
             text_document, icon_colors: &QStringList, pending_icon_color: &QString,

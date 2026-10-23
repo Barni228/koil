@@ -91,7 +91,9 @@ function sections(help) {
                 ["`relativenumber`  `rnu`", "Line numbers counted from the cursor's line."],
                 ["`syntax`  `syn`", "Color files and the scratchpad: strings, numbers, comments, paths and URLs. "
                     + "`:syntax off` and `:syntax on` turn it off and on too."],
-                ["`wrap`", "Wrap a line too long for the window: at a word's start, but anywhere in the listing. "
+                ["`wrap`", "Wrap a line too long for the window: after a space or where a word starts or ends "
+                    + "(but not before a `,`, `.`, `-`, `/` or `)`), else anywhere, and in the listing never "
+                    + "after the icon alone. "
                     + "View > Word Wrap (`" + altKey + "Z`) toggles it too. Then `gj` and `gk` go "
                     + "a row down or up, the page keys and `Ctrl-E` count rows, and nothing scrolls sideways."],
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
@@ -405,7 +407,7 @@ function sections(help) {
             tags: ["g", "gg", "ge", "gE", "gj", "gk", "gI", "gJ", "g~", "gu", "gU", "g?", "rot13", "case",
                 "uppercase", "lowercase", "gv"],
             rows: [
-                ["`gg`", "The first line (`5gg`: line 5)."],
+                ["`gg`", "The first line, at its first character that isn't blank (`5gg`: line 5)."],
                 ["`ge`  `gE`", "Back to the end of the word before (`gE`: of the WORD, between blanks)."],
                 ["`gj`  `gk`", "Down or up a row of a line that wraps (see `:set wrap`)."],
                 ["`gI`", "Type at the line's very start, before its indent (in the listing, at the name)."],
@@ -482,9 +484,10 @@ function sections(help) {
             rows: [
                 ["`Y`", "Yank to the line's end, as `y$` (and as Neovim's), like `D` and `C`. Vim's yanks "
                     + "the line, which `yy` does. In visual mode it still yanks the lines."],
-                ["`G`  `gg`  `dd`  `>>`", "Keep the cursor's column, as Neovim's do, and so do `H`, `M`, `L`, "
+                ["`dd`  `>>`", "Keep the cursor's column, as Neovim's do, and so do `H`, `M`, `L`, "
                     + "`50%`, `:5`, `==` and visual `d`, `>` and `<` on lines. Vim's go to the line's first "
-                    + "character that isn't blank, which `^` does."],
+                    + "character that isn't blank, which `^` does. `gg` and `5G` go there too, as Vim's, "
+                    + "and `G` to the text's last character."],
                 ["`=`  `==`", "Reindent: `==` the line, `=ip` the paragraph, `gg=G` all of it, or in visual mode "
                     + "what's selected. A line in brackets (or HTML tags) goes a level deeper than the line "
                     + "they open on, and one that closes them as deep as that line. A line in none keeps its "

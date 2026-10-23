@@ -20,8 +20,7 @@ QtObject {
     property real lineHeight: 16
     // How wide a column is (a character of the editor's font).
     property real charWidth: 8
-    // Where the first line's row starts in the editor: its top padding,
-    // unless the view puts the rows lower (Editor.qml's textShift).
+    // Where the first line's row starts in the editor: its top padding.
     property real textTop: editor ? editor.topPadding : 0
     readonly property int pageLines: flickable ? Math.max(2, Math.floor(flickable.height / lineHeight)) : 20
 
@@ -6131,9 +6130,12 @@ QtObject {
         }
         case "gg":
         case "G": {
-            const lines = Txt.countLines(t);
-            const line = explicit ? Math.min(count, lines) : m.name === "gg" ? 1 : lines;
-            return { pos: Txt.atColumn(t, Txt.lineToPos(t, line), wantCol), type: "linewise", keepCol: true };
+            // G alone to the text's last character, else to the line's
+            // first non-blank, as vim's startofline has it.
+            if (m.name === "G" && !explicit)
+                return { pos: t.length, type: "linewise" };
+            const line = explicit ? Math.min(count, Txt.countLines(t)) : 1;
+            return { pos: firstNonBlank(t, Txt.lineToPos(t, line)), type: "linewise" };
         }
         case "w":
         case "W": {
@@ -6689,11 +6691,10 @@ QtObject {
             return;
         if (batch)
             flush(); // as scrollLines
-        // The cursor's row, while lines wrap. The room below the rows is
-        // less than the padding by as much as they start lower (textTop).
+        // The cursor's row, while lines wrap.
         const r = wrapping ? rowRect(cursor) : rectAt(cursor);
         const y = where === "t" ? r.y - textTop
-            : where === "b" ? r.y + r.height + editor.bottomPadding - (textTop - editor.topPadding) - flickable.height
+            : where === "b" ? r.y + r.height + editor.bottomPadding - flickable.height
             : r.y + r.height / 2 - flickable.height / 2;
         flickable.contentY = Math.max(0, Math.min(y, maxScroll()));
     }

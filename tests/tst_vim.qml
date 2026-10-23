@@ -417,23 +417,28 @@ TestCase {
         compare(render(), "one two\nthree\nfour");
     }
 
-    // G, gg, N%, :N and commands on whole lines (dd, >>, ==, V's d) keep
-    // the cursor's column, as Neovim's nostartofline, and j and k keep it
-    // after them too. Vim's go to the first non-blank.
+    // gg and NG go to the line's first non-blank, as vim's startofline,
+    // and G alone to the text's last character. N%, :N and commands on
+    // whole lines (dd, >>, ==, V's d) keep the cursor's column, as
+    // Neovim's nostartofline, and j and k keep it after them too.
     function test_noStartOfLine() {
         load("abcdef\n  ab\nabcdef");
         keys("3lG");
-        compare(vim.cursor, 15);
+        compare(vim.cursor, 17);
         keys("gg");
-        compare(vim.cursor, 3);
-        keys("2%");
+        compare(vim.cursor, 0);
+        keys("3l2G");
+        compare(vim.cursor, 9);
+        keys("3gg");
+        compare(vim.cursor, 12);
+        keys("3l2%");
         compare(vim.cursor, 3);
         keys("50%");
         compare(vim.cursor, 10);
         keys(":3<CR>");
         compare(vim.cursor, 15);
         keys("$gg");
-        compare(vim.cursor, 5);
+        compare(vim.cursor, 0);
         load("abcdef\nab\nabcdef");
         keys("4ldd");
         compare(vim.cursor, 1);

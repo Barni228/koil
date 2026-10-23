@@ -56,31 +56,36 @@ QString clipboardText();
 QString clipboardData();
 void setClipboardText(const QString& text, const QString& data);
 
-// Gives every line of a TextEdit's document (a QQuickTextDocument) the same
-// height, so a line with an emoji (from a taller font) doesn't grow. New
-// lines inherit it, but setting the TextEdit's text resets it. The bottom
-// margin adds to each line's height; Qt puts a fixed-height line's baseline
-// at 4/5 of it, and the margin lets the text sit higher in the whole line.
-// A line that wraps has each of its rows `height` tall, the margin after
-// the last, the rows after its first `indent` further right, and none
-// reaching into the `rightMargin`.
-void setLineFormat(QObject* textDocument,
-                   double height,
-                   double bottomMargin,
-                   double indent,
-                   double rightMargin);
+// Lays out a TextEdit's document as Koil does, in place of Qt's layout
+// (see TextLayout in native.cpp), with this grid: every line's rows
+// `lineHeight` tall, the text's baseline `baseline` down a row (an emoji,
+// from a taller font, doesn't make its line taller), and none reaching into
+// the `rightMargin`. While lines wrap, a row ends after a space or where a
+// word starts or ends, if one fits, else anywhere; in the `listing`, not in
+// a line's prefix (its icon and two spaces), nor right after it, and the
+// rows a line wraps to start under its name. A line longer than
+// `longLength` characters is hidden from Qt, a column (a space's width) a
+// UTF-16 unit (see the longLine functions). Call it again when any changes:
+// the text is laid out again as far as it changes it, at once.
+void setLineFormat(QObject* textEdit,
+                   double lineHeight,
+                   double baseline,
+                   double rightMargin,
+                   bool listing,
+                   int longLength);
 
-// Sets a TextEdit's text, with the line format setLineFormat gives, as one
-// edit, and resets what setting its text does (the cursor at the start).
-// Qt lays out all of a text for each change to it or its format, and
-// setting the text and then the format laid out 100,000 lines twice (a
-// second each).
-void setText(QObject* textEdit,
-             const QString& text,
-             double height,
-             double bottomMargin,
-             double indent,
-             double rightMargin);
+// How wide the widest line of a document setLineFormat lays out is,
+// unwrapped (not the hidden ones). Qt gives a TextEdit the text's width
+// (QTextDocument::textWidth) as its content's, as its idealWidth is
+// QTextDocumentLayout's only, so the TextEdit is made this wide while lines
+// don't wrap.
+double layoutWidth(QObject* textDocument);
+
+// Sets a TextEdit's text as one edit, and resets what setting its text
+// does (the cursor at the start). Setting the text the TextEdit's way
+// emptied it first, which changed its width as the scroll bar went, and
+// that laid out the new text again.
+void setText(QObject* textEdit, const QString& text);
 
 // Call after each change to a TextEdit's text. Over 10,000 characters, a
 // TextEdit builds only the lines in view, but Qt decides that only when its
@@ -102,23 +107,7 @@ void replaceText(QObject* textEdit, int start, int end, const QString& text);
 // nothing). Then this has it build every line in view from scratch.
 void redrawText(QObject* textEdit);
 
-// Hides the lines of a TextEdit's document (a QQuickTextDocument) longer
-// than `longLength` characters from Qt, as they're edited: Qt lays out and
-// draws all of a line in view, so a megabyte took seconds, and once a
-// second for each edit. Koil draws only what's in view of them, and places
-// them itself (see placeLongLines and the longLine functions).
-void watchLongLines(QObject* textDocument, int longLength);
-
-// Call after each change to the text of a document watchLongLines watches,
-// and to its line format: gives each line Qt lays out after the hidden ones
-// a top margin as tall as their rows (and the end of the document after the
-// last of them), so all lines are on a grid of rows `lineHeight` tall, of
-// which a line Qt lays out has `bottomMargin` at its end (see
-// setLineFormat). While lines wrap, a hidden line has `rowLength`
-// characters a row (0 while they don't, when every line is a row).
-void placeLongLines(QObject* textDocument, double lineHeight, double bottomMargin, int rowLength);
-
-// The length of the longest hidden line (see watchLongLines), or 0 if
+// The length of the longest hidden line (see setLineFormat), or 0 if
 // there's none.
 int longestLine(QObject* textDocument);
 
@@ -155,15 +144,9 @@ void watchTextChanges(QObject* textDocument);
 // text of a gigabyte.
 QStringList takeTextChange(QObject* textDocument, bool withText);
 
-// Has a TextEdit build all its lines in view again when it next draws,
-// rather than those a change of its selection touched: past a line Qt
-// doesn't lay out (see watchLongLines), Qt moves the lines after those
-// down by as much as they are from the top.
-void rebuildTextNodes(QObject* textEdit);
-
 // Stops a TextArea in a ScrollView from scrolling to show its cursor
-// rectangle, which is at the text's start in a hidden line (see
-// watchLongLines): its QML does it instead.
+// rectangle, which is at the line's start in a hidden line (see
+// setLineFormat): its QML does it instead.
 void scrollToCursorInQml(QObject* textArea);
 
 // Colors Koil's listing in a TextEdit's document (a QQuickTextDocument):

@@ -167,29 +167,26 @@ mod bridge {
         #[cxx_name = "monospaceFamilies"]
         fn monospace_families() -> QStringList;
 
-        /// Gives every line of a QQuickTextDocument the same height, plus a
-        /// margin below it, and the rows a wrapped line goes on to an indent
-        /// and a margin on their right.
+        /// Lays out a TextEdit's document as Koil does, on a grid of rows
+        /// (see native.h).
         #[cxx_name = "setLineFormat"]
         unsafe fn set_line_format(
-            text_document: *mut QObject,
-            height: f64,
-            bottom_margin: f64,
-            indent: f64,
+            text_edit: *mut QObject,
+            line_height: f64,
+            baseline: f64,
             right_margin: f64,
+            listing: bool,
+            long_length: i32,
         );
 
-        /// Sets a TextEdit's text with that line format, as one edit (see
+        /// How wide the widest line setLineFormat lays out is (see
         /// native.h).
+        #[cxx_name = "layoutWidth"]
+        unsafe fn layout_width(text_document: *mut QObject) -> f64;
+
+        /// Sets a TextEdit's text as one edit (see native.h).
         #[cxx_name = "setText"]
-        unsafe fn set_text(
-            text_edit: *mut QObject,
-            text: &QString,
-            height: f64,
-            bottom_margin: f64,
-            indent: f64,
-            right_margin: f64,
-        );
+        unsafe fn set_text(text_edit: *mut QObject, text: &QString);
 
         /// Has a TextEdit build only the lines in view while its text is
         /// long, after an edit too (see native.h).
@@ -204,20 +201,6 @@ mod bridge {
         /// bug; call it before setting its text (see native.h).
         #[cxx_name = "redrawText"]
         unsafe fn redraw_text(text_edit: *mut QObject);
-
-        /// Hides a QQuickTextDocument's lines longer than `long_length`
-        /// from Qt, as they're edited (see native.h).
-        #[cxx_name = "watchLongLines"]
-        unsafe fn watch_long_lines(text_document: *mut QObject, long_length: i32);
-
-        /// Places the hidden lines on the line grid (see native.h).
-        #[cxx_name = "placeLongLines"]
-        unsafe fn place_long_lines(
-            text_document: *mut QObject,
-            line_height: f64,
-            bottom_margin: f64,
-            row_length: i32,
-        );
 
         /// The longest hidden line's length, or 0 (see native.h).
         #[cxx_name = "longestLine"]
@@ -253,11 +236,6 @@ mod bridge {
         /// removed and text, or nothing (see native.h).
         #[cxx_name = "takeTextChange"]
         unsafe fn take_text_change(text_document: *mut QObject, with_text: bool) -> QStringList;
-
-        /// Has a TextEdit build all its lines in view again (see
-        /// native.h).
-        #[cxx_name = "rebuildTextNodes"]
-        unsafe fn rebuild_text_nodes(text_edit: *mut QObject);
 
         /// Has a TextArea's QML scroll to its cursor rather than Qt (see
         /// native.h).

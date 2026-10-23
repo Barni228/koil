@@ -71,12 +71,12 @@ the scratchpad (see Scratchpad).
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, Cmd+Backspace in
-  text fields, line format,
+  text fields, Koil's text layout (`TextLayout`: `setLineFormat`, see
+  Text layout, Long lines and Wrapping),
   `setText`, the listing's and path field's `QSyntaxHighlighter`, a
   file's colors (`TextColors`: `setTextColors`, with syntax.rs), and the
-  confirmations' (`setKeywordColors`), `redrawText`, the long lines Qt
-  doesn't lay out (`LongLines`, see Long lines), and what changed in a
-  text (`TextChanges`, see Long texts)).
+  confirmations' (`setKeywordColors`), `redrawText`, and what changed in
+  a text (`TextChanges`, see Long texts)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
   Koil), Objective-C++, which `build.rs` adds only there.
 - `qml/main.qml`: the window: settings, menus (`MacMenuBar.qml`, and
@@ -1074,8 +1074,8 @@ the scratchpad (see Scratchpad).
   lines it has then, and vim's edit is a remove and an insert, between
   which lines have other numbers (a `:s` preview left a file's icon
   white). The highlighter is found by object name
-  (no moc for native.cpp). Highlighting counts as a text change to Qt (as
-  `fixLineFormat` does), so Editor.qml only emits `edited` when the text
+  (no moc for native.cpp). Highlighting counts as a text change to Qt, so
+  Editor.qml only emits `edited` when the text
   really changed (see `latest` under Long texts), and `trackEdit` returns
   at once. Coloring again goes through `recolor`: only the lines whose
   pending state changed,
@@ -1119,14 +1119,14 @@ the scratchpad (see Scratchpad).
   `QSyntaxHighlighter` would, but without
   its format for each character of the line (5 ms for a line of a
   megabyte), and not again when only the text's format changed
-  (`FormatOnly`: the line format, Koil's margins, see Long lines), which
+  (`FormatOnly`: the colors, or a new layout, see Text layout), which
   had it color every line again; a line's state (in a `/* */`) is its
   block's user state, as a highlighter's. Only one highlighter may color a
   document (each would take the other's colors away), so Editor.qml takes
   the listing's
   away before giving a file's, and the file's before the listing's. Which
   it gives follows `listing` only as the text is replaced
-  (`listingColors`, set in `setText` with no text in, as the wrap mode
+  (`listingColors`, set in `setText` with no text in, as the line format
   is): `listing` comes before the text, and the listing's highlighter
   went through every character of a gigabyte's file (QSyntaxHighlighter
   makes a format for each) before the listing replaced it, 4 s of `-`. A new
@@ -1474,10 +1474,12 @@ the scratchpad (see Scratchpad).
   Macros), `*` and `#` in visual mode search for what's selected, as it
   is (`searchSelection`, which goes on from the selection's end or back
   from its start, so `#` doesn't stop on it first, as Neovim's does),
-  and `nostartofline`: `G`, `gg`, `H`, `M`, `L`, `N%` (`keepCol`), `:N`
-  and the commands on whole lines (`dd`, `>>`, `==`, visual and marked
-  lines' `d`, `>`, `<`: `toLine`) keep the cursor's column, which j and
-  k then go on from (`colKept`). Only the `"+`/`"*`
+  and `nostartofline`: `H`, `M`, `L`, `N%` (`keepCol`), `:N` and the
+  commands on whole lines (`dd`, `>>`, `==`, visual and marked lines'
+  `d`, `>`, `<`: `toLine`) keep the cursor's column, which j and k then
+  go on from (`colKept`). But `gg` and `NG` go to the line's first
+  non-blank, as Vim's `startofline` has them, and `G` alone to the
+  text's last character. Only the `"+`/`"*`
   registers use the system clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
   `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
@@ -1896,23 +1898,48 @@ the scratchpad (see Scratchpad).
   relayout. Nothing drawn may depend on `editor.text` directly, or it
   recomputes in the middle of an edit. The carets are declared after the
   search highlights, so they're drawn over them.
-- **Line height**: emoji come from a taller font and would make their line
-  taller, so `fixLineFormat` gives every block a fixed height (a block format;
-  Qt counts it as an edit, so `quiet` keeps it from marking the file
-  modified). Setting the `TextArea`'s text resets it, so `setText` goes
-  through `System.setText`, which puts the text in with the format (see Long
-  texts); `quiet` also keeps its cursor moves from vim (`syncFromEditor`
-  would read the old `text`, which Qt updates after, and ask for a position
-  past the new one's end), which starts over after it. Qt puts a fixed-height line's baseline at 4/5 of
-  it, so to center the text the block gets a shorter line plus a bottom margin
-  that makes up `lineHeight` (`textBaseline` is where the baseline ends up).
-  Qt keeps both in 64ths of a pixel and drops the rest, so the line's height
-  is rounded down to one: else each line comes out a 64th short, and in a
-  10,000-line file the text drifts lines away from the overlays.
-  Qt's selection and `positionToRectangle` still use the natural (taller)
-  height on emoji lines, so the selection is drawn by the app (under the text,
-  `z: -0.5`), and all overlays use `cellAt` (the whole line, snapped to the
-  line grid). The current-line highlight is at `z: -0.6`.
+- **Text layout** (`TextLayout` in native.cpp): Koil lays out the
+  editors' text itself, a `QAbstractTextDocumentLayout` that
+  `setLineFormat` puts in place of Qt's `QTextDocumentLayout` (which it
+  deletes), with the grid Editor.qml's `fixLineFormat` gives it
+  (`lineFormat`). Every row is `lineHeight` tall, the baseline
+  `textBaseline` down it, however tall its characters are: emoji come from
+  a taller font, which made their line taller in Qt's, and the fixed-height
+  block format that made up for it put the baseline at 4/5 of a line, kept
+  in 64ths of a pixel (each line drifted a 64th off the grid), and while
+  lines wrapped, rows lower than the grid. A new grid isn't an edit: the
+  layout lays the text out again as far as it changes it, and has the
+  TextEdit take its size, draw its lines again and move its cursor
+  delegate, through slots of Qt's that aren't public (`updateSize`,
+  `updateWholeDocument`, `moveCursorDelegate`), which `formatting` keeps
+  Editor.qml's `ensureCursorVisible` from following. Qt Quick asks a layout
+  only what `QAbstractTextDocumentLayout` gives: where a line is
+  (`blockBoundingRect`, of which its lines' `QTextLine`s are placed),
+  `hitTest`, `documentSize` and `frameBoundingRect`. Each line's rows are
+  counted (`RowCounts`, a Fenwick tree), so a line's place is found in
+  O(log n) and an edit lays out only its own lines (Qt's moved every line
+  after it). Qt's `QTextDocument` calls `documentChanged` with (0, 0, its
+  length) both when all of the text went in and when what it's laid out by
+  changed (its width, font or wrap mode, or the layout enabled again), but
+  tells a change to the text first (`contentsChange`), so one it didn't
+  tell lays out only as far as it matters: a new width while lines don't
+  wrap lays out nothing (a resize laid all the text out again). It calls it
+  while the layout is disabled too (`LayoutPaused`), which lays all of it
+  out once it's enabled. `QTextDocument::idealWidth` is the widest line
+  only for Qt's layout (a cast), the text's width for any other, which a
+  TextEdit takes as its content's, so while lines don't wrap Editor.qml
+  makes the TextArea as wide as its widest line (`fitWidth`,
+  `System.layoutWidth`) or the view, after each change and resize.
+  Clearing the text (`setText`) deletes the root frame, which Qt's layout
+  made again as it laid it out; Qt Quick asks for it as it draws, in its
+  render thread, where a `QObject` of the document can't be made, so
+  `documentChanged` asks first. Qt's selection and `positionToRectangle`
+  still use a line's natural (taller) height on emoji lines, so the
+  selection is drawn by the app (under the text, `z: -0.5`), and all
+  overlays use `cellAt` (the whole row, snapped to the grid). The
+  current-line highlight is at `z: -0.6`. In a debug build, 100,000 lines
+  open in 7.5 s (11 with Qt's layout), 10.5 wrapped (20), and an edit takes
+  20 to 40 ms.
 - **Long texts**: a `TextEdit` with over 10,000 characters builds only the
   lines in view (`ItemObservesViewport`), and after a change builds again
   from where those started, so a new text that ends before that shows none
@@ -1932,22 +1959,22 @@ the scratchpad (see Scratchpad).
   built from its start, allow), or for a text that's short now, all of
   them from scratch (`q_invalidate`, as its built lines may start far past
   its end).
-  Qt lays out all of a text again (about a second for 100,000 lines) when
-  it or its format changes, and when the editor's width or padding does,
-  as the text's width changes with it (even without wrapping). So opening
-  one makes it once: `System.setText` replaces the text and gives every
-  line its format in one edit block (setting the text the `TextArea`'s way
-  and then the format laid it out twice; emptying it first hid the scroll
-  bar, which changed the width), clearing the document in it (a selection
-  removed stays in its buffer, where Qt's positions are ints: a gigabyte
-  opened again after the listing went past them and crashed), the gutter
-  gets its width before the text
+  The layout lays out all of a text again (about a second for 100,000
+  lines) when it or its grid changes, and while lines wrap, when the
+  editor's width or padding does. So opening one makes it once:
+  `System.setText` replaces the text in one edit block (setting it the
+  `TextArea`'s way emptied it first, which hid the scroll bar, which
+  changed the width), after its grid (`applyLineFormat`, with no text in
+  when a file follows the listing or the other way round), clearing the
+  document in it (a selection removed stays in its buffer, where Qt's
+  positions are ints: a gigabyte opened again after the listing went past
+  them and crashed), the gutter gets its width before the text
   (`gutter.fit`), and a file on the command line opens after the editor's
-  `onCompleted`, which adds the gutter's padding. A window resize still
-  lays it out again, and so does the scroll bar showing up on macOS, whose
-  style makes room for it (Fusion draws it over the text): keeping that
-  room even without one saved most of a second, but left a strip the text
-  didn't reach.
+  `onCompleted`, which adds the gutter's padding. While lines wrap, a
+  window resize still lays it out again, and so does the scroll bar
+  showing up on macOS, whose style makes room for it (Fusion draws it over
+  the text): keeping that room even without one saved most of a second,
+  but left a strip the text didn't reach.
   Qt's `TextArea` clips its text to the view as it was when it last drew
   (`QQuickTextArea::updatePaintNode`), and a resize doesn't make it draw
   when the text overflows the view both ways, so the window made bigger
@@ -1973,9 +2000,9 @@ the scratchpad (see Scratchpad).
   all the text reads `latest.text` (the hover, saves, the find bar through
   `vim.editorText`): reading `text` on every move of the pointer took 2 s
   in a gigabyte. Changes only to the format (`formatting` in Editor.qml,
-  `FormatOnly` in native.cpp: the line format, the colors, Koil's
-  margins) leave it alone. Txt's line index takes
-  the string it's asked with (`lineIndex`), if it's the same string, not
+  `FormatOnly` in native.cpp: the colors, a new layout) leave it alone.
+  Txt's line index takes the string it's asked with (`lineIndex`), if
+  it's the same string, not
   only the same text, which `System.sameString` tells by its data in O(1)
   (`Txt.compareStringsWith`; `===` in the tests): vim's text during a key
   and the editor's are as long after `r`, and `===` hashed both, seconds a
@@ -1988,73 +2015,77 @@ the scratchpad (see Scratchpad).
   `Txt.column` and `atColumn` count a code unit a character up to the
   first that may not be one (`mayAttach`, found by a regex), as a long line
   took seconds.
-- **Long lines** (`LongLines` in native.cpp, `longText` in Editor.qml): a
-  `TextEdit` builds only the lines in view, but all of each, so Qt shaped
+- **Long lines** (`TextLayout` in native.cpp, `longText` in Editor.qml):
+  a `TextEdit` builds only the lines in view, but all of each, so Qt shaped
   every character of a line in view (300 ns each, again when the text's
   width changed) and put a glyph of each in the scene graph: `big` (52 lines
   of a megabyte) took a minute to show and seconds an edit. A line longer
-  than `longLength` (10,000) is hidden from Qt (`QTextBlock::setVisible`,
-  set in `contentsChange`, before Qt lays it out), which then never lays it
-  out or draws it, and the line after hidden ones gets a top margin as tall
-  as their rows (the text's end, a bottom margin of the root frame), so the
-  lines Qt lays out stay on the grid (`placeLongLines`, after each change,
-  around it). Each has the bottom margin of the line Qt laid out before
-  them too, which Qt adds only before a next line it lays out: without it
-  at the text's end, a long last line ended past the text, and Qt's guard
-  in `ensureCursorVisible` (as far as the content goes) didn't scroll to
-  it. Koil places a hidden line's characters, a column a UTF-16
-  unit, `rowLength` a row while lines wrap (anywhere): `longLineSpot` and
+  than `longLength` (10,000) is hidden from Qt (`QTextBlock::setVisible`)
+  as the layout lays it out, so Qt never lays it out or draws it, and the
+  layout gives it its rows (`rowLength` columns a row while lines wrap,
+  anywhere, as finding where words end would read all of a megabyte), so
+  the lines after it are where they should be. Koil places a hidden line's
+  characters, a column a UTF-16 unit: `longLineSpot` and
   `longLinePosition`, which the TextArea's `rectAt` and `posAt` give in
   place of `positionToRectangle` and `positionAt` (vim's and the overlays'
   go through them), and draws only what's in view of them (`longText`, a
   `Text` a run of one color, from `TextColors`'s formats: `longLineRuns`; a
-  tab is a space). Qt's cursor rectangle in a hidden line is at the text's
-  start, so its TextArea mustn't scroll to it: its private
-  `ensureCursorVisible` is disconnected (`scrollToCursorInQml`), and
-  Editor.qml's does the same (QML handlers run before C++ slots anyway),
-  with Koil's rectangle in a hidden line; Qt hides its cursor delegate when
-  that rectangle is out of view, so there `carets` draws the insert bar, and
-  a press on one (and its drag) is Koil's (the `MouseArea`). Qt builds again
-  only the lines a selection touches, and past a hidden line put the lines
-  after it too far down (it takes an empty node, where it skipped the hidden
-  line, as the next one's place), so a selection change has it build all the
-  lines in view (`rebuildTextNodes`). Placed while Qt resized the TextArea,
-  the margins' height went nowhere (its `updateSize` guards against itself),
-  so a resize places them after. The matching bracket is looked for at most
-  `reach` characters away. A `QTextCursor` lays out the line it's put in to
-  find its x, so native.cpp reads text with `characterAt` and blocks' text
-  (`textBetween`). `big` shows in half a second, and an edit takes 0.1 to
-  0.3 s, mostly V4 copying all 54 MB.
+  tab is a space). Qt's cursor rectangle in a hidden line is at its start,
+  however far in the cursor is, so its TextArea mustn't scroll to it: its
+  private `ensureCursorVisible` is disconnected (`scrollToCursorInQml`),
+  and Editor.qml's does the same (QML handlers run before C++ slots
+  anyway), with Koil's rectangle in a hidden line; Qt hides its cursor
+  delegate when that rectangle is out of view, so there `carets` draws the
+  insert bar, and a press on one (and its drag) is Koil's (the
+  `MouseArea`). The layout gives a hidden line's place
+  (`blockBoundingRect`) too, where Qt's gave an empty rectangle: Qt Quick
+  moves the lines it drew after a change by as much as the first of them
+  moved, which put those after a hidden line too far down whenever the
+  selection changed (and all the lines in view were drawn again after each
+  change of it). With Qt's layout, the line after hidden ones had a top
+  margin as tall as their rows, and the text's end a bottom margin, which
+  Qt resizing the TextArea left untold. The matching bracket is looked for
+  at most `reach` characters away. A `QTextCursor` lays out the line it's
+  put in to find its x, so native.cpp reads text with `characterAt` and
+  blocks' text (`textBetween`). `big` shows in half a second, and an edit
+  takes 0.1 to 0.3 s, mostly V4 copying all 54 MB.
 - **Wrapping** (`:set wrap`, a vim setting the Settings window saves, and
   View > Word Wrap, Alt+Z as in VS Code; never in the path field:
   `Editor.wrapping`, `Vim.wrapping`): a line too long for the view goes on
-  in rows under it, at a word's start in a file (`TextEdit.Wrap`), but
-  anywhere in the listing (`WrapAnywhere`, as vim wraps oil.nvim's): at a
-  word's start, a name of one long word left its icon alone on a row.
-  The wrap mode goes in with the text (`setText` empties the editor
-  first, a file after the listing), not as a binding, which laid out the
-  old text again in the new mode (`applyWrapMode`). Qt gives each of a
-  wrapped line's rows the format's fixed height, and its bottom margin
-  after the last (`layoutBlock`), so while lines wrap, `lineFormat` makes
-  rows `lineHeight` tall with no margin. Qt then puts the baseline at 4/5
-  of a row, below `textBaseline`, so the rows start lower, by
-  `textShift` (`textTop`, the grid's top, which `cellAt` and vim's
-  `textTop` use): moving the text up by its padding instead made the
-  style's `implicitHeight` a binding loop. In the listing, a name's rows
-  after its first start under it, not under its icon (a hanging indent:
-  the blocks' left margin, and as much text indent taken off), and with
-  notes (sorted by size or a date) none reaches into the notes' room on
-  the right (`noteRoom`, the blocks' right margin), so each note fits
-  after its line, lined up as in a table. Qt fits a `TextArea` to its
-  view's width only as the view or the text's size changes, and a new
-  wrap mode had it do that inside its own resize, so the wrapped text's
-  height went untold (`contentSizeChanged`, see below): the view kept the
-  unwrapped height, and `j` and `G` went past its end without scrolling.
-  So `applyWrapMode` gives it the view's width before the wrap mode. On
-  macOS the vertical scroll bar is `AlwaysOn` while lines wrap: one
-  showing up narrowed the view inside Qt's own resize, whose new size Qt
-  doesn't tell then (`contentSizeChanged`), which left the content a row
-  short.
+  in rows under it, in the listing too. A row ends where `breaksBefore`
+  lets it, the last place that fits: after a space, or where a word
+  (letters, digits and `_`, as a regex's `\b`) starts or ends, but not
+  before a space, nor before what stays with the word before it
+  (`staysBefore`: a `,`, `.`, `;`, `:`, `!`, `?`, `-` or `/`, a closing
+  bracket or quote), so `foo.bar` breaks after the `.`, `a/b` after the
+  `/`, and `f(x, y)` before the `(`, after it or after the `, `. Where none
+  fits, where the next character doesn't (`breakRow`: Qt lays the row out
+  to break anywhere, and again as wide as up to the place picked and
+  halfway into the character after it, which then doesn't fit). In the
+  listing (`prefixed`), not in a line's prefix nor right after it, so an
+  icon is never alone on its row, and a name's rows after its first start
+  under it, not under its icon. Qt's line breaking (Unicode's, UAX #14)
+  breaks only at spaces and after a `-` or `/`, and broke after the
+  prefix's spaces, which left the icon of a long `snake_case` or dotted
+  name alone: nothing lets its breaks be changed, which is why Koil lays
+  the text out itself (see Text layout). With notes (sorted by size or a
+  date) no row reaches into the notes' room on the right (`noteRoom`,
+  `rightMargin`), so each note fits after its line, lined up as in a
+  table. The wrap mode is set by `applyWrapMode`, not a binding: Qt fits
+  a `TextArea` to its view's width only as the view or the text's size
+  changes, and a new wrap mode had it do that inside its own resize, so
+  the wrapped text's height went untold (`contentSizeChanged`, see below):
+  the view kept the unwrapped height, and `j` and `G` went past its end
+  without scrolling. So `applyWrapMode` gives it the view's width before
+  the wrap mode. On macOS the vertical scroll bar is `AlwaysOn` while
+  lines wrap: one showing up narrowed the view inside Qt's own resize,
+  whose new size Qt doesn't tell then (`contentSizeChanged`), which left
+  the content a row short. Both scroll bars change as lines start or stop
+  wrapping, and Qt doesn't tell the room the vertical one takes
+  (`effectiveScrollBarWidth`) if that changes while it tells the
+  horizontal one's (QQuickScrollViewPrivate's `isUpdatingScrollBar`), so
+  `onWrappingChanged` tells it again once both did: the macOS style's
+  padding kept none, and the text went under the bar.
   The overlays draw a span in a part a row (`rowSpans`, finding where
   rows start by `cellAt`, only those in view: a line can have thousands),
   the current line's band covers all its rows, a line number is on its
@@ -2069,22 +2100,14 @@ the scratchpad (see Scratchpad).
   cursor is where they left it), or go to a row's end after `$`. Not
   `positionAt` far right with 1e9, which wrapped round (Qt keeps an x in
   64ths of a pixel, in 32 bits) to the row's start. Toggling it lays all
-  the text out twice (the format, then the wrap mode): 10 s for 100,000
-  lines in a debug build. `setLineFormat` turns the layout off while it
-  applies the format, as `recolor` does: Qt's highlighter colors every line
-  again on a format change and laid the document out after each one, so
-  turning wrapping off took five minutes in a colored file of 100,000
-  lines (a file's `TextColors` doesn't color them again, see Syntax).
-  The TextEdit takes the text's size as the change is told, while the
-  layout is off, and nothing tells it the size it's laid out to after, so
-  `setLineFormat` then runs its `updateSize` (a slot of Qt's, not
-  public): the view kept the height from before, so in a listing sorted
-  by size or a date (the notes' room changes the rows names wrap to), or
-  zoomed, the cursor went past its end without the view following.
-  `fixLineFormat` then keeps the cursor in view, if it was, as Qt scrolls
-  to it only when it moves; and `showListing` gives the new format (the
-  notes' room) before it places the view, then shows the cursor, whose
-  line a sort can move with the rows above it while its place stays.
+  the text out once: `onWrappingChanged` gives the wrap mode and the line
+  format (the notes' room) in the order that lays it out only for the
+  first (3.4 s for 100,000 lines in a debug build; Qt's laid it out twice,
+  in 10). `fixLineFormat` keeps the cursor in view, if it was, as Qt
+  scrolls to it only when it moves (a zoom, the notes' room), and
+  `showListing` gives the new grid (the notes' room) before it places the
+  view, then shows the cursor, whose line a sort can move with the rows
+  above it while its place stays.
 - **Line numbers** (`:set nu`/`rnu`): the `gutter` is a child of the
   `TextArea` (so it scrolls with the text), kept at `contentX` and drawn over
   text scrolled under it. The styles hard-code `leftPadding` (7 on macOS,
