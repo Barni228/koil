@@ -1382,8 +1382,14 @@ the scratchpad (see Scratchpad).
   links, …), and the plugins for images, TLS, network information, the
   widgets' style and databases (whose client libraries it can't find in
   CI: its "ERROR: no file at" lines, which it still prints).
-  `package-windows.ps1` deletes only windeployqt's database drivers, as
-  the rest is untried there. To check the list, build the bundle with
+  `package-windows.ps1` does the same with windeployqt's options
+  (`--skip-plugin-types`, no translations, no shader compilers: Windows
+  has D3D's, and DXC is D3D12's) and deletes, which also take the Windows
+  style and NativeStyle, as Fusion is set there. That was checked without
+  running it: Windows' Qt (`aqt install-qt windows desktop 6.10.3
+  win64_msvc2022_64`, which unpacks on macOS too), its `qmldir`s for
+  imports of what's deleted, and `objdump -p` for the DLLs Koil's imports,
+  `qwindows.dll` and the QML plugins kept import. To check the list, build the bundle with
   CI's Qt (`aqt install-qt mac desktop 6.11.3 clang_64`, its `bin` first
   on `PATH`) and a temporary `Timer` that opens the windows and dialogs,
   run `Contents/MacOS/Koil` with `DYLD_PRINT_LIBRARIES=1`, and compare
