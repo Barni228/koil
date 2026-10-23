@@ -4456,6 +4456,7 @@ TestCase {
         shows("gI", "Keys starting with g", "`gI`");
         shows("gi", "The listing", "`g.`  `gi`  `gr`");
         shows("gs", "The listing", "`gs`");
+        shows("sort", "Options (:set)", "`sort`");
         shows("zs", "Keys starting with z", "`zs`  `ze`");
         shows("ZZ", "Keys starting with z", "`ZZ`");
         shows("gS", "Surround", "`S`  `gS`");

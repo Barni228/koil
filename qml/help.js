@@ -15,7 +15,7 @@ function sections(help) {
             title: "The listing",
             tags: ["koil", "listing", "list", "entry", "entries", "update", "apply", "-", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
-                "gr", "gs", "sort", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer",
+                "gr", "gs", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer",
                 "app"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
@@ -80,7 +80,7 @@ function sections(help) {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
                 "number", "nu", "relativenumber", "rnu", "syntax", "syn", "wrap", "sidescrolloff", "siso", "hidden", "hid",
-                "gitignore", "ignore", "regex", "re", "sortreverse", "sr", "dirsfirst", "df", "colors"],
+                "gitignore", "ignore", "regex", "re", "sort", "sortreverse", "sr", "dirsfirst", "df", "colors"],
             intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
                 + "once: `:set nu rnu fs=18`.",
             rows: [
