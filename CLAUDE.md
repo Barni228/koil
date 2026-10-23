@@ -2088,12 +2088,13 @@ the scratchpad (see Scratchpad).
   the wrap mode. On macOS the vertical scroll bar is `AlwaysOn` while
   lines wrap: one showing up narrowed the view inside Qt's own resize,
   whose new size Qt doesn't tell then (`contentSizeChanged`), which left
-  the content a row short. Both scroll bars change as lines start or stop
-  wrapping, and Qt doesn't tell the room the vertical one takes
-  (`effectiveScrollBarWidth`) if that changes while it tells the
-  horizontal one's (QQuickScrollViewPrivate's `isUpdatingScrollBar`), so
-  `onWrappingChanged` tells it again once both did: the macOS style's
-  padding kept none, and the text went under the bar.
+  the content a row short. Qt doesn't tell the room a scroll bar takes
+  (`effectiveScrollBarWidth` or `Height`) if that changes while it tells
+  the other's (QQuickScrollViewPrivate's `isUpdatingScrollBar`), as when
+  both show up or go at once (a text opened, lines starting or stopping
+  wrapping), so Editor.qml tells both again once either does
+  (`tellScrollBars`): the macOS style's padding kept none, and the text
+  went under the bar, the last line under the horizontal one after `G`.
   The overlays draw a span in a part a row (`rowSpans`, finding where
   rows start by `cellAt`, only those in view: a line can have thousands),
   the current line's band covers all its rows, a line number is on its

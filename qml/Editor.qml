@@ -634,12 +634,18 @@ Item {
             fixLineFormat();
         }
         flickable.contentX = 0;
-        // Both scroll bars change, and Qt doesn't tell the room the vertical
-        // one takes (effectiveScrollBarWidth) if it changes while it tells
-        // the horizontal one's (QQuickScrollViewPrivate's
-        // isUpdatingScrollBar): the macOS style's padding kept none, and
-        // the text went under the bar. So it's told again, once both did.
-        Qt.callLater(scrollView.effectiveScrollBarWidthChanged);
+    }
+
+    // Qt doesn't tell the room a scroll bar takes (effectiveScrollBarWidth
+    // or Height) if it changes while it tells the other's
+    // (QQuickScrollViewPrivate's isUpdatingScrollBar), as when both show up
+    // or go at once (a text opened, wrapping turned on): the macOS style's
+    // padding kept none, and the text went under the bar, the last line
+    // under the horizontal one after G. So both are told again once either
+    // shows up or goes.
+    function tellScrollBars() {
+        scrollView.effectiveScrollBarWidthChanged();
+        scrollView.effectiveScrollBarHeightChanged();
     }
 
     // Gives the TextArea the wrap mode, which lays out all its text again
@@ -688,6 +694,22 @@ Item {
         // Vim.qml): with nothing under it, gh shows its line's icon's text.
         function onHoverRequested(at) {
             hover.show(view.listing && !hover.targetAt(at) ? Txt.lineStart(editor.latest.text, at) : at, false);
+        }
+    }
+
+    Connections {
+        target: scrollView.ScrollBar.vertical
+
+        function onVisibleChanged() {
+            Qt.callLater(view.tellScrollBars);
+        }
+    }
+
+    Connections {
+        target: scrollView.ScrollBar.horizontal
+
+        function onVisibleChanged() {
+            Qt.callLater(view.tellScrollBars);
         }
     }
 
