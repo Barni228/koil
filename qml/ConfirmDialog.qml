@@ -34,7 +34,9 @@ import QtQuick.Layouts
 ModalBox {
     id: dialog
 
-    // Colors the list's keywords (see `keywords`); none in the tests.
+    // Colors the list's keywords (see `keywords`), and lays out the text,
+    // so its rows break where words do (see SelectableText); none in the
+    // tests.
     property var system: null
 
     // The question, or a function of how many lines are picked (and which)
@@ -234,7 +236,7 @@ ModalBox {
     onRowShownChanged: Qt.callLater(showRow)
 
     width: Math.min(parent ? parent.width - 48 * zoom : 500,
-        Math.max(questionText.implicitWidth, label.implicitWidth + scroller.scrollBar.width, buttons.implicitWidth) + 2 * padding)
+        Math.max(questionText.naturalWidth, label.naturalWidth + scroller.scrollBar.width, buttons.implicitWidth) + 2 * padding)
     closePolicy: Popup.CloseOnPressOutside
     onClosed: {
         questionText.deselect();
@@ -285,6 +287,7 @@ ModalBox {
         id: selectable
 
         theme: dialog.theme
+        system: dialog.system
         font: dialog.theme.font
         color: dialog.theme.text
         textFormat: TextEdit.PlainText
@@ -366,6 +369,9 @@ ModalBox {
                 // needing: that depends on the height, which depends on it.
                 width: scroller.width - scroller.scrollBar.width
                 text: dialog.list
+                // A wrapped line to pick from goes on under its text, not
+                // under its box.
+                listing: dialog.items.length > 0
                 onTextChanged: Qt.callLater(dialog.showRow)
                 onContentHeightChanged: Qt.callLater(dialog.showRow)
 

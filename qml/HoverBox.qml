@@ -198,8 +198,9 @@ Item {
             SelectableText {
                 id: label
 
-                width: Math.min(implicitWidth, hover.maxWidth - scroller.x - 8)
+                width: Math.min(naturalWidth, hover.maxWidth - scroller.x - 8)
                 theme: hover.theme
+                system: hover.editor.system
                 text: hover.text
                 font: hover.theme.font
                 color: hover.theme.text

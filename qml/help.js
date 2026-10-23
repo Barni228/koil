@@ -91,9 +91,9 @@ function sections(help) {
                 ["`relativenumber`  `rnu`", "Line numbers counted from the cursor's line."],
                 ["`syntax`  `syn`", "Color files and the scratchpad: strings, numbers, comments, paths and URLs. "
                     + "`:syntax off` and `:syntax on` turn it off and on too."],
-                ["`wrap`", "Wrap a line too long for the window: after a space or where a word starts or ends "
-                    + "(but not before a `,`, `.`, `-`, `/` or `)`), else anywhere, and in the listing never "
-                    + "after the icon alone. "
+                ["`wrap`", "Wrap a line too long for the window: after a space, a `_` or where a word starts or "
+                    + "ends (but not before a `,`, `.`, `-`, `_`, `/` or `)`), else anywhere, and in the listing "
+                    + "never after the icon alone. Questions (what to apply or undo) and the hover box wrap so too. "
                     + "View > Word Wrap (`" + altKey + "Z`) toggles it too. Then `gj` and `gk` go "
                     + "a row down or up, the page keys and `Ctrl-E` count rows, and nothing scrolls sideways."],
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],

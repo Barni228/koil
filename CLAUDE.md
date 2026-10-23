@@ -2054,11 +2054,12 @@ the scratchpad (see Scratchpad).
   `Editor.wrapping`, `Vim.wrapping`): a line too long for the view goes on
   in rows under it, in the listing too. A row ends where `breaksBefore`
   lets it, the last place that fits: after a space, or where a word
-  (letters, digits and `_`, as a regex's `\b`) starts or ends, but not
-  before a space, nor before what stays with the word before it
-  (`staysBefore`: a `,`, `.`, `;`, `:`, `!`, `?`, `-` or `/`, a closing
-  bracket or quote), so `foo.bar` breaks after the `.`, `a/b` after the
-  `/`, and `f(x, y)` before the `(`, after it or after the `, `. Where none
+  (letters and digits, as a regex's `\b`, but not `_`) starts or ends,
+  but not before a space, nor before what stays with the word before it
+  (`staysBefore`: a `,`, `.`, `;`, `:`, `!`, `?`, `-`, `_` or `/`, a
+  closing bracket or quote), so `foo.bar` breaks after the `.`, `a/b`
+  after the `/`, `snake_case` after the `_`, and `f(x, y)` before the
+  `(`, after it or after the `, `. Where none
   fits, where the next character doesn't (`breakRow`: Qt lays the row out
   to break anywhere, and again as wide as up to the place picked and
   halfway into the character after it, which then doesn't fit). In the
@@ -2071,7 +2072,14 @@ the scratchpad (see Scratchpad).
   the text out itself (see Text layout). With notes (sorted by size or a
   date) no row reaches into the notes' room on the right (`noteRoom`,
   `rightMargin`), so each note fits after its line, lined up as in a
-  table. The wrap mode is set by `applyWrapMode`, not a binding: Qt fits
+  table. A question's text and list (`ConfirmDialog`: what to apply or
+  undo) and the hover box always wrap so, as the editor would
+  (`SelectableText`'s `system`): their rows as tall as the font's lines (a
+  `lineHeight` of 0, which follows the zoom), and a list with boxes as the
+  listing, its lines going on under their text. They're sized to their
+  text unwrapped (`naturalWidth`, `System.layoutWidth`), which their
+  `implicitWidth` isn't with Koil's layout (see Text layout). The wrap
+  mode is set by `applyWrapMode`, not a binding: Qt fits
   a `TextArea` to its view's width only as the view or the text's size
   changes, and a new wrap mode had it do that inside its own resize, so
   the wrapped text's height went untold (`contentSizeChanged`, see below):

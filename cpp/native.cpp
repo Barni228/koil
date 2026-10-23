@@ -539,15 +539,16 @@ isBlank(char32_t c)
   return QChar::isSpace(c) && c != 0xa0 && c != 0x2007 && c != 0x202f;
 }
 
-// A character of a word, as a regex's \w: a letter, a digit or `_`.
+// A character of a word: a letter or a digit (not `_`, as a regex's \w
+// has it, so `snake_case` breaks after its `_`s).
 bool
 isWord(char32_t c)
 {
-  return QChar::isLetterOrNumber(c) || QChar::isMark(c) || c == u'_';
+  return QChar::isLetterOrNumber(c) || QChar::isMark(c);
 }
 
 // What ends something (a `,`, a `.`, a closing bracket or quote) or joins
-// two words (a `-`, a `/`), which stays with the word before it.
+// two words (a `-`, a `_`, a `/`), which stays with the word before it.
 bool
 staysBefore(char32_t c)
 {
@@ -556,14 +557,15 @@ staysBefore(char32_t c)
     case QChar::Punctuation_FinalQuote:
       return true;
     default:
-      return c < 0x80 && QStringView(u",.;:!?%'\"-/").contains(QChar(c));
+      return c < 0x80 && QStringView(u",.;:!?%'\"-_/").contains(QChar(c));
   }
 }
 
 // Whether a row may end before the character at `i` of `text`, so that it
 // starts the next one: after a space, or where a word starts or ends, as a
-// regex's \b does, but not before a space (which ends the row it's on), nor
-// before what stays with the word before it (see staysBefore).
+// regex's \b does (but at a `_` too), not before a space (which ends the
+// row it's on), nor before what stays with the word before it (see
+// staysBefore).
 bool
 breaksBefore(QStringView text, qsizetype i)
 {
@@ -688,7 +690,8 @@ struct LongLine : QTextBlockUserData
 // Koil's layout of a TextEdit's document, in place of Qt's (see
 // setLineFormat). Every line's rows are on a grid of rows `lineHeight`
 // tall, with the text's baseline `baseline` down each, however tall its
-// characters are (an emoji's font is taller). While lines wrap, a row ends
+// characters are (an emoji's font is taller), or if `lineHeight` is 0, as
+// tall as the font's lines, as Qt's are (see rowHeight). While lines wrap, a row ends
 // where breaksBefore lets it, the last place that fits, or else where the
 // next character doesn't fit; in the listing (`prefixed`), not in a line's
 // prefix nor right after it, which would leave its icon alone, and the rows
@@ -734,9 +737,9 @@ public:
   void setFormat(double height, double base, double margin, bool listing, int longAt)
   {
     const bool rows = rightMargin != margin || prefixed != listing;
-    const bool grid = lineHeight != height || baseline != base;
+    const bool moved = lineHeight != height || baseline != base;
     const bool hiding = longLength != longAt;
-    if (!rows && !grid && !hiding)
+    if (!rows && !moved && !hiding)
       return;
     lineHeight = height;
     baseline = base;
@@ -759,6 +762,20 @@ public:
       QMetaObject::invokeMethod(textEdit, slot);
   }
 
+  // How tall a row is, and how far down it its baseline is: as the grid
+  // was given, else the font's line spacing and ascent, as Qt lays out a
+  // line (not lineSpacing itself: Qt rounds a line's height up).
+  qreal rowHeight() const
+  {
+    return lineHeight > 0 ? lineHeight
+                          : std::ceil(QFontMetricsF(document()->defaultFont()).lineSpacing());
+  }
+
+  qreal rowBaseline() const
+  {
+    return lineHeight > 0 ? baseline : QFontMetricsF(document()->defaultFont()).ascent();
+  }
+
   // How wide a column is: every character of the font advances one (see
   // Icon font in CLAUDE.md), as far as a hidden line goes.
   qreal charWidth() const
@@ -770,10 +787,13 @@ public:
   // under a name rather than its icon, past the prefix (three columns).
   qreal indent() const { return prefixed ? 3 * charWidth() : 0; }
 
+  // Whether lines wrap: not without a width, which a TextEdit gives none
+  // while it measures how wide its text is unwrapped.
   bool wrapping() const
   {
     const auto mode = document()->defaultTextOption().wrapMode();
-    return mode != QTextOption::NoWrap && mode != QTextOption::ManualWrap;
+    return mode != QTextOption::NoWrap && mode != QTextOption::ManualWrap &&
+           document()->textWidth() >= 0;
   }
 
   // How many characters a row of a hidden line has while lines wrap (as
@@ -794,7 +814,7 @@ public:
     return rows.size() ? document()->findBlockByNumber(rows.lineAt(row)) : QTextBlock();
   }
 
-  // How wide the widest line Qt lays out is, unwrapped.
+  // How wide the widest line Qt lays out is, unwrapped, wrapped or not.
   qreal width() const { return widest; }
 
   int longest() const
@@ -841,7 +861,7 @@ public:
       return 0;
     const qreal margin = document()->documentMargin();
     const qint64 row =
-      qBound<qint64>(0, qint64(std::floor((point.y() - margin) / lineHeight)), rows.total() - 1);
+      qBound<qint64>(0, qint64(std::floor((point.y() - margin) / rowHeight())), rows.total() - 1);
     const QTextBlock block = blockAtRow(row);
     const int r = int(row - rowOf(block));
     const qreal x = point.x() - margin;
@@ -859,7 +879,7 @@ public:
   {
     const qreal margin = document()->documentMargin();
     const qreal width = wrapping() ? qMax<qreal>(0, textWidth()) : widest;
-    return { width + 2 * margin, qreal(rows.total()) * lineHeight + 2 * margin };
+    return { width + 2 * margin, qreal(rows.total()) * rowHeight() + 2 * margin };
   }
 
   QRectF frameBoundingRect(QTextFrame* frame) const override
@@ -877,9 +897,9 @@ public:
       return {};
     const qreal margin = document()->documentMargin();
     return { margin,
-             margin + qreal(rows.before(line)) * lineHeight,
+             margin + qreal(rows.before(line)) * rowHeight(),
              documentSize().width() - 2 * margin,
-             rows.at(line) * lineHeight };
+             rows.at(line) * rowHeight() };
   }
 
 protected:
@@ -1009,19 +1029,31 @@ private:
   // Puts the rows of the lines Qt lays out on the grid as it is now.
   void placeAll()
   {
-    const qreal rowIndent = indent();
+    const Grid grid = this->grid();
     for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
       auto* layout = block.layout();
       if (!block.isVisible())
         continue;
       for (int i = 0; i < layout->lineCount(); ++i)
-        place(layout->lineAt(i), i, rowIndent);
+        place(layout->lineAt(i), i, grid);
     }
   }
 
-  void place(QTextLine line, int row, qreal rowIndent) const
+  // Where a row goes: its height, its baseline, and how far right the rows
+  // after a line's first start.
+  struct Grid
   {
-    line.setPosition(QPointF(row ? rowIndent : 0, row * lineHeight + baseline - line.ascent()));
+    qreal height;
+    qreal baseline;
+    qreal indent;
+  };
+
+  Grid grid() const { return { rowHeight(), rowBaseline(), indent() }; }
+
+  static void place(QTextLine line, int row, const Grid& grid)
+  {
+    line.setPosition(
+      QPointF(row ? grid.indent : 0, row * grid.height + grid.baseline - line.ascent()));
   }
 
   // Lays out a line (a block), or hides it from Qt if it's too long, and
@@ -1058,21 +1090,22 @@ private:
     if (layout->preeditAreaPosition() >= 0)
       text.insert(layout->preeditAreaPosition(), layout->preeditAreaText());
     const qsizetype after = prefixed ? prefixEnd(text) : 0;
-    const qreal room = textWidth() - rightMargin, column = charWidth(), rowIndent = indent();
+    const qreal room = textWidth() - rightMargin, column = charWidth();
+    const Grid grid = this->grid();
     int row = 0;
+    // How wide the line is unwrapped: its rows' text side by side.
     qreal width = 0;
     layout->beginLayout();
     for (;; ++row) {
       QTextLine textLine = layout->createLine();
       if (!textLine.isValid())
         break;
-      const qreal x = row ? rowIndent : 0;
-      const qreal rowWidth = qMax(room - x, column);
+      const qreal rowWidth = qMax(room - (row ? grid.indent : 0), column);
       textLine.setLineWidth(rowWidth);
       if (wrap)
         breakRow(layout, textLine, text, after, rowWidth);
-      place(textLine, row, rowIndent);
-      width = qMax(width, x + textLine.horizontalAdvance());
+      place(textLine, row, grid);
+      width += textLine.horizontalAdvance();
     }
     layout->endLayout();
     return { qMax(1, row), width };

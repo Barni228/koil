@@ -59,9 +59,11 @@ void setClipboardText(const QString& text, const QString& data);
 // Lays out a TextEdit's document as Koil does, in place of Qt's layout
 // (see TextLayout in native.cpp), with this grid: every line's rows
 // `lineHeight` tall, the text's baseline `baseline` down a row (an emoji,
-// from a taller font, doesn't make its line taller), and none reaching into
+// from a taller font, doesn't make its line taller), or with a
+// `lineHeight` of 0, as tall as the font's lines, and none reaching into
 // the `rightMargin`. While lines wrap, a row ends after a space or where a
-// word starts or ends, if one fits, else anywhere; in the `listing`, not in
+// word starts or ends (or after a `_`), if one fits, else anywhere; in the
+// `listing` (or a list whose lines start with a box and two spaces), not in
 // a line's prefix (its icon and two spaces), nor right after it, and the
 // rows a line wraps to start under its name. A line longer than
 // `longLength` characters is hidden from Qt, a column (a space's width) a
@@ -75,10 +77,11 @@ void setLineFormat(QObject* textEdit,
                    int longLength);
 
 // How wide the widest line of a document setLineFormat lays out is,
-// unwrapped (not the hidden ones). Qt gives a TextEdit the text's width
-// (QTextDocument::textWidth) as its content's, as its idealWidth is
-// QTextDocumentLayout's only, so the TextEdit is made this wide while lines
-// don't wrap.
+// unwrapped (not the hidden ones), wrapped or not. Qt gives a TextEdit the
+// text's width (QTextDocument::textWidth) as its content's, and the same as
+// its implicitWidth, as its idealWidth is QTextDocumentLayout's only: so
+// the TextEdit is made this wide while lines don't wrap, and what's sized
+// to its text unwrapped is sized to this.
 double layoutWidth(QObject* textDocument);
 
 // Sets a TextEdit's text as one edit, and resets what setting its text
