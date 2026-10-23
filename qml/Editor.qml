@@ -300,7 +300,9 @@ Item {
         Qt.callLater(colorAsShown);
     }
     // What the colors are made of: when any changes, they're given again.
-    readonly property var colorInputs: [listingColors, iconColors, pendingIconColor, pathSyntax, filePath, theme.dark, vim.syntax]
+    // The theme's colors too, not only `dark`: this can run on a new theme
+    // before they follow it, which left the dirs in the other theme's blue.
+    readonly property var colorInputs: [listingColors, iconColors, pendingIconColor, pathSyntax, filePath, theme.dark, theme.directory, theme.patternColors, vim.syntax]
     onColorInputsChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
 
