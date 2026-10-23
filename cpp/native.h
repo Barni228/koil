@@ -21,6 +21,11 @@ QString nerdFontFamily();
 // The windows' icon, from a PNG file (`png`). On macOS, also the Dock's.
 void useWindowIcon(const QByteArray& png);
 
+// Has Cmd+Backspace in every text field (a TextInput) delete back to its
+// start, or the selection, as in macOS's own: Qt reads Cmd as Ctrl there,
+// and a TextInput's Ctrl+Backspace deletes a word. Nothing elsewhere.
+void useLineDeleteKey();
+
 // Has `document` (a Document) emit fileOpened(path) for each file the
 // system asks the app to open: what Finder's Open With does on macOS, rather
 // than giving the path on the command line (also to an app already running).

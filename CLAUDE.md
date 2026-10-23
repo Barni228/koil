@@ -70,7 +70,8 @@ the scratchpad (see Scratchpad).
   native.cpp are made by `forward!`.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
-  Nerd Font, the window icon, files macOS asks to open, line format,
+  Nerd Font, the window icon, files macOS asks to open, Cmd+Backspace in
+  text fields, line format,
   `setText`, the listing's and path field's `QSyntaxHighlighter`, a
   file's colors (`TextColors`: `setTextColors`, with syntax.rs), and the
   confirmations' (`setKeywordColors`), `redrawText`, the long lines Qt
@@ -1492,7 +1493,14 @@ the scratchpad (see Scratchpad).
   shortcut's, as a mapping's. The `TextArea` does nothing on Cmd+Backspace, so on macOS
   it's vim's `<D-BS>`: typed by vim in insert mode (`typedEdit`: back to
   the line's start, the name's in the listing, and there Backspace),
-  `Ctrl-U` in the command line, nothing in the other modes. Other Cmd
+  `Ctrl-U` in the command line, nothing in the other modes. A
+  `TextInput` (every other text field: the find bar's, the help's
+  search, the Settings and Shortcuts windows') deletes a word on it
+  (Qt's Ctrl+Backspace, as Qt reads Cmd as Ctrl), so native.cpp's
+  `LineDeleteFilter`, an application's event filter (`useLineDeleteKey`
+  in main.rs), has it delete back to the field's start, or the
+  selection, through `remove`, which Cmd+Z undoes. With nothing to
+  delete, the field's Keys handlers have it (the help's search closes). Other Cmd
   keys (`<D-k>`, see Shortcuts) do nothing but run a shortcut: insert
   mode leaves them to the editor, the command line drops them, and Cmd
   and an arrow stays the editor's (no token).

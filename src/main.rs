@@ -55,6 +55,7 @@ fn main() {
     }
     ffi::use_settings_menu_title();
     ffi::use_nerd_font(&QByteArray::from(NERD_FONT));
+    ffi::use_line_delete_key();
     // In a bundle, macOS draws the Dock's icon from the bundle's, as Finder
     // does; a window icon would replace it.
     #[cfg(not(windows))]

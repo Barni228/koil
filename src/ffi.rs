@@ -88,6 +88,11 @@ mod bridge {
         #[allow(dead_code)] // not used on Windows
         fn use_window_icon(png: &QByteArray);
 
+        /// Has Cmd+Backspace in every text field delete back to its start, as
+        /// on macOS (see native.h). Nothing elsewhere.
+        #[cxx_name = "useLineDeleteKey"]
+        fn use_line_delete_key();
+
         /// Has `document`, a Document, emit `fileOpened(path)` for each file
         /// the system asks the app to open (macOS's Open With; see native.h).
         #[cxx_name = "watchFileOpens"]

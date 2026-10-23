@@ -22,6 +22,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QIcon>
 #include <QtGui/QImage>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPixmap>
 #include <QtGui/QSyntaxHighlighter>
 #include <QtGui/QTextBlockFormat>
@@ -89,6 +90,41 @@ public:
 private:
   QPointer<QObject> document;
 };
+
+#ifdef Q_OS_MACOS
+// Has Cmd+Backspace in a TextInput delete back to its start (see
+// useLineDeleteKey). An application's filter, as the key goes to the item
+// through it, before its Keys handlers and its own keyPressEvent.
+class LineDeleteFilter : public QObject
+{
+public:
+  using QObject::QObject;
+
+  bool eventFilter(QObject* watched, QEvent* event) override
+  {
+    if (event->type() != QEvent::KeyPress || !watched->inherits("QQuickTextInput") ||
+        watched->property("readOnly").toBool())
+      return false;
+    const auto* key = static_cast<QKeyEvent*>(event);
+    // Qt's ControlModifier is Cmd on macOS.
+    if (key->key() != Qt::Key_Backspace || key->modifiers() != Qt::ControlModifier)
+      return false;
+    int start = watched->property("selectionStart").toInt();
+    int end = watched->property("selectionEnd").toInt();
+    if (start == end) {
+      start = 0;
+      end = watched->property("cursorPosition").toInt();
+    }
+    // Nothing to delete: its Keys handlers have it (the help's search
+    // closes on a Backspace in an empty field).
+    if (start == end)
+      return false;
+    // TextInput's own, so Cmd+Z undoes it.
+    QMetaObject::invokeMethod(watched, "remove", Q_ARG(int, start), Q_ARG(int, end));
+    return true;
+  }
+};
+#endif
 
 // Whether a family has Latin letters, digits and punctuation, all the same
 // width. Not QFontDatabase::isFixedPitch: a font says it's monospaced only
@@ -837,6 +873,15 @@ void
 useWindowIcon(const QByteArray& png)
 {
   QGuiApplication::setWindowIcon(QIcon(QPixmap::fromImage(QImage::fromData(png, "PNG"))));
+}
+
+void
+useLineDeleteKey()
+{
+#ifdef Q_OS_MACOS
+  auto* app = QCoreApplication::instance();
+  app->installEventFilter(new LineDeleteFilter(app));
+#endif
 }
 
 void
