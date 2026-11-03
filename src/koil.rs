@@ -225,18 +225,29 @@ pub mod qobject {
         #[qinvokable]
         fn apply(self: Pin<&mut Koil>, picked: &QString) -> QString;
 
-        /// What creating the new file at `path` before the other changes
-        /// are applied takes (see `listing::create_steps`): `{ steps,
-        /// message }`, where `message` says why it can't be, and then
-        /// `steps` is empty.
+        /// What making the new files or copies at `paths` (a list) before
+        /// the other changes are applied takes (see
+        /// `listing::create_steps`): `{ steps, message }`, where `message`
+        /// says why they can't be, and then `steps` is empty.
         #[qinvokable]
-        fn create_steps(self: &Koil, path: &QString) -> QString;
+        fn create_steps(self: &Koil, paths: &QString) -> QString;
 
-        /// Creates the new file at `path` now, with the new dirs it's in,
-        /// keeping the other changes, then reads the open dir again (see
-        /// `listing::create_now`). Returns `{ ok, message }`.
+        /// Makes the new files or copies at `paths` (a list) now, with the
+        /// new dirs they're in, keeping the other changes, then reads the
+        /// open dir again (see `listing::create_now`). Returns `{ ok,
+        /// message }`.
         #[qinvokable]
-        fn create(self: Pin<&mut Koil>, path: &QString) -> QString;
+        fn create(self: Pin<&mut Koil>, paths: &QString) -> QString;
+
+        /// The copies applying would make of the file at `path`, or of a
+        /// dir it's in, which would get what changes in it, or with an
+        /// empty `path`, every copy (see `listing::copies_of`): `{ copies:
+        /// { paths, steps }, message }`, where `message` says why they
+        /// can't be made now. With the listing `text` (not empty), as Koil
+        /// will have them once it's read, or if it can't be, as it has
+        /// them now.
+        #[qinvokable]
+        fn copies_of(self: &Koil, path: &QString, text: &QString, hidden: &QString) -> QString;
 
         /// The applies that can be undone, newest first, as a list of
         /// `listing::HistoryLine`s (`{ text, needs, blocked, steps }`),
@@ -781,20 +792,30 @@ impl qobject::Koil {
         outcome(applied)
     }
 
-    fn create_steps(&self, path: &QString) -> QString {
-        let path = PathBuf::from(path.to_string());
-        listed("steps", listing::create_steps(&self.koil, &path))
+    fn create_steps(&self, paths: &QString) -> QString {
+        let paths: Vec<PathBuf> = from_json(paths);
+        listed("steps", listing::create_steps(&self.koil, &paths))
     }
 
-    fn create(self: Pin<&mut Self>, path: &QString) -> QString {
-        let path = PathBuf::from(path.to_string());
+    fn create(self: Pin<&mut Self>, paths: &QString) -> QString {
+        let paths: Vec<PathBuf> = from_json(paths);
         let mut rust = self.rust_mut();
         let rust = &mut *rust;
-        let created = listing::create_now(&mut rust.koil, &path);
-        // With the new dirs it's in.
-        rust.sizes.changed(&path);
+        let created = listing::create_now(&mut rust.koil, &paths);
+        // With the new dirs they're in.
+        for path in &paths {
+            rust.sizes.changed(path);
+        }
         rust.history.merge(&mut rust.koil);
         outcome(created)
+    }
+
+    fn copies_of(&self, path: &QString, text: &QString, hidden: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        let path = (!path.as_os_str().is_empty()).then_some(path.as_path());
+        let (text, hidden) = (text.to_string(), read_hidden(hidden));
+        let listing = (!text.is_empty()).then_some((text.as_str(), hidden.as_slice()));
+        listed("copies", listing::copies_of(&self.koil, path, listing))
     }
 
     fn history(self: Pin<&mut Self>) -> QString {

@@ -57,8 +57,9 @@ fn navigate(koil: &mut Koil, path: &str, settings: &Settings, open: Option<&str>
 }
 
 /// The rendered listing with each line changed by `edit`, which gets the
-/// line's name and returns the new line, or `None` to remove it. The hidden
-/// texts stay with their lines.
+/// line's name and returns the new lines, or `None` to remove it. The hidden
+/// texts stay with their lines, and go with a copy of a line too (a line of
+/// the new ones that starts with its icon, as `yyp` pastes it).
 fn edited(
     rendered: &Rendered,
     edit: impl Fn(&str, &str) -> Option<String>,
@@ -67,12 +68,13 @@ fn edited(
     let mut hidden = Vec::new();
     let mut old_at = 0;
     for (line, name) in rendered.text.split('\n').zip(&rendered.names) {
-        if let Some(new) = edit(line, name) {
+        let h = rendered.hidden.iter().find(|h| h.at == old_at);
+        for new in edit(line, name).iter().flat_map(|new| new.split('\n')) {
             if !text.is_empty() {
                 text.push('\n');
             }
             // An icon keeps its hidden text if the line still starts with it.
-            if let Some(h) = rendered.hidden.iter().find(|h| h.at == old_at)
+            if let Some(h) = h
                 && new.starts_with(&h.icon)
             {
                 hidden.push(Hidden {
@@ -80,7 +82,7 @@ fn edited(
                     ..h.clone()
                 });
             }
-            text.push_str(&new);
+            text.push_str(new);
         }
         old_at += utf16_len(line) + 1;
     }
@@ -454,6 +456,77 @@ fn test_target_on_line() {
 }
 
 #[test]
+fn test_target_on_line_copies() {
+    let (_temp, koil) = koil();
+    let rendered = render(&koil);
+    // dir and notes copied, and file.rs copied and renamed (to its last line)
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "dir/" => Some(format!("{line}\n{}", line.replace("dir/", "dir2/"))),
+        "file.rs" => Some(format!(
+            "{}\n{}",
+            line.replace("file.rs", "copy.rs"),
+            line.replace("file.rs", "main.rs")
+        )),
+        "notes" => Some(format!("{line}\n{}", line.replace("notes", "notes 2"))),
+        _ => Some(line.to_string()),
+    });
+    let target = |line| target_on_line(&koil, &text, &hidden, line);
+    assert_eq!(target(0), Some(Target::Dir("dir".into())));
+    assert_eq!(
+        target(1),
+        Some(Target::Copy {
+            path: path_in(&koil, "dir2"),
+            name: "dir2".into(),
+            from: "dir/".into(),
+            dir: true
+        })
+    );
+    assert_eq!(
+        target(2),
+        Some(Target::Copy {
+            path: path_in(&koil, "copy.rs"),
+            name: "copy.rs".into(),
+            from: "file.rs".into(),
+            dir: false
+        })
+    );
+    // the file it copies, which applying renames
+    assert_eq!(
+        target(3),
+        Some(Target::File {
+            path: path_in(&koil, "file.rs"),
+            name: "main.rs".into()
+        })
+    );
+    assert_eq!(
+        target(4),
+        Some(Target::File {
+            path: path_in(&koil, "notes"),
+            name: "notes".into()
+        })
+    );
+    assert!(matches!(target(5), Some(Target::Copy { .. })));
+    // a dir renamed is opened where it is on disk, as a file is
+    let (text, hidden) = edited(&rendered, |line, _| Some(line.replace("dir/", "renamed/")));
+    assert_eq!(
+        target_on_line(&koil, &text, &hidden, 0),
+        Some(Target::Dir("dir".into()))
+    );
+    // with errors, a line can't be told to be a copy, and the update says why
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "notes" => Some(format!(
+            "{line}\n{}\nfile.rs",
+            line.replace("notes", "notes 2")
+        )),
+        _ => Some(line.to_string()),
+    });
+    assert!(matches!(
+        target_on_line(&koil, &text, &hidden, 3),
+        Some(Target::File { .. })
+    ));
+}
+
+#[test]
 fn test_file_at() {
     let (_temp, koil) = koil();
     let root = koil.current_dir().to_path_buf();
@@ -504,6 +577,18 @@ fn test_path_on_line() {
     assert_eq!(path(5), none);
     // a blank line
     assert_eq!(path_on_line(&koil, "\n", &[], 0), none);
+    // a copy isn't the file it copies
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "notes" => Some(format!("{line}\n{}", line.replace("notes", "notes 2"))),
+        _ => Some(line.to_string()),
+    });
+    let path = |line| path_on_line(&koil, &text, &hidden, line);
+    assert_eq!(path(2), Ok(path_in(&koil, "notes")));
+    assert_eq!(path(3), new("notes 2"));
+    assert_eq!(
+        paths_on_lines(&koil, &text, &hidden, &[(1, 3)]),
+        Err("“notes 2” isn't on disk until the changes are applied".into())
+    );
 }
 
 #[test]
@@ -1752,7 +1837,7 @@ fn test_create_now() {
     let settings = koil.settings().clone();
     let updated = update(&mut koil, &rendered.path, &text, &hidden, &settings, None);
     assert!(updated.ok, "{updated:?}");
-    let path = koil.current_dir().join("new/file.txt");
+    let path = [koil.current_dir().join("new/file.txt")];
     assert_eq!(
         create_steps(&koil, &path),
         Ok(vec![
@@ -1782,8 +1867,127 @@ fn test_create_now() {
     let updated = update(&mut koil, &rendered.path, &text, &hidden, &settings, None);
     assert!(updated.ok, "{updated:?}");
     assert_eq!(
-        create_steps(&koil, &koil.current_dir().join("file.rs")),
+        create_steps(&koil, &[koil.current_dir().join("file.rs")]),
         Err("`file.rs` can't be created before the other changes are applied (Space Space)".into())
+    );
+}
+
+// Enter on a copy makes it before the other changes, which stay, as for a
+// new file, and opening the file it copies makes the copies first.
+#[test]
+fn test_copy_now() {
+    let (temp, mut koil) = koil();
+    let rendered = render(&koil);
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "notes" => Some(format!(
+            "{line}\n{}\n{}\nother",
+            line.replace("notes", "notes 2"),
+            line.replace("notes", "new/notes")
+        )),
+        _ => Some(line.to_string()),
+    });
+    let settings = koil.settings().clone();
+    let updated = update(&mut koil, &rendered.path, &text, &hidden, &settings, None);
+    assert!(updated.ok, "{updated:?}");
+    let notes = koil.current_dir().join("notes");
+    let copies = [path_in(&koil, "new/notes"), path_in(&koil, "notes 2")];
+    assert_eq!(
+        copies_of(&koil, Some(&notes), None),
+        Ok(Copies {
+            paths: copies.to_vec(),
+            steps: [
+                "COPY   notes -> notes 2",
+                "CREATE new/",
+                "COPY   notes -> new/notes"
+            ]
+            .map(String::from)
+            .to_vec()
+        })
+    );
+    assert_eq!(
+        copies_of(&koil, Some(&koil.current_dir().join("file.rs")), None),
+        Ok(Copies::default())
+    );
+    let copy = [koil.current_dir().join("notes 2")];
+    assert_eq!(
+        create_steps(&koil, &copy),
+        Ok(vec!["COPY   notes -> notes 2".to_string()])
+    );
+    fs::write(&notes, "kept").unwrap();
+    assert_eq!(
+        create_now(&mut koil, &copy),
+        Ok("`notes 2` copied".to_string())
+    );
+    assert_eq!(
+        fs::read_to_string(temp.path().join("notes 2")).unwrap(),
+        "kept"
+    );
+    assert_eq!(
+        action_texts(&koil),
+        ["CREATE other", "CREATE new/", "COPY   notes -> new/notes"].map(String::from)
+    );
+    // its own entry now, not pending
+    let rendered = render(&koil);
+    let line = rendered.names.iter().position(|n| n == "notes 2").unwrap();
+    let (text, hidden) = (&rendered.text, &rendered.hidden);
+    assert!(!pending_lines(&koil, text, hidden).contains(&line));
+    let made: Vec<PathBuf> = copies.iter().map(PathBuf::from).collect();
+    assert_eq!(
+        create_now(&mut koil, &made[..1]),
+        Ok("`new/notes` copied".to_string())
+    );
+    assert_eq!(action_texts(&koil), ["CREATE other"].map(String::from));
+}
+
+// What a shell command could change: every copy, also of other files, as
+// the listing has them before an update reads it.
+#[test]
+fn test_copies_of_listing() {
+    let (_temp, mut koil) = koil();
+    let rendered = render(&koil);
+    let notes = koil.current_dir().join("notes");
+    let copy = |line: &str| format!("{line}\n{}", line.replace("notes", "notes 2"));
+    // written, not read yet
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "notes" => Some(copy(line)),
+        _ => Some(line.to_string()),
+    });
+    let listing = Some((text.as_str(), hidden.as_slice()));
+    let paths = vec![path_in(&koil, "notes 2")];
+    let steps = vec!["COPY   notes -> notes 2".to_string()];
+    let made = Copies { paths, steps };
+    assert_eq!(copies_of(&koil, Some(&notes), None), Ok(Copies::default()));
+    assert_eq!(copies_of(&koil, Some(&notes), listing), Ok(made.clone()));
+    assert_eq!(copies_of(&koil, None, listing), Ok(made.clone()));
+    // read, then taken out of the listing again
+    let settings = koil.settings().clone();
+    let updated = update(&mut koil, &rendered.path, &text, &hidden, &settings, None);
+    assert!(updated.ok, "{updated:?}");
+    assert_eq!(copies_of(&koil, None, None), Ok(made));
+    let listing = Some((rendered.text.as_str(), rendered.hidden.as_slice()));
+    assert_eq!(copies_of(&koil, None, listing), Ok(Copies::default()));
+}
+
+#[test]
+fn test_copies_of_needs_changes() {
+    let (_temp, mut koil) = koil();
+    let rendered = render(&koil);
+    // notes copied to where file.rs is, which is renamed away
+    let (text, hidden) = edited(&rendered, |line, name| match name {
+        "file.rs" => Some(line.replace("file.rs", "main.rs")),
+        "notes" => Some(format!("{line}\n{}", line.replace("notes", "file.rs"))),
+        _ => Some(line.to_string()),
+    });
+    let settings = koil.settings().clone();
+    let updated = update(&mut koil, &rendered.path, &text, &hidden, &settings, None);
+    assert!(updated.ok, "{updated:?}");
+    assert_eq!(
+        copies_of(&koil, Some(&koil.current_dir().join("notes")), None),
+        Err(
+            "`file.rs` would copy what changes in `notes`, and can't be made before the other \
+             changes are applied (Space Space)"
+                .into()
+        )
     );
 }
 

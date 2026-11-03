@@ -22,7 +22,9 @@ the scratchpad (see Scratchpad).
   it into koil, then navigate), a path as QML takes it (`unicode`), the confirmations'
   lines (`actions`, `history`), the path field's regex parts
   (`path_syntax`), what Tab completes in it (`complete`), the file `:e`
-  opens (`file_at`), what's shown after
+  opens (`file_at`), what Enter opens (`target_on_line`), which lines are
+  copies (`copies`, read into a copy of the Koil: `with_listing`) and the
+  copies of a file to make before it changes (`copies_of`), what's shown after
   each line when sorted by size or a date (`notes`), what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`),
   and the entries a shell command runs on (`paths_on_lines`, or from the
@@ -345,11 +347,12 @@ the scratchpad (see Scratchpad).
   the applies to undo (see Undo history), `Space r` shows the entry on
   the cursor's line in Finder or Explorer, selected (`reveal`: where its
   ID is on disk, as Enter opens it; from the path field, the open dir; a
-  new entry isn't on disk yet, so the status line says so, as
+  new entry or a copy isn't on disk yet, so the status line says so, as
   `Koil.pathOnLine` gives `{ path, message }`; `System.reveal`
   runs `open -R`, or `explorer /select,`, or on Linux opens the dir it's
   in), `Space o` opens the same path (`entryPath`) as a double-click in
-  Finder or Explorer does, a file in its default app (`System.openInApp`:
+  Finder or Explorer does, once its copies are asked about, as in Koil
+  (`copyFirst`, see Files), a file in its default app (`System.openInApp`:
   `open`, `explorer` or `xdg-open`, waited for on a thread, as `open`
   waits while an app launches; on macOS `openFailed` then says why it
   failed, like "No app opens", which Finder would ask about, while
@@ -367,8 +370,10 @@ the scratchpad (see Scratchpad).
   files.
   Enter in the listing opens the dir or file on its line
   (`listing::target_on_line`: a dir if the name ends with `/`, else the file
-  its ID points to on disk, even if the line renames it; a new file is
-  created first, see Files); on a line without an entry it's vim's Enter.
+  its ID points to on disk, even if the line renames it, and so a dir
+  renamed or moved here, as it's the same dir, which applying then moves;
+  a new file is created first, and a copy made first, see Files); on a
+  line without an entry it's vim's Enter.
   Enter in the
   path field (`openPath`, also from insert mode: see `singleLine`) updates
   and goes to the listing, unless the update fails; Shift+Enter there only
@@ -707,7 +712,35 @@ the scratchpad (see Scratchpad).
   over first, as after an apply: undo mustn't bring back its line without
   its ID, which koil would read as new again. One that needs other changes
   (a new `a` where `a` is moved away, or in a renamed dir) isn't created,
-  and the status line says to apply them. Unsaved
+  and the status line says to apply them. Enter on a copy (a line with
+  an ID whose file stays, or goes to another line: `Target::Copy`, which
+  `listing::copies` finds by reading the listing into a copy of the Koil,
+  koil-core's `Koil::copied_from`) is the same: it isn't the file it
+  copies, which opening would change, and the copy then get too (what
+  `yyp` and Enter did), so it asks "“b.txt” doesn't exist yet. Copy
+  “a.txt” to it?", and Yes copies it on its own (`create_now` takes copies
+  too), as a file of its own, with an ID of its own, and opens it, or
+  lists it, a dir. And as a copy is of what's on disk when it's made,
+  whatever Koil does that lets a file that applying copies, or a dir
+  it's in, change (koil-core's `Koil::copies_of`: `yyp` of a file to keep
+  it as it is, then Enter on the file) makes those copies first
+  (`copyFirst`): opening it (`readFile`, so also `:e`, File > Open, gf
+  and a drop), Space o and gx (another app could change it), and Save As
+  over it; and before any shell command (see Shell commands), every copy
+  applying would make (`listing::copies_of` with no path). They're asked
+  about as the confirmChanges setting says, as a create is ("Applying
+  the changes makes a copy of “a.txt”, which would get your changes to
+  it too. Make it now?"), where No does nothing (there's no opening it
+  as it is: the copy mustn't get its changes); not asking, they're made
+  at once, and the status line says so. In the listing, they're found as
+  koil will have them once it reads it (a copy of the Koil reads it,
+  only if a line isn't at its ID's path or koil has copies), and made
+  after an update, then the listing is shown from scratch, as for a
+  create. One that can't be made before the other changes (where a file
+  is moved away) stops it, and the status line says to apply them. Edits
+  from other apps (one opened outside Koil) still reach the copies. What changes
+  inside a dir in the listing, a copy of it never gets either: koil-core
+  copies a dir before the changes inside it. Unsaved
   changes are asked about first (save, drop, or stay: `askToSave`), there
   and before File > Open, Open Folder or a drop opens something else
   (after the pick, so a dialog cancelled asks nothing). While the listing has
@@ -817,7 +850,7 @@ the scratchpad (see Scratchpad).
   its stdin. `%` in it is, as in vim, the file (relative to that dir if
   it's in it), but in the listing the entry on the cursor's line, where
   its ID is on disk, as for Space r (`listing::paths_on_lines`; a new
-  entry is an error). From the path field, it's the open dir, `.`, or if
+  entry or a copy is an error). From the path field, it's the open dir, `.`, or if
   a pattern is open, every line's entry, as `:%` gives them
   (`listing::paths_in_field`), so `wc -l %` with `src/**/*.rs` counts
   what it matches, as a shell's glob would, not fail on `src`. And in the
@@ -911,7 +944,11 @@ the scratchpad (see Scratchpad).
   with `/d /s /c "…"` as a raw argument, PowerShell with
   `-EncodedCommand`, and Git Bash with its command line always quoted (its
   runtime globs an argument that isn't), in a process group of its own
-  (no console window on Windows). Meanwhile vim waits (`Vim.waiting`,
+  (no console window on Windows). It runs once the copies applying would
+  make are made (`copyFirst` with no path, see Files), as it could change
+  what they copy; not before a filter of the listing's lines, which only
+  edits them, and whose lines making them would show again (`:%!sort`
+  with its output rejected, as the text changed). Meanwhile vim waits (`Vim.waiting`,
   "Running (Esc to stop)"): keys do nothing but Esc and Ctrl-C, which stop
   it (`Running::stop`: SIGINT to the group, SIGKILL a second later;
   `taskkill /T /F` on Windows), a macro running it waits too (`runChunk`

@@ -402,12 +402,15 @@ ApplicationWindow {
 
     // Opens the file `path` (see loadFile), from the entry `from` of the
     // listing (see openedFrom), or says in the status line why it can't, as
-    // vim does (a picture isn't text).
+    // vim does (a picture isn't text). Its copies that aren't made yet are
+    // asked about first (see copyFirst).
     function readFile(path, from) {
-        openedFrom = from || "";
-        const error = doc.openFile(path);
-        if (error)
-            vim.showError(error);
+        copyFirst(path, () => {
+            openedFrom = from || "";
+            const error = doc.openFile(path);
+            if (error)
+                vim.showError(error);
+        });
     }
 
     // Lists the dir (or pattern) `path`: File > Open Folder, and at startup.
@@ -849,6 +852,9 @@ ApplicationWindow {
             updateListing(target.dir);
         } else if (target.new !== undefined) {
             createFile(target.new);
+        } else if (target.copy !== undefined) {
+            // Not the file it copies, whose changes the copy would get.
+            createFile(target.copy);
         } else {
             // The file on disk, even if the line renames it; loadFile updates
             // the listing first.
@@ -883,9 +889,12 @@ ApplicationWindow {
             if (!Qt.openUrlExternally(target.url))
                 vim.showError("Can't open “" + target.url + "”");
         } else if (external) {
-            const why = system.openInApp(target.path);
-            if (why)
-                vim.showError(why);
+            // Where it can be changed, as in Koil (see copyFirst).
+            copyFirst(target.path, () => {
+                const why = system.openInApp(target.path);
+                if (why)
+                    vim.showError(why);
+            });
         } else {
             openDropped(target.path);
         }
@@ -951,12 +960,18 @@ ApplicationWindow {
     }
 
     // Space o: opens the entry on the cursor's line (the file, in one) as a
-    // double-click in Finder (Explorer) does: a file in its default app.
+    // double-click in Finder (Explorer) does: a file in its default app,
+    // once its copies that aren't made yet are asked about (see copyFirst).
     function openInApp() {
         const path = entryPath();
-        const why = path && system.openInApp(path);
-        if (why)
-            vim.showError(why);
+        if (!path)
+            return;
+        // Where it can be changed, as in Koil.
+        copyFirst(path, () => {
+            const why = system.openInApp(path);
+            if (why)
+                vim.showError(why);
+        });
     }
 
     // :!command, and with a range (see Vim.shellRequested): runs it in the
@@ -1014,28 +1029,38 @@ ApplicationWindow {
             scratchpad: scratch,
             environment: shellEnvironment
         });
-        // Koil takes the listing's edits before leaving it for the
-        // scratchpad, as _ does: before the command runs, after which they
-        // might not read (an entry it deleted).
-        if (scratch && listing && !updateListing())
-            return;
-        const r = JSON.parse(system.runShell(request));
-        if (r.error) {
-            vim.showError(r.error);
-            return;
-        }
-        shellRun = {
-            line: r.line,
-            filter: filter && !scratch ? { first: range.first, last: last, lines: lines, text: t, view: activeView,
-                listing: listing, path: filePath, scratchpad: scratchpad } : null,
-            scratch: scratch,
-            // What it may change on disk that's shown, unless its output
-            // goes in place of the text: the scratchpad's file, which it
-            // was written to, or the file (see afterShell).
-            disk: filter || scratch || listing ? null : scratchFile || (scratchpad ? null : filePath)
+        const run = () => {
+            // Koil takes the listing's edits before leaving it for the
+            // scratchpad, as _ does: before the command runs, after which
+            // they might not read (an entry it deleted).
+            if (scratch && listing && !updateListing())
+                return;
+            const r = JSON.parse(system.runShell(request));
+            if (r.error) {
+                vim.showError(r.error);
+                return;
+            }
+            shellRun = {
+                line: r.line,
+                filter: filter && !scratch ? { first: range.first, last: last, lines: lines, text: t, view: activeView,
+                    listing: listing, path: filePath, scratchpad: scratchpad } : null,
+                scratch: scratch,
+                // What it may change on disk that's shown, unless its output
+                // goes in place of the text: the scratchpad's file, which it
+                // was written to, or the file (see afterShell).
+                disk: filter || scratch || listing ? null : scratchFile || (scratchpad ? null : filePath)
+            };
+            vim.showMessage((scratch ? ":_!" : ":!") + r.line);
+            vim.waiting = "Running";
         };
-        vim.showMessage((scratch ? ":_!" : ":!") + r.line);
-        vim.waiting = "Running";
+        // It could change any file, so the copies applying would make are
+        // made first, as they'd get its changes (see copyFirst). But not
+        // under a filter of the listing's lines, which only edits them, and
+        // whose lines making them would show again.
+        if (filter && listing && !scratch)
+            run();
+        else
+            copyFirst("", run);
     }
 
     // Line numbers (from 1, in order) as spans of lines from 0, [first,
@@ -1173,26 +1198,33 @@ ApplicationWindow {
         return JSON.parse(system.shells());
     }
 
-    // Enter on a new file (`{ path, name }`): once the user says so, creates
-    // it (with the new dirs it's in) before the other changes, which stay,
-    // and opens it.
+    // Enter on a new file (`{ path, name }`), or on a copy (`{ path, name,
+    // from, dir }`, see Koil.targetOnLine), which isn't the file or dir it
+    // copies (whose changes it would get) until it's made: once the user
+    // says so, creates or copies it (with the new dirs it's in) before the
+    // other changes, which stay, and opens it.
     function createFile(target) {
         // Koil must have the new entry, and the rest of the listing.
         if (!updateListing())
             return;
-        const r = JSON.parse(koil.createSteps(target.path));
+        const r = JSON.parse(koil.createSteps(JSON.stringify([target.path])));
         if (r.message) {
             vim.showError(r.message);
             return;
         }
         const create = () => {
             const spot = listingSpot();
-            const c = JSON.parse(koil.create(target.path));
+            const c = JSON.parse(koil.create(JSON.stringify([target.path])));
             // From scratch, as after an apply: undo mustn't bring back its
             // line without its ID, which Koil would read as new again.
             showListing(true, "", spot);
             if (!c.ok) {
                 vim.showError(c.message);
+                return;
+            }
+            if (target.dir) {
+                vim.showMessage(c.message);
+                updateListing(target.name);
                 return;
             }
             readFile(target.path, target.name);
@@ -1206,8 +1238,59 @@ ApplicationWindow {
         }
         // Only the new dirs need saying.
         const details = r.steps.length > 1 ? r.steps.join("\n") : "";
-        confirmDialog.ask("“" + target.name + "” doesn't exist yet. Create it?", details, create, null, null,
+        const name = target.name + (target.dir ? "/" : "");
+        const question = target.from === undefined ? "Create it?" : "Copy “" + target.from + "” to it?";
+        confirmDialog.ask("“" + name + "” doesn't exist yet. " + question, details, create, null, null,
             { keywords: changeKeywords });
+    }
+
+    // Runs `open`, which lets the user change the file at `path` (in Koil,
+    // or in another app), once the copies applying would make of it, or of
+    // a dir it's in, are made: a copy is of what's on disk when it's made,
+    // so they'd get the changes too. With no `path`, every copy, before a
+    // shell command, which could change any file. They're asked about as
+    // the confirmChanges setting says, as a create is (No runs nothing),
+    // and if one can't be made before the other changes, nothing runs. In
+    // the listing, as Koil will have them once it's read.
+    function copyFirst(path, open) {
+        const t = listing ? editorView.textArea.text : "";
+        const r = JSON.parse(koil.copiesOf(path, t, JSON.stringify(listing ? editorView.hidden : [])));
+        if (r.message) {
+            vim.showError(r.message);
+            return;
+        }
+        if (!r.copies.paths.length) {
+            open();
+            return;
+        }
+        const copy = () => {
+            // Koil must have the copies, and the rest of the listing.
+            if (listing && !updateListing())
+                return;
+            const spot = listing ? listingSpot() : null;
+            const c = JSON.parse(koil.create(JSON.stringify(r.copies.paths)));
+            // From scratch, as after an apply (see createFile).
+            if (listing)
+                showListing(true, "", spot);
+            if (!c.ok) {
+                vim.showError(c.message);
+                return;
+            }
+            open();
+            // It ran, else the status line says why.
+            if (!vim.messageIsError)
+                vim.showMessage(c.message);
+        };
+        if (!asksFirst(false)) {
+            copy();
+            return;
+        }
+        const one = r.copies.paths.length === 1;
+        const copies = one ? "a copy" : r.copies.paths.length + " copies";
+        const which = path ? copies + " of “" + path.split(/[\\/]/).pop() + "”, which would get your changes to it too"
+            : copies + ", which would get what the command changes too";
+        confirmDialog.ask("Applying the changes makes " + which + ". Make " + (one ? "it" : "them") + " now?",
+            r.copies.steps.join("\n"), copy, null, null, { keywords: changeKeywords });
     }
 
     // Whether changing files asks first, as the confirmChanges setting
@@ -1615,17 +1698,20 @@ ApplicationWindow {
     // opens that in its place, as File > Open would, with the cursor and
     // the view where they were. The scratchpad keeps its text.
     function saveScratch(path) {
-        if (!doc.saveNewFile(path, editorView.textArea.latest.text))
-            return;
-        const cursor = vim.cursor;
-        const contentY = editorView.flickable.contentY;
-        readFile(path);
-        if (scratchpad)
-            return;
-        // Before vim's cursor, which then scrolls only if it's out of view.
-        const f = editorView.flickable;
-        f.contentY = Math.max(0, Math.min(contentY, f.contentHeight + f.bottomMargin - f.height));
-        vim.jumpTo(cursor);
+        // Over a file applying copies, once the copies are made.
+        copyFirst(path, () => {
+            if (!doc.saveNewFile(path, editorView.textArea.latest.text))
+                return;
+            const cursor = vim.cursor;
+            const contentY = editorView.flickable.contentY;
+            readFile(path);
+            if (scratchpad)
+                return;
+            // Before vim's cursor, which then scrolls only if it's out of view.
+            const f = editorView.flickable;
+            f.contentY = Math.max(0, Math.min(contentY, f.contentHeight + f.bottomMargin - f.height));
+            vim.jumpTo(cursor);
+        });
     }
 
     function loadFontFamilies() {
@@ -2351,10 +2437,13 @@ ApplicationWindow {
                 root.askToSave(() => root.saveScratch(path));
                 return;
             }
-            if (doc.saveFile(path, editorView.textArea.latest.text)) {
-                root.filePath = path;
-                root.markUnedited();
-            }
+            // Over a file applying copies, once the copies are made.
+            root.copyFirst(path, () => {
+                if (doc.saveFile(path, editorView.textArea.latest.text)) {
+                    root.filePath = path;
+                    root.markUnedited();
+                }
+            });
         }
     }
 

@@ -1207,32 +1207,90 @@ pub enum Target {
     /// until it's created on its own, see [`create_steps`]): where it goes,
     /// and its name on the line.
     New { path: String, name: String },
+    /// A copy, which isn't there until the changes are applied (or until
+    /// it's made on its own, see [`create_steps`]): where it goes, its name
+    /// on the line, what it copies (as the listing shows it, relative to
+    /// the open dir), and whether that's a dir.
+    Copy {
+        path: String,
+        name: String,
+        from: String,
+        dir: bool,
+    },
     /// Why it can't be opened (see [`unicode`]).
     Error(String),
 }
 
 /// What Enter on `line` opens: the dir of an entry whose name ends with `/`,
-/// or else the file the entry is on disk (where its ID points, even if the
-/// line renames it). None on a line without an entry, or with an ID koil
-/// doesn't know.
+/// or else the file the entry is on disk; for an entry renamed or moved
+/// here, where its ID is on disk, as it's the same file or dir, which
+/// applying then moves. But a copy isn't the file it copies, whose changes
+/// the copy would get, nor a new file: it's made first (see [`copies`]).
+/// None on a line without an entry, or with an ID koil doesn't know.
 pub fn target_on_line(koil: &Koil, text: &str, hidden: &[Hidden], line: usize) -> Option<Target> {
     let parsed = read(koil, text, hidden);
     let i = parsed.spots.iter().position(|&(l, _)| l == line)?;
     let entry = &parsed.entries[i];
     let name = entry.name.to_string_lossy().into_owned();
-    let target = match entry.id {
-        _ if entry.is_dir => unicode(&entry.name).map(Target::Dir),
-        None => {
-            let path = koil.current_dir().join(&entry.name);
-            unicode(&path).map(|path| Target::New { path, name })
+    let at = koil.current_dir().join(&entry.name);
+    let by_name = || unicode(&entry.name).map(Target::Dir);
+    let target = match entry.id.map(|id| koil.path_of(id)) {
+        None if entry.is_dir => by_name(),
+        None => unicode(&at).map(|path| Target::New { path, name }),
+        // opened by its name, as an ID koil doesn't know is no file
+        Some(None) => {
+            return entry
+                .is_dir
+                .then(|| by_name().unwrap_or_else(Target::Error));
         }
-        Some(id) => match koil.path_of(id)? {
-            // a dir with the `/` taken off its name
-            path if path.is_dir() => unicode(&entry.name).map(Target::Dir),
-            path => unicode(path).map(|path| Target::File { path, name }),
+        Some(Some(path)) => match copies(koil, &parsed.entries, &[entry]).remove(&at) {
+            Some(from) => unicode(&at).map(|path| Target::Copy {
+                path,
+                name,
+                from: slashed(relative(koil, &from), from.is_dir()),
+                dir: from.is_dir(),
+            }),
+            None if path.is_dir() && koil.is_pending(entry) => {
+                unicode(path).map(|_| Target::Dir(relative(koil, path)))
+            }
+            // a dir with the `/` taken off its name, or a file shown as one
+            None if entry.is_dir || path.is_dir() => by_name(),
+            None => unicode(path).map(|path| Target::File { path, name }),
         },
     };
     Some(target.unwrap_or_else(Target::Error))
+}
+
+/// A copy of `koil` that has read `entries` (a listing as read), as the
+/// next update will, to say what applying them does before then. None if
+/// they can't be read: the update says why.
+fn with_entries(koil: &Koil, entries: &[Entry]) -> Option<Koil> {
+    let mut read = koil.clone();
+    read.update(entries).ok()?;
+    Some(read)
+}
+
+/// Which of `these` (some of `entries`, a listing as read) applying would
+/// make as copies (see `Koil::copied_from`), by their paths, each with what
+/// it copies: those with an ID that isn't at its path, whose file stays
+/// where it is, or goes to another line. Found by reading `entries` into a
+/// copy of `koil`, only if one of `these` isn't at its ID's path. None if
+/// they can't be read: the update says why.
+fn copies(koil: &Koil, entries: &[Entry], these: &[&Entry]) -> HashMap<PathBuf, PathBuf> {
+    let moved: Vec<PathBuf> = (these.iter())
+        .filter(|entry| entry.id.is_some() && koil.is_pending(entry))
+        .map(|entry| koil.current_dir().join(&entry.name))
+        .collect();
+    if moved.is_empty() {
+        return HashMap::new();
+    }
+    let Some(read) = with_entries(koil, entries) else {
+        return HashMap::new();
+    };
+    (moved.into_iter())
+        .filter_map(|path| Some((read.copied_from(&path)?, path)))
+        .map(|(from, path)| (path, from))
+        .collect()
 }
 
 /// Where `-` goes (see [`up`]).
@@ -1308,8 +1366,8 @@ pub fn file_at(koil: &Koil, location: &str) -> Option<PathBuf> {
 
 /// Where the entry on `line` is on disk, for Space r to show: where its ID
 /// points, even if the line renames it (as Enter opens it); or else why
-/// there's none (see [`on_disk`]), or no entry on the line (or one with an
-/// ID koil doesn't know).
+/// there's none (see [`on_disk`]: it's new, or a copy), or no entry on the
+/// line (or one with an ID koil doesn't know).
 pub fn path_on_line(
     koil: &Koil,
     text: &str,
@@ -1318,15 +1376,18 @@ pub fn path_on_line(
 ) -> Result<String, String> {
     let parsed = read(koil, text, hidden);
     let i = parsed.spots.iter().position(|&(l, _)| l == line);
-    let path = i.and_then(|i| on_disk(koil, &parsed.entries[i]));
+    let path = i.and_then(|i| {
+        let entry = &parsed.entries[i];
+        on_disk(koil, entry, &copies(koil, &parsed.entries, &[entry]))
+    });
     path.unwrap_or_else(|| Err(NO_ENTRY.to_string()))
 }
 
 /// Where the entries on `lines` are on disk, as [`path_on_line`] finds
 /// each, leaving out lines without one, for a shell command run on them; or
-/// else why it can't be: one of them is new, or there are none. `lines` are
-/// spans of lines, `(first, last)`, in order and apart: a range's, or the
-/// marked lines (see Marked lines in Vim.qml).
+/// else why it can't be: one of them is new or a copy, or there are none.
+/// `lines` are spans of lines, `(first, last)`, in order and apart: a
+/// range's, or the marked lines (see Marked lines in Vim.qml).
 pub fn paths_on_lines(
     koil: &Koil,
     text: &str,
@@ -1366,11 +1427,14 @@ fn entries_on_lines(
     lines: &[(usize, usize)],
 ) -> Result<Vec<String>, String> {
     let parsed = read(koil, text, hidden);
+    let these: Vec<&Entry> = (parsed.spots.iter().zip(&parsed.entries))
+        .filter(|&(&(line, _), _)| on_lines(lines, line))
+        .map(|(_, entry)| entry)
+        .collect();
+    let copies = copies(koil, &parsed.entries, &these);
     let mut paths = Vec::new();
-    for (&(line, _), entry) in parsed.spots.iter().zip(&parsed.entries) {
-        if on_lines(lines, line)
-            && let Some(path) = on_disk(koil, entry)
-        {
+    for entry in these {
+        if let Some(path) = on_disk(koil, entry, &copies) {
             paths.push(path?);
         }
     }
@@ -1469,16 +1533,25 @@ const NO_FILE_NAME: &str = "E446: No file name under cursor";
 const NO_ENTRY: &str = "No entry on this line";
 
 /// Where `entry` is on disk, as QML takes it: where its ID points, even if
-/// the line renames it; or else why there's none to give: it's new, so it
-/// isn't on disk until the changes are applied, or its path isn't Unicode
-/// (see [`unicode`]). None if its ID isn't one koil knows.
-fn on_disk(koil: &Koil, entry: &Entry) -> Option<Result<String, String>> {
-    match entry.id {
-        Some(id) => Some(unicode(koil.path_of(id)?)),
-        None => Some(Err(format!(
+/// the line renames it; or else why there's none to give: it's new, or a
+/// copy (one of `copies`, see [`copies`]), which isn't the file it copies,
+/// so it isn't on disk until the changes are applied, or its path isn't
+/// Unicode (see [`unicode`]). None if its ID isn't one koil knows.
+fn on_disk(
+    koil: &Koil,
+    entry: &Entry,
+    copies: &HashMap<PathBuf, PathBuf>,
+) -> Option<Result<String, String>> {
+    let not_yet = || {
+        Err(format!(
             "“{}” isn't on disk until the changes are applied",
             entry_name(entry)
-        ))),
+        ))
+    };
+    match entry.id {
+        _ if copies.contains_key(&koil.current_dir().join(&entry.name)) => Some(not_yet()),
+        Some(id) => Some(unicode(koil.path_of(id)?)),
+        None => Some(not_yet()),
     }
 }
 
@@ -1534,29 +1607,110 @@ fn action_text(koil: &Koil, action: &Action) -> String {
     }
 }
 
-/// What creating the new file at `path` before the other changes are
-/// applied takes (`Koil::create_steps`), like `actions`' lines: its create,
-/// after those of the new dirs it's in. Fails if it can't be created on its
-/// own (see [`describe_create`]).
-pub fn create_steps(koil: &Koil, path: &Path) -> Result<Vec<String>, String> {
+/// What making the new files or copies at `paths` before the other
+/// changes are applied takes (`Koil::create_steps`), like `actions`' lines:
+/// their creates and copies, after those of the new dirs they're in. Fails
+/// if they can't be made on their own (see [`describe_create`]).
+pub fn create_steps(koil: &Koil, paths: &[PathBuf]) -> Result<Vec<String>, String> {
     let steps = koil
-        .create_steps(path)
+        .create_steps(paths)
         .map_err(|e| describe_create(koil, &e))?;
     Ok(steps.iter().map(|a| action_text(koil, a)).collect())
 }
 
-/// Creates the new file at `path` now, with the new dirs it's in, keeping
-/// the other changes (`Koil::create_now`). Returns what the status line
-/// says, like "`notes` created", or why it can't be created.
-pub fn create_now(koil: &mut Koil, path: &Path) -> Result<String, String> {
-    let name = relative(koil, path);
-    match koil.create_now(path) {
+/// Makes the new files or copies at `paths` now, with the new dirs they're
+/// in, keeping the other changes (`Koil::create_now`). Returns what the
+/// status line says, like "`notes` created", "`notes 2` copied" or "2
+/// copies made", or why they can't be made.
+pub fn create_now(koil: &mut Koil, paths: &[PathBuf]) -> Result<String, String> {
+    let copied = (paths.iter()).all(|path| koil.copied_from(path).is_some());
+    let made = match paths {
+        [path] => format!(
+            "`{}` {}",
+            relative(koil, path),
+            if copied { "copied" } else { "created" }
+        ),
+        _ if copied => format!("{} copies made", paths.len()),
+        _ => format!("{} made", paths.len()),
+    };
+    match koil.create_now(paths) {
         Ok(report) => Ok(match report.warning {
-            Some(warning) => format!("`{name}` created; {}", describe_warning(&warning)),
-            None => format!("`{name}` created"),
+            Some(warning) => format!("{made}; {}", describe_warning(&warning)),
+            None => made,
         }),
         Err(error) => Err(describe_create(koil, &error)),
     }
+}
+
+/// The copies applying would make of a file, or of a dir it's in
+/// (`Koil::copies_of`), which would get what changes in it, and what making
+/// them now takes (see [`create_steps`]).
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+pub struct Copies {
+    /// Where they go, as QML gives them back to [`create_now`].
+    pub paths: Vec<String>,
+    /// Like `actions`' lines.
+    pub steps: Vec<String>,
+}
+
+/// The [`Copies`] of the file at `path`, or with none, every copy applying
+/// would make (what a shell command could change), as koil will have them
+/// once it has read the listing `text`, if there's one (see
+/// [`with_entries`]), or if it can't be read, as it has them now. None if
+/// there are none, or else why they can't be made before the other changes
+/// are applied.
+pub fn copies_of(
+    koil: &Koil,
+    path: Option<&Path>,
+    listing: Option<(&str, &[Hidden])>,
+) -> Result<Copies, String> {
+    let copies = |koil: &Koil| match path {
+        Some(path) => koil.copies_of(path),
+        None => (koil.changes().into_iter())
+            .filter_map(|change| match change.action {
+                Action::Copy(_, to) => Some(to),
+                _ => None,
+            })
+            .collect(),
+    };
+    let mut made = copies(koil);
+    // A line that puts an ID at another path, or a copy the listing may
+    // not have anymore, which only reading it tells.
+    let read = listing
+        .map(|(text, hidden)| read(koil, text, hidden).entries)
+        .filter(|entries| {
+            !made.is_empty() || entries.iter().any(|e| e.id.is_some() && koil.is_pending(e))
+        })
+        .and_then(|entries| with_entries(koil, &entries));
+    let koil = read.as_ref().unwrap_or(koil);
+    if read.is_some() {
+        made = copies(koil);
+    }
+    if made.is_empty() {
+        return Ok(Copies::default());
+    }
+    let steps = koil
+        .create_steps(&made)
+        .map_err(|error| match (error, path) {
+            (KoilError::NeedsChanges(copy), Some(path)) => format!(
+                "`{}` would copy what changes in `{}`, and can't be made before the other changes \
+             are applied (Space Space)",
+                relative(koil, &copy),
+                relative(koil, path)
+            ),
+            (KoilError::NeedsChanges(copy), None) => format!(
+                "`{}` would copy what the command could change, and can't be made before the other \
+             changes are applied (Space Space)",
+                relative(koil, &copy)
+            ),
+            (error, _) => describe_create(koil, &error),
+        })?;
+    Ok(Copies {
+        paths: (made.iter())
+            .map(|p| unicode(p))
+            .collect::<Result<_, _>>()?,
+        steps: steps.iter().map(|a| action_text(koil, a)).collect(),
+    })
 }
 
 /// Why `Koil::create_steps` or `Koil::create_now` failed, naming the path

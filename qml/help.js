@@ -36,7 +36,10 @@ function sections(help) {
                     + "the history instead, also those that can't be undone any more."],
                 ["`u`", "Once there's nothing left to undo: undo the last apply, after listing what that "
                     + "does."],
-                ["`Enter`", "Open the dir or file on the line. A new file is created first, after asking."],
+                ["`Enter`", "Open the dir or file on the line (a renamed one where it is now). A new file "
+                    + "is created first, after asking, and so is a copy, so what you change in it isn't "
+                    + "in the file it copies. Opening a file that applying copies (or `Space o`, or a "
+                    + "shell command) makes the copies first, so they don't get your changes."],
                 ["`Space r`", "Show the entry on the line in " + fileManager + " (from the path field, the "
                     + "open dir; in a file, the file)."],
                 ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
