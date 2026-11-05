@@ -18,6 +18,11 @@ fn sync(koil: &mut Koil, text: &str, hidden: &[Hidden]) -> Synced {
     super::sync(koil, &DirSizes::new(), text, hidden)
 }
 
+/// The lines of entries applying would change (see [`pending_lines`]).
+fn pending(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
+    pending_lines(koil, text, hidden, &HashSet::new()).pending
+}
+
 /// `name` in the dir `koil` has open, as QML takes a path.
 fn path_in(koil: &Koil, name: &str) -> String {
     unicode(&koil.current_dir().join(name)).unwrap()
@@ -151,7 +156,7 @@ fn test_pending_color_apart() {
 fn test_pending_lines() {
     let (_temp, mut koil) = koil();
     let rendered = render(&koil);
-    assert!(pending_lines(&koil, &rendered.text, &rendered.hidden).is_empty());
+    assert!(pending(&koil, &rendered.text, &rendered.hidden).is_empty());
 
     // file.rs renamed, notes copied as notes2, and a new file
     let lines: Vec<&str> = rendered.text.split('\n').collect();
@@ -176,13 +181,13 @@ fn test_pending_lines() {
         }
         at += utf16_len(line) + 1;
     }
-    assert_eq!(pending_lines(&koil, &text, &hidden), [1, 3, 4]);
+    assert_eq!(pending(&koil, &text, &hidden), [1, 3, 4]);
 
     // still pending once koil has read them, until they're applied
     let updated = update_listing(&mut koil, &text, &hidden);
     assert!(updated.ok, "{updated:?}");
     let rendered = render(&koil);
-    let lines = pending_lines(&koil, &rendered.text, &rendered.hidden);
+    let lines = pending(&koil, &rendered.text, &rendered.hidden);
     let mut names: Vec<&str> = lines.iter().map(|&l| rendered.names[l].as_str()).collect();
     names.sort();
     assert_eq!(names, ["main.rs", "new.txt", "notes2"]);
@@ -206,7 +211,78 @@ fn test_pending_lines() {
         .find(|h| h.text == hidden[2].text)
         .unwrap();
     let moved = [Hidden { at: 0, ..h.clone() }];
-    assert_eq!(pending_lines(&koil, line, &moved), [0]);
+    assert_eq!(pending(&koil, line, &moved), [0]);
+}
+
+/// A symlink's target as it's written, after its line, and broken if
+/// nothing's there; and files that can be run, whose lines are green
+/// wherever they're moved or copied.
+#[cfg(unix)]
+#[test]
+fn test_looks() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let (temp, mut koil) = koil_with(&["dir"], &["run.sh", "text"]);
+    let path = temp.path();
+    fs::set_permissions(path.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+    symlink("dir", path.join("to-dir")).unwrap();
+    symlink("gone", path.join("broken")).unwrap();
+    symlink(path.join("text"), path.join("absolute")).unwrap();
+    let settings = Settings::default();
+    assert!(navigate(&mut koil, &path.to_string_lossy(), &settings, None).ok);
+    let rendered = render(&koil);
+    let id_of = |name: &str| {
+        let line = rendered.names.iter().position(|n| n == name).unwrap();
+        let ls = rendered
+            .text
+            .split('\n')
+            .take(line)
+            .map(|l| utf16_len(l) + 1)
+            .sum::<usize>();
+        rendered
+            .hidden
+            .iter()
+            .find(|h| h.at == ls)
+            .unwrap()
+            .text
+            .clone()
+    };
+    let link = |target: &str, broken| LinkTarget {
+        target: target.to_string(),
+        broken,
+    };
+    let links = &rendered.looks.links;
+    assert_eq!(links.get(&id_of("to-dir/")), Some(&link("dir", false)));
+    assert_eq!(links.get(&id_of("broken")), Some(&link("gone", true)));
+    let absolute = show_path(&path.join("text"));
+    assert_eq!(links.get(&id_of("absolute")), Some(&link(&absolute, false)));
+    assert_eq!(links.len(), 3);
+    let executables = &rendered.looks.executables;
+    let run = Id(id_of("run.sh").parse().unwrap());
+    assert_eq!(executables.iter().collect::<Vec<_>>(), [&run]);
+    // a dir isn't one, though it can be entered
+    assert!(fs::metadata(path.join("dir")).unwrap().permissions().mode() & 0o111 != 0);
+
+    let lines = pending_lines(&koil, &rendered.text, &rendered.hidden, executables);
+    let line = rendered.names.iter().position(|n| n == "run.sh").unwrap();
+    assert_eq!(lines.executable, [line]);
+    // renamed and copied, it's still the file
+    let run_line = rendered.text.lines().nth(line).unwrap();
+    let icon = run_line.chars().next().unwrap().to_string();
+    let hidden = |at| Hidden {
+        at,
+        icon: icon.clone(),
+        text: run.0.to_string(),
+    };
+    let text = format!("{icon}  go.sh\n{icon}  run.sh");
+    let second = utf16_len(&format!("{icon}  go.sh\n"));
+    let lines = pending_lines(&koil, &text, &[hidden(0), hidden(second)], executables);
+    assert_eq!(lines.executable, [0, 1]);
+    assert_eq!(lines.pending, [0]);
+
+    // and sync finds them too
+    let synced = sync(&mut koil, &rendered.text, &rendered.hidden);
+    assert_eq!(synced.looks.links, rendered.looks.links);
+    assert_eq!(synced.looks.executables, rendered.looks.executables);
 }
 
 #[test]
@@ -783,7 +859,7 @@ fn test_name_not_unicode() {
     let line = (rendered.names.iter())
         .position(|n| *n == name.to_string_lossy())
         .unwrap();
-    assert_eq!(pending_lines(&koil, text, hidden), Vec::<usize>::new());
+    assert_eq!(pending(&koil, text, hidden), Vec::<usize>::new());
     assert_eq!(check(&koil, text, hidden), []);
     let path = koil.current_dir().join(&name);
     let why = format!(
@@ -1858,7 +1934,7 @@ fn test_create_now() {
     let rendered = render(&koil);
     let line = rendered.names.iter().position(|n| n == "new/").unwrap();
     let (text, hidden) = (&rendered.text, &rendered.hidden);
-    assert!(!pending_lines(&koil, text, hidden).contains(&line));
+    assert!(!pending(&koil, text, hidden).contains(&line));
     // a file that's there until it's moved away can't be
     let (text, hidden) = edited(&rendered, |line, name| match name {
         "file.rs" => Some(format!("{}\nfile.rs", line.replace("file.rs", "main.rs"))),
@@ -1930,7 +2006,7 @@ fn test_copy_now() {
     let rendered = render(&koil);
     let line = rendered.names.iter().position(|n| n == "notes 2").unwrap();
     let (text, hidden) = (&rendered.text, &rendered.hidden);
-    assert!(!pending_lines(&koil, text, hidden).contains(&line));
+    assert!(!pending(&koil, text, hidden).contains(&line));
     let made: Vec<PathBuf> = copies.iter().map(PathBuf::from).collect();
     assert_eq!(
         create_now(&mut koil, &made[..1]),

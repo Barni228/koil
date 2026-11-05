@@ -29,16 +29,21 @@ ApplicationWindow {
     // field (see activate).
     property Editor activeView: editorView
     // The colors of the icons the listings have shown, and of a pending
-    // entry's, and the lines of the pending ones (see Editor.iconColors).
+    // entry's, and the lines of the pending ones and of files that can be
+    // run (see Editor.iconColors).
     property var iconColors: ({})
     property var pendingIconColor: ["", ""]
     property var pendingLines: []
+    property var executableLines: []
     // What the listing shows after each entry's line, by its ID: its size
     // or a date, when it's sorted by one (see Editor.infos). Sorted by
     // size, `busyInfos` has the dirs whose sizes are being counted (see
     // pollSizes), whose notes show `infoDots` of their three dots.
     property var infos: ({})
     property var busyInfos: ({})
+    // Where the entries that are symlinks point, by their IDs (see
+    // Editor.links), shown after their lines whatever it's sorted by.
+    property var links: ({})
     // When the first of the notes that are times changes ("5 min ago"
     // becomes "6 min ago"), by Date.now(), or 0 if none will (see
     // refreshTimes).
@@ -594,6 +599,7 @@ ApplicationWindow {
             busy[id] = true;
         if (!sizes) {
             infos = notes.infos;
+            links = notes.links;
             setTimesDue(notes);
         } else {
             // A dir that can't be read has none.
@@ -704,12 +710,16 @@ ApplicationWindow {
         pathSyntax = listing ? JSON.parse(koil.pathSyntax(line)) : [];
     }
 
-    // Finds the listing's lines whose entries applying would change, after
+    // Finds the listing's lines whose entries applying would change, and
+    // those of files that can be run (see listing::pending_lines), after
     // every edit. Called later after vim's: halfway through one, its hidden
     // text isn't up to date, and coloring counts as a text change, which
     // would make it shift that text again.
     function updatePendingLines() {
-        pendingLines = listing ? JSON.parse(koil.pendingLines(editorView.textArea.text, JSON.stringify(editorView.hidden))) : [];
+        const lines = listing ? JSON.parse(koil.pendingLines(editorView.textArea.text, JSON.stringify(editorView.hidden)))
+            : { pending: [], executable: [] };
+        pendingLines = lines.pending;
+        executableLines = lines.executable;
     }
 
     function checkListing() {
@@ -2362,11 +2372,13 @@ ApplicationWindow {
         iconColors: root.iconColors
         pendingIconColor: root.pendingIconColor
         pendingLines: root.pendingLines
+        executableLines: root.executableLines
         problems: root.problems
         // An ID as the path it stands for, so the hover says whose it is.
         describeHidden: text => koil.idPath(text) || text
         infos: root.listing ? root.infos : ({})
         busyInfos: root.listing ? root.busyInfos : ({})
+        links: root.listing ? root.links : ({})
         infoDots: root.infoDots
         onActivated: root.activate(editorView)
         onKeyReleased: root.keyReleased()

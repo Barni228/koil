@@ -146,11 +146,12 @@ hasFixedWidthText(const QString& family)
   return width > 0;
 }
 
-// Whether a line's icon was last colored as pending (see setPendingLines),
-// as its block's user data. None is as false.
+// Whether a line was last colored as pending and as a file that can be
+// run (see setEntryLines), as its block's user data. None is as neither.
 struct ColoredAs : QTextBlockUserData
 {
   bool pending = false;
+  bool executable = false;
 };
 
 // See setListingColors and setPathColors.
@@ -165,10 +166,13 @@ public:
   // listing.
   bool isPath = false;
   QHash<QString, QTextCharFormat> icons;
-  // The icon of a pending entry: one on a line in `pending` (see
-  // setPendingLines).
+  // The icon of a pending entry: one on a line in `pending`, and the name
+  // of a file that can be run, on a line in `executable` (see
+  // setEntryLines).
   QTextCharFormat pendingIcon;
   QSet<int> pending;
+  QTextCharFormat executableName;
+  QSet<int> executable;
   QTextCharFormat directory;
   struct Span
   {
@@ -188,14 +192,17 @@ protected:
           setFormat(span.start, span.length, span.format);
       return;
     }
-    const bool isPending = pending.contains(currentBlock().blockNumber());
+    const int line = currentBlock().blockNumber();
+    const bool isPending = pending.contains(line), isExecutable = executable.contains(line);
     auto* colored = dynamic_cast<ColoredAs*>(currentBlockUserData());
-    if (!colored && isPending) {
+    if (!colored && (isPending || isExecutable)) {
       colored = new ColoredAs;
       setCurrentBlockUserData(colored);
     }
-    if (colored)
+    if (colored) {
       colored->pending = isPending;
+      colored->executable = isExecutable;
+    }
     const QStringView trimmed = QStringView(text).trimmed();
     if (trimmed.isEmpty())
       return;
@@ -212,6 +219,10 @@ protected:
     const qsizetype slash = text.lastIndexOf(u'/');
     if (slash >= start)
       setFormat(start, slash + 1 - start, directory);
+    // A file's name, after the dirs it's in.
+    const qsizetype name = std::max(start, slash + 1);
+    if (isExecutable)
+      setFormat(name, text.size() - name, executableName);
   }
 };
 
@@ -1633,6 +1644,7 @@ void
 setListingColors(QObject* textDocument,
                  const QStringList& iconColors,
                  const QString& pendingIconColor,
+                 const QString& executableColor,
                  const QString& directoryColor)
 {
   auto* highlighter = highlighterOf<ListingHighlighter>(textDocument, !directoryColor.isEmpty());
@@ -1644,36 +1656,45 @@ setListingColors(QObject* textDocument,
   }
   const auto icons = colorsByKey(iconColors);
   const auto pendingIcon = colored(pendingIconColor);
+  const auto executableName = colored(executableColor);
   const auto directory = colored(directoryColor);
   if (icons == highlighter->icons && pendingIcon == highlighter->pendingIcon &&
-      directory == highlighter->directory)
+      executableName == highlighter->executableName && directory == highlighter->directory)
     return;
   highlighter->icons = icons;
   highlighter->pendingIcon = pendingIcon;
+  highlighter->executableName = executableName;
   highlighter->directory = directory;
   recolor(highlighter);
 }
 
 void
-setPendingLines(QObject* textDocument, const QStringList& lines)
+setEntryLines(QObject* textDocument, const QStringList& pendingLines, const QStringList& executableLines)
 {
   auto* highlighter = highlighterOf<ListingHighlighter>(textDocument, false);
   if (!highlighter || highlighter->isPath)
     return;
-  QSet<int> pending;
-  for (const auto& line : lines)
-    pending.insert(line.toInt());
-  // The lines colored otherwise than they're pending now: not only those
-  // that were pending, as Qt colors a line as an edit reaches it, with the
-  // pending lines it has then, and vim's edit is a remove and an insert,
+  const auto numbers = [](const QStringList& lines) {
+    QSet<int> set;
+    for (const auto& line : lines)
+      set.insert(line.toInt());
+    return set;
+  };
+  const auto pending = numbers(pendingLines), executable = numbers(executableLines);
+  // The lines colored otherwise than they're pending (or run) now: not
+  // only those that were, as Qt colors a line as an edit reaches it, with
+  // the lines it has then, and vim's edit is a remove and an insert,
   // between which lines are other numbers (a :s's preview, a few lines
   // longer at each key, left a file's icon white).
   highlighter->pending = pending;
+  highlighter->executable = executable;
   QSet<int> changed;
   for (auto block = highlighter->document()->begin(); block.isValid(); block = block.next()) {
     const auto* colored = dynamic_cast<ColoredAs*>(block.userData());
-    if ((colored && colored->pending) != pending.contains(block.blockNumber()))
-      changed.insert(block.blockNumber());
+    const int line = block.blockNumber();
+    if ((colored && colored->pending) != pending.contains(line) ||
+        (colored && colored->executable) != executable.contains(line))
+      changed.insert(line);
   }
   if (!changed.isEmpty())
     recolor(highlighter, changed);

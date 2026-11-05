@@ -238,7 +238,8 @@ pub mod qobject {
 
         /// Colors Koil's listing in a TextEdit's `textDocument`: each icon in
         /// `icon_colors` (icons and colors, alternating), or a pending
-        /// entry's in `pending_icon_color`, and dirs in `directory_color`. No
+        /// entry's in `pending_icon_color`, the names of files that can be
+        /// run in `executable_color`, and dirs in `directory_color`. No
         /// `directory_color` takes the colors away.
         #[qinvokable]
         unsafe fn set_listing_colors(
@@ -246,16 +247,19 @@ pub mod qobject {
             text_document: *mut QObject,
             icon_colors: &QStringList,
             pending_icon_color: &QString,
+            executable_color: &QString,
             directory_color: &QString,
         );
 
         /// The lines of the listing in `textDocument` (numbers, from 0) whose
-        /// entries applying would change, whose icons get the pending color.
+        /// entries applying would change, whose icons get the pending color,
+        /// and those of files that can be run, whose names get theirs.
         #[qinvokable]
-        unsafe fn set_pending_lines(
+        unsafe fn set_entry_lines(
             self: &System,
             text_document: *mut QObject,
-            lines: &QStringList,
+            pending_lines: &QStringList,
+            executable_lines: &QStringList,
         );
 
         /// Colors the path field's `textDocument`: all of it in
@@ -467,9 +471,11 @@ impl qobject::System {
         scroll_to_cursor_in_qml(text_area);
         set_listing_colors(
             text_document, icon_colors: &QStringList, pending_icon_color: &QString,
-            directory_color: &QString
+            executable_color: &QString, directory_color: &QString
         );
-        set_pending_lines(text_document, lines: &QStringList);
+        set_entry_lines(
+            text_document, pending_lines: &QStringList, executable_lines: &QStringList
+        );
         set_path_colors(text_document, directory_color: &QString, spans: &QStringList);
         set_keyword_colors(text_document, keyword_colors: &QStringList);
         set_span_colors(text_document, spans: &QStringList);

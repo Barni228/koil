@@ -135,12 +135,18 @@ mod bridge {
             text_document: *mut QObject,
             icon_colors: &QStringList,
             pending_icon_color: &QString,
+            executable_color: &QString,
             directory_color: &QString,
         );
 
-        /// The listing's lines whose entries are pending (see native.h).
-        #[cxx_name = "setPendingLines"]
-        unsafe fn set_pending_lines(text_document: *mut QObject, lines: &QStringList);
+        /// The listing's lines whose entries are pending, and those of
+        /// files that can be run (see native.h).
+        #[cxx_name = "setEntryLines"]
+        unsafe fn set_entry_lines(
+            text_document: *mut QObject,
+            pending_lines: &QStringList,
+            executable_lines: &QStringList,
+        );
 
         /// Colors the path field's QQuickTextDocument (see native.h).
         #[cxx_name = "setPathColors"]

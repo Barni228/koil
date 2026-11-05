@@ -22,7 +22,8 @@ Item {
     // Whether the text is Koil's listing (rather than a file), which gets
     // colors: its icons' (`iconColors`, as { icon: [dark, light] }, or
     // `pendingIconColor` on `pendingLines`, the lines whose entries applying
-    // would change: see listing::pending_lines), and its dirs'.
+    // would change: see listing::pending_lines), its dirs', and the names
+    // on `executableLines` (files that can be run) in green.
     property bool listing: false
     // Whether the text has the listing's colors, else a file's: `listing`
     // once the text is replaced (see setText), as the old text would be
@@ -32,6 +33,7 @@ Item {
     property var iconColors: ({})
     property var pendingIconColor: ["", ""]
     property var pendingLines: []
+    property var executableLines: []
     // Whether this is the path field over the listing: one line, in the
     // dirs' color, with no line numbers. `pathSyntax` holds the parts of it
     // to color (a pattern's), as { start, length, kind } (see listing::Span).
@@ -60,6 +62,11 @@ Item {
     property var infos: ({})
     property var busyInfos: ({})
     property int infoDots: 3
+    // Where the entries that are symlinks point, by the text their icons
+    // hide, as { target, broken } (see listing::LinkTarget): shown after
+    // the line's note, if it has one, in the links' color (an error's if
+    // nothing's there), as `ls -l` shows it after the name.
+    property var links: ({})
     // Vim's state for this editor while it edits another one (see
     // Vim.leaveBuffer), kept here for main.qml to give back.
     property var saved: null
@@ -111,13 +118,14 @@ Item {
     // While lines wrap, the columns kept free right of the rows for the
     // notes after the lines (`infos`): the longest's, and the spaces before
     // it (see aside), so that each fits after its line, as in a table.
-    readonly property int noteRoom: {
+    readonly property int noteRoom: wrapping && infoWidth ? infoWidth + aside.gap : 0
+    // How long the longest note (`infos`) is, which the links after the
+    // notes go after (see noteOf), so they're lined up too.
+    readonly property int infoWidth: {
         let n = 0;
-        if (wrapping) {
-            for (const key in infos)
-                n = Math.max(n, infos[key].length);
-        }
-        return n && n + aside.gap;
+        for (const key in infos)
+            n = Math.max(n, infos[key].length);
+        return n;
     }
     // Changes when the text or its layout does, and when the view scrolls
     // or resizes: what the overlays are computed from (see Layer).
@@ -208,7 +216,8 @@ Item {
         const colors = [];
         for (const icon in iconColors)
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
-        system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1], listingColors ? String(theme.directory) : "");
+        system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1],
+            String(theme.infoColor("execute")), listingColors ? String(theme.directory) : "");
         if (!listingColors)
             system.setTextColors(editor.textDocument, vim.syntax ? theme.syntaxColors() : [], filePath);
         applyPendingLines();
@@ -222,7 +231,7 @@ Item {
 
     function applyPendingLines() {
         if (listingColors)
-            formatOnly(() => system.setPendingLines(editor.textDocument, pendingLines.map(String)));
+            formatOnly(() => system.setEntryLines(editor.textDocument, pendingLines.map(String), executableLines.map(String)));
     }
 
     // A press at x, y in the editor's coordinates, in the room the view
@@ -300,6 +309,7 @@ Item {
     readonly property var colorInputs: [listingColors, iconColors, pendingIconColor, pathSyntax, filePath, theme.dark, theme.directory, theme.patternColors, vim.syntax]
     onColorInputsChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
+    onExecutableLinesChanged: applyPendingLines()
 
     // Lays the text out on the grid lineFormat gives (see setLineFormat in
     // native.h), which Koil's layout does in place of Qt's: every row the
@@ -617,6 +627,17 @@ Item {
     // How wide a note or a message after a line is drawn, at x, `width`
     // wide: cut off at the view's edge while lines wrap, as the view
     // doesn't scroll sideways then (the hover box shows a message whole).
+    // What's shown after the line whose icon hides `key`: its note
+    // (`infos`), and where it links to (`links`), two spaces after the
+    // longest note, as in a table.
+    function noteOf(key) {
+        const info = infos[key] || "", link = links[key];
+        return link ? (infoWidth ? info + " ".repeat(infoWidth - info.length + 2) : "") + linkNote(link) : info;
+    }
+    function linkNote(link) {
+        return "→ " + link.target;
+    }
+
     function asideWidth(x, width) {
         return wrapping ? Math.max(0, Math.min(width, editor.width - editor.rightPadding - x)) : width;
     }
@@ -1473,7 +1494,7 @@ Item {
                 property int messageColumn: -1
                 // The column the last of them ends at (see sideScrollRoom).
                 property int widest: 0
-                readonly property var inputs: [view.infos, view.hidden, view.problems, view.layout, room, view.wrapping]
+                readonly property var inputs: [view.infos, view.links, view.hidden, view.problems, view.layout, room, view.wrapping]
 
                 function refresh() {
                     const t = editor.latest.text, lines = new Map();
@@ -1483,13 +1504,13 @@ Item {
                             lines.set(ls, { end: endColumn(t, ls, Txt.lineEnd(t, ls)), note: "", message: "", error: false });
                         return lines.get(ls);
                     };
-                    let notes = false;
-                    for (const key in view.infos) {
-                        notes = true;
-                        break;
-                    }
-                    for (const h of notes ? view.hidden : []) {
-                        const note = view.infos[h.text], ls = note ? Txt.lineStart(t, h.at) : 0;
+                    const any = map => {
+                        for (const key in map)
+                            return true;
+                        return false;
+                    };
+                    for (const h of any(view.infos) || any(view.links) ? view.hidden : []) {
+                        const note = view.noteOf(h.text), ls = note ? Txt.lineStart(t, h.at) : 0;
                         if (note && startsLine(t, ls, h.at))
                             line(ls).note = note;
                     }
@@ -1542,7 +1563,7 @@ Item {
                 // text its icon hides.
                 function noteOn(t, ls, le) {
                     const hidden = view.hidden, h = hidden[view.vim.firstAt(hidden, ls)];
-                    return h && h.at < le && startsLine(t, ls, h.at) ? view.infos[h.text] || "" : "";
+                    return h && h.at < le && startsLine(t, ls, h.at) ? view.noteOf(h.text) : "";
                 }
 
                 // Where the note and the message after the line of t from ls
@@ -1566,18 +1587,28 @@ Item {
                 onInputsChanged: Qt.callLater(refresh)
             }
 
-            // What `infos` has for each line in view, dimmed (see aside).
+            // What `infos` has for each line in view, dimmed, and where
+            // `links` says it points, in the links' color (see aside).
             Layer {
                 id: notes
 
-                inputs: [view.infos, view.busyInfos, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room, view.wrapping]
+                inputs: [view.infos, view.busyInfos, view.links, view.hidden, view.layout, view.viewport, aside.noteColumn, aside.room, view.wrapping, view.theme.dark]
                 compute: () => {
                     const list = [], hidden = view.hidden, t = editor.latest.text, v = view.visibleRange();
                     for (let i = view.vim.firstAt(hidden, v.from); i < hidden.length && hidden[i].at <= v.to; i++) {
-                        const h = hidden[i], text = view.infos[h.text];
-                        const ls = text ? Txt.lineStart(t, h.at) : 0, le = text ? Txt.lineEnd(t, h.at) : 0;
-                        if (text && aside.startsLine(t, ls, h.at))
-                            list.push({ x: aside.spots(t, ls, le, text, "").note, y: view.cellAt(le).y, text: text, busy: !!view.busyInfos[h.text] });
+                        const h = hidden[i], note = view.noteOf(h.text);
+                        const ls = note ? Txt.lineStart(t, h.at) : 0, le = note ? Txt.lineEnd(t, h.at) : 0;
+                        if (!note || !aside.startsLine(t, ls, h.at))
+                            continue;
+                        const x = aside.spots(t, ls, le, note, "").note, y = view.cellAt(le).y;
+                        const info = view.infos[h.text], link = view.links[h.text];
+                        if (info)
+                            list.push({ x: x, y: y, text: info, busy: !!view.busyInfos[h.text], color: view.theme.faint });
+                        if (link) {
+                            const color = link.broken ? view.theme.error : view.theme.infoColor("link");
+                            const at = x + (view.infoWidth ? view.infoWidth + 2 : 0) * view.charWidth;
+                            list.push({ x: at, y: y, text: view.linkNote(link), busy: false, color: color });
+                        }
                     }
                     return list;
                 }
@@ -1594,7 +1625,7 @@ Item {
                         // Its place is worked out with all three dots.
                         text: modelData.busy ? modelData.text.slice(0, modelData.text.length - 3 + view.infoDots) : modelData.text
                         font: editor.font
-                        color: view.theme.faint
+                        color: modelData.color
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                     }

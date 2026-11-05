@@ -7,8 +7,9 @@
 //! Positions in the text are in UTF-16 code units, as QML counts them.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
+use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
@@ -80,6 +81,8 @@ pub struct Rendered {
     pub pending_color: [&'static str; 2],
     #[serde(flatten)]
     pub notes: Notes,
+    #[serde(flatten)]
+    pub looks: Looks,
 }
 
 /// The listing of what `koil` has open, with the sizes of its dirs counted
@@ -90,6 +93,7 @@ pub fn render(koil: &Koil, sizes: &dyn SizeOf) -> Rendered {
         path: show_location(koil),
         pending_color: PENDING_COLOR,
         notes: notes(koil, sizes, entries.iter().filter_map(|e| e.id)),
+        looks: looks(koil, entries.iter().filter_map(|e| e.id)),
         ..Rendered::default()
     };
     // The text's length, kept rather than counted for each line.
@@ -293,6 +297,72 @@ pub struct Notes {
     /// In how many seconds the first of them changes (`5 min ago` becomes
     /// `6 min ago`), None if none will.
     pub times_change: Option<u64>,
+}
+
+/// What the listing shows of its entries as they are on disk, whatever
+/// it's sorted by (see [`looks`]).
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Looks {
+    /// Where each symlink points, by the ID as its icon hides it, which the
+    /// editor shows after its line (after its note, if it has one).
+    pub links: HashMap<String, LinkTarget>,
+    /// The files that can be run, whose names are green (see
+    /// [`pending_lines`]).
+    #[serde(skip)]
+    pub executables: HashSet<Id>,
+}
+
+/// Where a symlink points.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LinkTarget {
+    /// As it's written (relative to the link's dir if it's relative), as
+    /// Koil shows a path, as `ls -l` shows it after the link's name.
+    pub target: String,
+    /// Whether nothing can be read there.
+    pub broken: bool,
+}
+
+/// What the listing shows of each of `ids` (see `Koil::path_of`) as it is
+/// on disk now, besides its name (see [`Looks`]): read for each, whatever
+/// the listing is sorted by, as koil-core keeps only what it sorts by.
+pub fn looks(koil: &Koil, ids: impl IntoIterator<Item = Id>) -> Looks {
+    let mut looks = Looks::default();
+    for id in ids {
+        let key = id.0.to_string();
+        if looks.links.contains_key(&key) || looks.executables.contains(&id) {
+            continue;
+        }
+        let Some(path) = koil.path_of(id) else {
+            continue;
+        };
+        let Ok(meta) = fs::symlink_metadata(path) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() {
+            if let Ok(written) = fs::read_link(path) {
+                let target = show_path(&written);
+                let broken = fs::metadata(path).is_err();
+                looks.links.insert(key, LinkTarget { target, broken });
+            }
+        } else if meta.is_file() && executable(&meta) {
+            looks.executables.insert(id);
+        }
+    }
+    looks
+}
+
+/// Whether a file with `meta` can be run: has an execute permission, for
+/// anyone (as `ls` and eza color it). Windows has none.
+#[cfg(unix)]
+fn executable(meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn executable(_meta: &fs::Metadata) -> bool {
+    false
 }
 
 /// The dirs whose sizes the listing of what `koil` has open shows (see
@@ -617,17 +687,38 @@ fn problem(parsed: &Parsed, entry: usize, severity: Severity, message: String) -
     }
 }
 
+/// The lines of the listing colored for their entries (see
+/// [`pending_lines`]).
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct EntryLines {
+    /// Entries applying would change, whose icons get `PENDING_COLOR`.
+    pub pending: Vec<usize>,
+    /// Files that can be run (see [`Looks`]), whose names are green.
+    pub executable: Vec<usize>,
+}
+
 /// The lines (from 0) of entries that aren't on disk as the listing shows
 /// them yet, which applying would change (`Koil::is_pending`): new ones, and
 /// ones whose path isn't their ID's (renamed, copied, or moved here from
-/// another dir). Their icons get `PENDING_COLOR`.
-pub fn pending_lines(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
+/// another dir); and those whose IDs are of the files in `executables` (see
+/// [`Looks`]), wherever they are, as it's the same file.
+pub fn pending_lines(
+    koil: &Koil,
+    text: &str,
+    hidden: &[Hidden],
+    executables: &HashSet<Id>,
+) -> EntryLines {
     let parsed = read(koil, text, hidden);
-    let entries = parsed.entries.iter().zip(&parsed.spots);
-    entries
-        .filter(|(entry, _)| koil.is_pending(entry))
-        .map(|(_, &(line, _))| line)
-        .collect()
+    let mut lines = EntryLines::default();
+    for (entry, &(line, _)) in parsed.entries.iter().zip(&parsed.spots) {
+        if koil.is_pending(entry) {
+            lines.pending.push(line);
+        }
+        if entry.id.is_some_and(|id| executables.contains(&id)) {
+            lines.executable.push(line);
+        }
+    }
+    lines
 }
 
 /// What [`update`] did.
@@ -779,6 +870,8 @@ pub struct Synced {
     /// What's shown after the lines, as it is on disk now.
     #[serde(flatten)]
     pub notes: Notes,
+    #[serde(flatten)]
+    pub looks: Looks,
 }
 
 /// A question about the conflicts of one kind, which Yes resolves (see
@@ -812,9 +905,15 @@ pub fn sync(koil: &mut Koil, sizes: &dyn SizeOf, text: &str, hidden: &[Hidden]) 
         Edit::Add(entry) | Edit::Change { to: entry, .. } => Some(entry),
         Edit::Remove(_) => None,
     });
-    let ids = parsed.entries.iter().chain(added).filter_map(|e| e.id);
+    let ids: Vec<Id> = parsed
+        .entries
+        .iter()
+        .chain(added)
+        .filter_map(|e| e.id)
+        .collect();
     Synced {
-        notes: notes(koil, sizes, ids),
+        notes: notes(koil, sizes, ids.iter().copied()),
+        looks: looks(koil, ids),
         merge: match synced.moved {
             true => Merge::default(),
             false => merge(koil, sizes, text, &parsed, &synced.edits),

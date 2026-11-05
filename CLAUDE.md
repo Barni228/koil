@@ -25,7 +25,8 @@ the scratchpad (see Scratchpad).
   opens (`file_at`), what Enter opens (`target_on_line`), which lines are
   copies (`copies`, read into a copy of the Koil: `with_listing`) and the
   copies of a file to make before it changes (`copies_of`), what's shown after
-  each line when sorted by size or a date (`notes`), what changed on
+  each line when sorted by size or a date (`notes`), and whatever it's
+  sorted by, a link's target and the files that can be run (`looks`), what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`),
   and the entries a shell command runs on (`paths_on_lines`, or from the
   path field `paths_in_field`), or what `<cfile>` stands for on a file's
@@ -1159,12 +1160,20 @@ the scratchpad (see Scratchpad).
   `listing::pending_lines`, from `Koil::is_pending`) is pure white in a dark theme and
   pure black in a light one (`PENDING_COLOR`, sent as `pendingColor`), and
   `listing::apart` moves devicons' colors that come within `APART` of those
-  (its white icons, like `vercel.json`'s) a fifth away. main.qml finds the
-  pending lines after every edit of the listing (`updatePendingLines`, with
+  (its white icons, like `vercel.json`'s) a fifth away. The name of a file
+  that can be run (any execute permission, as `ls` and eza color it; a
+  file, not a dir nor a link to one: `listing::looks`, read at each render
+  and sync, as koil-core keeps no permissions, so a `chmod` shows at the
+  next one, as the watcher skips metadata changes; none on Windows) is
+  green (`theme.infoColor("execute")`, K's `x`), after the dirs it's in,
+  wherever its line is moved or copied, as it's the same file (by its ID,
+  in `KoilRust::executables`). main.qml finds the
+  pending lines and those after every edit of the listing (`updatePendingLines`, with
   `Qt.callLater`: halfway through vim's `replaceRange` its hidden text isn't
   up to date, and coloring is a text change to Qt, which would make
-  `trackEdit` shift the hidden text again), and the highlighter colors those
-  lines' icons (`setPendingLines`): every line whose icon was last colored
+  `trackEdit` shift the hidden text again; `listing::pending_lines`, as `{
+  pending, executable }`), and the highlighter colors those
+  lines (`setEntryLines`): every line last colored
   otherwise (`ColoredAs`, its block's user data), not only those that were
   pending, as Qt colors a line as an edit reaches it, with the pending
   lines it has then, and vim's edit is a remove and an insert, between
@@ -1835,7 +1844,14 @@ the scratchpad (see Scratchpad).
   view's width do; the overlays then place the lines in view
   (`aside.spots`), never over what's before them (an emoji wider than a
   column). While lines wrap, they go after a line's last row, and the
-  view doesn't scroll to them (see Wrapping).
+  view doesn't scroll to them (see Wrapping). After its note, a link's
+  line shows where it points (`links`, from `listing::looks` at each
+  render and sync, whatever it's sorted by: `→ target`, as written, as `ls
+  -l` has it, in `theme.infoColor("link")`, or `theme.error` if nothing's
+  there), two spaces after the longest note (`infoWidth`, `noteOf`, which
+  the columns are worked out with), so they're lined up too. The notes'
+  room while lines wrap (`noteRoom`) is the notes' alone, as a long target
+  would narrow every row: a link's is cut off at the view's edge.
 - **Quitting**: `:q` with unsaved changes fails (E37); `:confirm q` asks
   instead, in a `ConfirmDialog` rather than a `MessageDialog` (which is native
   on macOS, can't use the editor's font or vim's keys). `ConfirmDialog.ask`

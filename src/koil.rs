@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -136,7 +136,8 @@ pub mod qobject {
         ) -> QString;
 
         /// The lines of the listing `text` (with `hidden`) whose entries
-        /// applying would change (see `listing::pending_lines`), as a list.
+        /// applying would change, and those of files that can be run, as
+        /// `{ pending, executable }` (see `listing::pending_lines`).
         #[qinvokable]
         fn pending_lines(self: &Koil, text: &QString, hidden: &QString) -> QString;
 
@@ -321,6 +322,9 @@ pub struct KoilRust {
     inspected: Option<info::Entry>,
     /// The IDs of the entries listed whose notes are times (see `times`).
     timed: Vec<Id>,
+    /// The files listed that can be run (see `listing::Looks`), whose
+    /// lines `pending_lines` gives.
+    executables: HashSet<Id>,
 }
 
 /// Watches dirs for changes on disk, and emits `changedOnDisk` for those
@@ -600,6 +604,7 @@ impl qobject::Koil {
         if !synced.failed && !synced.moved {
             rust.count_sizes(&mut synced.notes);
             rust.timed = synced.notes.times.clone();
+            rust.executables = std::mem::take(&mut synced.looks.executables);
         }
         // The undo steps follow what was renamed on disk.
         rust.history.merge_changed(&mut rust.koil);
@@ -671,6 +676,7 @@ impl qobject::Koil {
         let mut rendered = listing::render(&rust.koil, &sizes);
         rust.count_sizes(&mut rendered.notes);
         rust.timed = rendered.notes.times.clone();
+        rust.executables = std::mem::take(&mut rendered.looks.executables);
         to_json(&rendered)
     }
 
@@ -738,6 +744,7 @@ impl qobject::Koil {
             &self.koil,
             &text.to_string(),
             &read_hidden(hidden),
+            &self.executables,
         ))
     }
 
