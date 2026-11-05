@@ -722,7 +722,13 @@ the scratchpad (see Scratchpad).
   changed, at once (`paths_mut`: on macOS each change restarts the
   FSEvents stream), and only if the dirs did. Its thread
   skips reads, writes (unless sorted by size or a date, see Sorting) and
-  events `Watched::affects` says can't matter, and
+  events `Watched::affects` says can't matter (`Filter::matters`), but
+  not a `chmod` that makes a file listed one that can be run, or one that
+  can't any more (see Colors): it comes as a change of metadata, as a
+  write's new time does, so for a file listed (`Filter::files`, from
+  `listing::looks`, by its path) the thread reads its permissions again
+  (`listing::runs`), which costs a write one `lstat`, and only a change of
+  what its name shows syncs. Then it
   queues `changedOnDisk` once per burst (`queued`). `syncTimer` then syncs
   (`syncListing`) 100 ms later, and not again for four times as long as
   the last sync took (a pattern's walk can be slow); not while a file is
@@ -1163,8 +1169,9 @@ the scratchpad (see Scratchpad).
   (its white icons, like `vercel.json`'s) a fifth away. The name of a file
   that can be run (any execute permission, as `ls` and eza color it; a
   file, not a dir nor a link to one: `listing::looks`, read at each render
-  and sync, as koil-core keeps no permissions, so a `chmod` shows at the
-  next one, as the watcher skips metadata changes; none on Windows) is
+  and sync, as koil-core keeps no permissions; a `chmod`, from Koil's `:!`
+  or anywhere, has the watcher sync, see Changes on disk, and the sync
+  colors the lines again, though it changes none; none on Windows) is
   green (`theme.infoColor("execute")`, K's `x`), after the dirs it's in,
   wherever its line is moved or copied, as it's the same file (by its ID,
   in `KoilRust::executables`). main.qml finds the

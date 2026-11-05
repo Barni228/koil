@@ -573,6 +573,9 @@ ApplicationWindow {
             if (!r.failed)
                 setNotes(r);
             mergeListing(r, false);
+            // A file that can be run now (a chmod), which changes no line.
+            if (!r.edits.length)
+                updatePendingLines();
             // The open dir was renamed.
             if (r.path !== location) {
                 location = r.path;

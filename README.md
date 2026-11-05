@@ -7,24 +7,24 @@ ones to create (`notes.txt`, `docs/` for a dir, `a/b/c.txt` with its dirs).
 Cut a line, go to another dir and paste it to move. Nothing changes on disk
 until you apply, and your edits stay while you go through other dirs.
 
-| Key            | Does                                                                              |
-| -------------- | --------------------------------------------------------------------------------- |
-| `Cmd+S` `:w`   | Update: read your edits and show the listing again (doesn't change anything)      |
-| `Space Space`  | Apply (deletes go to the trash). In a file, save                                  |
-| `u`            | Undo                                                                              |
-| `Enter`        | Open the dir or file on the line                                                  |
-| `-`            | The dir above (`3-`: three up). In a file, back to the listing                    |
-| `Tab`          | Go between the listing and the path field over it                                 |
-| `g.` `gi` `gr` | Toggle hidden files, hiding what git ignores, and reading the path as a regex     |
-| `gs`           | Change the sort order (by size, size on disk, last modified, natural, and more)   |
-| `_`            | The scratchpad                                                                    |
-| `Space r`      | Show the entry (in a file, the file) in Finder or Explorer                        |
-| `Space o`      | Open the entry (in a file, the file) in its default app                           |
-| `K`            | Show all about the entry: size, times, permissions, a symlink's target, and more  |
-| `Space q`      | Your shortcuts: run one, edit them or make one                                    |
-| `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
-| `m`            | Mark lines anywhere, then `d`, `y`, `!` or `A` act on all of them at once         |
-| `:h`           | Show the help (`:h g`: the keys starting with `g`; `:h gJ`: a key)                |
+| Key            | Does                                                                            |
+| -------------- | ------------------------------------------------------------------------------- |
+| `Cmd+S` `:w`   | Update: read your edits and show the listing again (doesn't change anything)    |
+| `Space Space`  | Apply (deletes go to the trash). In a file, save                                |
+| `u`            | Undo                                                                            |
+| `Enter`        | Open the dir or file on the line                                                |
+| `-`            | The dir above (`3-`: three up). In a file, back to the listing                  |
+| `Tab`          | Go between the listing and the path field over it                               |
+| `g.` `gi` `gr` | Toggle hidden files, hiding what git ignores, and reading the path as a regex   |
+| `gs`           | Change the sort order (by size, size on disk, last modified, natural, and more) |
+| `_`            | The scratchpad                                                                  |
+| `Space r`      | Show the entry (in a file, the file) in Finder or Explorer                      |
+| `Space o`      | Open the entry (in a file, the file) in its default app                         |
+| `K`            | Show info about the entry: size, times, permissions, symlink's target, and more |
+| `Space q`      | Your shortcuts: run one, edit them or make one                                  |
+| `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command         |
+| `m`            | Mark lines anywhere, then `d`, `y`, `!` or `A` act on all of them at once       |
+| `:h`           | Show the help (`:h g`: the keys starting with `g`; `:h gJ`: a key)              |
 
 `Cmd` is `Ctrl` on Windows.
 

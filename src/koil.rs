@@ -1,7 +1,6 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
@@ -323,8 +322,10 @@ pub struct KoilRust {
     /// The IDs of the entries listed whose notes are times (see `times`).
     timed: Vec<Id>,
     /// The files listed that can be run (see `listing::Looks`), whose
-    /// lines `pending_lines` gives.
+    /// lines `pending_lines` gives, and every file listed, by its path, and
+    /// whether it can be run, for the watcher (see `Filter`).
     executables: HashSet<Id>,
+    files: Arc<HashMap<PathBuf, bool>>,
 }
 
 /// Watches dirs for changes on disk, and emits `changedOnDisk` for those
@@ -336,18 +337,50 @@ struct DiskWatcher {
     dirs: BTreeMap<PathBuf, bool>,
     failed: BTreeSet<PathBuf>,
     /// Which changes matter, which the watcher's thread reads.
-    watched: Arc<Mutex<Watched>>,
+    filter: Arc<Mutex<Filter>>,
+}
+
+/// What tells the changes that can change the listing from the others (see
+/// `Filter::matters`).
+#[derive(Default)]
+struct Filter {
+    watched: Watched,
     /// Whether writing a file matters too: the listing shows its size or
     /// when it changed (see `listing::info`).
-    writes: Arc<AtomicBool>,
+    writes: bool,
+    /// Every file listed, and whether it can be run, which its name shows
+    /// (see `listing::Looks`).
+    files: Arc<HashMap<PathBuf, bool>>,
+}
+
+impl Filter {
+    /// Whether `event` can change the listing: not reading a file, nor
+    /// writing one, unless `writes`; but a change of a file's permissions
+    /// that it can be run now, or can't any more, which the platforms tell
+    /// as a change of its metadata, as they do a write's new time. So for
+    /// a file listed, its permissions are read again, which costs a write
+    /// little more than not syncing for it did.
+    fn matters(&self, event: &notify::Event) -> bool {
+        match event.kind {
+            EventKind::Access(_) => false,
+            EventKind::Modify(ModifyKind::Metadata(_)) if !self.writes => {
+                (event.paths.iter()).any(|path| {
+                    self.files
+                        .get(path)
+                        .is_some_and(|&runs| listing::runs(path) != runs)
+                })
+            }
+            EventKind::Modify(ModifyKind::Data(_)) if !self.writes => false,
+            _ => event.need_rescan() || event.paths.iter().any(|p| self.watched.affects(p)),
+        }
+    }
 }
 
 impl DiskWatcher {
     fn new(thread: CxxQtThread<qobject::Koil>, sizes: Sizes) -> Option<DiskWatcher> {
-        let watched = Arc::new(Mutex::new(Watched::default()));
-        let writes = Arc::new(AtomicBool::new(false));
+        let filter = Arc::new(Mutex::new(Filter::default()));
         let changed = Coalesced::new(thread);
-        let (filter, with_writes) = (watched.clone(), writes.clone());
+        let read_filter = filter.clone();
         let handler = move |event: notify::Result<notify::Event>| {
             match &event {
                 // Reading changes no size.
@@ -367,11 +400,7 @@ impl DiskWatcher {
                 Err(_) => sizes.forget(),
             }
             let matters = match event {
-                Ok(event) => {
-                    let watched = filter.lock().unwrap();
-                    changes_listing(&event.kind, with_writes.load(Ordering::Relaxed))
-                        && (event.need_rescan() || event.paths.iter().any(|p| watched.affects(p)))
-                }
+                Ok(event) => read_filter.lock().unwrap().matters(&event),
                 // Changes may have been missed.
                 Err(_) => true,
             };
@@ -384,21 +413,19 @@ impl DiskWatcher {
             watcher,
             dirs: BTreeMap::new(),
             failed: BTreeSet::new(),
-            watched,
-            writes,
+            filter,
         })
     }
 
-    /// Watches what `watched` says, and `sizes` with what's inside them,
-    /// instead of what it did, and with `writes`, files being written too.
-    /// Returns the dirs of `sizes` it can't watch. The watches are changed
-    /// only if the dirs did, and only those that did, at once (on macOS
-    /// it starts over each time), trying again those it couldn't watch.
-    fn set(&mut self, watched: Watched, writes: bool, sizes: &[PathBuf]) -> Vec<PathBuf> {
-        self.writes.store(writes, Ordering::Relaxed);
-        let mut dirs: BTreeMap<PathBuf, bool> = watched.dirs.iter().cloned().collect();
+    /// Watches what `filter` says (see `Filter`), and `sizes` with what's
+    /// inside them, instead of what it did. Returns the dirs of `sizes` it
+    /// can't watch. The watches are changed only if the dirs did, and only
+    /// those that did, at once (on macOS it starts over each time), trying
+    /// again those it couldn't watch.
+    fn set(&mut self, filter: Filter, sizes: &[PathBuf]) -> Vec<PathBuf> {
+        let mut dirs: BTreeMap<PathBuf, bool> = filter.watched.dirs.iter().cloned().collect();
         dirs.extend(sizes.iter().map(|dir| (dir.clone(), true)));
-        *self.watched.lock().unwrap() = watched;
+        *self.filter.lock().unwrap() = filter;
         if dirs == self.dirs {
             return Vec::new();
         }
@@ -445,17 +472,6 @@ fn size_watches(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     }
     #[cfg(not(windows))]
     dirs
-}
-
-/// Whether an event of `kind` can change a listing: not reading a file, nor
-/// writing one, unless `writes` (the listing shows its size or when it
-/// changed).
-fn changes_listing(kind: &EventKind, writes: bool) -> bool {
-    match kind {
-        EventKind::Access(_) => false,
-        EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_)) => writes,
-        _ => true,
-    }
 }
 
 impl KoilRust {
@@ -584,11 +600,14 @@ impl qobject::Koil {
         if rust.watcher.is_none() {
             rust.watcher = DiskWatcher::new(thread, rust.sizes.clone());
         }
-        let watched = rust.koil.watched();
-        let writes = rust.koil.settings().sort.by.reads_metadata();
+        let filter = Filter {
+            watched: rust.koil.watched(),
+            writes: rust.koil.settings().sort.by.reads_metadata(),
+            files: rust.files.clone(),
+        };
         let sizes = size_watches(rust.sizes.watches());
         if let Some(watcher) = &mut rust.watcher {
-            for dir in watcher.set(watched, writes, &sizes) {
+            for dir in watcher.set(filter, &sizes) {
                 rust.sizes.unwatched(&dir);
             }
         }
@@ -605,6 +624,7 @@ impl qobject::Koil {
             rust.count_sizes(&mut synced.notes);
             rust.timed = synced.notes.times.clone();
             rust.executables = std::mem::take(&mut synced.looks.executables);
+            rust.files = Arc::new(std::mem::take(&mut synced.looks.files));
         }
         // The undo steps follow what was renamed on disk.
         rust.history.merge_changed(&mut rust.koil);
@@ -677,6 +697,7 @@ impl qobject::Koil {
         rust.count_sizes(&mut rendered.notes);
         rust.timed = rendered.notes.times.clone();
         rust.executables = std::mem::take(&mut rendered.looks.executables);
+        rust.files = Arc::new(std::mem::take(&mut rendered.looks.files));
         to_json(&rendered)
     }
 
@@ -976,5 +997,50 @@ fn report_message(report: Report, done: &str) -> String {
     match report.warning {
         Some(warning) => format!("{changes} {done}; {}", listing::describe_warning(&warning)),
         None => format!("{changes} {done}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use notify::event::{DataChange, MetadataKind};
+
+    use super::*;
+
+    /// A chmod that makes a file listed one that can be run, or one that
+    /// can't any more, matters, though it comes as a change of metadata, as
+    /// a write's new time does; a write, a chmod that leaves it as it was,
+    /// and a file that isn't listed don't.
+    #[cfg(unix)]
+    #[test]
+    fn permissions_matter() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.sh");
+        fs::write(&file, "").unwrap();
+        let event = |kind, path: &Path| notify::Event::new(kind).add_path(path.to_path_buf());
+        let metadata = EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any));
+        let write = EventKind::Modify(ModifyKind::Data(DataChange::Content));
+        let filter = Filter {
+            files: Arc::new(HashMap::from([(file.clone(), false)])),
+            ..Filter::default()
+        };
+        assert!(!filter.matters(&event(metadata, &file)));
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o744)).unwrap();
+        assert!(filter.matters(&event(metadata, &file)));
+        assert!(!filter.matters(&event(write, &file)));
+        let other = dir.path().join("other");
+        fs::write(&other, "").unwrap();
+        fs::set_permissions(&other, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!filter.matters(&event(metadata, &other)));
+        // shown as one that can be run, it matters once it can't
+        let filter = Filter {
+            files: Arc::new(HashMap::from([(file.clone(), true)])),
+            ..Filter::default()
+        };
+        assert!(!filter.matters(&event(metadata, &file)));
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(filter.matters(&event(metadata, &file)));
     }
 }

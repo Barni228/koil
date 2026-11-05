@@ -311,6 +311,10 @@ pub struct Looks {
     /// [`pending_lines`]).
     #[serde(skip)]
     pub executables: HashSet<Id>,
+    /// Every file, by its path, and whether it can be run, so a change of
+    /// its permissions can be told from a write (see [`runs`]).
+    #[serde(skip)]
+    pub files: HashMap<PathBuf, bool>,
 }
 
 /// Where a symlink points.
@@ -345,11 +349,21 @@ pub fn looks(koil: &Koil, ids: impl IntoIterator<Item = Id>) -> Looks {
                 let broken = fs::metadata(path).is_err();
                 looks.links.insert(key, LinkTarget { target, broken });
             }
-        } else if meta.is_file() && executable(&meta) {
-            looks.executables.insert(id);
+        } else if meta.is_file() {
+            let runs = executable(&meta);
+            if runs {
+                looks.executables.insert(id);
+            }
+            looks.files.insert(path.to_path_buf(), runs);
         }
     }
     looks
+}
+
+/// Whether the file at `path` can be run (see [`Looks`]); false for a dir,
+/// a link, and what can't be read.
+pub fn runs(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && executable(&meta))
 }
 
 /// Whether a file with `meta` can be run: has an execute permission, for

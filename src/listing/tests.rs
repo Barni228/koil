@@ -261,6 +261,14 @@ fn test_looks() {
     assert_eq!(executables.iter().collect::<Vec<_>>(), [&run]);
     // a dir isn't one, though it can be entered
     assert!(fs::metadata(path.join("dir")).unwrap().permissions().mode() & 0o111 != 0);
+    // every file, for the watcher to tell a chmod from a write
+    let real = |name: &str| fs::canonicalize(path.join(name)).unwrap();
+    let files = &rendered.looks.files;
+    assert_eq!(files.get(&real("run.sh")), Some(&true));
+    assert_eq!(files.get(&real("text")), Some(&false));
+    assert_eq!(files.len(), 2);
+    assert!(runs(&path.join("run.sh")));
+    assert!(!runs(&path.join("text")) && !runs(&path.join("dir")) && !runs(&path.join("gone")));
 
     let lines = pending_lines(&koil, &rendered.text, &rendered.hidden, executables);
     let line = rendered.names.iter().position(|n| n == "run.sh").unwrap();
