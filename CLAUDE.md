@@ -143,10 +143,13 @@ the scratchpad (see Scratchpad).
   (see Scrolling boxes) and `SelectableText.qml`, the boxes'; and
   `TextButton.qml`, `Segmented.qml` and `DropList.qml` (with
   `DropOption.qml`, a row of it), the buttons and lists the Settings and
-  Shortcuts windows share, and `Toggle.qml`, the switch of a setting
-  that's on or off. A delegate other files use is a file of its own: an
-  inline component of a file with `ComponentBehavior: Bound` is bound to
-  it, and Qt makes none from another file (the lists were empty).
+  Shortcuts windows share, `Toggle.qml`, the switch of a setting that's
+  on or off, and `Check.qml`, a checkbox, for one of two that are each on
+  or off (line numbers' Absolute and Relative, a shortcut's Normal and
+  Visual), rather than a choice of neither, one or both. A delegate other
+  files use is a file of its own: an inline component of a file with
+  `ComponentBehavior: Bound` is bound to it, and Qt makes none from
+  another file (the lists were empty).
 - `tests/tst_vim.qml`: qmltestrunner tests for Vim.qml, the find bar and the
   help's search; `tests/tst_shortcuts.qml`, the Shortcuts window with the
   keys alone.
@@ -1325,11 +1328,13 @@ the scratchpad (see Scratchpad).
   Their keys run other shortcuts (as macros recorded with them need),
   which can loop (see Macros).
   They're saved in `settings.shortcuts`, as JSON of `{ name, keys, macro,
-  mode, enabled }` (`readShortcuts` drops what isn't one, as the settings
-  can be edited by hand), which Restore Defaults leaves alone, and
-  only the enabled ones with keys reach vim. Koil shows keys with Space
-  as a word (`Vim.keysName`: `Space gc`), in the list, the form and the
-  status line's run. The window (`Space q`, Koil >
+  normal, visual, enabled }` (`readShortcuts` drops what isn't one, as
+  the settings can be edited by hand), which Restore Defaults leaves
+  alone, and only the enabled ones with keys reach vim. The form has a
+  checkbox for each mode, and one in neither can't be saved; Koil's own
+  (`root.ownShortcuts`) say their modes the same way. Koil shows keys
+  with Space as a word (`Vim.keysName`: `Space gc`), in the list, the
+  form and the status line's run. The window (`Space q`, Koil >
   Shortcuts…, `ApplicationSpecificRole`, which puts it in the app menu;
   File > Shortcuts… elsewhere; and a button in Settings) lists each by its
   name, else its keys, else the keys it runs, and under them, while the
@@ -1378,9 +1383,9 @@ the scratchpad (see Scratchpad).
   window as active while any of the main window's family has the keys,
   so Esc in the editor closed them, and with both open, their Escs were
   ambiguous and neither ran. Space or Enter clicks a
-  button (`TextButton`, `IconButton`), and `Segmented` is one stop, where
-  Left and Right pick. While the macros are listed, their popup's window
-  gets the keys (so it has `focus`, and both it and the button handle
+  button (`TextButton`, `IconButton`), and Space flips a checkbox
+  (`Check`). While the macros are listed, their popup's window gets the
+  keys (so it has `focus`, and both it and the button handle
   them: `macroKey`), and the window asks to be active again once it
   closes, as Qt's offscreen platform left the popup's. The form's key box
   takes the keys typed, as vim names them (`typeKey`, `Vim.tokenFor`:

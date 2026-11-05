@@ -32,12 +32,12 @@ TestCase {
 
         property var shortcuts: []
         readonly property var ownShortcuts: [
-            { keys: "  ", name: "Apply", mode: "normal", where: "" },
-            { keys: " q", name: "List your shortcuts", mode: "both", where: "" },
-            { keys: "g.", name: "Toggle hidden", mode: "normal", where: "Listing" },
-            { keys: "-", name: "Up", mode: "normal", where: "" }
+            { keys: "  ", name: "Apply", normal: true, visual: false, where: "" },
+            { keys: " q", name: "List your shortcuts", normal: true, visual: true, where: "" },
+            { keys: "g.", name: "Toggle hidden", normal: true, visual: false, where: "Listing" },
+            { keys: "-", name: "Up", normal: true, visual: false, where: "" }
         ]
-        readonly property var menuShortcuts: [{ keys: "<D-s>", name: "Save", mode: "both", where: "" }]
+        readonly property var menuShortcuts: [{ keys: "<D-s>", name: "Save", normal: true, visual: true, where: "" }]
         property bool showOwnShortcuts: false
         // Koil's own keys that do something where vim is.
         property var here: ["  ", " q", "-"]
@@ -126,8 +126,8 @@ TestCase {
 
     function init() {
         app.shortcuts = [
-            { name: "Copy", keys: " c", macro: "yy", mode: "normal", enabled: true },
-            { name: "", keys: " e", macro: "dd", mode: "both", enabled: true }
+            { name: "Copy", keys: " c", macro: "yy", normal: true, visual: false, enabled: true },
+            { name: "", keys: " e", macro: "dd", normal: true, visual: true, enabled: true }
         ];
         app.ran = [];
         app.showOwnShortcuts = false;
@@ -225,9 +225,9 @@ TestCase {
         verify(!win.visible);
     }
 
-    // The form, from the pencil: Tab through it both ways, the mode with
-    // the arrows, the checkbox and the buttons with Space, the key, a macro
-    // picked, and Enter, which saves from anything.
+    // The form, from the pencil: Tab through it both ways, the checkboxes
+    // (a mode each, and Enabled) and the buttons with Space, the key, a
+    // macro picked, and Enter, which saves from anything.
     function test_form() {
         press(Qt.Key_Down);
         tab();
@@ -236,25 +236,37 @@ TestCase {
         verify(win.editing);
         compare(focused(), "Name");
         const order = [];
-        for (let i = 0; i < 9; i++) {
+        for (let i = 0; i < 10; i++) {
             tab();
             order.push(focused());
         }
-        compare(order, ["Shortcut keys", "Keys it runs", "Recorded Macros", "Mode", "Enabled", "Delete",
-            "Cancel", "Save", "Name"]);
+        compare(order, ["Shortcut keys", "Keys it runs", "Recorded Macros", "Normal mode", "Visual mode",
+            "Enabled", "Delete", "Cancel", "Save", "Name"]);
         back();
         compare(focused(), "Save");
         tab(5);
-        compare(focused(), "Mode");
-        press(Qt.Key_Left);
-        compare(win.draft.mode, "visual");
+        compare(focused(), "Normal mode");
+        verify(win.draft.normal);
+        verify(win.draft.visual);
+        press(Qt.Key_Space);
+        verify(!win.draft.normal);
+        verify(win.draft.visual);
+        // in neither mode, it can't be saved
+        tab();
+        press(Qt.Key_Space);
+        compare(win.problem, "It runs in neither mode: check Normal, Visual or both.");
+        verify(!win.canSave);
+        press(Qt.Key_Return);
+        verify(win.editing);
+        press(Qt.Key_Space);
+        compare(win.problem, "");
         tab();
         press(Qt.Key_Space);
         compare(win.draft.enabled, false);
         press(Qt.Key_Space);
         compare(win.draft.enabled, true);
         // the macros, with the keys
-        back(2);
+        back(3);
         compare(focused(), "Recorded Macros");
         press(Qt.Key_Space);
         press(Qt.Key_Return);
@@ -270,7 +282,7 @@ TestCase {
         tab();
         press(Qt.Key_Space);
         tab();
-        compare(focused(), "Mode");
+        compare(focused(), "Normal mode");
         back(3);
         compare(focused(), "Shortcut keys");
         // after the keys it had
@@ -285,12 +297,13 @@ TestCase {
         press(Qt.Key_Backspace);
         press(Qt.Key_Backspace);
         press("x");
-        tab(7);
+        tab(8);
         compare(focused(), "Save");
         press(Qt.Key_Space);
         verify(!win.editing);
         compare(app.shortcuts[1].keys, " x");
-        compare(app.shortcuts[1].mode, "visual");
+        verify(!app.shortcuts[1].normal);
+        verify(app.shortcuts[1].visual);
         compare(focused(), "Search shortcuts");
         compare(win.currentShortcut(), 1);
     }
@@ -301,14 +314,17 @@ TestCase {
         press(Qt.Key_Return);
         verify(win.editing);
         tab(4);
-        compare(focused(), "Mode");
-        press(Qt.Key_Right);
+        compare(focused(), "Normal mode");
+        press(Qt.Key_Space);
+        tab();
+        press(Qt.Key_Space);
         press(Qt.Key_Return);
         verify(!win.editing);
-        compare(app.shortcuts[0].mode, "visual");
+        verify(!app.shortcuts[0].normal);
+        verify(app.shortcuts[0].visual);
         tab();
         press(Qt.Key_Return);
-        tab(5);
+        tab(6);
         compare(focused(), "Enabled");
         press(Qt.Key_Space);
         press(Qt.Key_Enter);
@@ -317,7 +333,7 @@ TestCase {
         // and Cancel and Delete still do what they say, with Space
         tab();
         press(Qt.Key_Return);
-        tab(7);
+        tab(8);
         compare(focused(), "Cancel");
         press(Qt.Key_Space);
         verify(!win.editing);
@@ -436,23 +452,26 @@ TestCase {
         press("-");
         compare(win.problem, "- is the built-in “Up”.");
         tab(3);
-        press(Qt.Key_Right);
-        compare(win.draft.mode, "visual");
+        press(Qt.Key_Space);
+        tab();
+        press(Qt.Key_Space);
+        verify(!win.draft.normal);
+        verify(win.draft.visual);
         compare(win.problem, "");
-        back(3);
+        back(4);
         press(Qt.Key_Backspace);
         press(Qt.Key_Space);
         press("c");
         compare(win.problem, "");
         // nor if it's off
         tab(3);
-        press(Qt.Key_Right);
+        press(Qt.Key_Space);
         compare(win.problem, "Space c already runs “Copy” in normal mode.");
-        tab();
+        tab(2);
         press(Qt.Key_Space);
         compare(win.draft.enabled, false);
         compare(win.problem, "");
-        back(4);
+        back(5);
         compare(focused(), "Shortcut keys");
         press(Qt.Key_Backspace);
         press(Qt.Key_Backspace);

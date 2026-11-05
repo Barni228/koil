@@ -6,8 +6,8 @@ import QtQuick.Layouts
 
 // The user's shortcuts (Space q, Koil > Shortcuts…, or a button in
 // Settings): each is keys (Space c, gc, <C-k>) that run keys of theirs, as
-// a macro does (see Vim.shortcuts), in normal mode, visual mode or both,
-// with a name, and on or off. The list shows each by its name, else its
+// a macro does (see Vim.shortcuts), in normal mode, visual mode or both
+// (a check for each), with a name, and on or off. The list shows each by its name, else its
 // keys, else the keys it runs, and under them, with the lock button on,
 // Koil's own keys, which can be run but not changed, nor taken (see
 // problemOf). A click on one (or
@@ -41,11 +41,6 @@ Window {
     // so neither did anything.
     readonly property bool focused: activeFocusItem !== null
     readonly property var shortcuts: app.shortcuts
-    readonly property var modes: [
-        { label: qsTr("Normal"), value: "normal" },
-        { label: qsTr("Visual"), value: "visual" },
-        { label: qsTr("Both"), value: "both" }
-    ]
     // The search's words, in lower case.
     readonly property var searchWords: searchField.input.text.toLowerCase().split(/\s+/).filter(w => w)
     // The shortcuts the list shows, by their index, and Koil's own (if it
@@ -67,7 +62,8 @@ Window {
         name: nameField.input.text.trim(),
         keys: keyBox.keys,
         macro: macroField.input.text,
-        mode: modes[Math.max(0, modeChoice.current)].value,
+        normal: normalBox.checked,
+        visual: visualBox.checked,
         enabled: enabledBox.checked
     })
     readonly property string problem: problemOf(draft)
@@ -93,9 +89,10 @@ Window {
     function startsWith(a, b) {
         return b.length <= a.length && b.every((t, i) => t === a[i]);
     }
-    // Whether shortcuts in `a` and `b` mode can have the same keys.
+    // Whether the shortcuts `a` and `b` run in a mode both (their keys
+    // can't be the same then).
     function sameMode(a, b) {
-        return a === "both" || b === "both" || a === b;
+        return a.normal && b.normal || a.visual && b.visual;
     }
     // Keys written out (a shortcut's), as StyledText: the names of keys,
     // like <CR>, in `color` (the theme's for them, if not given), so they
@@ -107,10 +104,11 @@ Window {
             + escape(p.text) + "</font>" : escape(p.text)).join("");
     }
     function modeLabel(s) {
-        return !s.enabled ? qsTr("Off") : s.mode === "both" ? qsTr("Normal, visual")
-            : s.mode === "visual" ? qsTr("Visual") : qsTr("Normal");
+        return !s.enabled || !s.normal && !s.visual ? qsTr("Off") : s.normal && s.visual ? qsTr("Normal, visual")
+            : s.visual ? qsTr("Visual") : qsTr("Normal");
     }
-    // Why the shortcut `d` can't be saved: its keys start with a count or a
+    // Why the shortcut `d` can't be saved: it runs in neither mode, its
+    // keys start with a count or a
     // register, which vim reads first, or in the same mode they're Koil's
     // own (app.ownShortcuts, and the menus' Cmd keys, app.menuShortcuts,
     // which vim never gets), or another shortcut's that's on, or start
@@ -118,6 +116,8 @@ Window {
     // from the longer ones they start, one of the two would never run.
     // "" if it can.
     function problemOf(d) {
+        if (!d.normal && !d.visual)
+            return qsTr("It runs in neither mode: check Normal, Visual or both.");
         const ks = app.keyTokens(d.keys);
         if (!ks.length)
             return "";
@@ -128,7 +128,7 @@ Window {
             return qsTr("%1 can't start with \", which picks a register.").arg(name);
         for (const o of app.ownShortcuts.concat(app.menuShortcuts)) {
             const os = app.keyTokens(o.keys);
-            if (!sameMode(o.mode, d.mode) || !startsWith(os, ks) && !startsWith(ks, os))
+            if (!sameMode(o, d) || !startsWith(os, ks) && !startsWith(ks, os))
                 continue;
             if (os.length === ks.length)
                 return qsTr("%1 is the built-in “%2”.").arg(name).arg(o.name);
@@ -137,13 +137,13 @@ Window {
         }
         if (!d.enabled)
             return "";
-        const other = shortcuts.find((s, i) => i !== editIndex && s.enabled && s.keys && sameMode(s.mode, d.mode)
+        const other = shortcuts.find((s, i) => i !== editIndex && s.enabled && s.keys && sameMode(s, d)
             && (startsWith(app.keyTokens(s.keys), ks) || startsWith(ks, app.keyTokens(s.keys))));
         if (!other)
             return "";
         const what = other.name || (other.macro.length > 40 ? other.macro.slice(0, 39) + "…" : other.macro);
-        const where = other.mode === "normal" ? qsTr(" in normal mode") : other.mode === "visual"
-            ? qsTr(" in visual mode") : "";
+        const where = other.normal && other.visual ? "" : other.normal ? qsTr(" in normal mode")
+            : qsTr(" in visual mode");
         const os = app.keyTokens(other.keys);
         if (os.length === ks.length)
             return qsTr("%1 already runs “%2”%3.").arg(name).arg(what).arg(where);
@@ -156,11 +156,11 @@ Window {
     // (Space, which starts Koil's, no longer moves). "" if nothing.
     function noteOf(d) {
         for (const visual of [false, true]) {
-            if (!d.keys || d.mode === (visual ? "normal" : "visual"))
+            if (!d.keys || !(visual ? d.visual : d.normal))
                 continue;
             const c = app.vimCommandIn(d.keys, visual);
             const cs = c ? app.keyTokens(c.keys) : [];
-            if (!c || app.ownShortcuts.some(o => sameMode(o.mode, visual ? "visual" : "normal")
+            if (!c || app.ownShortcuts.some(o => (visual ? o.visual : o.normal)
                     && startsWith(app.keyTokens(o.keys), cs)))
                 continue;
             return (c.whole ? qsTr("It takes the place of vim's %1.")
@@ -201,8 +201,8 @@ Window {
         const forward = event.key === Qt.Key_Tab && !(event.modifiers & Qt.ShiftModifier);
         const reason = forward ? Qt.TabFocusReason : Qt.BacktabFocusReason;
         const row = shortcutList.currentItem as ShortcutRow;
-        const chain = (editing ? [nameField.input, keyBox, macroField.input, macroButton, modeChoice, enabledBox,
-            deleteButton, cancelButton, saveButton] : [searchField.input, row ? row.editButton : null,
+        const chain = (editing ? [nameField.input, keyBox, macroField.input, macroButton, normalBox, visualBox,
+            enabledBox, deleteButton, cancelButton, saveButton] : [searchField.input, row ? row.editButton : null,
             row ? row.deleteButton : null, ownButton, newButton]).filter(i => i && i.visible && i.enabled);
         const at = chain.indexOf(from || activeFocusItem);
         const next = chain[at < 0 ? (forward ? 0 : chain.length - 1) : (at + (forward ? 1 : chain.length - 1)) % chain.length];
@@ -252,14 +252,16 @@ Window {
     }
     // The form for the shortcut at `index`, or for a new one (-1).
     function edit(index) {
-        const s = index < 0 ? { name: "", keys: "", macro: "", mode: "normal", enabled: true } : shortcuts[index];
+        const s = index < 0 ? { name: "", keys: "", macro: "", normal: true, visual: false, enabled: true }
+            : shortcuts[index];
         editIndex = index;
         nameField.input.text = s.name;
         keyBox.keys = s.keys;
         macroField.input.text = s.macro;
         // From its start, rather than scrolled to its end.
         macroField.input.cursorPosition = 0;
-        modeChoice.current = Math.max(0, modes.findIndex(m => m.value === s.mode));
+        normalBox.checked = s.normal;
+        visualBox.checked = s.visual;
         enabledBox.checked = s.enabled;
         editing = true;
         nameField.input.forceActiveFocus();
@@ -378,6 +380,14 @@ Window {
         theme: win.theme
         color: win.theme.windowText
         focusPolicy: Qt.TabFocus
+        Keys.onTabPressed: event => win.tab(event)
+        Keys.onBacktabPressed: event => win.tab(event)
+    }
+
+    // A checkbox of the form, which keeps what it shows.
+    component FormCheck: Check {
+        theme: win.theme
+        checkable: true
         Keys.onTabPressed: event => win.tab(event)
         Keys.onBacktabPressed: event => win.tab(event)
     }
@@ -981,69 +991,30 @@ Window {
                 FormLabel {
                     text: qsTr("Mode")
                 }
-                Segmented {
-                    id: modeChoice
+                // Where it runs: a check for each mode, rather than one of
+                // Normal, Visual and Both.
+                Row {
+                    spacing: 16 * win.zoom
 
-                    theme: win.theme
-                    options: win.modes
-                    Accessible.name: qsTr("Mode")
-                    onPicked: index => current = index
-                    Keys.onTabPressed: event => win.tab(event)
-                    Keys.onBacktabPressed: event => win.tab(event)
+                    FormCheck {
+                        id: normalBox
+
+                        text: qsTr("Normal")
+                        Accessible.name: qsTr("Normal mode")
+                    }
+                    FormCheck {
+                        id: visualBox
+
+                        text: qsTr("Visual")
+                        Accessible.name: qsTr("Visual mode")
+                    }
                 }
 
                 Item {}
-                AbstractButton {
+                FormCheck {
                     id: enabledBox
 
-                    checkable: true
-                    focusPolicy: Qt.TabFocus
                     text: qsTr("Enabled")
-                    Accessible.role: Accessible.CheckBox
-                    Accessible.name: text
-                    Accessible.checked: checked
-                    Keys.onTabPressed: event => win.tab(event)
-                    Keys.onBacktabPressed: event => win.tab(event)
-                    Keys.onReturnPressed: click()
-                    Keys.onEnterPressed: click()
-
-                    // Its ring, as the box is the accent's color when on.
-                    background: Rectangle {
-                        x: -4 * win.zoom
-                        y: -3 * win.zoom
-                        width: parent.width + 8 * win.zoom
-                        height: parent.height + 6 * win.zoom
-                        radius: 4 * win.zoom
-                        color: "transparent"
-                        border.color: enabledBox.visualFocus ? win.theme.accent : "transparent"
-                    }
-
-                    contentItem: Row {
-                        spacing: 8 * win.zoom
-
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 16 * win.zoom
-                            height: 16 * win.zoom
-                            radius: 3 * win.zoom
-                            color: enabledBox.checked ? win.theme.accent : win.theme.field
-                            border.color: enabledBox.checked || enabledBox.visualFocus ? win.theme.accent : win.theme.fieldBorder
-
-                            Icon {
-                                anchors.centerIn: parent
-                                visible: enabledBox.checked
-                                theme: win.theme
-                                path: "M4 8.5 L7 11.5 L12 5"
-                                color: win.theme.highlightedText
-                            }
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: enabledBox.text
-                            font.pixelSize: Math.round(13 * win.zoom)
-                            color: win.theme.windowText
-                        }
-                    }
                 }
             }
 

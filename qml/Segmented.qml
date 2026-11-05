@@ -3,9 +3,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 
-// One of a few options, as a row of buttons, in a window (Settings,
-// Shortcuts). With the keys, it's one stop for Tab, where Left and Right
-// pick the option before or after.
+// One of a few options, as a row of buttons, in a window (the Settings
+// window's theme, and when applying asks). With the keys, it's one stop
+// for Tab, where Left and Right pick the option before or after.
 Rectangle {
     id: segmented
 

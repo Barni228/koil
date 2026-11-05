@@ -40,15 +40,6 @@ Window {
     readonly property color accent: theme.accent
     readonly property color borderColor: theme.fieldBorder
 
-    // Line numbers as one choice: :set nonu nornu, nu, rnu, or both.
-    readonly property var lineNumberModes: [
-        { label: qsTr("Off"), number: false, relative: false },
-        { label: qsTr("On"), number: true, relative: false },
-        { label: qsTr("Relative"), number: false, relative: true },
-        { label: qsTr("Hybrid"), number: true, relative: true }
-    ]
-    readonly property int lineNumberMode: lineNumberModes.findIndex(
-        m => m.number === settings.number && m.relative === settings.relativeNumber)
     readonly property var colorSchemes: [
         { label: qsTr("System"), value: "system" },
         { label: qsTr("Light"), value: "light" },
@@ -117,10 +108,6 @@ Window {
     function setFontSize(size) {
         app.changeSetting("fontSize", Math.max(app.minFontSize, Math.min(app.maxFontSize, size)));
     }
-    function setLineNumberMode(i) {
-        app.changeSetting("number", lineNumberModes[i].number);
-        app.changeSetting("relativeNumber", lineNumberModes[i].relative);
-    }
     // What the Command line row says under its button.
     function commandNote() {
         if (commandError)
@@ -167,7 +154,7 @@ Window {
         return {
             fontFamily: app.defaultFontFamily,
             fontSize: app.defaultFontSize,
-            number: false,
+            number: true,
             relativeNumber: false,
             syntax: true,
             wrap: false,
@@ -302,6 +289,18 @@ Window {
         theme: win.theme
         checked: win.settings[onOff.key]
         onClicked: win.app.changeSetting(onOff.key, !onOff.checked)
+    }
+
+    // The setting `key`, on or off, as one of a few beside it, each its
+    // own: line numbers' :set number and relativenumber.
+    component SettingCheck: Check {
+        id: settingCheck
+
+        required property string key
+
+        theme: win.theme
+        checked: win.settings[settingCheck.key]
+        onClicked: win.app.changeSetting(settingCheck.key, !settingCheck.checked)
     }
 
     // Resets the setting `key`.
@@ -635,17 +634,28 @@ Window {
 
                 SettingLabel {
                     text: qsTr("Line numbers")
-                    about: qsTr("Numbers before the lines. On numbers them from the top, Relative counts from the cursor's line, and Hybrid does both, with the cursor's line's own number. `:set number` and `:set relativenumber` change it until Koil quits.")
+                    about: qsTr("Numbers before the lines. Absolute numbers them from the top, and Relative counts from the cursor's line; with both, the cursor's line has its own number, and the others count from it. `:set number` and `:set relativenumber` change them until Koil quits.")
                 }
-                Segmented {
-                    theme: win.theme
-                    options: win.lineNumberModes
-                    current: win.lineNumberMode
-                    onPicked: index => win.setLineNumberMode(index)
+                Row {
+                    spacing: 16 * win.zoom
+
+                    SettingCheck {
+                        key: "number"
+                        text: qsTr("Absolute")
+                        Accessible.name: qsTr("Absolute line numbers")
+                    }
+                    SettingCheck {
+                        key: "relativeNumber"
+                        text: qsTr("Relative")
+                        Accessible.name: qsTr("Relative line numbers")
+                    }
                 }
                 ResetButton {
-                    enabled: win.lineNumberMode !== 0
-                    onClicked: win.setLineNumberMode(0)
+                    enabled: win.custom("number") || win.custom("relativeNumber")
+                    onClicked: {
+                        win.reset("number");
+                        win.reset("relativeNumber");
+                    }
                 }
 
                 SettingLabel {

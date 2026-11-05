@@ -182,48 +182,51 @@ ApplicationWindow {
     // or cmd.exe on Windows.
     readonly property string systemShell: system.defaultShell()
     // The user's shortcuts (see ShortcutsWindow), as saved: { name, keys,
-    // macro, mode, enabled }, where `keys` are those that run it, written
-    // as Vim.commandKeys' are (" c" is Space c, "gc"; "" for none), `macro`
-    // the keys it runs (as a register's text), and `mode` "normal",
-    // "visual" or "both".
+    // macro, normal, visual, enabled }, where `keys` are those that run it,
+    // written as Vim.commandKeys' are (" c" is Space c, "gc"; "" for none),
+    // `macro` the keys it runs (as a register's text), and `normal` and
+    // `visual` whether it runs in that mode.
     readonly property var shortcuts: readShortcuts(settings.shortcuts)
     // Koil's own keys (see Vim.commandKeys), which the shortcuts' list
     // shows under the user's, to run but not to change, as { keys, name,
-    // mode, where }: where they work, if not everywhere. No shortcut can
-    // have them, start with them, or be their start (in the same mode), so
-    // gs, which stands for the sort keys after it, keeps them all.
-    readonly property var ownShortcuts: [
-        { keys: "  ", name: qsTr("Apply the changes (in a file, save)"), mode: "normal", where: "" },
-        { keys: " a", name: qsTr("Apply, listing the changes first"), mode: "normal", where: qsTr("Listing") },
-        { keys: " u", name: qsTr("List the applies to undo"), mode: "normal", where: qsTr("Listing") },
-        { keys: " r", name: (isMac ? qsTr("Show the entry in Finder") : Qt.platform.os === "windows"
-            ? qsTr("Show the entry in Explorer") : qsTr("Show the entry in the file manager"))
-            + qsTr(" (in a file, the file)"), mode: "normal", where: "" },
-        { keys: " o", name: qsTr("Open the entry in its default app (in a file, the file)"), mode: "normal",
-            where: "" },
-        { keys: "K", name: qsTr("Show all about the entry: size, times, permissions… (in a file, the file)"),
-            mode: "normal", where: "" },
-        { keys: " q", name: qsTr("List your shortcuts"), mode: "both", where: "" },
-        { keys: "<CR>", name: qsTr("Open the dir or file on the line"), mode: "normal", where: qsTr("Listing") },
-        { keys: "<S-CR>", name: qsTr("Update, staying in the path field"), mode: "normal",
-            where: qsTr("Path field") },
-        { keys: "-", name: qsTr("The dir above (in a file, back to the listing)"), mode: "normal", where: "" },
-        { keys: "<Tab>", name: qsTr("Go between the listing and the path field"), mode: "normal",
-            where: qsTr("Listing") },
-        { keys: "g.", name: qsTr("Toggle hidden entries"), mode: "normal", where: qsTr("Listing") },
-        { keys: "gi", name: qsTr("Toggle hiding what git ignores"), mode: "normal", where: qsTr("Listing") },
-        { keys: "gr", name: qsTr("Toggle reading the path as a regex"), mode: "normal", where: qsTr("Listing") },
-        { keys: "gs", name: qsTr("Sort the listing, by the key after it"), mode: "normal", where: qsTr("Listing") },
-        { keys: "_", name: qsTr("The scratchpad (in it, back)"), mode: "normal", where: "" },
-        { keys: "!", name: qsTr("Run a shell command on the entry"), mode: "normal", where: "" }
-    ]
+    // normal, visual, where }: the modes they're in, as a shortcut's (all
+    // normal mode's, and Space q visual mode's too), and where they work,
+    // if not everywhere. No shortcut can have them, start with them, or be
+    // their start (in the same mode), so gs, which stands for the sort keys
+    // after it, keeps them all.
+    readonly property var ownShortcuts: {
+        const own = (keys, name, where) => ({ keys: keys, name: name, normal: true, visual: keys === " q",
+            where: where || "" });
+        const listing = qsTr("Listing");
+        return [
+            own("  ", qsTr("Apply the changes (in a file, save)")),
+            own(" a", qsTr("Apply, listing the changes first"), listing),
+            own(" u", qsTr("List the applies to undo"), listing),
+            own(" r", (isMac ? qsTr("Show the entry in Finder") : Qt.platform.os === "windows"
+                ? qsTr("Show the entry in Explorer") : qsTr("Show the entry in the file manager"))
+                + qsTr(" (in a file, the file)")),
+            own(" o", qsTr("Open the entry in its default app (in a file, the file)")),
+            own("K", qsTr("Show all about the entry: size, times, permissions… (in a file, the file)")),
+            own(" q", qsTr("List your shortcuts")),
+            own("<CR>", qsTr("Open the dir or file on the line"), listing),
+            own("<S-CR>", qsTr("Update, staying in the path field"), qsTr("Path field")),
+            own("-", qsTr("The dir above (in a file, back to the listing)")),
+            own("<Tab>", qsTr("Go between the listing and the path field"), listing),
+            own("g.", qsTr("Toggle hidden entries"), listing),
+            own("gi", qsTr("Toggle hiding what git ignores"), listing),
+            own("gr", qsTr("Toggle reading the path as a regex"), listing),
+            own("gs", qsTr("Sort the listing, by the key after it"), listing),
+            own("_", qsTr("The scratchpad (in it, back)")),
+            own("!", qsTr("Run a shell command on the entry"))
+        ];
+    }
     // The keys Koil's menus (and the editor's copy, paste and undo) take
     // before vim gets them, as vim names them (see Vim.tokenFor: Cmd on
     // macOS, Ctrl elsewhere, with Shift only for Cmd), which no shortcut
     // can have, as ownShortcuts are, but which the list doesn't show.
     readonly property var menuShortcuts: {
-        const key = (k, name) => ({ keys: "<" + (isMac ? "D" : "C") + "-" + k + ">", name: name, mode: "both",
-            where: "" });
+        const key = (k, name) => ({ keys: "<" + (isMac ? "D" : "C") + "-" + k + ">", name: name, normal: true,
+            visual: true, where: "" });
         const both = [key("o", qsTr("Open…")), key("s", qsTr("Save")), key("q", qsTr("Quit")), key("f", qsTr("Find")),
             key("g", qsTr("Find Next")), key("z", qsTr("Undo")), key("c", qsTr("Copy"))];
         return both.concat(isMac ? [key("O", qsTr("Open Folder…")), key("S", qsTr("Save As…")),
@@ -1855,7 +1858,8 @@ ApplicationWindow {
             name: typeof s.name === "string" ? s.name : "",
             keys: typeof s.keys === "string" ? s.keys : "",
             macro: s.macro,
-            mode: ["normal", "visual", "both"].includes(s.mode) ? s.mode : "normal",
+            normal: s.normal !== false,
+            visual: s.visual === true,
             enabled: s.enabled !== false
         })) : [];
     }
@@ -1871,8 +1875,8 @@ ApplicationWindow {
             keys: s.keys,
             macro: s.macro,
             label: s.keys ? vim.keysName(s.keys) : s.name || qsTr("Shortcut"),
-            normal: s.mode !== "visual",
-            visual: s.mode !== "normal"
+            normal: s.normal,
+            visual: s.visual
         };
     }
 
@@ -1965,7 +1969,7 @@ ApplicationWindow {
         property string fontFamily: root.defaultFontFamily
         property string colorScheme: "system"
         property string confirmChanges: "always"
-        property bool number: false
+        property bool number: true
         property bool relativeNumber: false
         // Whether files and the scratchpad are colored (:set syntax).
         property bool syntax: true
