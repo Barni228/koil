@@ -38,7 +38,8 @@ ApplicationWindow {
     // What the listing shows after each entry's line, by its ID: its size
     // or a date, when it's sorted by one (see Editor.infos). Sorted by
     // size, `busyInfos` has the dirs whose sizes are being counted (see
-    // pollSizes), whose notes show `infoDots` of their three dots.
+    // pollSizes), whose notes show `infoDots` of their three dots, as
+    // K's box does a dir's size it counts (see dotsTimer).
     property var infos: ({})
     property var busyInfos: ({})
     // Where the entries that are symlinks point, by their IDs (see
@@ -622,10 +623,8 @@ ApplicationWindow {
     // as they are, with the dots after them coming and going, and sorts
     // the listing by them once they're all counted.
     function pollSizes() {
-        if (counting) {
-            infoDots = infoDots % 3 + 1;
+        if (counting)
             setNotes(JSON.parse(koil.dirSizes()), true);
-        }
         if (!counting && sortedCounting)
             sortCounted();
     }
@@ -2110,6 +2109,18 @@ ApplicationWindow {
         onTriggered: root.refreshInfo()
     }
 
+    // The dots after a size being counted come and go, in the listing's
+    // notes and K's box alike, so a count that finds nothing new for a
+    // while (a dir of 100,000 files is read at once) still shows it's on.
+    Timer {
+        id: dotsTimer
+
+        interval: 300
+        repeat: true
+        running: root.listing && root.counting || infoTimer.running
+        onTriggered: root.infoDots = root.infoDots % 3 + 1
+    }
+
     // Has the times after the lines say how long ago they were as time
     // goes on (see refreshTimes), while the listing shows them. It checks
     // the clock rather than waiting till they change, as a timer doesn't
@@ -2480,6 +2491,7 @@ ApplicationWindow {
 
         theme: theme
         system: system
+        dots: root.infoDots
     }
 
     HelpPanel {

@@ -523,7 +523,8 @@ the scratchpad (see Scratchpad).
   can put another entry there; the path field's open dir; the file), or
   why there's none (`entryOnDisk`'s message, which Space r shows in the
   status line), until Esc in normal mode closes it (vim's
-  `highlightsCleared`, as for `:noh`). K reads it again. A row a
+  `highlightsCleared`, as for `:noh`), as a hint under its text says,
+  dimmed, as the help's header does its keys. K reads it again. A row a
   label and a value (lined up by `Entry::show`): the path (with `/` after a dir's), what it is (a
   symlink's target as written, and where it resolves as the Real path,
   on a row of its own: `target → real` read as the link and its target,
@@ -557,7 +558,9 @@ the scratchpad (see Scratchpad).
   it again every 300 ms, as `sizeTimer` does the notes, until it's done
   or the box closes or shows something else (`closeInfoCount`), which
   stops its count (`Koil.infoClosed`, keeping what's counted); done, Koil
-  stops it itself (`give_info`). Following the cursor down a listing of
+  stops it itself (`give_info`). Its `...` (each `busy` span's end,
+  `busyDots`) shows `infoDots` of the dots, the others spaces, so nothing
+  moves, as the notes do. Following the cursor down a listing of
   dirs, each is counted while it's shown. `Sizes` reads a dir at a time, so one of 128,000
   files comes in at once: `target/` showed 2.8 GB for 9 s, then 16 GB, as
   its `debug/deps` was read.
@@ -647,7 +650,9 @@ the scratchpad (see Scratchpad).
   its ID is in `busy`; main.qml's `sizeTimer` polls `Koil.dirSizes` every
   300 ms while any is, and Editor.qml shows `infoDots` of the three dots,
   the note's place worked out with all of them (so nothing moves as they
-  come and go). The dirs counted go first, by size (`listing::listing`,
+  come and go), which `dotsTimer` steps while the notes or K's box count
+  one, as a count can find nothing new for seconds (a dir of 128,000
+  files is read at once). The dirs counted go first, by size (`listing::listing`,
   `compare`, which `merge` uses too, through `by_size`), and the others
   after, in koil's order (with Folders first off, among the files: see
   Sorting). Once they're all counted, `sortCounted` updates (`sortedCounting`:
