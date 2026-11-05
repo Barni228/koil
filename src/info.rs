@@ -262,7 +262,7 @@ pub fn read(path: &Path) -> Entry {
     };
     let mut rows = vec![row("Kind", kind_text(&kind, target.as_ref()))];
     match &target {
-        Some(target) => rows.push(row("Target", target_text(path, target))),
+        Some(target) => rows.extend(target_rows(path, target)),
         None => {
             let absolute = std::path::absolute(path).ok();
             if let Some(real) = real_path(path).filter(|real| Some(real) != absolute.as_ref()) {
@@ -354,38 +354,41 @@ fn special_kind(_kind: &FileType) -> &'static str {
     "Unknown"
 }
 
-/// Where the link at `path` points, as it's written, and where that is,
-/// followed to the end, if it's written otherwise (relative, or to another
-/// link); or that it isn't there, from `target`, what's there.
-fn target_text(path: &Path, target: &io::Result<Metadata>) -> Text {
+/// Where the link at `path` points, as it's written (Target), or that it
+/// isn't there, from `target`, what's there; and where that is, followed
+/// to the end (Real path), if it's written otherwise (relative, or to
+/// another link). Not on one row with an arrow between, which read as the
+/// link and its target, as `ls -l` shows them.
+fn target_rows(path: &Path, target: &io::Result<Metadata>) -> Vec<Row> {
     let written = match fs::read_link(path) {
         Ok(written) => written,
         Err(error) => {
-            return Text::of(format!("Can't be read: {}", describe(&error)), Kind::Error);
+            let why = Text::of(format!("Can't be read: {}", describe(&error)), Kind::Error);
+            return vec![row("Target", why)];
         }
     };
     let shown = Text::of(show_path(&written), Kind::Link);
-    match target {
+    let target = match target {
+        Ok(target) => target,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            shown.and(" (not there)", Kind::Error)
+            return vec![row("Target", shown.and(" (not there)", Kind::Error))];
         }
-        Err(error) => shown.and(
-            format!(" (can't be read: {})", describe(error)),
-            Kind::Error,
-        ),
-        Ok(target) => match real_path(path) {
-            Some(real) if real != written => {
-                let name = if target.is_dir() {
-                    Kind::Dir
-                } else {
-                    Kind::Plain
-                };
-                let real = path_text(&slashed(show_path(&real), target.is_dir()), name);
-                shown.and(" → ", Kind::Muted).then(real)
-            }
-            _ => shown,
-        },
+        Err(error) => {
+            let why = format!(" (can't be read: {})", describe(error));
+            return vec![row("Target", shown.and(why, Kind::Error))];
+        }
+    };
+    let mut rows = vec![row("Target", shown)];
+    if let Some(real) = real_path(path).filter(|real| *real != written) {
+        let name = if target.is_dir() {
+            Kind::Dir
+        } else {
+            Kind::Plain
+        };
+        let real = path_text(&slashed(show_path(&real), target.is_dir()), name);
+        rows.push(row("Real path", real));
     }
+    rows
 }
 
 /// `path` with every link in it followed, without the `\\?\` Windows puts

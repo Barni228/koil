@@ -144,8 +144,9 @@ fn symlinks() {
         row(&info.text, "Kind").as_deref(),
         Some("Symlink to a file")
     );
-    let target = format!("a.txt → {}", show_path(&path.join("a.txt")));
-    assert_eq!(row(&info.text, "Target"), Some(target));
+    assert_eq!(row(&info.text, "Target").as_deref(), Some("a.txt"));
+    let real = show_path(&path.join("a.txt"));
+    assert_eq!(row(&info.text, "Real path"), Some(real));
     assert_eq!(
         row(&info.text, "Size").as_deref(),
         Some("5 bytes, the target's")
@@ -160,8 +161,9 @@ fn symlinks() {
     assert_eq!(read(&to_dir).dir(), None);
     assert!(info.text.lines().next().unwrap().ends_with("to-dir/"));
     assert_eq!(row(&info.text, "Kind").as_deref(), Some("Symlink to a dir"));
-    let target = format!("sub → {}/", show_path(&path.join("sub")));
-    assert_eq!(row(&info.text, "Target"), Some(target));
+    assert_eq!(row(&info.text, "Target").as_deref(), Some("sub"));
+    let real = format!("{}/", show_path(&path.join("sub")));
+    assert_eq!(row(&info.text, "Real path"), Some(real));
     assert_eq!(row(&info.text, "Contains").as_deref(), Some("Nothing"));
     assert_eq!(row(&info.text, "Size"), None);
 
@@ -171,6 +173,7 @@ fn symlinks() {
         row(&info.text, "Target").as_deref(),
         Some("gone (not there)")
     );
+    assert_eq!(row(&info.text, "Real path"), None);
     assert_eq!(row(&info.text, "Size"), None);
 
     // an absolute link written as it resolves shows it once
@@ -180,6 +183,7 @@ fn symlinks() {
         row(&info.text, "Target"),
         Some(show_path(&path.join("a.txt")))
     );
+    assert_eq!(row(&info.text, "Real path"), None);
 }
 
 #[cfg(unix)]
@@ -426,7 +430,6 @@ fn colored_links() {
     assert_eq!(kind_of(&info, "to-dir/"), Some(Kind::Link));
     assert_eq!(kind_of(&info, "Symlink to a dir"), Some(Kind::Link));
     assert_eq!(kind_of(&info, "sub"), Some(Kind::Link));
-    assert_eq!(kind_of(&info, " → "), Some(Kind::Muted));
     assert_eq!(kind_of(&info, "sub/"), Some(Kind::Dir));
     let info = shown(&path.join("broken"), None, None);
     assert_eq!(kind_of(&info, "Broken symlink"), Some(Kind::Error));

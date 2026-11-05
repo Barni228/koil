@@ -524,8 +524,9 @@ the scratchpad (see Scratchpad).
   status line), until Esc in normal mode closes it (vim's
   `highlightsCleared`, as for `:noh`). K reads it again. A row a
   label and a value (lined up by `Entry::show`): the path (with `/` after a dir's), what it is (a
-  symlink's target as written, and where it resolves; the real path if a
-  dir it's in is a link), its size and size on disk (`koil_core::disk_size`),
+  symlink's target as written, and where it resolves as the Real path,
+  on a row of its own: `target → real` read as the link and its target,
+  as `ls -l` has them; the real path if a dir it's in is a link), its size and size on disk (`koil_core::disk_size`),
   what a dir has (by kind, and how many are hidden), its times (local, to
   the second, and how long ago; none at 0, which a device's creation is),
   and on Unix when its metadata changed (`ctime`), its permissions as `ls
