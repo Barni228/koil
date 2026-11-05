@@ -335,8 +335,8 @@ the scratchpad (see Scratchpad).
   `my_tests` and `my_tools`, but `ts` nothing, which would lose its `s`).
   Otherwise vim shows them (`vim.completion`, drawn by `CompletionList` in
   the window's overlay, a row per dir as its listing line, the names under
-  the part): Tab and Shift+Tab (`<S-Tab>`, which does nothing elsewhere;
-  also Down and Up, Ctrl-N and Ctrl-P) pick the next or previous one, Enter
+  the part): Tab and Shift+Tab (`<S-Tab>`, which elsewhere only a
+  shortcut takes, see Shortcuts; also Down and Up, Ctrl-N and Ctrl-P) pick the next or previous one, Enter
   takes it (so Enter opens the path only once they're closed), Esc closes
   them but stays in insert mode, typing and
   Backspace narrow them (vim types those itself, so the options follow at
@@ -1334,7 +1334,8 @@ the scratchpad (see Scratchpad).
   causes. In the form, Enter saves whatever has the keys (a `Shortcut`, as
   Return is a macOS dialog's default button, which `primary` colors), and
   Space clicks a button. Everything in it is reached with Tab (`tab`, a list of what each
-  page has, which every control there hands Tab and Shift+Tab to): Qt's
+  page has, which every control there hands Tab and Shift+Tab to, but
+  the key box, which types Shift+Tab): Qt's
   own Tab reaches only text fields and lists on macOS unless Keyboard
   navigation is on in System Settings, and skips every button. The list
   has no keys of its own (it had vim's `j`, `k`, `e`, `a` and `/`): the
@@ -1361,12 +1362,24 @@ the scratchpad (see Scratchpad).
   them: `macroKey`), and the window asks to be active again once it
   closes, as Qt's offscreen platform left the popup's. The form's key box
   takes the keys typed, as vim names them (`typeKey`, `Vim.tokenFor`:
-  Backspace takes one back, Cmd+Backspace all; Tab, Enter and Esc go to
-  the form, so no shortcut has them). On macOS, Cmd and a letter, digit or
-  sign is a key too (`<D-k>`, `<D-K>` with Shift, as MacVim names them),
-  in the box and in the editor, where only a shortcut does something with
-  it (else it's a bad command); Cmd+W goes to the box rather than closing
-  the window. They can't be Koil's own, start
+  Backspace takes one back, Cmd+Backspace all; Tab, Enter and Esc alone
+  go to the form, so no shortcut has them, but with a modifier they're
+  keys, and Shift+Tab is `<S-Tab>` there, not a step back). On macOS, Cmd
+  and a letter, digit or sign is a key too (`<D-k>`, `<D-K>` with Shift,
+  as MacVim names them), in the box and in the editor, where only a
+  shortcut does something with it (else it's a bad command); Cmd+W goes
+  to the box rather than closing the window. A key with a name
+  (`keyName`: Esc, Enter, Tab, the arrows, Home, End, PageUp, PageDown,
+  F1 to F35) is one of its own with Shift, Ctrl or Cmd (`<S-F12>`,
+  `<C-S-Left>`, `<D-Esc>`: `modifiedName`; not Backspace and Delete, and
+  Alt isn't told apart, as Option types characters). F-keys, Shift+Tab
+  and the Ctrl and Cmd ones are keys only a shortcut takes
+  (`shortcutOnly`): without one they do nothing, not even end a command,
+  as before they had names (`runKey` reads them only if a shortcut takes
+  the keys so far with them), and Enter's make no line break in the path
+  field. Shift and a key vim knows (`<S-Esc>`, `<S-PageDown>`) is that
+  key alone, but for a shortcut that takes it in normal or visual mode
+  (`runKey`), as Shift+Enter is `<S-CR>`. They can't be Koil's own, start
   them, or start with them (`g`, `g.x`), nor a key Koil's menus or the
   editor's copy, paste and undo take before vim gets it
   (`root.menuShortcuts`, which the list doesn't show: Cmd keys on macOS,
@@ -1598,9 +1611,9 @@ the scratchpad (see Scratchpad).
   in main.rs), has it delete back to the field's start, or the
   selection, through `remove`, which Cmd+Z undoes. With nothing to
   delete, the field's Keys handlers have it (the help's search closes). Other Cmd
-  keys (`<D-k>`, see Shortcuts) do nothing but run a shortcut: insert
-  mode leaves them to the editor, the command line drops them, and Cmd
-  and an arrow stays the editor's (no token).
+  keys (`<D-k>`, `<D-Left>`, see Shortcuts) do nothing but run a
+  shortcut: insert mode leaves them to the editor (Cmd and an arrow), and
+  the command line drops them.
 - **Macros**: typed keys are recorded as tokens (`"<Esc>"`, `"x"`); the register
   keeps them as `keys` next to the text, so literal "<CR>" typed in insert mode
   stays text. `@` pushes a frame (`{ keys, next, runs }`, not the keys `runs`

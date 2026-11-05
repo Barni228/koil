@@ -309,9 +309,16 @@ Window {
         macroField.input.forceActiveFocus();
     }
     // A key typed in the form's key box, which goes after its keys, as vim
-    // names it (Space, g, <C-k>): Backspace takes the last one back, and
-    // Cmd+Backspace all of them. Tab, Enter and Esc go through the form.
+    // names it (Space, g, <C-k>, <S-Tab>, <D-Esc>): Backspace takes the
+    // last one back, and Cmd+Backspace all of them. Tab, Enter and Esc
+    // alone go through the form (the window's shortcuts take Enter and
+    // Esc), so with a modifier they're keys, and Shift+Tab doesn't go back.
     function typeKey(event) {
+        const modifiers = event.modifiers & (Qt.ShiftModifier | Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier);
+        if (event.key === Qt.Key_Tab && !modifiers) {
+            tab(event);
+            return;
+        }
         const typed = app.keyToken(event);
         if (typed === "<BS>" || typed === "<Del>")
             keyBox.keys = app.keyTokens(keyBox.keys).slice(0, -1).join("");
@@ -319,7 +326,9 @@ Window {
             keyBox.keys = "";
         else if (typed !== null)
             keyBox.keys += typed;
-        else
+        // Nor a key vim has no name for (Cmd+Option+Tab), which Qt's
+        // own Tab would take somewhere.
+        else if (event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backtab)
             return;
         event.accepted = true;
     }
@@ -830,8 +839,6 @@ Window {
                         Accessible.name: qsTr("Shortcut keys")
                         Accessible.description: keys ? win.app.keysName(keys) : ""
                         Keys.onPressed: event => win.typeKey(event)
-                        Keys.onTabPressed: event => win.tab(event)
-                        Keys.onBacktabPressed: event => win.tab(event)
 
                         // The last keys, if they don't all fit.
                         Text {

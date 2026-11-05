@@ -79,6 +79,13 @@ TestCase {
                 return "<BS>";
             if (event.key === Qt.Key_K && event.modifiers & Qt.MetaModifier)
                 return "<C-k>";
+            if (event.key === Qt.Key_Backtab)
+                return "<S-Tab>";
+            // Esc and Enter with Cmd or Shift
+            const named = { [Qt.Key_Escape]: "Esc", [Qt.Key_Return]: "CR" }[event.key];
+            if (named)
+                return event.modifiers & Qt.ControlModifier ? "<D-" + named + ">"
+                    : event.modifiers & Qt.ShiftModifier ? "<S-" + named + ">" : "<" + named + ">";
             // Cmd
             if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z && event.modifiers & Qt.ControlModifier)
                 return "<D-" + String.fromCharCode(event.key - Qt.Key_A + 97) + ">";
@@ -465,6 +472,35 @@ TestCase {
         press(Qt.Key_Return);
         verify(!win.editing);
         compare(app.shortcuts[2].keys, "z");
+    }
+
+    // In the key box, Tab, Esc and Enter with a modifier are keys, and so
+    // is Shift+Tab, rather than going back; alone, Tab goes on, Enter
+    // saves and Esc goes back to the list.
+    function test_modifiedKeys() {
+        press(Qt.Key_N, Qt.ControlModifier);
+        tab();
+        compare(focused(), "Shortcut keys");
+        press(Qt.Key_Backtab, Qt.ShiftModifier);
+        compare(focused(), "Shortcut keys");
+        press(Qt.Key_Escape, Qt.ControlModifier);
+        press(Qt.Key_Return, Qt.ControlModifier);
+        press(Qt.Key_Escape, Qt.ShiftModifier);
+        compare(win.draft.keys, "<S-Tab><D-Esc><D-CR><S-Esc>");
+        verify(win.editing);
+        tab();
+        compare(focused(), "Keys it runs");
+        type("x");
+        back();
+        compare(focused(), "Shortcut keys");
+        press(Qt.Key_Return);
+        verify(!win.editing);
+        compare(app.shortcuts[2].keys, "<S-Tab><D-Esc><D-CR><S-Esc>");
+        press(Qt.Key_N, Qt.ControlModifier);
+        tab();
+        press(Qt.Key_Escape);
+        verify(!win.editing);
+        compare(app.shortcuts.length, 3);
     }
 
     // Typing searches the names, keys and keys run, which every word must

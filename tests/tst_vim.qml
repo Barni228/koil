@@ -58,8 +58,9 @@ TestCase {
         return (r + t.slice(i)).split(mushroom).join("M").split(chair).join("C");
     }
 
-    // Types keys: characters, and names like <Esc>, <CR>, <S-CR>
-    // (Shift+Enter), <S-Tab>, <C-v> (Ctrl) or <D-c> (Cmd on macOS, Ctrl elsewhere).
+    // Types keys: characters, and names like <Esc>, <CR>, <F12>, <S-Tab>,
+    // <C-v> (Ctrl) or <D-c> (Cmd on macOS, Ctrl elsewhere), and named keys
+    // with those (<S-CR>, <C-Esc>, <D-S-F12>).
     function keys(s) {
         const named = {
             "Esc": Qt.Key_Escape,
@@ -71,29 +72,33 @@ TestCase {
             "Right": Qt.Key_Right,
             "Up": Qt.Key_Up,
             "Down": Qt.Key_Down,
-            "Home": Qt.Key_Home
+            "Home": Qt.Key_Home,
+            "End": Qt.Key_End,
+            "PageUp": Qt.Key_PageUp,
+            "PageDown": Qt.Key_PageDown
         };
         const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
         for (const m of s.match(/<[^<>]+>|[\s\S]/g)) {
             if (m.length === 1 || m === "<>") {
                 keyClick(m);
-            } else {
-                const name = m.slice(1, -1);
-                if (named[name] !== undefined)
-                    keyClick(named[name]);
-                else if (name === "S-CR")
-                    keyClick(Qt.Key_Return, Qt.ShiftModifier);
-                else if (name === "S-Tab")
-                    keyClick(Qt.Key_Backtab, Qt.ShiftModifier);
-                else if (/^C-[a-z]$/.test(name))
-                    keyClick(Qt.Key_A + name.charCodeAt(2) - 97, ctrl);
-                else if (/^D-[a-z]$/.test(name))
-                    keyClick(Qt.Key_A + name.charCodeAt(2) - 97, Qt.ControlModifier);
-                else if (name === "D-BS")
-                    keyClick(Qt.Key_Backspace, Qt.ControlModifier);
-                else
-                    fail("unknown key " + m);
+                continue;
             }
+            const name = m.slice(1, -1);
+            const k = /^([CD]-)?(S-)?(\w+)$/.exec(name);
+            const key = k && (/^F\d+$/.test(k[3]) ? Qt.Key_F1 + Number(k[3].slice(1)) - 1 : named[k[3]]);
+            if (name === "S-Tab")
+                keyClick(Qt.Key_Backtab, Qt.ShiftModifier);
+            else if (/^C-[a-z]$/.test(name))
+                keyClick(Qt.Key_A + name.charCodeAt(2) - 97, ctrl);
+            else if (/^D-[a-z]$/.test(name))
+                keyClick(Qt.Key_A + name.charCodeAt(2) - 97, Qt.ControlModifier);
+            else if (name === "D-BS")
+                keyClick(Qt.Key_Backspace, Qt.ControlModifier);
+            else if (key !== undefined && key !== null)
+                keyClick(key, (k[1] === "C-" ? ctrl : k[1] === "D-" ? Qt.ControlModifier : Qt.NoModifier)
+                    | (k[2] ? Qt.ShiftModifier : Qt.NoModifier));
+            else
+                fail("unknown key " + m);
         }
     }
 
@@ -2495,6 +2500,113 @@ TestCase {
             ">"]);
         keys("ggV<D-c>");
         compare(clipboard.text, "4\n");
+        // Esc and Enter with Cmd, which do nothing without a shortcut
+        vim.shortcuts = [{ keys: "<D-Esc>", macro: "<C-a>", label: "<D-Esc>", normal: true, visual: false },
+            { keys: "g<D-CR>", macro: "<C-x>", label: "g<D-CR>", normal: true, visual: false }];
+        keys("<Esc><D-Esc>");
+        compare(editor.text, "5\n1");
+        keys("g<D-CR>");
+        compare(editor.text, "4\n1");
+        vim.shortcuts = [];
+        keys("d<D-Esc><D-CR>w");
+        compare(editor.text, "\n1");
+    }
+
+    // Keys with a name, with Shift, Ctrl or Cmd, as vim names them (Alt
+    // isn't told apart), and F-keys.
+    function test_keyNames() {
+        const name = (key, modifiers) => vim.tokenFor({ key: key, modifiers: modifiers || Qt.NoModifier, text: "" });
+        const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
+        compare([name(Qt.Key_F12), name(Qt.Key_F1, Qt.ShiftModifier), name(Qt.Key_F35, ctrl),
+            name(Qt.Key_PageDown), name(Qt.Key_PageDown, Qt.ShiftModifier), name(Qt.Key_PageDown, Qt.AltModifier),
+            name(Qt.Key_Left, ctrl | Qt.ShiftModifier), name(Qt.Key_Backtab, Qt.ShiftModifier),
+            name(Qt.Key_Backtab, ctrl | Qt.ShiftModifier), name(Qt.Key_Backspace, Qt.ShiftModifier),
+            name(Qt.Key_Delete, ctrl)],
+            ["<F12>", "<S-F1>", "<C-F35>", "<PageDown>", "<S-PageDown>", "<PageDown>", "<C-S-Left>", "<S-Tab>",
+                "<C-S-Tab>", "<BS>", null]);
+        if (isMac)
+            compare([name(Qt.Key_F12, Qt.ControlModifier), name(Qt.Key_Down, Qt.ControlModifier | Qt.ShiftModifier)],
+                ["<D-F12>", "<D-S-Down>"]);
+        compare(vim.macroKeys("<F12><S-F12><D-S-F35><F36><C-S-PageDown><S-Home>"), ["<F12>", "<S-F12>", "<D-S-F35>",
+            "<", "F", "3", "6", ">", "<C-S-PageDown>", "<S-Home>"]);
+    }
+
+    // An F-key does nothing but a shortcut's, and Shift and a key vim
+    // knows is the key, but for a shortcut that takes it.
+    function test_namedKeyShortcuts() {
+        load("1\n1\n1");
+        keys("<S-Down>");
+        compare(cursorLine(), 2);
+        keys("d<F12><S-F12>j");
+        compare(editor.text, "1");
+        load("1\n1");
+        vim.shortcuts = [{ keys: "<S-F12>", macro: "<C-a>", label: "<S-F12>", normal: true, visual: false },
+            { keys: "<S-Down>", macro: "<C-x>", label: "<S-Down>", normal: true, visual: false }];
+        keys("<S-F12>");
+        compare(editor.text, "2\n1");
+        keys("<S-Down>");
+        compare([editor.text, cursorLine()], ["1\n1", 1]);
+        // only normal mode's
+        keys("v<S-Down>");
+        compare([vim.mode, cursorLine()], ["visual", 2]);
+        keys("<Esc>");
+        // and in the command line, the key alone
+        keys(":ab<S-Left>c");
+        compare(vim.commandLine, ":acb");
+        keys("<Esc>");
+    }
+
+    // Shift+Esc is Esc, but for a shortcut that takes it, in normal or
+    // visual mode, as Shift+Enter is Enter.
+    function test_shiftEsc() {
+        load("1\n1");
+        keys("ix<S-Esc>");
+        compare([editor.text, vim.mode], ["x1\n1", "normal"]);
+        keys("d<S-Esc>x");
+        compare(editor.text, "1\n1");
+        keys("v<S-Esc>");
+        compare(vim.mode, "normal");
+        vim.shortcuts = [{ keys: "<S-Esc>", macro: "<C-a>", label: "<S-Esc>", normal: true, visual: false }];
+        keys("<S-Esc>");
+        compare(editor.text, "2\n1");
+        keys("ix<S-Esc>");
+        compare([editor.text, vim.mode], ["x2\n1", "normal"]);
+        // only normal mode's
+        keys("v<S-Esc>");
+        compare(vim.mode, "normal");
+        compare(editor.text, "x2\n1");
+        compare(vim.macroKeys("<S-Esc>x"), ["<S-Esc>", "x"]);
+    }
+
+    // Shift+Tab, and Esc, Enter and Tab with Ctrl (or Cmd, see
+    // test_cmdKeys), which vim has no use for, are keys a shortcut can
+    // have, with a count; without one they do nothing, not even end a
+    // command (see test_completion).
+    function test_shortcutOnlyKeys() {
+        load("1\n1");
+        const shortcut = (k, macro) => ({ keys: k, macro: macro, label: k, normal: true, visual: false });
+        vim.shortcuts = [shortcut("<S-Tab>", "<C-a>"), shortcut("g<C-CR>", "j"), shortcut("<C-Tab>", "k"),
+            shortcut("<C-Esc>", "<C-x>")];
+        keys("<S-Tab>");
+        compare(editor.text, "2\n1");
+        keys("g<C-CR>");
+        compare(cursorLine(), 2);
+        keys("<C-Tab>");
+        compare(cursorLine(), 1);
+        keys("<C-Esc>");
+        compare(editor.text, "1\n1");
+        keys("3<S-Tab>");
+        compare(editor.text, "4\n1");
+        // a macro records them
+        keys("qa<S-Tab>q@a");
+        compare(editor.text, "6\n1");
+        compare(vim.getRegister("a").text, "<S-Tab>");
+        compare(vim.macroKeys("<S-Tab><C-Tab><C-Esc><C-CR><D-Esc><D-CR><D-Tab>"), ["<S-Tab>", "<C-Tab>", "<C-Esc>",
+            "<C-CR>", "<D-Esc>", "<D-CR>", "<D-Tab>"]);
+        vim.shortcuts = [];
+        keys("d<S-Tab><C-Esc><C-CR><C-Tab>w");
+        compare(editor.text, "\n1");
+        compare(vim.mode, "normal");
     }
 
     // A shortcut's keys as Koil shows them: Space as a word.
@@ -3109,6 +3221,10 @@ TestCase {
         // Shift+Tab does nothing elsewhere, not even end a command.
         keys("0d<S-Tab>w");
         compare(other.text, "/docs/");
+        // Enter with Ctrl or Cmd makes no line break in one line.
+        keys("A<C-CR><D-CR>");
+        compare([other.text, vim.mode], ["/docs/", "insert"]);
+        keys("<Esc>");
     }
 
     function test_nothingToUndo() {

@@ -349,7 +349,10 @@ function sections(help) {
                     + (isMac ? ", `⌘K` as `<D-k>`" : "") + ") that run keys as a "
                     + "macro does, like `:!git add %<CR>`, in normal mode, visual mode or both. A count runs one "
                     + "that many times. They come before vim's: a shortcut on `xa` makes `x` wait for the `a`. "
-                    + "Koil's own keys can't be taken, nor keys that start them or start with them (`g`, `g.x`)."],
+                    + "Koil's own keys can't be taken, nor keys that start them or start with them (`g`, `g.x`). "
+                    + "F-keys, and keys like `Esc`, `Tab` and `PageDown` with `Shift`, " + (isMac ? "`⌃` or `⌘`" : "`Ctrl`")
+                    + ", are keys too (`<F12>`, `<S-Tab>`, " + (isMac ? "`<D-Esc>` for `⌘Esc`" : "`<C-Esc>`")
+                    + "); in the form, `Tab`, `Esc` and `Enter` alone go through it."],
                 ["`Space q`", "List your shortcuts (so do " + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
                     + " and Settings), and under them the built-in ones, with the lock button on. Typing searches "
                     + "them, `↑` and `↓` pick one, and `Enter` or a click runs it, also one with no keys, on the "
