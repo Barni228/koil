@@ -155,6 +155,11 @@ mod bridge {
         #[cxx_name = "setKeywordColors"]
         unsafe fn set_keyword_colors(text_document: *mut QObject, keyword_colors: &QStringList);
 
+        /// Colors spans of the lines of a QQuickTextDocument (see
+        /// native.h).
+        #[cxx_name = "setSpanColors"]
+        unsafe fn set_span_colors(text_document: *mut QObject, spans: &QStringList);
+
         /// Colors a file's QQuickTextDocument (see native.h).
         #[cxx_name = "setTextColors"]
         unsafe fn set_text_colors(

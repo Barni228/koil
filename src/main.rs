@@ -6,6 +6,7 @@ mod convert;
 mod document;
 mod ffi;
 mod history;
+mod info;
 #[cfg(target_os = "macos")]
 mod install;
 mod koil;

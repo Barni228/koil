@@ -16,7 +16,7 @@ function sections(help) {
             tags: ["koil", "listing", "list", "entry", "entries", "update", "apply", "-", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
                 "gr", "gs", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer",
-                "app"],
+                "app", "K", "info", "stat", "permissions", "symlink"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
                 + "copy lines to copy, and write new ones to create (`new.txt`, `new/dir/`). A line cut "
@@ -44,6 +44,11 @@ function sections(help) {
                     + "open dir; in a file, the file)."],
                 ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
                     + fileManager + " does (from the path field, the open dir; in a file, the file)."],
+                ["`K`", "Show all about the entry on the line: its path, what it is (a symlink's target), "
+                    + "its size (a dir's is counted), what a dir has, its times, "
+                    + (isWindows ? "and its attributes" : "permissions, owner and group, and flags")
+                    + " (from the path field, the open dir; in a file, the file). The box stays while you "
+                    + "move (`j`, `k`), showing the entry you're on, until `Esc`."],
                 ["`!`", "Run a shell command on the entry on the line (or the marked ones: see `:h m`): "
                     + "`!git add` or `!rm`, then `Enter` (see `:h !`)."],
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],

@@ -140,6 +140,39 @@ QtObject {
             escape: ["#56b6c2", "#0184bc"] }[kind] || ["#9cdcfe", "#001080"]);
     }
 
+    // The color of a kind of part of what K shows (see info::Kind), like
+    // a file manager's and a syntax's: a label, a dir, a link, a size and
+    // its unit, a date, each permission (`r` yellow, `w` red, `x` green,
+    // as eza has them), and so on. Muted parts are dim, and "plain" ones
+    // aren't colored.
+    function infoColor(kind) {
+        if (kind === "muted")
+            return String(dim);
+        if (kind === "dir")
+            return String(directory);
+        if (kind === "error" || kind === "locked")
+            return changeColor("delete");
+        if (kind === "busy")
+            return severityColor("warning");
+        return pick({
+            label: ["#9cdcfe", "#0451a5"],
+            link: ["#56b6c2", "#0184bc"],
+            special: ["#e5c07b", "#c18401"],
+            size: ["#98c379", "#3d8b37"],
+            unit: ["#4ec9b0", "#267f99"],
+            number: ["#d19a66", "#986801"],
+            date: ["#c678dd", "#a626a4"],
+            time: ["#b392f0", "#6f42c1"],
+            read: ["#e5c07b", "#c18401"],
+            write: ["#e06c75", "#e45649"],
+            execute: ["#98c379", "#3d8b37"],
+            setId: ["#c678dd", "#a626a4"],
+            you: ["#e5c07b", "#c18401"],
+            root: ["#e06c75", "#e45649"],
+            flag: ["#dcdcaa", "#795e26"]
+        }[kind] || [String(text), String(text)]);
+    }
+
     // The color of a warning's or an error's squiggle, message and icon.
     function severityColor(severity) {
         return severity === "error" ? changeColor("delete") : pick(["#ff9d3b", "#e07000"]);

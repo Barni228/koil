@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,8 +14,9 @@ use serde_json::json;
 
 use crate::convert::{Coalesced, from_json, path_string, paths, to_json};
 use crate::history::History;
+use crate::info::{self, Info};
 use crate::listing::{self, Hidden, Notes};
-use crate::sizes::{Measure, Sizes};
+use crate::sizes::{Measure, SizeOf, Sizes};
 
 /// Koil itself (koil-core): the dir or pattern that's open, the changes
 /// written in its listings so far, and applying and undoing them. Takes and
@@ -208,6 +209,24 @@ pub mod qobject {
         #[qinvokable]
         fn id_path(self: &Koil, id: &QString) -> QString;
 
+        /// K: everything there is to know of what's at `path` (see
+        /// info.rs), as `{ text, counting }`. A dir's size is counted, by
+        /// what the listing's dirs are (see `measure`), and with
+        /// `counting` it isn't done yet: `info_again` shows it again.
+        #[qinvokable]
+        fn info(self: Pin<&mut Koil>, path: &QString) -> QString;
+
+        /// What `info` showed last, as `info` gives it, with its dir's size
+        /// as far as it's counted now; `text` is "" if it showed nothing
+        /// that's still counted.
+        #[qinvokable]
+        fn info_again(self: Pin<&mut Koil>) -> QString;
+
+        /// The box that showed `info` is closed: its dir's size isn't
+        /// counted any more (but what's counted of it is kept).
+        #[qinvokable]
+        fn info_closed(self: Pin<&mut Koil>);
+
         /// What applying would do, as a list of `listing::ActionLine`s
         /// (`{ text, needs, deletes }`, `text` like `MOVE a -> b`), which
         /// `apply` picks from.
@@ -298,6 +317,8 @@ pub struct KoilRust {
     /// keeps them, and the IDs of the dirs listed.
     sizes: Sizes,
     sized: Vec<Id>,
+    /// What K showed last (see `info`), while its dir's size is counted.
+    inspected: Option<info::Entry>,
     /// The IDs of the entries listed whose notes are times (see `times`).
     timed: Vec<Id>,
 }
@@ -441,7 +462,7 @@ impl KoilRust {
     fn count_sizes(&mut self, notes: &mut Notes) {
         self.sized = notes.dirs.iter().map(|&(id, _)| id).collect();
         let dirs = notes.dirs.iter().map(|(_, dir)| dir.clone());
-        if !self.sizes.want(dirs, self.measure()) {
+        if !self.want_sizes(dirs) {
             return;
         }
         let sizes = self.sizes.known(self.measure());
@@ -451,6 +472,45 @@ impl KoilRust {
         }
         notes.infos.extend(now.infos);
         notes.busy = now.busy;
+    }
+
+    /// Counts the sizes of `dirs`, and of the dir K shows (see `info`),
+    /// and stops counting every other one (see `Sizes::want`). True if it
+    /// starts any.
+    fn want_sizes(&self, dirs: impl IntoIterator<Item = PathBuf>) -> bool {
+        let shown = self.inspected.as_ref().and_then(info::Entry::dir);
+        let dirs = dirs.into_iter().chain(shown.map(Path::to_path_buf));
+        self.sizes.want(dirs, self.measure())
+    }
+
+    /// The dirs whose sizes the listing shows (see `sized`).
+    fn sized_dirs(&self) -> Vec<PathBuf> {
+        (self.sized.iter())
+            .filter_map(|&id| Some(self.koil.path_of(id)?.to_path_buf()))
+            .collect()
+    }
+
+    /// What K shows (see `info`), with its dir's size as far as it's
+    /// counted.
+    fn show_inspected(&self) -> Info {
+        let Some(entry) = &self.inspected else {
+            return Info::default();
+        };
+        let size_of = |measure| {
+            let dir = entry.dir()?;
+            self.sizes.known(measure).size_of(dir)
+        };
+        entry.show(size_of, self.measure())
+    }
+
+    /// Stops counting the size of the dir K showed (see `info`), if it was.
+    /// True if it was.
+    fn stop_inspecting(&mut self) -> bool {
+        let counted = self.inspected.take().is_some_and(|e| e.dir().is_some());
+        if counted {
+            self.want_sizes(self.sized_dirs());
+        }
+        counted
     }
 
     /// What dirs' sizes are measured by, when the listing is sorted by them
@@ -606,7 +666,7 @@ impl qobject::Koil {
         let mut rust = self.rust_mut();
         // Before it's sorted by them, so the small ones are known.
         let dirs = listing::size_dirs(&rust.koil);
-        rust.sizes.want(dirs, rust.measure());
+        rust.want_sizes(dirs);
         let sizes = rust.sizes.known(rust.measure());
         let mut rendered = listing::render(&rust.koil, &sizes);
         rust.count_sizes(&mut rendered.notes);
@@ -757,6 +817,44 @@ impl qobject::Koil {
     fn id_path(&self, id: &QString) -> QString {
         let path = listing::id_path(&self.koil, &id.to_string());
         QString::from(path.unwrap_or_default().as_str())
+    }
+
+    fn info(mut self: Pin<&mut Self>, path: &QString) -> QString {
+        let entry = info::read(Path::new(&path.to_string()));
+        let mut rust = self.as_mut().rust_mut();
+        // The dir counted before stops, unless it's this one.
+        let wanted =
+            rust.inspected.as_ref().and_then(info::Entry::dir).is_some() || entry.dir().is_some();
+        rust.inspected = Some(entry);
+        if wanted {
+            rust.want_sizes(rust.sized_dirs());
+        }
+        let info = rust.show_inspected();
+        self.give_info(info, wanted)
+    }
+
+    fn info_again(self: Pin<&mut Self>) -> QString {
+        let info = self.show_inspected();
+        self.give_info(info, false)
+    }
+
+    fn info_closed(mut self: Pin<&mut Self>) {
+        if self.as_mut().rust_mut().stop_inspecting() {
+            self.watch();
+        }
+    }
+
+    /// `info` as QML takes it, once its dir isn't counted any more if it's
+    /// done (see `stop_inspecting`), and the dirs counted are watched (see
+    /// `watch`) if they changed, which `wanted` says they did.
+    fn give_info(mut self: Pin<&mut Self>, info: Info, mut wanted: bool) -> QString {
+        if !info.counting {
+            wanted |= self.as_mut().rust_mut().stop_inspecting();
+        }
+        if wanted {
+            self.as_mut().watch();
+        }
+        to_json(&info)
     }
 
     fn actions(mut self: Pin<&mut Self>) -> QString {

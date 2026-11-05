@@ -48,6 +48,9 @@ Item {
     // What the hover box shows for the text an icon hides: the text itself,
     // unless this gives something else (main.qml: the path an ID stands for).
     property var describeHidden: text => text
+    // Copies what's selected in a box that never takes the keys (K's), if
+    // anything is, which Copy then does rather than vim's.
+    property var copyElsewhere: () => false
     // What to show after a line that starts with an icon, by the text it
     // hides: in the listing, an entry's size or a date, when it's sorted
     // by one (see listing::notes). Keyed by the ID, it goes with its line
@@ -1071,7 +1074,7 @@ Item {
                     view.linkKey = true;
                     view.updateLink();
                 }
-                if (event.matches(StandardKey.Copy) && hover.copySelection()) {
+                if (event.matches(StandardKey.Copy) && (hover.copySelection() || view.copyElsewhere())) {
                     event.accepted = true;
                     return;
                 }

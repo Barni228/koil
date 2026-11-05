@@ -20,6 +20,7 @@ until you apply, and your edits stay while you go through other dirs.
 | `_`            | The scratchpad                                                                    |
 | `Space r`      | Show the entry (in a file, the file) in Finder or Explorer                        |
 | `Space o`      | Open the entry (in a file, the file) in its default app                           |
+| `K`            | Show all about the entry: size, times, permissions, a symlink's target, and more  |
 | `Space q`      | Your shortcuts: run one, edit them or make one                                    |
 | `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command           |
 | `m`            | Mark lines anywhere, then `d`, `y`, `!` or `A` act on all of them at once         |

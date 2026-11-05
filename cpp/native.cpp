@@ -309,6 +309,31 @@ protected:
   }
 };
 
+// See setSpanColors.
+class SpanHighlighter : public QSyntaxHighlighter
+{
+public:
+  using QSyntaxHighlighter::QSyntaxHighlighter;
+
+  static inline const QString name = QStringLiteral("koilSpanHighlighter");
+
+  struct Span
+  {
+    int start;
+    int length;
+    QTextCharFormat format;
+  };
+  // By line.
+  QHash<int, QList<Span>> spans;
+
+protected:
+  void highlightBlock(const QString&) override
+  {
+    for (const auto& span : spans.value(currentBlock().blockNumber()))
+      setFormat(span.start, span.length, span.format);
+  }
+};
+
 // Whether a change to `document` is only to its format (see FormatOnly),
 // which leaves its text as it was.
 bool
@@ -1106,6 +1131,15 @@ private:
         breakRow(layout, textLine, text, after, rowWidth);
       place(textLine, row, grid);
       width += textLine.horizontalAdvance();
+      // Qt's advance leaves out the spaces a row ends with, which the line
+      // unwrapped has between its words: a box sized to it wrapped there
+      // again, a space too narrow.
+      const int end = textLine.textStart() + textLine.textLength();
+      int spaces = end;
+      while (spaces > textLine.textStart() && text.at(spaces - 1).isSpace())
+        --spaces;
+      if (end < text.size() && spaces < end)
+        width += QFontMetricsF(document()->defaultFont()).horizontalAdvance(text.mid(spaces, end - spaces));
     }
     layout->endLayout();
     return { qMax(1, row), width };
@@ -1673,6 +1707,23 @@ setKeywordColors(QObject* textDocument, const QStringList& keywordColors)
   if (keywords == highlighter->keywords)
     return;
   highlighter->keywords = keywords;
+  recolor(highlighter);
+}
+
+void
+setSpanColors(QObject* textDocument, const QStringList& spans)
+{
+  auto* highlighter = highlighterOf<SpanHighlighter>(textDocument, !spans.isEmpty());
+  if (!highlighter)
+    return;
+  if (spans.isEmpty()) {
+    delete highlighter; // which takes its colors away
+    return;
+  }
+  highlighter->spans.clear();
+  for (qsizetype i = 0; i + 3 < spans.size(); i += 4)
+    highlighter->spans[spans.at(i).toInt()].append(
+      { spans.at(i + 1).toInt(), spans.at(i + 2).toInt(), colored(spans.at(i + 3)) });
   recolor(highlighter);
 }
 

@@ -195,6 +195,8 @@ ApplicationWindow {
             + qsTr(" (in a file, the file)"), mode: "normal", where: "" },
         { keys: " o", name: qsTr("Open the entry in its default app (in a file, the file)"), mode: "normal",
             where: "" },
+        { keys: "K", name: qsTr("Show all about the entry: size, times, permissions… (in a file, the file)"),
+            mode: "normal", where: "" },
         { keys: " q", name: qsTr("List your shortcuts"), mode: "both", where: "" },
         { keys: "<CR>", name: qsTr("Open the dir or file on the line"), mode: "normal", where: qsTr("Listing") },
         { keys: "<S-CR>", name: qsTr("Update, staying in the path field"), mode: "normal",
@@ -242,7 +244,12 @@ ApplicationWindow {
     onFilePathChanged: {
         fileChange = "";
         doc.watchFile(filePath);
+        Qt.callLater(followInfo);
     }
+    // K's box shows what's shown now (see followInfo).
+    onActiveViewChanged: Qt.callLater(followInfo)
+    onListingChanged: Qt.callLater(followInfo)
+    onScratchpadChanged: Qt.callLater(followInfo)
 
     // Shows `text` as a new document, whose icons hide the texts in
     // `entries` (see Hidden text in Vim.qml). `path` is its file, if any:
@@ -775,6 +782,7 @@ ApplicationWindow {
             undoApply: () => undoApply(),
             reveal: () => reveal(),
             openInApp: () => openInApp(),
+            info: () => showInfo(),
             parent: () => goUp(count),
             open: () => openLine(count),
             openPath: () => openPath(),
@@ -937,17 +945,20 @@ ApplicationWindow {
     // else "", once the status line says why there's none (the scratchpad
     // isn't on disk).
     function entryPath() {
-        if (!listing) {
-            if (!filePath)
-                vim.showError("The scratchpad isn't a file on disk");
-            return filePath;
-        }
+        const entry = entryOnDisk();
+        if (entry.message)
+            vim.showError(entry.message);
+        return entry.path;
+    }
+
+    // What entryPath gives, as { path, message }: `message` says why
+    // there's no path, which entryPath shows.
+    function entryOnDisk() {
+        if (!listing)
+            return { path: filePath, message: filePath ? "" : "The scratchpad isn't a file on disk" };
         const t = editorView.textArea.text;
         const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
-        const r = JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
-        if (r.message)
-            vim.showError(r.message);
-        return r.path;
+        return JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
     }
 
     // Space r: shows the entry on the cursor's line (the file, in one) in
@@ -957,6 +968,85 @@ ApplicationWindow {
         const why = path && system.reveal(path);
         if (why)
             vim.showError(why);
+    }
+
+    // K: everything there is to know of the entry on the cursor's line (the
+    // file, in one) where it is on disk, as Space r takes it, in K's box
+    // (see info.rs), read again if it's open. The box doesn't take the keys,
+    // and follows the cursor (see followInfo) until Esc closes it. A dir's
+    // size is counted meanwhile, which infoTimer shows as it goes.
+    function showInfo() {
+        showInfoOf(entryOnDisk(), true);
+    }
+
+    // K's box, once the cursor moved, or something else is shown (a file,
+    // the path field): shows what's known of the entry it's on now, as K
+    // does, reading only a new path (a dir's contents can take a while).
+    function followInfo() {
+        if (infoBox.shown && infoSpot() !== infoBox.spot)
+            showInfoOf(entryOnDisk(), false);
+    }
+
+    // What K's box follows (see followInfo): the cursor's line in the
+    // listing (its number, its text and the IDs on it, as an edit can put
+    // another entry there), the open dir from the path field, or the file
+    // shown.
+    function infoSpot() {
+        if (!listing)
+            return "file:" + filePath;
+        if (activeView === pathView)
+            return "dir:" + koil.currentDir();
+        const t = editorView.textArea.latest.text, p = vim.cursor;
+        const start = Txt.lineStart(t, p), end = Txt.lineEnd(t, p);
+        return "line:" + Txt.lineOf(t, p) + ":" + t.slice(start, end) + JSON.stringify(vim.hiddenIn(vim.hidden, start, end));
+    }
+
+    // Shows in K's box what's known of `entry.path` (see Koil.info), read
+    // again if `again` or if it's new, or else why there's none
+    // (`entry.message`).
+    function showInfoOf(entry, again) {
+        infoBox.spot = infoSpot();
+        if (!entry.path) {
+            closeInfoCount();
+            infoBox.path = "";
+            infoBox.show({ text: entry.message, spans: [] });
+            return;
+        }
+        if (entry.path === infoBox.path && infoBox.shown && !again)
+            return;
+        const info = JSON.parse(koil.info(entry.path));
+        infoBox.path = entry.path;
+        infoBox.show(info);
+        infoTimer.running = info.counting;
+    }
+
+    // Esc: closes K's box.
+    function closeInfo() {
+        if (!infoBox.shown)
+            return;
+        infoBox.close();
+        closeInfoCount();
+    }
+
+    // Stops counting the size of the dir K's box showed.
+    function closeInfoCount() {
+        if (infoTimer.running || infoBox.path)
+            koil.infoClosed();
+        infoTimer.stop();
+    }
+
+    // The dir's size K's box shows, as far as it's counted now, until it's
+    // done.
+    function refreshInfo() {
+        if (!infoBox.shown || !infoBox.path) {
+            closeInfoCount();
+            return;
+        }
+        const info = JSON.parse(koil.infoAgain());
+        if (info.text)
+            infoBox.show(info);
+        if (!info.counting)
+            infoTimer.stop();
     }
 
     // Space o: opens the entry on the cursor's line (the file, in one) as a
@@ -1998,6 +2088,15 @@ ApplicationWindow {
         onTriggered: root.pollSizes()
     }
 
+    // Shows K's dir's size as it's counted (see refreshInfo).
+    Timer {
+        id: infoTimer
+
+        interval: 300
+        repeat: true
+        onTriggered: root.refreshInfo()
+    }
+
     // Has the times after the lines say how long ago they were as time
     // goes on (see refreshTimes), while the listing shows them. It checks
     // the clock rather than waiting till they change, as a timer doesn't
@@ -2065,6 +2164,7 @@ ApplicationWindow {
             " r": "reveal",
             " o": "openInApp",
             " q": "shortcuts",
+            "K": "info",
             "-": "parent",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",
@@ -2082,11 +2182,13 @@ ApplicationWindow {
         }, root.filePath ? {
             " r": "reveal",
             " o": "openInApp",
+            "K": "info",
             "-": "back",
             "_": "scratch"
         } : root.scratchpad ? {
             " r": "reveal",
             " o": "openInApp",
+            "K": "info",
             "-": "back",
             "_": "scratch"
         } : {})
@@ -2109,6 +2211,12 @@ ApplicationWindow {
             if (root.listing && root.activeView === editorView)
                 root.undoLast();
         }
+        // K's box follows the cursor, and Esc closes it.
+        onCursorChanged: {
+            if (infoBox.shown)
+                Qt.callLater(root.followInfo);
+        }
+        onHighlightsCleared: root.closeInfo()
         onShowHiddenChanged: root.settingChanged()
         onGitignoreChanged: root.settingChanged()
         onRegexChanged: root.settingChanged()
@@ -2164,6 +2272,7 @@ ApplicationWindow {
             system: system
             pathSyntax: root.pathSyntax
             problems: root.pathProblems
+            copyElsewhere: () => infoBox.copySelection()
             onActivated: root.activate(pathView)
             onKeyReleased: root.keyReleased()
             onEdited: {
@@ -2262,10 +2371,12 @@ ApplicationWindow {
         onActivated: root.activate(editorView)
         onKeyReleased: root.keyReleased()
         onLinkClicked: at => root.clickLink(at)
+        copyElsewhere: () => infoBox.copySelection()
         onEdited: {
             if (root.listing) {
                 checkTimer.restart();
                 Qt.callLater(root.updatePendingLines);
+                Qt.callLater(root.followInfo); // another entry can be on the line
                 // Once vim has the hidden text of the editor's own edits
                 // (typing: see trackEdit), which come after this.
                 Qt.callLater(root.checkModified);
@@ -2347,6 +2458,13 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    InfoBox {
+        id: infoBox
+
+        theme: theme
+        system: system
     }
 
     HelpPanel {

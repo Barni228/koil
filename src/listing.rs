@@ -221,7 +221,7 @@ fn entry_name(entry: &Entry) -> String {
 }
 
 /// `name`, with a `/` after it if it's a dir's.
-fn slashed(name: impl std::fmt::Display, is_dir: bool) -> String {
+pub fn slashed(name: impl std::fmt::Display, is_dir: bool) -> String {
     format!("{name}{}", if is_dir { "/" } else { "" })
 }
 
@@ -394,7 +394,7 @@ fn dir_info(size: Option<DirSize>) -> Option<String> {
 
 /// `bytes` as people read a size, with a KB of 1000 bytes, as macOS counts:
 /// `340 B`, `1.2 KB`, `56 MB`.
-fn show_size(bytes: u64) -> String {
+pub fn show_size(bytes: u64) -> String {
     if bytes < 1000 {
         return format!("{bytes} B");
     }
@@ -427,7 +427,7 @@ fn show_time(time: SystemTime) -> String {
 /// year or more before (where months say too little), or later than a
 /// moment after it (a clock that's wrong), it's the time in the local time
 /// zone, like `2026-10-06 14:03`, which doesn't change.
-fn time_ago(time: SystemTime, now: SystemTime) -> (String, Option<u64>) {
+pub fn time_ago(time: SystemTime, now: SystemTime) -> (String, Option<u64>) {
     const MINUTE: u64 = 60;
     const HOUR: u64 = 60 * MINUTE;
     const DAY: u64 = 24 * HOUR;

@@ -34,6 +34,9 @@ the scratchpad (see Scratchpad).
 - `src/history.rs`: `History`, the undo history kept in a file across
   sessions (see Undo history). Its tests (`src/history/tests.rs`) use a
   temp dir.
+- `src/info.rs`: what `K` shows of an entry (`read`, then `Entry::show`
+  with a dir's size as `Sizes` knows it then; see Info). Its tests
+  (`src/info/tests.rs`) use a temp dir.
 - `src/shell.rs`: shell commands (see Shell commands): the shell's kind
   (`Kind`), `%` in a command (`expand`), running one (`start`, then
   `Started::finish` on a thread) and stopping it (`Running::stop`), the
@@ -76,8 +79,9 @@ the scratchpad (see Scratchpad).
   text fields, Koil's text layout (`TextLayout`: `setLineFormat`, see
   Text layout, Long lines and Wrapping),
   `setText`, the listing's and path field's `QSyntaxHighlighter`, a
-  file's colors (`TextColors`: `setTextColors`, with syntax.rs), and the
-  confirmations' (`setKeywordColors`), `redrawText`, and what changed in
+  file's colors (`TextColors`: `setTextColors`, with syntax.rs), the
+  confirmations' (`setKeywordColors`) and `K`'s (`setSpanColors`),
+  `redrawText`, and what changed in
   a text (`TextChanges`, see Long texts)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
   Koil), Objective-C++, which `build.rs` adds only there.
@@ -103,6 +107,8 @@ the scratchpad (see Scratchpad).
   Settings window's notes (see Theme).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
+- `qml/InfoBox.qml`: what `K` shows of an entry, in the middle of the
+  window, without the keys (see Info).
 - `qml/CompletionList.qml`: the dirs Tab can complete the path field to, in
   a box under it, like VS Code's suggestions (see Completion).
 - `qml/SortMenu.qml`: what `gs` and a key sort the listing by, in a box
@@ -356,7 +362,7 @@ the scratchpad (see Scratchpad).
   `open`, `explorer` or `xdg-open`, waited for on a thread, as `open`
   waits while an app launches; on macOS `openFailed` then says why it
   failed, like "No app opens", which Finder would ask about, while
-  Explorer asks itself), `-` opens `..`
+  Explorer asks itself), `K` shows all about it (see Info), `-` opens `..`
   (`3-`: `../../..`), where a pattern is a level of its own (`Koil.up`,
   `listing::up`): `dir/*` goes to `dir`, on the dir or file there that
   the cursor's entry is in (`src/` of `src/main.rs`), then to the dir
@@ -381,7 +387,7 @@ the scratchpad (see Scratchpad).
   `:w`: `save`), `!` is Koil's too, and with a path, so are `-`
   (`leaveFile`): back to the listing, on the file's line, a level up, so
   `3-` goes two up from there (`goUp`), `_`: the scratchpad over the
-  file, and `Space r` and `Space o`, which take the file, as `%` does
+  file, and `Space r`, `Space o` and `K`, which take the file, as `%` does
   (`entryPath`; in the scratchpad, they say it isn't on disk). `Space q` lists the user's shortcuts
   (see Shortcuts) everywhere, in visual mode too (`visualCommandKeys`), so
   the list can run one on the selection.
@@ -501,6 +507,58 @@ the scratchpad (see Scratchpad).
   merge, not empty, which would make every apply one the other undid, and
   each Koil writes it through a temp file of its own
   (`history.json.<pid>.new`).
+- **Info** (`K`, info.rs, `showInfo` in main.qml): everything there is to
+  know of the entry on the cursor's line where it is on disk, as Space r
+  takes it, in K's box (`InfoBox`), in the middle of the window, as wide
+  and tall as it allows (so a row doesn't wrap out of its column), which
+  never takes the keys: a plain item in the overlay (under the hover box
+  and the completions, which show what's under the pointer or the
+  cursor), whose text a press selects without the keys (Copy goes to it
+  through the editors' `copyElsewhere`). So vim goes on, and the box
+  follows (`followInfo`, after vim's `cursorChanged`, an edit of the
+  listing, or another view or file shown): it shows the entry the cursor
+  is on, read only if it's at another path than the one shown
+  (`infoSpot`, the cursor's line by its number, text and IDs, as an edit
+  can put another entry there; the path field's open dir; the file), or
+  why there's none (`entryOnDisk`'s message, which Space r shows in the
+  status line), until Esc in normal mode closes it (vim's
+  `highlightsCleared`, as for `:noh`). K reads it again. A row a
+  label and a value (lined up by `Entry::show`): the path (with `/` after a dir's), what it is (a
+  symlink's target as written, and where it resolves; the real path if a
+  dir it's in is a link), its size and size on disk (`koil_core::disk_size`),
+  what a dir has (by kind, and how many are hidden), its times (local, to
+  the second, and how long ago; none at 0, which a device's creation is),
+  and on Unix when its metadata changed (`ctime`), its permissions as `ls
+  -l` has them and in octal, its owner and group (`getpwuid_r`), its hard
+  links (not a dir's, which count its dirs), and on macOS its flags
+  (`chflags`'s: hidden, locked, restricted, not downloaded); on Windows
+  its attributes instead (untried, but checked to build for it). Not its
+  inode nor its extended attributes: they said little, and took room.
+  It's colored as syntax is: each part has a `Kind` (`Text` is parts of
+  a kind each), and `Info` gives their spans (a line, and where in it in
+  UTF-16), which `InfoBox.color` gives `System.setSpanColors` (a
+  `QSyntaxHighlighter` of spans) in `theme.infoColor`'s colors: labels, dirs as
+  the listing's, links cyan, sizes green and their units teal, other
+  numbers orange, dates and times purple, each permission as eza colors
+  them (`r` yellow, `w` red, `x` green, setuid and the like magenta, `-`
+  dim), an owner and group of the user's yellow and root's red, flags
+  that lock red, and what only goes with the rest (brackets, how long
+  ago) dim.
+  It reads the link itself (`symlink_metadata`), but a link to a file
+  shows the target's size, and one to a dir what it has. A dir's size
+  (not a link's: the counts don't follow links) is counted by `Sizes`, by
+  the listing's measure (`measure`, as it counts by one at a time; by the
+  other one too if it's kept), as `Koil.info` adds it to what it asks
+  for (`inspected`, which `want_sizes` adds to every `want`, render's
+  and sync's, so they don't stop it) and watches it (`watch`). While it's
+  counted (`counting`), main.qml's `infoTimer` has `Koil.infoAgain` give
+  it again every 300 ms, as `sizeTimer` does the notes, until it's done
+  or the box closes or shows something else (`closeInfoCount`), which
+  stops its count (`Koil.infoClosed`, keeping what's counted); done, Koil
+  stops it itself (`give_info`). Following the cursor down a listing of
+  dirs, each is counted while it's shown. `Sizes` reads a dir at a time, so one of 128,000
+  files comes in at once: `target/` showed 2.8 GB for 9 s, then 16 GB, as
+  its `debug/deps` was read.
 - **Sorting** (koil-core's `Settings::sort`; read its CLAUDE.md): `gs`
   shows the sort menu (`SortMenu`, under the sort button beside the
   options, visible while vim's `pendingKeys` end in `gs`), and a key picks
@@ -2110,12 +2168,18 @@ the scratchpad (see Scratchpad).
   date) no row reaches into the notes' room on the right (`noteRoom`,
   `rightMargin`), so each note fits after its line, lined up as in a
   table. A question's text and list (`ConfirmDialog`: what to apply or
-  undo) and the hover box always wrap so, as the editor would
+  undo), the hover box and K's box always wrap so, as the editor would
   (`SelectableText`'s `system`): their rows as tall as the font's lines (a
   `lineHeight` of 0, which follows the zoom), and a list with boxes as the
   listing, its lines going on under their text. They're sized to their
   text unwrapped (`naturalWidth`, `System.layoutWidth`), which their
-  `implicitWidth` isn't with Koil's layout (see Text layout). The wrap
+  `implicitWidth` isn't with Koil's layout (see Text layout): its rows'
+  advances side by side, with the spaces a row ends with, which Qt's
+  advance leaves out (laid out narrower first, a box was sized a space too
+  narrow, and wrapped at that space again). So it's the same however the
+  text wraps, and `measure` doesn't read it again as its own new width
+  (a box sized to it) lays the text out again: bound to `contentHeight`,
+  which that changes, it was a binding loop whenever a box grew. The wrap
   mode is set by `applyWrapMode`, not a binding: Qt fits
   a `TextArea` to its view's width only as the view or the text's size
   changes, and a new wrap mode had it do that inside its own resize, so

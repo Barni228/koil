@@ -180,6 +180,13 @@ void setPathColors(QObject* textDocument, const QString& directoryColor, const Q
 // colors away.
 void setKeywordColors(QObject* textDocument, const QStringList& keywordColors);
 
+// Colors spans of a TextEdit's document (a QQuickTextDocument), like the
+// parts of what K shows: `spans` holds a line (from 0), a start and a
+// length in it (in UTF-16) and a color for each span, in that order. It
+// colors those lines whatever they are then, not following edits. None
+// takes the colors away.
+void setSpanColors(QObject* textDocument, const QStringList& spans);
+
 // Colors a file's text in a TextEdit's document (a QQuickTextDocument),
 // with what suits any file (see syntax.rs): its strings, numbers, comments,
 // paths and URLs, in `colors`, one for each SyntaxKind, in its order (URLs
