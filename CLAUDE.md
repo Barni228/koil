@@ -322,6 +322,26 @@ the scratchpad (see Scratchpad).
   the newest, that again, as the command line's history does. Each is a
   change undo takes back, and a field edited since starts over
   (`lineBrowse.shown`).
+- **Back and forward** (`visits` in main.qml, `stepVisits`): apart from
+  the path history, the locations listed in the order they were gone to,
+  as a browser's history: `[` (`3[`) goes back through them, `]`
+  forward again, and going to another location (`onLocationChanged`)
+  drops those after the one shown (`visitAt`), keeping the newest 100.
+  Each keeps where the cursor was when it was left (`spot`, saved by
+  `showListing` as the location changes: `listingSpot`, or `fileSpot`
+  from a file), which going back to it gives `showListing` as its `keep`,
+  but going back up, the cursor is on the dir it came from, as for `-`
+  (`Updated::from`). It's an update (`tryUpdate`) of the location as
+  shown, as Enter in the path field reads it; while it runs (`stepping`)
+  the location changing adds no visit, nor does the open dir renamed on
+  disk, which renames the one shown. One that can't be opened any more
+  (no problems in the listing or the field, so `open` failed) is dropped
+  (`dropVisit`), so the next `[` goes past it. In a file or the
+  scratchpad, `[` is `-` without a count (`leave`), and `]` isn't a key.
+  The mouse's back and forward buttons type them (`mouseStep`, a
+  `TapHandler` in the overlay, as `vim.startCommand` does for the sort
+  button), only where they do something (`commandHere`), and not while
+  a box has the keys or something runs.
 - **Completion** (Completion in Vim.qml, `listing::complete`, koil-core's
   `Koil::complete`): Tab while typing in the path field (`vim.completer`,
   set only there) completes the dir being written, like a shell. koil-core
@@ -370,7 +390,8 @@ the scratchpad (see Scratchpad).
   (`3-`: `../../..`), where a pattern is a level of its own (`Koil.up`,
   `listing::up`): `dir/*` goes to `dir`, on the dir or file there that
   the cursor's entry is in (`src/` of `src/main.rs`), then to the dir
-  it's in, `_` the scratchpad (see Scratchpad), `!` a shell
+  it's in, `[` and `]` back and forward (see Back and forward), `_`
+  the scratchpad (see Scratchpad), `!` a shell
   command on the entry (see Shell commands), Tab goes to
   the other editor (`activate`), `g.`,
   `gi` and `gr` toggle `:set hidden`, `gitignore` and `regex` (like the

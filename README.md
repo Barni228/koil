@@ -14,6 +14,7 @@ until you apply, and your edits stay while you go through other dirs.
 | `u`            | Undo                                                                            |
 | `Enter`        | Open the dir or file on the line                                                |
 | `-`            | The dir above (`3-`: three up). In a file, back to the listing                  |
+| `[` `]`        | Back and forward through the dirs you went to                                   |
 | `Tab`          | Go between the listing and the path field over it                               |
 | `g.` `gi` `gr` | Toggle hidden files, hiding what git ignores, and reading the path as a regex   |
 | `gs`           | Change the sort order (by size, size on disk, last modified, natural, and more) |

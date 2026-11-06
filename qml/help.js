@@ -13,7 +13,8 @@ function sections(help) {
     return [
         {
             title: "The listing",
-            tags: ["koil", "listing", "list", "entry", "entries", "update", "apply", "-", "enter",
+            tags: ["koil", "listing", "list", "entry", "entries", "update", "apply", "-", "[", "]", "back",
+                "forward", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
                 "gr", "gs", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer",
                 "app", "K", "info", "stat", "permissions", "symlink"],
@@ -54,6 +55,10 @@ function sections(help) {
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
                 ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing, and in the "
                     + "scratchpad, to where you were (`3-`: and `-` twice more from there)."],
+                ["`[`  `]`", "Back to the dir listed before (`3[`: three back), and forward again, as a "
+                    + "browser's back and forward (so do the mouse's buttons), with the cursor where it was "
+                    + "there. Going to another dir drops those `]` would go forward to. In a file or the "
+                    + "scratchpad, `[` goes back as `-` does."],
                 ["`_`", "The scratchpad (from a file too): text of your own, never saved, kept as you left "
                     + "it until Koil quits. `_` or `-` there goes back to where you were, a file with its "
                     + "unsaved changes. In a command, `%` is a file of its text (`!wc -w`), and `<cfile>` "

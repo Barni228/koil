@@ -99,6 +99,15 @@ ApplicationWindow {
     // Every location listed since Koil started, oldest first, each once,
     // which k and j in the path field put back (see Vim.lineHistory).
     property var pathHistory: []
+    // The locations listed in the order they were gone to, as a browser's
+    // history, which `[` goes back through and `]` forward again (see
+    // stepVisits): { path, spot }, the location as shown and where the
+    // cursor was in its listing when it was left (see listingSpot).
+    // `visitAt` is the one shown, and `stepping` is set while [ or ] goes
+    // to one, which the location changing then doesn't add.
+    property var visits: []
+    property int visitAt: -1
+    property bool stepping: false
     // The listing's entry a file was opened from (with Enter), which `-`
     // goes back to; "" for a file opened otherwise.
     property string openedFrom: ""
@@ -211,6 +220,8 @@ ApplicationWindow {
             own("<CR>", qsTr("Open the dir or file on the line"), listing),
             own("<S-CR>", qsTr("Update, staying in the path field"), qsTr("Path field")),
             own("-", qsTr("The dir above (in a file, back to the listing)")),
+            own("[", qsTr("Back to the dir listed before (in a file, back to the listing)")),
+            own("]", qsTr("Forward again, to the dir [ went back from"), listing),
             own("<Tab>", qsTr("Go between the listing and the path field"), listing),
             own("g.", qsTr("Toggle hidden entries"), listing),
             own("gi", qsTr("Toggle hiding what git ignores"), listing),
@@ -246,8 +257,15 @@ ApplicationWindow {
     // Last in the history, however it got there (the path field, Enter, -,
     // a dir renamed on disk), keeping the newest 100.
     onLocationChanged: {
-        if (location)
-            pathHistory = pathHistory.filter(p => p !== location).concat([location]).slice(-100);
+        if (!location)
+            return;
+        pathHistory = pathHistory.filter(p => p !== location).concat([location]).slice(-100);
+        // A visit after the one shown, as a browser's, so those `]` went
+        // forward to are dropped.
+        if (!stepping) {
+            visits = visits.slice(0, visitAt + 1).concat([{ path: location, spot: null }]).slice(-100);
+            visitAt = visits.length - 1;
+        }
     }
     // The file shown is watched for changes on disk (see checkFile).
     onFilePathChanged: {
@@ -476,6 +494,10 @@ ApplicationWindow {
         iconColors = Object.assign({}, iconColors, r.colors);
         pendingIconColor = r.pendingColor;
         setNotes(r);
+        // Where the cursor was in the location left, for [ and ] to go
+        // back to (the listing's, when a file was opened over it).
+        if (r.path !== location && visitAt >= 0)
+            setVisit(visitAt, { spot: listing ? listingSpot() : fileSpot });
         location = r.path;
         const inPath = listing && activeView === pathView;
         activate(editorView);
@@ -536,9 +558,16 @@ ApplicationWindow {
     // Reads the edited listing into Koil, then opens `open` (a dir, relative
     // to the open one) if given, else the path in the path field if it
     // changed, and shows the listing again, with the cursor on the entry
-    // `from` if given. False if it can't (the problems and the status line
-    // say why).
-    function updateListing(open, from) {
+    // `from` if given, and where `keep` says (see showListing). False if
+    // it can't (the problems and the status line say why).
+    function updateListing(open, from, keep) {
+        return tryUpdate(open, from, keep).ok;
+    }
+
+    // updateListing, giving what Koil said (see listing::Updated): `open`
+    // couldn't be opened if it isn't ok, with no problems in the listing
+    // or the path field.
+    function tryUpdate(open, from, keep) {
         // Not a preview (a :s's, the find bar's): the text as it was.
         vim.endPreview();
         const r = JSON.parse(koil.update(pathView.textArea.text, editorView.textArea.text, JSON.stringify(editorView.hidden), open || ""));
@@ -548,12 +577,58 @@ ApplicationWindow {
             if (r.pathProblems.length)
                 pathProblems = r.pathProblems;
             vim.showError(r.message);
-            return false;
+            return r;
         }
-        showListing(r.moved, from || r.from);
+        showListing(r.moved, from || r.from, keep);
         if (r.message)
             vim.showMessage(r.message);
-        return true;
+        return r;
+    }
+
+    // [ (`steps` -1, or -3 for 3[) and ] (1): the location listed before
+    // the one shown, or the one after it, which `[` came back from, as far
+    // as there are (else an error, which stops a macro), with the cursor
+    // where it was there (going back up, on the dir it came from, as for
+    // `-`). One that can't be opened any more is dropped, so the next
+    // goes past it.
+    function stepVisits(steps) {
+        const to = Math.max(0, Math.min(visits.length - 1, visitAt + steps));
+        if (to === visitAt || visitAt < 0) {
+            vim.showError(steps < 0 ? "Nothing to go back to" : "Nothing to go forward to");
+            return;
+        }
+        stepping = true;
+        // showListing keeps the cursor's place in the one left first.
+        const r = tryUpdate(visits[to].path, "", visits[to].spot);
+        stepping = false;
+        if (r.ok) {
+            visitAt = to;
+            setVisit(to, { path: location });
+        } else if (!r.problems.length && !r.pathProblems.length) {
+            dropVisit(to);
+        }
+    }
+
+    // Changes the visit `i` (see `visits`) by `change`, as a new array:
+    // compiled, a `var` property's array may be a copy.
+    function setVisit(i, change) {
+        visits = visits.map((v, j) => j === i ? Object.assign({}, v, change) : v);
+    }
+
+    // Forgets the visit `i`, which can't be opened. The two on either side
+    // of it are then one if they're the same location, the one shown if
+    // either is.
+    function dropVisit(i) {
+        const v = visits.slice(0, i).concat(visits.slice(i + 1));
+        let at = visitAt > i ? visitAt - 1 : visitAt;
+        if (i > 0 && i < v.length && v[i - 1].path === v[i].path) {
+            const twin = at === i ? i - 1 : i;
+            v.splice(twin, 1);
+            if (at > twin)
+                at--;
+        }
+        visits = v;
+        visitAt = at;
     }
 
     // Shows what changed on disk in the listing (see Koil.sync), keeping the
@@ -580,9 +655,13 @@ ApplicationWindow {
             // A file that can be run now (a chmod), which changes no line.
             if (!r.edits.length)
                 updatePendingLines();
-            // The open dir was renamed.
+            // The open dir was renamed: the same visit, by its new name.
             if (r.path !== location) {
+                if (visitAt >= 0)
+                    setVisit(visitAt, { path: r.path });
+                stepping = true;
                 location = r.path;
+                stepping = false;
                 showPath(r.path);
                 updatePathSyntax(true);
             }
@@ -806,6 +885,9 @@ ApplicationWindow {
             gitignore: () => vim.gitignore = !vim.gitignore,
             regex: () => vim.regex = !vim.regex,
             back: () => leaveFile(false, count),
+            goBack: () => stepVisits(-Math.max(1, count)),
+            goForward: () => stepVisits(Math.max(1, count)),
+            leave: () => leaveFile(false),
             scratch: () => scratchpad ? leaveFile(false) : openScratch(),
             shell: () => bangLines(count),
             shortcuts: () => openShortcuts(true)
@@ -1895,6 +1977,18 @@ ApplicationWindow {
             vim.runShortcut(vimShortcut(s));
     }
 
+    // The mouse's back (`key` "[") or forward ("]") button: the key, typed
+    // in normal mode (out of insert or visual mode first), where it does
+    // something (not `]` in a file), as a shortcut of Koil's is run from
+    // the list (see runShortcut). Not while a box has the keys or something
+    // runs, when keys do nothing.
+    function mouseStep(key) {
+        if (boxOpen || askingConflicts || vim.running || vim.waiting || !commandHere(key))
+            return;
+        activeView.textArea.forceActiveFocus();
+        vim.startCommand([key]);
+    }
+
     // Whether Koil's own `keys` (ownShortcuts') do something where vim is
     // now, in normal mode: they're one of commandKeys, or their start (gs).
     function commandHere(keys) {
@@ -2194,6 +2288,8 @@ ApplicationWindow {
             " q": "shortcuts",
             "K": "info",
             "-": "parent",
+            "[": "goBack",
+            "]": "goForward",
             "<CR>": root.activeView === pathView ? "openPath" : "open",
             "<Tab>": "switch",
             "g.": "hidden",
@@ -2212,12 +2308,14 @@ ApplicationWindow {
             " o": "openInApp",
             "K": "info",
             "-": "back",
+            "[": "leave",
             "_": "scratch"
         } : root.scratchpad ? {
             " r": "reveal",
             " o": "openInApp",
             "K": "info",
             "-": "back",
+            "[": "leave",
             "_": "scratch"
         } : {})
         // With a selection too, so the list can run a shortcut on it.
@@ -2487,6 +2585,19 @@ ApplicationWindow {
                     textFormat: Text.PlainText
                 }
             }
+        }
+    }
+
+    // The mouse's back and forward buttons, as in a browser: `[` and `]`
+    // (see mouseStep). In the overlay, so they work over the status line
+    // too. Other buttons go on to what's under it.
+    Item {
+        parent: root.Overlay.overlay
+        anchors.fill: parent
+
+        TapHandler {
+            acceptedButtons: Qt.BackButton | Qt.ForwardButton
+            onTapped: (point, button) => root.mouseStep(button === Qt.BackButton ? "[" : "]")
         }
     }
 
