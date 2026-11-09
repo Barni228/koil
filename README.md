@@ -49,6 +49,9 @@ until you apply, and your edits stay while you go through other dirs.
   glob (`**/*.rs`). Write `/`, also on Windows. `Tab` while typing completes
   a dir like a shell (and like zsh, `myt` gives `my_tools` if no dir starts
   with `myt`), and `k` and `j` go through the dirs you listed before.
+- **Drives on Windows**: `-` in a drive's root (`C:/`) lists the drives, at
+  `/` in the path field, where `Enter` opens one. `Tab` completes a drive
+  too: `t` gives `T:/`.
 - **Globs match a dir with its `/`**, as it's listed, so unlike in a shell,
   `*` shows only files, `*/` only dirs, and `{*,*/}` both. As in a shell,
   `*` skips names starting with `.`, but `.*` or `**/.env` shows them even

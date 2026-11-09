@@ -371,6 +371,31 @@ the scratchpad (see Scratchpad).
   as they are, since koil opens a location that's a dir as written before
   reading its quotes. A completion goes into the insert as Backspaces and
   its text, so `.` and counts repeat it.
+- **Drives** (Windows only, koil-core's `Koil::shows_drives`; read Drives
+  in its CLAUDE.md): `-` in a drive's root (`listing::up`'s `..`) lists
+  the drives, as koil-core opens them for `..` of a root, and for `/`,
+  which the path field then shows (so the path history and `[` and `]`
+  go back to it from anywhere; `/x` is in them too, so nowhere, not on
+  the open dir's drive as Windows has it). A line is a drive's root,
+  named as its drive (`C:/`, with `DRIVE_ICON`, by its name: `is_drive`,
+  which the completions' icons use too), whose ID Enter (`Target::Dir`
+  of `C:`, which koil reads as `C:\`), K, Space r and `%` take as for
+  any dir; `update` puts the cursor on the drive it came from (`from`,
+  through `Koil::relative`, which names a path there by its drive). It
+  only lists them: editing it is an error, but a line left out, which
+  stays. `C:` alone is `C:/` anywhere, and Tab completes a drive from a
+  letter (`t` gives `T:/`, with the dirs starting with `t`). As `/` is
+  no dir on disk, though Windows reads it as its current drive's root,
+  what Koil looks up itself there doesn't go through it
+  (`koil_core::in_drives`): from the path field, K, Space r and Space o
+  say the drives aren't a folder (`path_on_line`), `%` is every drive
+  (`paths_in_field`), a shell command runs in the home dir
+  (`Request::dir`), `file_at` and `link::target` don't look in it, and
+  `looks` reads nothing (a network drive that can't be reached would
+  keep Koil waiting). `slashed` adds no `/` after a root's, which ends
+  with one, so the hover and K show `C:/`. Untried on Windows; the
+  `#[cfg(windows)]` tests (`test_drives` here, and koil-core's) say what
+  it should do, and core's CI runs its own there.
 - **Keys** (`commandKeys` in Vim.qml, only while a listing is shown, in the
   listing and the path field): `Space Space` applies (`Space a` too, but
   always asking first, whatever the setting: see Apply), `Space u` lists

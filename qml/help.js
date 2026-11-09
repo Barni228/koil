@@ -17,7 +17,7 @@ function sections(help) {
                 "forward", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
                 "gr", "gs", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer",
-                "app", "K", "info", "stat", "permissions", "symlink"],
+                "app", "K", "info", "stat", "permissions", "symlink", "drive", "drives"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
                 + "copy lines to copy, and write new ones to create (`new.txt`, `new/dir/`). A line cut "
@@ -53,8 +53,10 @@ function sections(help) {
                 ["`!`", "Run a shell command on the entry on the line (or the marked ones: see `:h m`): "
                     + "`!git add` or `!rm`, then `Enter` (see `:h !`)."],
                 ["`Shift+Enter`", "Vim's `Enter`: the first character of the next line."],
-                ["`-`", "Open the dir above (`3-`: three up). In a file: back to the listing, and in the "
-                    + "scratchpad, to where you were (`3-`: and `-` twice more from there)."],
+                ["`-`", "Open the dir above (`3-`: three up)"
+                    + (isWindows ? ", and above a drive's root (`C:/`), the drives, at `/`" : "")
+                    + ". In a file: back to the listing, and in the scratchpad, to where you were (`3-`: and "
+                    + "`-` twice more from there)."],
                 ["`[`  `]`", "Back to the dir listed before (`3[`: three back), and forward again, as a "
                     + "browser's back and forward (so do the mouse's buttons), with the cursor where it was "
                     + "there. Going to another dir drops those `]` would go forward to. In a file or the "
@@ -68,7 +70,8 @@ function sections(help) {
                 ["quitting", "`:conf q` and `ZZ` ask to apply the changes first. In a file, quitting goes "
                     + "back to the listing while it has changes (`:qa!` still quits)."],
                 ["path", "The field at the top: a dir or a glob, like `~/src/**/*.rs` (a regex with `:set "
-                    + "regex`). Write `/`, also on Windows: in a pattern, `\\` escapes."],
+                    + "regex`). Write `/`, also on Windows: in a pattern, `\\` escapes."
+                    + (isWindows ? " `/` alone is the drives, and `t:` drive T's root." : "")],
                 ["glob", "A dir matches with its `/`: `*` is only files, `*/` only dirs, `{*,*/}` both. "
                     + "`*` skips names starting with `.`, but `.*` and `**/.env` show them."],
                 ["`Enter`  `Shift+Enter`", "In the path field: open it and go to the listing, or open it and "
@@ -76,8 +79,9 @@ function sections(help) {
                 ["`k`  `j`", "In the path field: the dirs listed before (`↑` and `↓` while typing)."],
                 ["`Tab`", "Go between the listing and the path field (so does a click)."],
                 ["`Tab`  `Shift+Tab`", "While typing a path: complete the dir, like a shell (if none starts "
-                    + "with what's typed, one with its letters in order: `myt` gives `my_tools`). With "
-                    + "several to pick from, they go through them, and `Enter` takes one."],
+                    + "with what's typed, one with its letters in order: `myt` gives `my_tools`)"
+                    + (isWindows ? ", or a drive: `t` gives `T:/` (with the dirs starting with `t`)" : "")
+                    + ". With several to pick from, they go through them, and `Enter` takes one."],
                 ["`g.`  `gi`  `gr`", "Toggle `:set hidden`, `gitignore` and `regex`, like the buttons beside "
                     + "the path."],
                 ["`gs`", "Sort: shows by what, then a key picks it, like `gss` by size (biggest first) and "

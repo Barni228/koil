@@ -1515,6 +1515,53 @@ fn test_up() {
 }
 
 #[test]
+fn test_slashed() {
+    assert_eq!(slashed("dir", true), "dir/");
+    assert_eq!(slashed("file", false), "file");
+    // a root has its `/` already
+    assert_eq!(slashed("/", true), "/");
+    assert_eq!(slashed("C:/", true), "C:/");
+}
+
+#[cfg(windows)]
+#[test]
+fn test_drives() {
+    let (_temp, mut koil) = koil();
+    let settings = koil.settings().clone();
+    let root = koil.current_dir().ancestors().last().unwrap().to_path_buf();
+    let drive = root.to_str().unwrap().trim_end_matches('\\').to_string();
+    let path = render(&koil).path;
+    assert!(navigate(&mut koil, &path, &settings, Some(&drive)).ok);
+    assert_eq!(koil.current_dir(), root);
+    // `-` from a drive's root goes to the drives, on that drive
+    let rendered = render(&koil);
+    let up = super::up(&koil, &rendered.text, &rendered.hidden, 0, 1);
+    let updated = navigate(&mut koil, &rendered.path, &settings, Some(&up.open));
+    assert!(updated.ok && updated.moved);
+    assert_eq!(updated.from, format!("{drive}/"));
+    let rendered = render(&koil);
+    assert_eq!(rendered.path, "/");
+    let line = (rendered.names.iter()).position(|n| *n == format!("{drive}/"));
+    let line = line.expect("the drive is listed");
+    let text = rendered.text.split('\n').nth(line).unwrap();
+    assert_eq!(text, format!("{DRIVE_ICON}  {drive}/"));
+    assert!(pending(&koil, &rendered.text, &rendered.hidden).is_empty());
+    assert!(check(&koil, &rendered.text, &rendered.hidden).is_empty());
+    // Enter opens it, and `%` is it, as from the path field it's every drive
+    let target = target_on_line(&koil, &rendered.text, &rendered.hidden, line);
+    assert_eq!(target, Some(Target::Dir(drive.clone())));
+    let on_line = path_on_line(&koil, &rendered.text, &rendered.hidden, line);
+    assert_eq!(on_line, unicode(&root));
+    let field = paths_in_field(&koil, &rendered.text, &rendered.hidden).unwrap();
+    assert!(field.contains(&unicode(&root).unwrap()));
+    // a file isn't looked for on the current drive
+    assert_eq!(file_at(&koil, "Windows/notepad.exe"), None);
+    let updated = navigate(&mut koil, "/", &settings, Some(&drive));
+    assert!(updated.ok);
+    assert_eq!(koil.current_dir(), root);
+}
+
+#[test]
 fn test_quoted_path() {
     let (temp, mut koil) = koil();
     fs::create_dir(temp.path().join("my dir")).unwrap();

@@ -153,7 +153,8 @@ pub mod qobject {
         /// Where the entry on `line` (from 0) is on disk, for Space r and
         /// Space o (see `listing::path_on_line`): `{ path, message }`, where
         /// `message` says why there's none (a new entry); with a negative
-        /// `line` (the path field), the open dir.
+        /// `line` (the path field), the open dir, which the drives aren't
+        /// (see `Koil::shows_drives`).
         #[qinvokable]
         fn path_on_line(self: &Koil, text: &QString, hidden: &QString, line: i32) -> QString;
 
@@ -790,6 +791,10 @@ impl qobject::Koil {
         let path = match usize::try_from(line) {
             Ok(line) => {
                 listing::path_on_line(&self.koil, &text.to_string(), &read_hidden(hidden), line)
+            }
+            // `/`, which Windows would read as its current drive's root.
+            Err(_) if self.koil.shows_drives() => {
+                Err("The drives aren't a folder on disk".to_string())
             }
             Err(_) => listing::unicode(self.koil.current_dir()),
         };

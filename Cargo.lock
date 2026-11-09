@@ -682,7 +682,7 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#9704f4ef0e4ee8176cb13ab449f680e66ab04861"
+source = "git+https://github.com/Barni228/koil-core#fe88722976147eda89595827571071d5dc58e6df"
 dependencies = [
  "dunce",
  "globset",

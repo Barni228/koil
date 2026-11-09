@@ -18,7 +18,7 @@ use koil_core::apply::{Blocked, Undo};
 use koil_core::{
     Action, Applied, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil,
     KoilError, Location, Metadata, OpenError, Pattern, Settings, Sort, SortBy, UpdateError,
-    UpdateOpenError, Warning, with_slashes,
+    UpdateOpenError, Warning, in_drives, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,9 @@ use crate::sizes::{DirSize, Measure, SizeOf};
 const FILE_ICON: char = '\u{f016}';
 /// The color devicons gives its default icons.
 const FILE_COLOR: &str = "#7e8ea8";
+/// The icon of a drive (Nerd Fonts' `nf-md-harddisk`), in the listing of
+/// the drives on Windows (see `Koil::shows_drives`), in `FILE_COLOR`.
+const DRIVE_ICON: char = '\u{f02ca}';
 /// The color of a pending entry's icon (see [`pending_lines`]), in a dark
 /// and in a light theme, which no other icon comes near (see [`apart`]).
 const PENDING_COLOR: [&str; 2] = ["#ffffff", "#000000"];
@@ -224,14 +227,29 @@ fn entry_name(entry: &Entry) -> String {
     slashed(entry.name.to_string_lossy(), entry.is_dir)
 }
 
-/// `name`, with a `/` after it if it's a dir's.
+/// `name`, with a `/` after it if it's a dir's, unless it ends with one (a
+/// root, like `C:/`).
 pub fn slashed(name: impl std::fmt::Display, is_dir: bool) -> String {
-    format!("{name}{}", if is_dir { "/" } else { "" })
+    let name = name.to_string();
+    match is_dir && !name.ends_with('/') {
+        true => name + "/",
+        false => name,
+    }
+}
+
+/// Whether `name` (with its `/`) is a drive's, as the listing of the
+/// drives on Windows names it (`C:/`), which a dir's can't be there, as
+/// `:` is no character of a name.
+fn is_drive(name: &str) -> bool {
+    cfg!(windows) && matches!(name.as_bytes(), [letter, b':', b'/'] if letter.is_ascii_alphabetic())
 }
 
 /// The icon of the entry `name` in `dir`, and its color in a dark and in a
 /// light theme.
 fn icon(dir: &Path, name: &str) -> (char, [String; 2]) {
+    if is_drive(name) {
+        return (DRIVE_ICON, [FILE_COLOR.into(), FILE_COLOR.into()]);
+    }
     // A dir's name ends with `/`, which tells devicons it's a dir without
     // asking the filesystem.
     let path = dir.join(name);
@@ -330,8 +348,13 @@ pub struct LinkTarget {
 /// What the listing shows of each of `ids` (see `Koil::path_of`) as it is
 /// on disk now, besides its name (see [`Looks`]): read for each, whatever
 /// the listing is sorted by, as koil-core keeps only what it sorts by.
+/// Nothing in the drives, whose roots are neither links nor files, and
+/// a network drive that can't be reached would keep Koil waiting.
 pub fn looks(koil: &Koil, ids: impl IntoIterator<Item = Id>) -> Looks {
     let mut looks = Looks::default();
+    if koil.shows_drives() {
+        return looks;
+    }
     for id in ids {
         let key = id.0.to_string();
         if looks.links.contains_key(&key) || looks.executables.contains(&id) {
@@ -810,8 +833,9 @@ pub fn update(
             return failed(Vec::new(), path_problems, message);
         }
     };
-    let from = before_dir.strip_prefix(koil.current_dir()).ok();
-    let from = from.and_then(|rest| rest.components().next());
+    // As the listing names it, so in the drives, its drive (`C:`).
+    let from = koil.relative(&before_dir);
+    let from = from.as_ref().and_then(|rest| rest.components().next());
     Updated {
         ok: true,
         problems: warning_problems(&parsed, &updated.warnings),
@@ -1461,18 +1485,21 @@ pub fn up(koil: &Koil, text: &str, hidden: &[Hidden], line: usize, count: usize)
 /// `Koil::read_location`), but as written first, as a dir is, so a name
 /// like `a[1].txt` isn't a pattern. None for anything else, which is
 /// listed (a dir or a pattern) or can't be opened, as the path field says.
+/// A path in the drives (see `koil_core::in_drives`: from them, or with a
+/// root but no drive) isn't looked for as written, as Windows would look on
+/// its current drive.
 pub fn file_at(koil: &Koil, location: &str) -> Option<PathBuf> {
     let location = location.trim();
     let written = koil
         .current_dir()
         .join(link::home_expanded(Path::new(location)));
-    if written.is_file() {
+    if !in_drives(&written) && written.is_file() {
         return Some(link::normalized(&written));
     }
     match koil.read_location(location, false) {
         Location {
             dir, pattern: None, ..
-        } if dir.is_file() => Some(dir),
+        } if !in_drives(&dir) && dir.is_file() => Some(dir),
         _ => None,
     }
 }
@@ -1519,9 +1546,10 @@ pub fn paths_on_lines(
 /// a pattern is open, the entries it lists, as [`paths_on_lines`] finds
 /// those of every line, so `wc -l %` with `src/**/*.rs` open counts the
 /// files it matches, as a shell's glob would, rather than failing on
-/// `src`, where the command runs anyway.
+/// `src`, where the command runs anyway. So are the drives' roots, which
+/// are in no dir (see `Koil::shows_drives`).
 pub fn paths_in_field(koil: &Koil, text: &str, hidden: &[Hidden]) -> Result<Vec<String>, String> {
-    if koil.pattern().is_none() {
+    if koil.pattern().is_none() && !koil.shows_drives() {
         return unicode(koil.current_dir()).map(|dir| vec![dir]);
     }
     let paths = entries_on_lines(koil, text, hidden, &[(0, usize::MAX)])?;

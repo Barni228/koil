@@ -200,7 +200,8 @@ pub struct Request {
     pub shell: String,
     /// As typed after `:!`.
     pub command: String,
-    /// The dir it runs in: the one Koil has open.
+    /// The dir it runs in: the one Koil has open, or the home dir while
+    /// that's the drives (see [`Request::dir`]).
     pub cwd: PathBuf,
     /// What `%` stands for: the entries on the lines it's run on (in the
     /// listing), or the file (the scratchpad's own, see
@@ -230,6 +231,18 @@ pub struct Request {
 pub struct Paths {
     pub paths: Vec<PathBuf>,
     pub message: String,
+}
+
+impl Request {
+    /// The dir it runs in: `cwd`, but the home dir for the drives (see
+    /// `Koil::shows_drives`), `/`, which is no dir on disk, though Windows
+    /// would run it in its current drive's root.
+    fn dir(&self) -> PathBuf {
+        match koil_core::in_drives(&self.cwd) {
+            true => env::home_dir().unwrap_or_else(|| self.cwd.clone()),
+            false => self.cwd.clone(),
+        }
+    }
 }
 
 impl Paths {
@@ -363,13 +376,14 @@ pub fn start(request: &Request, running: &Running) -> Result<(String, Started), 
     let kind = Kind::of(&request.shell);
     let file = request.file.or("E499: Empty file name for '%'");
     let cfile = request.cfile.or("E446: No file name under cursor");
-    let line = expand(&request.command, kind, &request.cwd, file, cfile)?;
-    if !request.cwd.is_dir() {
-        let shown = listing::show_path(&request.cwd);
+    let cwd = request.dir();
+    let line = expand(&request.command, kind, &cwd, file, cfile)?;
+    if !cwd.is_dir() {
+        let shown = listing::show_path(&cwd);
         return Err(format!("“{shown}” isn't there any more"));
     }
     let cant = |err: io::Error| format!("Can't run {}: {err}", request.shell);
-    let mut command = command(&request.shell, &line, &request.cwd, request.environment);
+    let mut command = command(&request.shell, &line, &cwd, request.environment);
     let filter = request.input.is_some() && !request.scratchpad;
     let (sender, output) = mpsc::sync_channel(16);
     let mut child;

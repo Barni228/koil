@@ -104,7 +104,8 @@ pub enum Target {
 /// one is the file it names; or else a path (`~` first is the home dir, and
 /// `\ ` a space, as in a shell, but not on Windows), which must be on disk.
 /// A relative one is looked for in each of `dirs` in turn, as vim's `path`
-/// (`.,,`) has gf look in the file's dir, then the current one.
+/// (`.,,`) has gf look in the file's dir, then the current one, but not in
+/// the drives (see `koil_core::in_drives`), which are no dir on disk.
 pub fn target(link: &str, dirs: &[PathBuf]) -> Target {
     let link = link.trim();
     if link.is_empty() || link.contains('\n') {
@@ -129,6 +130,7 @@ pub fn target(link: &str, dirs: &[PathBuf]) -> Target {
         Some(normalized(&path)).filter(|p| p.exists())
     } else {
         dirs.iter()
+            .filter(|dir| !koil_core::in_drives(dir))
             .map(|dir| normalized(&dir.join(&path)))
             .find(|p| p.exists())
     };
