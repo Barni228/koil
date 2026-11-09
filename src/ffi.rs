@@ -108,6 +108,12 @@ mod bridge {
         #[cxx_name = "finderServiceShortcut"]
         fn finder_service_shortcut() -> QString;
 
+        /// What's available on the volume `path` is on as Finder counts
+        /// it, with what macOS deletes when it needs the room; -1 if it
+        /// can't say, or not on macOS (see native.h).
+        #[cxx_name = "importantCapacity"]
+        fn important_capacity(path: &QString) -> i64;
+
         /// The family of the font `use_nerd_font` added.
         #[cxx_name = "nerdFontFamily"]
         fn nerd_font_family() -> QString;

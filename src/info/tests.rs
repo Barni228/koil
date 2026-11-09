@@ -281,6 +281,57 @@ fn sizes_and_counts() {
 }
 
 #[test]
+fn a_volumes_space() {
+    let rows = |space| -> Vec<(&str, String)> {
+        let rows = space_rows(space).into_iter();
+        rows.map(|(label, text)| (label, text.plain())).collect()
+    };
+    let space = Space {
+        total: 500_000_000_000,
+        available: 120_000_000_000,
+        purgeable: 20_000_000_000,
+    };
+    assert_eq!(
+        rows(space),
+        [
+            ("Capacity", "500 GB".to_string()),
+            ("Available", "120 GB (20 GB purgeable)".to_string()),
+            ("Used", "380 GB (76%)".to_string()),
+        ]
+    );
+    // nothing purgeable (on Windows), and none of it used
+    let space = Space {
+        total: 1000,
+        available: 1000,
+        purgeable: 0,
+    };
+    assert_eq!(rows(space)[1].1, "1.0 KB");
+    assert_eq!(rows(space)[2].1, "0 B (0%)");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_volume() {
+    // `/` is a volume's top dir: its space, rather than all of it counted
+    let root = Path::new("/");
+    let info = shown(root, None, None);
+    assert_eq!(row(&info.text, "Kind").as_deref(), Some("Volume"));
+    for label in ["Capacity", "Available", "Used"] {
+        assert!(row(&info.text, label).is_some(), "{}", info.text);
+    }
+    assert_eq!(row(&info.text, "Size"), None);
+    assert!(!info.counting);
+    assert_eq!(read(root).dir(), None);
+    // the data volume is one, where `/Users` really is, though `/Users`
+    // isn't (a firmlink), nor a dir on it
+    let data = volume(Path::new("/System/Volumes/Data")).unwrap();
+    assert!(data.total > 0 && data.available <= data.total, "{data:?}");
+    assert_eq!(volume(Path::new("/Users")), None);
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(volume(dir.path()), None);
+}
+
+#[test]
 fn times() {
     let now = SystemTime::now();
     let five = now - std::time::Duration::from_secs(5 * 60);

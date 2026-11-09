@@ -2,7 +2,8 @@
 // watchFinderService in native.h). macOS shows it in Finder for what's
 // selected, in its right-click menu and the Services menu, and handles its
 // shortcut, launching Koil if it isn't running; the files come on the
-// pasteboard.
+// pasteboard. And what Finder says is available on a volume
+// (importantCapacity), which only Foundation tells.
 
 #include "native.h"
 #include "koil/src/ffi.cxx.h"
@@ -134,4 +135,19 @@ finderServiceShortcut()
       key = changed[@"key_equivalent"];
   }
   return [key isKindOfClass:NSString.class] ? shortcutLabel(key) : QString();
+}
+
+std::int64_t
+importantCapacity(const QString& path)
+{
+  // Its objects are autoreleased (no ARC here), and K may ask before the
+  // event loop drains a pool.
+  @autoreleasepool {
+    NSURL* url = [NSURL fileURLWithPath:path.toNSString() isDirectory:YES];
+    NSNumber* bytes = nil;
+    if (![url getResourceValue:&bytes forKey:NSURLVolumeAvailableCapacityForImportantUsageKey error:nil]
+        || ![bytes isKindOfClass:NSNumber.class])
+      return -1;
+    return bytes.longLongValue;
+  }
 }

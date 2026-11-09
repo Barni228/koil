@@ -232,8 +232,9 @@ impl Shown {
 
 /// Everything there is to know of what's at `path`, the link itself for a
 /// link: what it is (and a link's target), its size (a dir's is put in as
-/// it's shown) and what a dir has, its times, its permissions and owner,
-/// and what the system keeps of it besides (flags).
+/// it's shown; for a volume's top dir, the volume's space instead, which
+/// says what all of it would count) and what a dir has, its times, its
+/// permissions and owner, and what the system keeps of it besides (flags).
 pub fn read(path: &Path) -> Entry {
     let entry = |heading, rows| Entry {
         path: path.to_path_buf(),
@@ -260,7 +261,12 @@ pub fn read(path: &Path) -> Entry {
         _ if kind.is_dir() => Kind::Dir,
         _ => Kind::Plain,
     };
-    let mut rows = vec![row("Kind", kind_text(&kind, target.as_ref()))];
+    let volume = kind.is_dir().then(|| volume(path)).flatten();
+    let kind_row = match volume {
+        Some(_) => Text::of(VOLUME, Kind::Dir),
+        None => kind_text(&kind, target.as_ref()),
+    };
+    let mut rows = vec![row("Kind", kind_row)];
     match &target {
         Some(target) => rows.extend(target_rows(path, target)),
         None => {
@@ -271,7 +277,10 @@ pub fn read(path: &Path) -> Entry {
             }
         }
     }
-    if kind.is_dir() {
+    if let Some(space) = volume {
+        let space = space_rows(space).into_iter();
+        rows.extend(space.map(|(label, text)| row(label, text)));
+    } else if kind.is_dir() {
         for (label, measure) in [("Size", Measure::Size), ("On disk", Measure::Disk)] {
             let value = Value::DirSize(measure);
             rows.push(Row { label, value });
@@ -403,6 +412,125 @@ fn real_path(path: &Path) -> Option<PathBuf> {
         return Some(PathBuf::from(rest));
     }
     Some(real)
+}
+
+/// How big a volume is (a disk, a partition, a disk image, a share), and
+/// how much of it is free (see [`volume`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
+struct Space {
+    total: u64,
+    /// What can still be written on it: on macOS also what macOS deletes
+    /// when it needs the room (caches, local snapshots), as Finder counts
+    /// it, `purgeable` of it.
+    available: u64,
+    purgeable: u64,
+}
+
+/// What `K` calls the top dir of a volume, as the system does.
+const VOLUME: &str = if cfg!(windows) { "Drive" } else { "Volume" };
+
+/// The space of the volume whose top dir `path` is (`/`, or one in
+/// `/Volumes`), None if it isn't one, or if that can't be read. What's
+/// mounted where comes from statfs, not from a device that differs from the
+/// dir above's: `/` and the data volume it's on (`/System/Volumes/Data`,
+/// where `/Users` really is) have one. Not statvfs, whose block counts are
+/// 32 bits on macOS.
+#[cfg(target_os = "macos")]
+fn volume(path: &Path) -> Option<Space> {
+    use std::ffi::{CStr, CString};
+    use std::os::unix::ffi::OsStrExt;
+    let real = fs::canonicalize(path).ok()?;
+    let c_path = CString::new(real.as_os_str().as_bytes()).ok()?;
+    // SAFETY: all zeros is a valid `statfs` (numbers and C strings), which
+    // statfs fills in.
+    let mut stats: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c_path` is a C string, and `stats` lives through the call.
+    if unsafe { libc::statfs(c_path.as_ptr(), &mut stats) } != 0 {
+        return None;
+    }
+    // SAFETY: statfs puts a C string in it, which `stats` keeps.
+    let mount = unsafe { CStr::from_ptr(stats.f_mntonname.as_ptr()) };
+    if mount.to_bytes() != real.as_os_str().as_bytes() {
+        return None;
+    }
+    let block = u64::from(stats.f_bsize);
+    let free = stats.f_bavail.saturating_mul(block);
+    // Finder's, with what's purgeable, which statfs leaves out.
+    let finders = crate::ffi::important_capacity(&crate::convert::path_string(&real));
+    let available = (u64::try_from(finders).ok())
+        .filter(|&available| available >= free)
+        .unwrap_or(free);
+    Some(Space {
+        total: stats.f_blocks.saturating_mul(block),
+        available,
+        purgeable: available - free,
+    })
+}
+
+/// The space of the drive (or the share) whose root `path` is (`C:\`), None
+/// if it isn't one, or if that can't be read: what's free is what the
+/// user can still write there, less than all that's free with a quota.
+#[cfg(windows)]
+fn volume(path: &Path) -> Option<Space> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    if path.parent().is_some() {
+        return None;
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let (mut available, mut total) = (0, 0);
+    // SAFETY: `wide` ends with a 0, the numbers live through the call, and
+    // all that's free (whatever the quota) isn't asked for.
+    let read = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut available,
+            &mut total,
+            std::ptr::null_mut(),
+        )
+    };
+    (read != 0).then_some(Space {
+        total,
+        available,
+        purgeable: 0,
+    })
+}
+
+/// Elsewhere (Linux), a volume's top dir is any dir, its size counted.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn volume(_path: &Path) -> Option<Space> {
+    None
+}
+
+/// What `K` shows of a volume's `space`: how big it is, what's available
+/// (and how much of that is purgeable, as Finder shows it), and what's
+/// used, of all of it.
+fn space_rows(space: Space) -> Rows {
+    let Space {
+        total,
+        available,
+        purgeable,
+    } = space;
+    let mut free = short_size(available);
+    if purgeable > 0 {
+        free = (free.and(" (", Kind::Muted).then(short_size(purgeable)))
+            .and(" purgeable)", Kind::Muted);
+    }
+    let used = total.saturating_sub(available);
+    // Rounded, in u128, where a volume's bytes times 100 fit.
+    let percent = match total {
+        0 => 0,
+        _ => (u128::from(used) * 100 + u128::from(total) / 2) / u128::from(total),
+    };
+    let used = (short_size(used).and(" (", Kind::Muted))
+        .and(format!("{percent}%"), Kind::Number)
+        .and(")", Kind::Muted);
+    vec![
+        ("Capacity", short_size(total)),
+        ("Available", free),
+        ("Used", used),
+    ]
 }
 
 /// A dir's size (see [`Entry::show`]), as far as it's counted (`size`),

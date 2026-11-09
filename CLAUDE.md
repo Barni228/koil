@@ -85,7 +85,9 @@ the scratchpad (see Scratchpad).
   `redrawText`, and what changed in
   a text (`TextChanges`, see Long texts)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
-  Koil), Objective-C++, which `build.rs` adds only there.
+  Koil), and what Finder says is available on a volume
+  (`importantCapacity`, see Info), Objective-C++, which `build.rs` adds
+  only there (native.cpp has what the others get).
 - `qml/main.qml`: the window: settings, menus (`MacMenuBar.qml`, and
   `WindowMenuBar.qml` elsewhere, which run its functions), dialogs, the
   status line (`StatusLine.qml`), the path field and its option buttons, and Koil's listing (`showListing`,
@@ -597,7 +599,21 @@ the scratchpad (see Scratchpad).
   that lock red, and what only goes with the rest (brackets, how long
   ago) dim.
   It reads the link itself (`symlink_metadata`), but a link to a file
-  shows the target's size, and one to a dir what it has. A dir's size
+  shows the target's size, and one to a dir what it has. A volume's top
+  dir (`info::volume`: on macOS `/`, one in `/Volumes`, or
+  `/System/Volumes/Data`, by statfs's `f_mntonname`, as `/` and the data
+  volume, where `/Users` is through a firmlink, have one device; not
+  statvfs, whose block counts are 32 bits there; on Windows a drive's or
+  a share's root, by `GetDiskFreeSpaceExW`; none on Linux, untried) is a
+  Volume (a Drive on Windows), and shows its Capacity, what's Available
+  and what's Used (and of how much, `space_rows`) instead of a size,
+  which isn't counted (all of a drive, from the drives' listing). On
+  macOS, Available is Finder's, with what macOS deletes when it needs the
+  room (`importantCapacity` in finder_mac.mm, Foundation's
+  `NSURLVolumeAvailableCapacityForImportantUsageKey`, as statfs leaves
+  that out), which it says is purgeable (`68 GB (10 GB purgeable)`, as
+  Finder's Get Info). A network share that doesn't answer keeps K waiting
+  as reading any dir there does. A dir's size
   (not a link's: the counts don't follow links) is counted by `Sizes`, by
   the listing's measure (`measure`, as it counts by one at a time; by the
   other one too if it's kept), as `Koil.info` adds it to what it asks

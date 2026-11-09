@@ -5,6 +5,8 @@
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 
+#include <cstdint>
+
 // On macOS, Qt titles the PreferencesRole menu item "Preferences...".
 // Rename it to "Settings…" to match current macOS conventions.
 void useSettingsMenuTitle();
@@ -45,6 +47,12 @@ void watchFinderService(QObject* document);
 // was changed in System Settings. Empty if it has none or is off, or
 // outside an app bundle (`cargo run`), or not on macOS.
 QString finderServiceShortcut();
+
+// How much is available on the volume `path` is on, in bytes, as Finder
+// counts it: with what macOS deletes when it needs the room (purgeable:
+// caches, local snapshots), which statfs leaves out. -1 if it can't say,
+// or not on macOS. In finder_mac.mm.
+std::int64_t importantCapacity(const QString& path);
 
 // Sets the Qt Quick Controls style. Must run before QML is loaded.
 void setControlsStyle(const QString& style);

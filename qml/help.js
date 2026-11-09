@@ -46,7 +46,9 @@ function sections(help) {
                 ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
                     + fileManager + " does (from the path field, the open dir; in a file, the file)."],
                 ["`K`", "Show all about the entry on the line: its path, what it is (a symlink's target), "
-                    + "its size (a dir's is counted), what a dir has, its times, "
+                    + "its size (a dir's is counted, but "
+                    + (isWindows ? "a drive's root shows the drive's" : "a volume's top dir, like `/`, shows the volume's")
+                    + " capacity and what's available instead), what a dir has, its times, "
                     + (isWindows ? "and its attributes" : "permissions, owner and group, and flags")
                     + " (from the path field, the open dir; in a file, the file). The box stays while you "
                     + "move (`j`, `k`), showing the entry you're on, until `Esc`."],

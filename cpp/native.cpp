@@ -1340,6 +1340,12 @@ finderServiceShortcut()
 {
   return {};
 }
+
+std::int64_t
+importantCapacity(const QString&)
+{
+  return -1;
+}
 #endif
 
 QString
