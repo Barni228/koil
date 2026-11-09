@@ -231,10 +231,11 @@ ApplicationWindow {
             own("!", qsTr("Run a shell command on the entry"))
         ];
     }
-    // The keys Koil's menus (and the editor's copy, paste and undo) take
-    // before vim gets them, as vim names them (see Vim.tokenFor: Cmd on
-    // macOS, Ctrl elsewhere, with Shift only for Cmd), which no shortcut
-    // can have, as ownShortcuts are, but which the list doesn't show.
+    // The keys Koil's menus (and the editor's copy, paste and undo, and
+    // back and forward's Cmd+[ and Cmd+]) take before vim gets them, as vim
+    // names them (see Vim.tokenFor: Cmd on macOS, Ctrl elsewhere, with
+    // Shift only for Cmd), which no shortcut can have, as ownShortcuts
+    // are, but which the list doesn't show.
     readonly property var menuShortcuts: {
         const key = (k, name) => ({ keys: "<" + (isMac ? "D" : "C") + "-" + k + ">", name: name, normal: true,
             visual: true, where: "" });
@@ -244,7 +245,8 @@ ApplicationWindow {
             key(",", qsTr("Settings…")), key("G", qsTr("Find Previous")), key("=", qsTr("Zoom In")),
             key("+", qsTr("Zoom In")), key("-", qsTr("Zoom Out")), key("0", qsTr("Actual Size")),
             key("Z", qsTr("Redo")), key("x", qsTr("Cut")), key("v", qsTr("Paste")), key("a", qsTr("Select All")),
-            key("h", qsTr("Hide Koil"))] : [key("h", qsTr("Replace…"))]);
+            key("h", qsTr("Hide Koil")), key("[", qsTr("Back")), key("]", qsTr("Forward"))]
+            : [key("h", qsTr("Replace…"))]);
     }
     // Whether the shortcuts' list shows Koil's own under the user's (saved).
     property bool showOwnShortcuts: settings.showOwnShortcuts
@@ -1977,12 +1979,13 @@ ApplicationWindow {
             vim.runShortcut(vimShortcut(s));
     }
 
-    // The mouse's back (`key` "[") or forward ("]") button: the key, typed
-    // in normal mode (out of insert or visual mode first), where it does
-    // something (not `]` in a file), as a shortcut of Koil's is run from
-    // the list (see runShortcut). Not while a box has the keys or something
-    // runs, when keys do nothing.
-    function mouseStep(key) {
+    // The mouse's back (`key` "[") or forward ("]") button, or a
+    // keyboard's Back or Forward key: the key, typed in normal mode (out
+    // of insert or visual mode first), where it does something (not `]` in
+    // a file), as a shortcut of Koil's is run from the list (see
+    // runShortcut). Not while a box has the keys or something runs, when
+    // keys do nothing.
+    function stepButton(key) {
         if (boxOpen || askingConflicts || vim.running || vim.waiting || !commandHere(key))
             return;
         activeView.textArea.forceActiveFocus();
@@ -2589,7 +2592,7 @@ ApplicationWindow {
     }
 
     // The mouse's back and forward buttons, as in a browser: `[` and `]`
-    // (see mouseStep). In the overlay, so they work over the status line
+    // (see stepButton). In the overlay, so they work over the status line
     // too. Other buttons go on to what's under it.
     Item {
         parent: root.Overlay.overlay
@@ -2597,8 +2600,27 @@ ApplicationWindow {
 
         TapHandler {
             acceptedButtons: Qt.BackButton | Qt.ForwardButton
-            onTapped: (point, button) => root.mouseStep(button === Qt.BackButton ? "[" : "]")
+            onTapped: (point, button) => root.stepButton(button === Qt.BackButton ? "[" : "]")
         }
+    }
+
+    // A keyboard's Back and Forward keys (a browser's), and the keys apps
+    // go back and forward with, Cmd+[ and Cmd+] on macOS (Finder's, which
+    // menuShortcuts has), Alt+Left and Alt+Right elsewhere (Explorer's, as
+    // Ctrl+[ is vim's Esc): as the mouse's buttons, whatever has the keys in
+    // this window. Qt gives Back and Forward on Windows (VK_BROWSER_BACK)
+    // and Linux; macOS gives apps no key event for them, so there they do
+    // nothing, as in every app. Once a press, as a button: not again while
+    // held.
+    Shortcut {
+        sequences: ["Back", root.isMac ? "Ctrl+[" : "Alt+Left"]
+        autoRepeat: false
+        onActivated: root.stepButton("[")
+    }
+    Shortcut {
+        sequences: ["Forward", root.isMac ? "Ctrl+]" : "Alt+Right"]
+        autoRepeat: false
+        onActivated: root.stepButton("]")
     }
 
     InfoBox {

@@ -340,10 +340,19 @@ the scratchpad (see Scratchpad).
   (no problems in the listing or the field, so `open` failed) is dropped
   (`dropVisit`), so the next `[` goes past it. In a file or the
   scratchpad, `[` is `-` without a count (`leave`), and `]` isn't a key.
-  The mouse's back and forward buttons type them (`mouseStep`, a
+  The mouse's back and forward buttons type them (`stepButton`, a
   `TapHandler` in the overlay, as `vim.startCommand` does for the sort
   button), only where they do something (`commandHere`), and not while
-  a box has the keys or something runs.
+  a box has the keys or something runs. So do Cmd+[ and Cmd+] on macOS
+  (Finder's back and forward, in `menuShortcuts`, so no shortcut of the
+  user's has them), Alt+Left and Alt+Right elsewhere (Explorer's; Ctrl+[
+  is vim's Esc), and a keyboard's Back and Forward keys: a `Shortcut` for
+  each way, once a press, whatever has the keys in the window. Qt gives
+  those as `Key_Back` and `Key_Forward` on Windows (`VK_BROWSER_BACK`)
+  and Linux. macOS gives apps no key event for them (its key codes have
+  none; Karabiner's EventViewer sees them as the HID's `ac_back` and
+  `ac_forward`), so there they do nothing, as in every app: reading them
+  from the HID device would need Input Monitoring.
 - **Completion** (Completion in Vim.qml, `listing::complete`, koil-core's
   `Koil::complete`): Tab while typing in the path field (`vim.completer`,
   set only there) completes the dir being written, like a shell. koil-core
