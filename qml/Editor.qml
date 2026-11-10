@@ -522,6 +522,50 @@ Item {
         return spans;
     }
 
+    // The spaces, tabs and other space characters in `spans` (as
+    // selectionSpans gives them), as far as they're in view, as { x, y,
+    // text } for `whitespace`: a run of spaces as `·`s, from its first
+    // (they're a column each), a tab as `→` at its start (it ends at its
+    // tab stop), another space character (an em space) as `␣` (it can be
+    // wider). A no-break space is a `·`, as Qt gives the text with spaces
+    // for them. A line break is a `¬` (as vim's `listchars` often has it)
+    // where the selection's shade shows it, a column after the line's end.
+    // In the listing, not in a line's prefix, where the icon is
+    // drawn over the space after it. Only what's in view sideways too, as a
+    // line can be long.
+    function whitespaceIn(spans) {
+        const t = editor.latest.text, f = flickable, list = [];
+        const left = f.contentX, right = f.contentX + f.width;
+        for (const s of spans) {
+            for (const r of rowSpans(s.start, s.end)) {
+                if (r.rect.x > right || r.rect.x + r.rect.width < left)
+                    continue;
+                const y = r.rect.y + lineHeight / 2;
+                const from = vim.outOfPrefix(t, Math.max(r.start, editor.posAt(left, y) - 1));
+                const to = Math.min(r.end, editor.posAt(right, y) + 1);
+                for (let p = from; p < to; ) {
+                    const c = t[p];
+                    let e = p + 1;
+                    if (c === " ") {
+                        while (e < to && t[e] === " ")
+                            e++;
+                        list.push({ x: cellAt(p).x, y: r.rect.y, text: "·".repeat(e - p) });
+                    } else if (c === "\t" || /[  -   　]/.test(c)) {
+                        list.push({ x: cellAt(p).x, y: r.rect.y, text: c === "\t" ? "→" : "␣" });
+                    }
+                    p = e;
+                }
+                // The line break, after the line's last row.
+                if (s.eol && r.end === s.end) {
+                    const x = cellAt(s.end).x;
+                    if (x >= left - charWidth && x <= right)
+                        list.push({ x: x, y: r.rect.y, text: "¬" });
+                }
+            }
+        }
+        return list;
+    }
+
     // What the find bar finds in (Find in Selection, see Vim's findScope)
     // in the visible lines, as selectionSpans gives the selection.
     function scopeSpans() {
@@ -1348,6 +1392,35 @@ Item {
                 inputs: [view.active, view.vim.yanked, view.layout, view.viewport]
                 spans: () => view.yankedSpans()
                 color: view.theme.yanked
+            }
+
+            // The selection's whitespace (see whitespaceIn), dimmed, as VS
+            // Code's renderWhitespace "selection" shows it, in visual mode
+            // while :set visualwhitespace is on (the Settings window's
+            // Whitespace in selection). Over the selection, under the text,
+            // which it doesn't meet.
+            Layer {
+                id: whitespace
+
+                z: -0.45
+                inputs: [view.vim.visualWhitespace, view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.vim.visualShown, view.layout, view.viewport, view.flickable.contentX, view.flickable.width]
+                compute: () => view.vim.visualWhitespace && (view.vim.isVisual || view.vim.visualShown)
+                    ? view.whitespaceIn(view.selectionSpans()) : []
+
+                Repeater {
+                    model: whitespace.model
+
+                    Text {
+                        required property var modelData
+
+                        x: modelData.x
+                        y: modelData.y + view.textBaseline - baselineOffset
+                        text: modelData.text
+                        font: editor.font
+                        color: view.theme.faint
+                        textFormat: Text.PlainText
+                    }
+                }
             }
 
             // The long lines Qt doesn't draw (see longLength), as far as

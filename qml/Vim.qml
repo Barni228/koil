@@ -46,6 +46,12 @@ QtObject {
     // syntax.rs), with its default. Vim's is the language to color as.
     property bool syntax: true
     property bool defaultSyntax: true
+    // :set visualwhitespace: in visual mode, the selection shows its
+    // spaces, tabs and line breaks (the view does, see
+    // Editor.whitespaceIn), with its default. Koil's, as VS Code's
+    // renderWhitespace "selection"; vim's `list` shows them everywhere.
+    property bool visualWhitespace: true
+    property bool defaultVisualWhitespace: true
     // :set wrap: a line too long for the view goes on in rows under it (at
     // a word's start where it can), with its default. Vim's default is on.
     // Not in a buffer of one line (`singleLine`). While lines wrap
@@ -5975,8 +5981,9 @@ QtObject {
     // (gvim has guifont); its short name is vim's for fsync, which Koil
     // hasn't. guifont is only the family (gvim's also takes a size, like
     // Menlo:h14), and shell only the program (vim's can have arguments).
-    // hidden, gitignore, regex, sort, sortreverse and dirsfirst are Koil's
-    // (vim's hidden is about buffers; its sr, shiftround, Koil hasn't), and
+    // hidden, gitignore, regex, sort, sortreverse, dirsfirst and
+    // visualwhitespace are Koil's (vim's hidden is about buffers; its sr,
+    // shiftround, Koil hasn't), and
     // syntax is on or off (vim's is the language, which :syntax off turns
     // off). wrap wraps at a word's start, as vim's does with linebreak on.
     readonly property var options: [
@@ -5987,6 +5994,7 @@ QtObject {
         { name: "relativenumber", short: "rnu", property: "relativeNumber", default: defaultRelativeNumber },
         { name: "syntax", short: "syn", property: "syntax", default: defaultSyntax },
         { name: "wrap", property: "wrap", default: defaultWrap },
+        { name: "visualwhitespace", short: "vws", property: "visualWhitespace", default: defaultVisualWhitespace },
         { name: "sidescrolloff", short: "siso", property: "sideScrollOff", default: 4, min: 0, max: 999 },
         { name: "shell", short: "sh", property: "shell", default: defaultShell },
         { name: "hidden", short: "hid", property: "showHidden", default: false },

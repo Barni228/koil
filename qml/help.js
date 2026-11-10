@@ -101,7 +101,8 @@ function sections(help) {
         {
             title: "Options (:set)",
             tags: ["set", "se", "options", "option", "fontsize", "fs", "guifont", "gfn", "font",
-                "number", "nu", "relativenumber", "rnu", "syntax", "syn", "wrap", "sidescrolloff", "siso", "hidden", "hid",
+                "number", "nu", "relativenumber", "rnu", "syntax", "syn", "wrap", "visualwhitespace", "vws", "whitespace",
+                "sidescrolloff", "siso", "hidden", "hid",
                 "gitignore", "ignore", "regex", "re", "sort", "sortreverse", "sr", "dirsfirst", "df", "colors"],
             intro: "`:set` alone lists the options that aren't at their default. Several can be set at "
                 + "once: `:set nu rnu fs=18`.",
@@ -118,6 +119,9 @@ function sections(help) {
                     + "never after the icon alone. Questions (what to apply or undo) and the hover box wrap so too. "
                     + "View > Word Wrap (`" + altKey + "Z`) toggles it too. Then `gj` and `gk` go "
                     + "a row down or up, the page keys and `Ctrl-E` count rows, and nothing scrolls sideways."],
+                ["`visualwhitespace`  `vws`", "In visual mode, show the selection's spaces as `·`, its tabs as "
+                    + "`→` and its line breaks as `¬` (another kind of space, like an em space, as `␣`). "
+                    + "Default: the one in Settings (on)."],
                 ["`sidescrolloff`  `siso`", "Columns kept in view beside the cursor. Default 4."],
                 ["`shell`  `sh`", "The shell `:!` runs commands in: a path, or a name on the PATH, like "
                     + "`:set sh=bash`. Default: the one in Settings, else `" + systemShell + "`."],
@@ -522,9 +526,9 @@ function sections(help) {
                     "Undo and redo, like `u` and `Ctrl-R`."],
                 [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",
                     "Zoom in, out, or back to the Settings size."],
-                ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, word wrap, theme, folders "
-                    + "first, when applying asks, start dir, shell and more. The pointer on a setting's name "
-                    + "shows what it does."]
+                ["`" + cmdKey + ",`", "Settings: font, line numbers, syntax colors, word wrap, whitespace in "
+                    + "selection, theme, folders first, when applying asks, start dir, shell and more. The "
+                    + "pointer on a setting's name shows what it does."]
             ]
         }
     ];

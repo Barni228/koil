@@ -185,8 +185,8 @@ ApplicationWindow {
             system.loadShellEnvironment();
     }
     // The settings vim keeps, which :set changes (see changeSetting).
-    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "wrap", "shell",
-        "dirsFirst"]
+    readonly property var vimSettings: ["fontSize", "fontFamily", "number", "relativeNumber", "syntax", "wrap",
+        "visualWhitespace", "shell", "dirsFirst"]
     // The shell :! runs commands in when the shell setting is empty: $SHELL,
     // or cmd.exe on Windows.
     readonly property string systemShell: system.defaultShell()
@@ -2072,6 +2072,9 @@ ApplicationWindow {
         property bool syntax: true
         // Whether long lines wrap (:set wrap).
         property bool wrap: false
+        // Whether the selection shows its spaces, tabs and line breaks in
+        // visual mode (:set visualwhitespace).
+        property bool visualWhitespace: true
         // Whether the listing has its dirs before its files, else sorted
         // with them (:set dirsfirst).
         property bool dirsFirst: true
@@ -2268,6 +2271,8 @@ ApplicationWindow {
         defaultSyntax: settings.syntax
         wrap: settings.wrap
         defaultWrap: settings.wrap
+        visualWhitespace: settings.visualWhitespace
+        defaultVisualWhitespace: settings.visualWhitespace
         dirsFirst: settings.dirsFirst
         defaultDirsFirst: settings.dirsFirst
         fontSize: settings.fontSize

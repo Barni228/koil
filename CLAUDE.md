@@ -96,8 +96,9 @@ the scratchpad (see Scratchpad).
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
   with it: cursors, selection, the marked lines (see Marked lines), the
-  find bar's scope and what was just yanked (each a `SpanShade`), search
-  highlights, the
+  find bar's scope and what was just yanked (each a `SpanShade`), the
+  selection's whitespace (`whitespace`, see Whitespace in the
+  selection), search highlights, the
   bracket matching the cursor's (`brackets`), the notes after lines (`infos`, see Sorting),
   warnings and errors, line numbers, the link under the pointer with Cmd
   held (`link`, see Links), the long lines Qt doesn't draw (`longText`,
@@ -1810,6 +1811,21 @@ the scratchpad (see Scratchpad).
   on Windows, so `handleKey` lets it through as `<C-v>` outside insert mode; in
   insert mode it pastes on every OS. Likewise Ctrl+Y (Redo on Windows, Paste in
   Qt's macOS bindings) scrolls outside insert mode.
+- **Whitespace in the selection** (`whitespace` in Editor.qml,
+  `whitespaceIn`): in visual mode (and while `:` left it, `visualShown`),
+  the selection's spaces show as `·` and its tabs as `→` at their start,
+  dimmed (`theme.faint`), as VS Code's `renderWhitespace: "selection"`,
+  while `:set visualwhitespace` (`vws`, Koil's) is on: a vim setting the
+  Settings window saves (Whitespace in selection, on at first). A run of
+  spaces is one `Text` of `·`s from its first, as they're a column each;
+  a tab is one of its own, as it ends at its tab stop, and another kind of
+  space (an em space, which can be wider) is a `␣` of its own. A no-break
+  space is a `·`: Qt gives the text with spaces for them. A line break
+  the selection has (`eol`) is a `¬` (vim's `listchars` often has one),
+  in the column the selection's shade gives it after the line. Not in a
+  listing line's prefix, where the icon is drawn over the space after it,
+  and only what's in view, sideways too (`posAt` at the view's edges), as
+  a line can be long.
 - **Multiple cursors**: `vim.cursors` holds the extra ones (Alt+click via a
   `MouseArea` over the editor, which passes plain clicks through). The editor
   knows one cursor, so with extras vim handles insert-mode typing and arrows
@@ -2353,7 +2369,8 @@ the scratchpad (see Scratchpad).
   gutter width (the digits and two spaces) to it. Only visible lines get a row.
 - **Settings**: `settings` (a QtCore `Settings` in main.qml) holds the saved
   values. The ones in use are vim's (`fontSize`, `fontFamily`, `number`,
-  `relativeNumber`, `syntax`, `wrap`, `shell`, `dirsFirst`, which `:set`
+  `relativeNumber`, `syntax`, `wrap`, `visualWhitespace`, `shell`,
+  `dirsFirst`, which `:set`
   changes, as View > Word Wrap does `wrap`: `root.vimSettings`),
   `root.colorScheme`, `root.confirmChanges` and `root.shellEnvironment`
   (see Shell commands), bound to the saved ones at startup. The Settings

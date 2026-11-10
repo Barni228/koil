@@ -6,7 +6,8 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 
 // The Settings window (Cmd+,): font, font size, line numbers, syntax
-// colors, word wrap, theme, whether folders come first, when applying asks
+// colors, word wrap, whitespace in the selection, theme, whether folders
+// come first, when applying asks
 // first, the dir Koil starts in, and the shell :! runs commands in; and on
 // macOS, the
 // shortcut that opens the folder selected in Finder, which System Settings
@@ -27,8 +28,8 @@ Window {
     // changeSetting.
     required property var app
     // The saved settings: fontSize, fontFamily, number, relativeNumber,
-    // syntax, wrap, colorScheme, dirsFirst, confirmChanges, startDir, shell,
-    // shellEnvironment.
+    // syntax, wrap, visualWhitespace, colorScheme, dirsFirst,
+    // confirmChanges, startDir, shell, shellEnvironment.
     required property var settings
     required property Theme theme
     // main.qml's Document, for the folder picked (a var, so this file needs
@@ -158,6 +159,7 @@ Window {
             relativeNumber: false,
             syntax: true,
             wrap: false,
+            visualWhitespace: true,
             colorScheme: "system",
             dirsFirst: true,
             confirmChanges: "always",
@@ -278,7 +280,8 @@ Window {
     }
 
     // The setting `key`, on or off: files' colors (:set syntax), long lines
-    // wrapped (:set wrap), the listing's dirs before its files (:set
+    // wrapped (:set wrap), the selection's whitespace shown (:set
+    // visualwhitespace), the listing's dirs before its files (:set
     // dirsfirst), and whether :! gets the environment read from the
     // user's shell.
     component OnOff: Toggle {
@@ -678,6 +681,17 @@ Window {
                 }
                 Reset {
                     key: "wrap"
+                }
+
+                SettingLabel {
+                    text: qsTr("Whitespace in selection")
+                    about: qsTr("In visual mode, the selection shows its spaces as `·`, its tabs as `→` and its line breaks as `¬`. `:set visualwhitespace` changes it until Koil quits.")
+                }
+                OnOff {
+                    key: "visualWhitespace"
+                }
+                Reset {
+                    key: "visualWhitespace"
                 }
 
                 SettingLabel {
