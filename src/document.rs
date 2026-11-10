@@ -7,6 +7,7 @@ use cxx_qt::casting::{Downcast, Upcast};
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QUrl};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use serde_json::json;
 
 use crate::convert::{Coalesced, path_string, to_json};
 #[cfg(target_os = "macos")]
@@ -118,6 +119,18 @@ pub mod qobject {
         /// to the file `path` as UTF-8; or else emits `failed`.
         #[qinvokable]
         fn save_new_file(self: Pin<&mut Document>, path: &QString, text: &QString) -> bool;
+
+        /// The text of the small file `path` (shortcuts to import, see
+        /// `SMALL`), as JSON `{ text }`, or `{ error }`: why it can't be
+        /// read. It has nothing to do with the file shown.
+        #[qinvokable]
+        fn read_text(self: &Document, path: &QString) -> QString;
+
+        /// Writes `text` to the file `path` as UTF-8 (shortcuts exported),
+        /// and gives why it can't, or "". It has nothing to do with the
+        /// file shown.
+        #[qinvokable]
+        fn write_text(self: &Document, path: &QString, text: &QString) -> QString;
 
         /// Writes `text` (the scratchpad's) to the scratchpad's own file, as
         /// UTF-8, for `%` in a shell command run there, and returns its
@@ -412,6 +425,21 @@ impl qobject::Document {
         self.write(path, &text.to_string(), Encoding::Utf8)
     }
 
+    fn read_text(&self, path: &QString) -> QString {
+        to_json(&match read_small(&path.to_string()) {
+            Ok(text) => json!({ "text": text }),
+            Err(error) => json!({ "error": error }),
+        })
+    }
+
+    fn write_text(&self, path: &QString, text: &QString) -> QString {
+        let path = path.to_string();
+        match std::fs::write(&path, text.to_string()) {
+            Ok(()) => QString::default(),
+            Err(err) => QString::from(cannot("save", &path, &err).as_str()),
+        }
+    }
+
     fn write_scratchpad(mut self: Pin<&mut Self>, text: &QString) -> QString {
         let mut rust = self.as_mut().rust_mut();
         let mut text = text.to_string();
@@ -651,6 +679,22 @@ fn read(path: &str) -> Result<(String, Encoding), String> {
     decode(bytes).ok_or_else(|| cannot("open", path, &io::ErrorKind::InvalidData.into()))
 }
 
+/// How big a file `read_small` reads at most: shortcuts take a few KB, and
+/// a big file picked by mistake mustn't keep Koil reading it.
+const SMALL: u64 = 1 << 20;
+
+/// The text of the file `path`, if it's no bigger than `SMALL`, or why it
+/// can't be read.
+fn read_small(path: &str) -> Result<String, String> {
+    let size = std::fs::metadata(path)
+        .map_err(|err| cannot("open", path, &err))?
+        .len();
+    if size > SMALL {
+        return Err(cannot("open", path, &io::Error::other("it's over 1 MB")));
+    }
+    read(path).map(|(text, _)| text)
+}
+
 /// The text in `bytes` and how it's stored there: UTF-8, or UTF-16 after a
 /// BOM (without one, UTF-16 can't be told from other bytes). None if it's
 /// neither, like a picture.
@@ -766,6 +810,25 @@ mod tests {
         );
         std::fs::write(path, "text").unwrap();
         assert_eq!(read(path), Ok(("text".to_string(), Encoding::Utf8)));
+    }
+
+    #[test]
+    fn test_read_small() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("shortcuts.json");
+        let path = path.to_str().unwrap();
+        assert!(
+            read_small(path)
+                .unwrap_err()
+                .starts_with("Can't open `shortcuts.json`: ")
+        );
+        std::fs::write(path, "[]").unwrap();
+        assert_eq!(read_small(path), Ok("[]".to_string()));
+        std::fs::write(path, vec![b' '; SMALL as usize + 1]).unwrap();
+        assert_eq!(
+            read_small(path),
+            Err("Can't open `shortcuts.json`: it's over 1 MB".to_string())
+        );
     }
 
     #[test]

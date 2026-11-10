@@ -1,7 +1,9 @@
 pragma ComponentBehavior: Bound
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 // The user's shortcuts (Space q, Koil > Shortcuts…, or a button in
@@ -17,7 +19,9 @@ import QtQuick.Layouts
 // search over the list has the keys, and shows only the ones it matches:
 // Up and Down pick one, and Enter runs it. The keys it runs can be typed
 // or taken from a macro recorded (a register q records into). Tab goes
-// through all of it (see tab).
+// through all of it (see tab). Export saves the ones picked on a page of
+// their own (startExport) to a JSON file, a list of them as the settings
+// keep it, which Import adds to another Koil's (importFrom).
 Window {
     id: win
 
@@ -31,6 +35,9 @@ Window {
     // of (vimCommandIn).
     required property var app
     required property Theme theme
+    // main.qml's Document, which reads and writes the files of shortcuts
+    // (a var, so this file needs no `import Koil`).
+    required property var document
 
     readonly property real zoom: theme.zoom
     readonly property bool isMac: Qt.platform.os === "osx"
@@ -57,6 +64,16 @@ Window {
     // Whether the form shows, and the shortcut it edits (-1 for a new one).
     property bool editing: false
     property int editIndex: -1
+    // Whether the page that asks which shortcuts to export shows, and
+    // which it has picked, a bool for each.
+    property bool exporting: false
+    property var picks: []
+    readonly property int pickedCount: picks.filter(p => p).length
+    // What an export or import did, or why it couldn't (`failed`), which
+    // the list's hint shows (the export page's, while it stays), until
+    // anything else is done.
+    property string message
+    property bool failed
     // What the form has, and why it can't be saved, if it can't.
     readonly property var draft: ({
         name: nameField.input.text.trim(),
@@ -114,8 +131,9 @@ Window {
     // which vim never gets), or another shortcut's that's on, or start
     // with those or are their start: as nothing waits to tell keys apart
     // from the longer ones they start, one of the two would never run.
-    // "" if it can.
-    function problemOf(d) {
+    // "" if it can. Against `list` if given (an import's, with none
+    // edited), else the shortcuts but the one edited.
+    function problemOf(d, list) {
         if (!d.normal && !d.visual)
             return qsTr("It runs in neither mode: check Normal, Visual or both.");
         const ks = app.keyTokens(d.keys);
@@ -137,7 +155,8 @@ Window {
         }
         if (!d.enabled)
             return "";
-        const other = shortcuts.find((s, i) => i !== editIndex && s.enabled && s.keys && sameMode(s, d)
+        const skip = list ? -1 : editIndex;
+        const other = (list || shortcuts).find((s, i) => i !== skip && s.enabled && s.keys && sameMode(s, d)
             && (startsWith(app.keyTokens(s.keys), ks) || startsWith(ks, app.keyTokens(s.keys))));
         if (!other)
             return "";
@@ -178,13 +197,17 @@ Window {
             x = app.x + Math.round((app.width - width) / 2);
             y = app.y + Math.round(Math.min(80 * zoom, Math.max(0, (app.height - height) / 2)));
             editing = false;
+            exporting = false;
+            message = "";
             searchField.input.text = "";
             shortcutList.currentIndex = rows.length ? 0 : -1;
         }
         show();
         raise();
         requestActivate();
-        if (!editing)
+        if (exporting)
+            exportList.forceActiveFocus();
+        else if (!editing)
             focusSearch();
     }
     // The keys to the search, with a shortcut picked if any is shown.
@@ -202,8 +225,10 @@ Window {
         const reason = forward ? Qt.TabFocusReason : Qt.BacktabFocusReason;
         const row = shortcutList.currentItem as ShortcutRow;
         const chain = (editing ? [nameField.input, keyBox, macroField.input, macroButton, normalBox, visualBox,
-            enabledBox, deleteButton, cancelButton, saveButton] : [searchField.input, row ? row.editButton : null,
-            row ? row.deleteButton : null, ownButton, newButton]).filter(i => i && i.visible && i.enabled);
+            enabledBox, deleteButton, cancelButton, saveButton]
+            : exporting ? [exportList, allButton, exportCancel, exportButton]
+            : [searchField.input, row ? row.editButton : null, row ? row.deleteButton : null, ownButton,
+                importButton, exportStart, newButton]).filter(i => i && i.visible && i.enabled);
         const at = chain.indexOf(from || activeFocusItem);
         const next = chain[at < 0 ? (forward ? 0 : chain.length - 1) : (at + (forward ? 1 : chain.length - 1)) % chain.length];
         if (macroList.visible) {
@@ -241,7 +266,11 @@ Window {
     // Esc: from the form back to the list; in the list, it empties the
     // search, as in a macOS search field, or with none, it closes.
     function back() {
-        if (editing) {
+        if (exporting) {
+            exporting = false;
+            message = "";
+            focusSearch();
+        } else if (editing) {
             showList(editIndex);
         } else if (searchField.input.text) {
             searchField.input.text = "";
@@ -252,6 +281,7 @@ Window {
     }
     // The form for the shortcut at `index`, or for a new one (-1).
     function edit(index) {
+        message = "";
         const s = index < 0 ? { name: "", keys: "", macro: "", normal: true, visual: false, enabled: true }
             : shortcuts[index];
         editIndex = index;
@@ -285,6 +315,119 @@ Window {
         shortcutList.currentIndex = rows.length ? Math.min(row, Math.max(shown.length - 1, 0)) : -1;
         focusSearch();
     }
+    // The page that asks which shortcuts to export, all of them picked, on
+    // the first, which has the keys: Up and Down move, Space picks or
+    // leaves out, `a` picks all or none, Enter exports.
+    function startExport() {
+        if (!shortcuts.length)
+            return;
+        picks = shortcuts.map(() => true);
+        message = "";
+        exporting = true;
+        exportList.currentIndex = 0;
+        exportList.forceActiveFocus();
+    }
+    function togglePick(index) {
+        const list = picks.slice();
+        list[index] = !list[index];
+        picks = list;
+    }
+    // All of them picked, or if they are, none.
+    function pickAll() {
+        const all = pickedCount < shortcuts.length;
+        picks = shortcuts.map(() => all);
+    }
+    // Asks where to save the ones picked (see writeExport).
+    function exportPicked() {
+        if (pickedCount)
+            exportDialog.open();
+    }
+    // The name of the file at `path`, as messages say it.
+    function fileName(path) {
+        return path.split(/[\\/]/).pop();
+    }
+    function say(text, failed) {
+        message = text;
+        win.failed = !!failed;
+    }
+    // Saves the shortcuts picked to the file at `path`, as JSON: a list of
+    // them as the settings keep it (see app.readShortcuts), so a file can
+    // be edited, or its list put in the settings, by hand. Then back to the
+    // list, or if it can't, the export page says why.
+    function writeExport(path) {
+        const list = shortcuts.filter((s, i) => picks[i]);
+        const error = document.writeText(path, JSON.stringify(list, null, 2) + "\n");
+        if (error) {
+            say(error, true);
+            return;
+        }
+        exporting = false;
+        focusSearch();
+        say(list.length === 1 ? qsTr("Exported 1 shortcut to “%1”.").arg(fileName(path))
+            : qsTr("Exported %1 shortcuts to “%2”.").arg(list.length).arg(fileName(path)));
+    }
+    // Adds the shortcuts in the file at `path` (an export's) after the
+    // user's, but those already here (the same keys running the same keys
+    // in the same modes). One that's on, but whose keys can't be used here
+    // (see problemOf: a built-in's, another's that's on; or Cmd keys, which
+    // only macOS has), comes in off, keys and all, for the user to change
+    // them. The list then shows the first added, and says what it did.
+    function importFrom(path) {
+        const read = JSON.parse(document.readText(path));
+        if (read.error) {
+            say(read.error, true);
+            return;
+        }
+        let data = null;
+        try {
+            data = JSON.parse(read.text);
+        } catch (e) {
+        }
+        const name = fileName(path);
+        if (!Array.isArray(data)) {
+            say(qsTr("Can't import “%1”: it isn't shortcuts as Export saves them.").arg(name), true);
+            return;
+        }
+        const found = app.readShortcuts(read.text);
+        const list = shortcuts.slice();
+        let added = 0, same = 0, off = 0;
+        for (const s of found) {
+            if (list.some(o => o.keys === s.keys && o.macro === s.macro && o.normal === s.normal
+                    && o.visual === s.visual)) {
+                same++;
+                continue;
+            }
+            if (s.enabled && (problemOf(s, list) !== "" || !isMac && s.keys.includes("<D-"))) {
+                s.enabled = false;
+                off++;
+            }
+            list.push(s);
+            added++;
+        }
+        const first = shortcuts.length;
+        if (added)
+            app.saveShortcuts(list);
+        searchField.input.text = "";
+        shortcutList.currentIndex = added ? first : shortcutList.currentIndex;
+        focusSearch();
+        if (!found.length) {
+            say(qsTr("“%1” has no shortcuts.").arg(name));
+            return;
+        }
+        if (!added) {
+            say(qsTr("The shortcuts in “%1” are all here already.").arg(name));
+            return;
+        }
+        let text = added === 1 ? qsTr("Imported 1 shortcut from “%1”.").arg(name)
+            : qsTr("Imported %1 shortcuts from “%2”.").arg(added).arg(name);
+        if (off)
+            text += " " + (off === 1 ? qsTr("1 is off, as its keys can't be used here: edit it to change them.")
+                : qsTr("%1 are off, as their keys can't be used here: edit them to change them.").arg(off));
+        if (same)
+            text += " " + (same === 1 ? qsTr("1 was here already.") : qsTr("%1 were here already.").arg(same));
+        say(text);
+    }
+
     // A key while the macros are listed, which the list's window gets
     // (else the button that shows them): Down and Up go through them,
     // Enter takes one, and Tab goes on from the button.
@@ -363,16 +506,17 @@ Window {
     }
     Shortcut {
         sequences: [StandardKey.New]
-        enabled: win.focused && !win.editing
+        enabled: win.focused && !win.editing && !win.exporting
         onActivated: win.edit(-1)
     }
     // In the form, Enter saves, whatever has the keys (Space clicks a
-    // button), as Return does a macOS dialog's default button. Not while
-    // the macros are listed, where it takes one (see macroKey).
+    // button), as Return does a macOS dialog's default button, and on the
+    // export page it exports. Not while the macros are listed, where it
+    // takes one (see macroKey).
     Shortcut {
         sequences: ["Return", "Enter"]
-        enabled: win.focused && win.editing && !macroList.visible
-        onActivated: win.save()
+        enabled: win.focused && (win.editing || win.exporting) && !macroList.visible
+        onActivated: win.editing ? win.save() : win.exportPicked()
     }
 
     // A small button with an icon, which Tab reaches.
@@ -642,6 +786,74 @@ Window {
         }
     }
 
+    // A shortcut on the export page, with a box that says whether it's
+    // picked: a click on the row (or Space on the current one) picks it or
+    // leaves it out.
+    component ExportRow: AbstractButton {
+        id: pick
+
+        required property var modelData
+        required property int index
+        readonly property bool picked: win.picks[index] === true
+        readonly property bool current: ListView.isCurrentItem && exportList.activeFocus
+
+        width: ListView.view.width
+        implicitHeight: 30 * win.zoom
+        focusPolicy: Qt.NoFocus
+        hoverEnabled: true
+        Accessible.role: Accessible.CheckBox
+        Accessible.name: win.titleOf(modelData)
+        Accessible.checkable: true
+        Accessible.checked: picked
+        onClicked: {
+            exportList.currentIndex = index;
+            exportList.forceActiveFocus();
+            win.togglePick(index);
+        }
+
+        background: Rectangle {
+            radius: 3 * win.zoom
+            color: pick.current ? win.theme.checked : pick.hovered ? win.theme.hover : "transparent"
+        }
+        contentItem: RowLayout {
+            spacing: 8 * win.zoom
+
+            Check {
+                Layout.leftMargin: 6 * win.zoom
+                theme: win.theme
+                checked: pick.picked
+                focusPolicy: Qt.NoFocus
+                Accessible.ignored: true
+                onClicked: pick.clicked()
+            }
+            Text {
+                Layout.fillWidth: true
+                // As ShortcutRow shows it.
+                readonly property bool showsKeys: !pick.modelData.name && !pick.modelData.keys
+                text: showsKeys ? win.styledKeys(pick.modelData.macro) : win.titleOf(pick.modelData)
+                font.family: pick.modelData.name ? Application.font.family : win.theme.font.family
+                font.pixelSize: Math.round(13 * win.zoom)
+                color: win.theme.windowText
+                elide: Text.ElideRight
+                textFormat: showsKeys ? Text.StyledText : Text.PlainText
+            }
+            Text {
+                text: win.modeLabel(pick.modelData)
+                font.pixelSize: Math.round(12 * win.zoom)
+                color: win.theme.windowText
+                opacity: 0.6
+            }
+            KeyCap {
+                visible: pick.modelData.name !== "" && pick.modelData.keys !== ""
+                Layout.rightMargin: 4 * win.zoom
+                theme: win.theme
+                text: win.app.keysName(pick.modelData.keys)
+                padding: 5 * win.zoom
+                textColor: win.theme.windowText
+            }
+        }
+    }
+
     component FormLabel: Label {
         font.pixelSize: Math.round(13 * win.zoom)
         color: win.theme.windowText
@@ -666,7 +878,7 @@ Window {
         y: 16 * win.zoom
         width: win.width - 2 * x
         height: win.height - 2 * y
-        currentIndex: win.editing ? 1 : 0
+        currentIndex: win.editing ? 1 : win.exporting ? 2 : 0
 
         ColumnLayout {
             spacing: 10 * win.zoom
@@ -701,6 +913,7 @@ Window {
 
                         function onTextChanged() {
                             shortcutList.currentIndex = win.rows.length ? 0 : -1;
+                            win.message = "";
                         }
                     }
                     onKeyPressed: event => {
@@ -731,6 +944,26 @@ Window {
                         // On a row still shown, if it was on one of Koil's.
                         shortcutList.currentIndex = Math.min(shortcutList.currentIndex, win.rows.length - 1);
                     }
+                }
+                // Shortcuts from a file another Koil exported (see
+                // importFrom), and the user's to one (see startExport).
+                WindowButton {
+                    id: importButton
+
+                    iconPath: "M8 2.5 V9.5 M5 6.5 L8 9.5 L11 6.5 M3 10.5 V13 H13 V10.5"
+                    tip: qsTr("Import Shortcuts…")
+                    onClicked: {
+                        win.message = "";
+                        importDialog.open();
+                    }
+                }
+                WindowButton {
+                    id: exportStart
+
+                    enabled: win.shortcuts.length > 0
+                    iconPath: "M8 9.5 V2.5 M5 5.5 L8 2.5 L11 5.5 M3 10.5 V13 H13 V10.5"
+                    tip: qsTr("Export Shortcuts…")
+                    onClicked: win.startExport()
                 }
                 WindowButton {
                     id: newButton
@@ -793,12 +1026,15 @@ Window {
                 }
             }
 
+            // Or what an export or import did, or why it couldn't.
             Hint {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
-                text: qsTr("↑ and ↓ pick one, and Enter or a click runs it.")
-                wrapMode: Text.NoWrap
-                elide: Text.ElideRight
+                text: win.message || qsTr("↑ and ↓ pick one, and Enter or a click runs it.")
+                color: win.message && win.failed ? win.theme.error : win.theme.windowText
+                opacity: win.message ? 1 : 0.6
+                wrapMode: win.message ? Text.WordWrap : Text.NoWrap
+                elide: win.message ? Text.ElideNone : Text.ElideRight
             }
         }
 
@@ -1071,5 +1307,128 @@ Window {
                 }
             }
         }
+
+        // Which shortcuts to export (see startExport), each with a box.
+        ColumnLayout {
+            spacing: 10 * win.zoom
+
+            Hint {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                text: qsTr("Pick the shortcuts to export to a file, which Import adds to Koil elsewhere.")
+                opacity: 1
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: 4 * win.zoom
+                color: win.theme.field
+                border.color: exportList.activeFocus ? win.theme.accent : win.theme.fieldBorder
+
+                // Up and Down move (the ListView's own keys), Space picks
+                // the current one or leaves it out (its row, which has the
+                // keys, clicks), `a` all or none.
+                ListView {
+                    id: exportList
+
+                    anchors.fill: parent
+                    anchors.margins: 4 * win.zoom
+                    clip: true
+                    model: win.exporting ? win.shortcuts : []
+                    currentIndex: -1
+                    boundsBehavior: Flickable.StopAtBounds
+                    Accessible.name: qsTr("Shortcuts to export")
+                    ScrollIndicator.vertical: ScrollIndicator {}
+                    // From its current row, which has the keys (as a
+                    // ListView gives them), as from the list.
+                    Keys.onTabPressed: event => win.tab(event, exportList)
+                    Keys.onBacktabPressed: event => win.tab(event, exportList)
+                    Keys.onPressed: event => {
+                        if (event.key === Qt.Key_Space && currentIndex >= 0)
+                            win.togglePick(currentIndex);
+                        else if (event.key === Qt.Key_A && !event.modifiers)
+                            win.pickAll();
+                        else
+                            return;
+                        event.accepted = true;
+                    }
+
+                    delegate: ExportRow {}
+                }
+            }
+
+            // Why it couldn't export, while the page stays.
+            Hint {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                visible: win.message !== ""
+                text: win.message
+                color: win.failed ? win.theme.error : win.theme.windowText
+                opacity: 1
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8 * win.zoom
+
+                FormButton {
+                    id: allButton
+
+                    text: win.pickedCount < win.shortcuts.length ? qsTr("Select All") : qsTr("Select None")
+                    onClicked: win.pickAll()
+                }
+                Hint {
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    text: qsTr("%1 of %2").arg(win.pickedCount).arg(win.shortcuts.length)
+                    wrapMode: Text.NoWrap
+                    elide: Text.ElideRight
+                }
+                FormButton {
+                    id: exportCancel
+
+                    text: qsTr("Cancel")
+                    onClicked: win.back()
+                }
+                FormButton {
+                    id: exportButton
+
+                    primary: true
+                    text: qsTr("Export…")
+                    enabled: win.pickedCount > 0
+                    onClicked: win.exportPicked()
+                }
+            }
+        }
+    }
+
+    // Where the shortcuts picked go, and the file of them to import. The
+    // window has the keys again after either, which a native dialog takes.
+    FileDialog {
+        id: exportDialog
+
+        title: qsTr("Export Shortcuts")
+        fileMode: FileDialog.SaveFile
+        nameFilters: [qsTr("Shortcuts (*.json)")]
+        defaultSuffix: "json"
+        selectedFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation) + "/koil_shortcuts.json"
+        onAccepted: {
+            win.requestActivate();
+            win.writeExport(win.document.urlToPath(selectedFile));
+        }
+        onRejected: win.requestActivate()
+    }
+    FileDialog {
+        id: importDialog
+
+        title: qsTr("Import Shortcuts")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Shortcuts (*.json)"), qsTr("All files (*)")]
+        onAccepted: {
+            win.requestActivate();
+            win.importFrom(win.document.urlToPath(selectedFile));
+        }
+        onRejected: win.requestActivate()
     }
 }

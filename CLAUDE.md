@@ -65,8 +65,10 @@ the scratchpad (see Scratchpad).
   and counts dirs' sizes (`sizes`, `dirSizes`; see Sorting).
 - `src/document.rs`: `Document` (QML element): reading and writing files,
   watching the one shown (`watchFile`, see Files changed on disk), the
-  scratchpad's file (`writeScratchpad`, see Shell commands), the command
-  line, and installing the `koil` command (on a thread).
+  scratchpad's file (`writeScratchpad`, see Shell commands), the files
+  of shortcuts exported and imported (`writeText`, `readText`, apart from
+  the file shown), the command line, and installing the `koil` command
+  (on a thread).
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, the editor's
   text, line format and colors, showing a path in Finder or Explorer
@@ -138,8 +140,8 @@ the scratchpad (see Scratchpad).
   and what changed on disk against the user's edits.
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,), which scrolls,
   and shows what a setting does with the pointer on it (see Settings).
-- `qml/ShortcutsWindow.qml`: the user's shortcuts, listed and edited (see
-  Shortcuts).
+- `qml/ShortcutsWindow.qml`: the user's shortcuts, listed, edited,
+  exported and imported (see Shortcuts).
 - `qml/Theme.qml`, `Panel.qml`, `Tip.qml`, `Icon.qml`, `IconButton.qml`,
   `KeyCap.qml`: the look the app's own controls share (see Theme);
   `ModalBox.qml` (:help's and the questions' box), `WheelFlickable.qml`
@@ -1424,7 +1426,22 @@ the scratchpad (see Scratchpad).
   has the keys or a shell command runs.
   Its pencil shows it in a form, as + (or Cmd+N) does a new one, which Save
   saves (Esc and Cancel go back to the list), and its trash deletes it at
-  once. `Space q` opens it once the key is up (`openShortcuts`, on the
+  once. Its export button (by +) shows a page of its own (`exporting`,
+  `startExport`) with a box before each shortcut, all picked at first
+  (Space or a click picks the current one or leaves it out, `a` all or
+  none, Enter exports), then a `FileDialog` asks where, and `writeExport`
+  saves them as JSON: a list of them as `settings.shortcuts` has it, so a
+  file can be edited, or put in the settings, by hand. Its import button
+  asks for one, and `importFrom` adds what `app.readShortcuts` reads of it
+  after the user's, but those already there (the same keys running the
+  same keys in the same modes); one that's on, but whose keys can't be
+  used there (`problemOf` against the list so far: a built-in's, like
+  Windows' Ctrl menu keys, or another's that's on; or Cmd keys off
+  macOS), comes in off, keys and all, for the user to change. The list's
+  hint then says what it did (`message`, `failed` for why it couldn't),
+  until anything else is done. Neither goes through `Document`'s
+  `saveFile` or `openFile`, which would take the file for the one shown
+  (`readText`, of 1 MB at most, and `writeText`). `Space q` opens it once the key is up (`openShortcuts`, on the
   editor's `keyReleased`, or 300 ms later for a macro's keys): opened while
   `q` was down, its release went to the new window, and macOS's text input
   (which watches a held key for its accent menu) logged

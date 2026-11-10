@@ -2676,6 +2676,7 @@ ApplicationWindow {
 
         app: root
         theme: theme
+        document: doc
     }
 
     Timer {

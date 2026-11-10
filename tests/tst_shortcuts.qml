@@ -98,6 +98,41 @@ TestCase {
         function macroList() {
             return [{ name: "q", keys: ":!ls<CR>" }, { name: "w", keys: "dd" }];
         }
+        // As main.qml's.
+        function readShortcuts(json) {
+            let list;
+            try {
+                list = JSON.parse(json);
+            } catch (e) {
+                return [];
+            }
+            return Array.isArray(list) ? list.filter(s => s && typeof s.macro === "string").map(s => ({
+                name: typeof s.name === "string" ? s.name : "",
+                keys: typeof s.keys === "string" ? s.keys : "",
+                macro: s.macro,
+                normal: s.normal !== false,
+                visual: s.visual === true,
+                enabled: s.enabled !== false
+            })) : [];
+        }
+    }
+
+    // Document, as far as the window needs it: files are kept here, by
+    // their path.
+    QtObject {
+        id: doc
+
+        property var files: ({})
+
+        function readText(path) {
+            return JSON.stringify(path in files ? { text: files[path] } : { error: "Can't open `" + path + "`" });
+        }
+        function writeText(path, text) {
+            if (path.startsWith("/locked/"))
+                return "Can't save `" + path + "`";
+            files[path] = text;
+            return "";
+        }
     }
 
     ShortcutsWindow {
@@ -105,6 +140,7 @@ TestCase {
 
         app: app
         theme: theme
+        document: doc
     }
 
     // The list the macros (and Settings' fonts and shells) are in, with
@@ -131,6 +167,7 @@ TestCase {
         ];
         app.ran = [];
         app.showOwnShortcuts = false;
+        doc.files = {};
         win.open();
         tryVerify(() => win.active);
         tryVerify(() => focused() !== "none");
@@ -192,11 +229,12 @@ TestCase {
         compare(focused(), "Search shortcuts");
         compare(win.currentShortcut(), 0);
         const order = [];
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 6; i++) {
             tab();
             order.push(focused());
         }
-        compare(order, ["Edit", "Delete", "Show Built-in Shortcuts", "New Shortcut"]);
+        compare(order, ["Edit", "Delete", "Show Built-in Shortcuts", "Import Shortcuts…", "Export Shortcuts…",
+            "New Shortcut"]);
         tab();
         back();
         compare(focused(), "New Shortcut");
@@ -352,14 +390,14 @@ TestCase {
     // button, and Enter runs one only where it does something.
     function test_own() {
         compare(win.rows.map(r => r.at), [0, 1]);
-        back(2);
+        back(4);
         compare(focused(), "Show Built-in Shortcuts");
         press(Qt.Key_Space);
         verify(app.showOwnShortcuts);
         compare(win.rows.map(r => r.own ? "own:" + r.shortcut.keys : r.at), [0, 1, "own:  ", "own: q", "own:g.",
             "own:-"]);
         compare(win.rows.map(r => r.heading), [false, false, true, false, false, false]);
-        tab(2);
+        tab(4);
         compare(focused(), "Search shortcuts");
         press(Qt.Key_Down);
         press(Qt.Key_Down);
@@ -368,7 +406,7 @@ TestCase {
         compare(win.currentShortcut(), -1);
         tab();
         compare(focused(), "Show Built-in Shortcuts");
-        tab(2);
+        tab(4);
         // g. only in the listing
         press(Qt.Key_Return);
         compare(app.ran, []);
@@ -590,6 +628,86 @@ TestCase {
         const row = drop.view.itemAtIndex(1) as DropOption;
         compare(row.text, "b");
         drop.close();
+    }
+
+    // Export asks which to export, all picked at first: Space picks the
+    // current one or leaves it out, `a` all or none, Tab goes to the
+    // buttons, Esc back to the list. They're saved as the settings keep
+    // them (a dialog asks where; writeExport is what it calls).
+    function test_export() {
+        back(2);
+        compare(focused(), "Export Shortcuts…");
+        press(Qt.Key_Space);
+        verify(win.exporting);
+        // its current row, which a ListView gives the keys
+        compare(focused(), "Copy");
+        compare(win.picks, [true, true]);
+        press(Qt.Key_Space);
+        compare(win.picks, [false, true]);
+        press(Qt.Key_A);
+        compare(win.picks, [true, true]);
+        press(Qt.Key_A);
+        compare(win.picks, [false, false]);
+        compare(win.pickedCount, 0);
+        press(Qt.Key_Down);
+        press(Qt.Key_Space);
+        compare(win.picks, [false, true]);
+        const order = [];
+        for (let i = 0; i < 4; i++) {
+            tab();
+            order.push(focused());
+        }
+        compare(order, ["Select All", "Cancel", "Export…", "Space e"]);
+        // A file that can't be written says why, on the page.
+        win.writeExport("/locked/s.json");
+        verify(win.exporting);
+        compare(win.message, "Can't save `/locked/s.json`");
+        verify(win.failed);
+        win.writeExport("/x/s.json");
+        verify(!win.exporting);
+        compare(JSON.parse(doc.files["/x/s.json"]), [app.shortcuts[1]]);
+        compare(win.message, "Exported 1 shortcut to “s.json”.");
+        verify(!win.failed);
+        compare(focused(), "Search shortcuts");
+        // Esc leaves the page, exporting nothing.
+        win.startExport();
+        press(Qt.Key_Escape);
+        verify(!win.exporting);
+        verify(win.visible);
+        compare(win.message, "");
+    }
+
+    // Import adds the shortcuts of a file after the user's, but those
+    // already here; one whose keys can't be used here (taken, by the
+    // user's or Koil's) comes in off. A file that isn't shortcuts, or
+    // can't be read, says why.
+    function test_import() {
+        doc.files["/in.json"] = JSON.stringify([
+            { name: "Copy", keys: " c", macro: "yy", normal: true, visual: false, enabled: true },
+            { name: "Same keys", keys: " c", macro: "p", normal: true, visual: false, enabled: true },
+            { name: "Save", keys: "<D-s>", macro: ":w<CR>", normal: true, visual: false, enabled: true },
+            { name: "New", keys: " n", macro: "o", normal: true, visual: false, enabled: true },
+            { name: "Visual", keys: " c", macro: "y", normal: false, visual: true, enabled: true }
+        ]);
+        win.importFrom("/in.json");
+        compare(app.shortcuts.map(s => s.name), ["Copy", "", "Same keys", "Save", "New", "Visual"]);
+        compare(app.shortcuts.map(s => s.enabled), [true, true, false, false, true, true]);
+        compare(win.message, "Imported 4 shortcuts from “in.json”. 2 are off, as their keys can't be used here: "
+            + "edit them to change them. 1 was here already.");
+        compare(win.currentShortcut(), 2);
+        win.importFrom("/in.json");
+        compare(app.shortcuts.length, 6);
+        compare(win.message, "The shortcuts in “in.json” are all here already.");
+        doc.files["/bad.json"] = "{ \"shortcuts\": 1 }";
+        win.importFrom("/bad.json");
+        compare(win.message, "Can't import “bad.json”: it isn't shortcuts as Export saves them.");
+        verify(win.failed);
+        win.importFrom("/gone.json");
+        compare(win.message, "Can't open `/gone.json`");
+        verify(win.failed);
+        // Typing a search drops the message.
+        type("c");
+        compare(win.message, "");
     }
 
     // + makes a new one, and Esc goes back to the list.
