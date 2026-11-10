@@ -422,6 +422,10 @@ textBetween(const QTextDocument* document, int from, int to)
 // How much of a line syntax.rs colors (syntax::MAX_LENGTH).
 constexpr int coloredLength = 3000;
 
+// How many columns apart a line's tab stops are (see TextLayout's
+// layoutBlock).
+constexpr int tabColumns = 4;
+
 // Colors a file's text (see setTextColors), following edits, as a
 // QSyntaxHighlighter would, but a line's colors go to its layout as they
 // are, where QSyntaxHighlighter goes through a format for each of its
@@ -1120,6 +1124,17 @@ private:
     QTextOption option = document()->defaultTextOption();
     option.setWrapMode(wrap ? QTextOption::WrapAnywhere : QTextOption::NoWrap);
     option.setTextDirection(block.textDirection());
+    // Aligned left, as Qt's layout aligns a block that says nothing: a
+    // TextEdit's text option has no horizontal alignment unless it's set,
+    // and in a line without one, a tab is as wide as its glyph, not as far
+    // as its tab stop, where it's drawn. So the line was narrower than
+    // drawn, the view didn't scroll as far as its end, and xToCursor (a
+    // click) put the cursor at its end.
+    if (!(option.alignment() & Qt::AlignHorizontal_Mask))
+      option.setAlignment(option.alignment() | Qt::AlignLeft);
+    // Tab stops every tabColumns columns, so what's after a tab is on the
+    // grid of columns (Qt's are every 80 pixels, whatever the font).
+    option.setTabStopDistance(tabColumns * charWidth());
     layout->setTextOption(option);
     // As the layout has it: with what an input method is typing.
     QString text = block.text();

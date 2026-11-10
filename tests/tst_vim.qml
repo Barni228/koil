@@ -2880,6 +2880,39 @@ TestCase {
         }
     }
 
+    // A tab goes on to its tab stop, so zL and zH find the character
+    // sidescrolloff columns from the edge by where it's drawn: by its
+    // column, zL put the cursor far past the view, which then jumped to
+    // it, and zH took the line as ending before the view, which left the
+    // cursor out of it.
+    function test_scrollSidewaysTabs() {
+        load("one");
+        narrowText.text = "\t".repeat(30) + "end";
+        waitForRendering(narrow);
+        const f = narrow.contentItem as Flickable;
+        switchTo(narrowText, {
+            cursor: 0
+        }, f);
+        const x = p => narrowText.positionToRectangle(p).x;
+        const cw = x(31) - x(30), left = narrowText.leftPadding, right = narrowText.rightPadding;
+        const tabs = narrowText.tabStopDistance;
+        narrowText.tabStopDistance = 3 * cw;
+        waitForRendering(narrow);
+        vim.charWidth = cw;
+        keys(":set siso=2<CR>");
+        keys("zL");
+        const half = Math.floor((f.width - left - right) / cw / 2);
+        fuzzyCompare(f.contentX, half * cw, 0.5);
+        const first = f.contentX + left + 2 * cw - 0.5;
+        verify(x(vim.cursor) >= first, "the cursor is in view");
+        verify(x(vim.cursor - 1) < first, "the first tab that is");
+        keys("$zH");
+        const last = f.contentX + f.width - right - 2 * cw + 0.5;
+        verify(x(vim.cursor + 1) <= last, "the cursor is in view");
+        verify(x(vim.cursor + 2) > last, "the last tab that is");
+        narrowText.tabStopDistance = tabs;
+    }
+
     // Makes vim edit the buffer whose lines wrap (see wrapView), with
     // :set wrap, from its line `at` (from 1), where `lines` start with a
     // short one (so the rows' height is the first two lines' distance).

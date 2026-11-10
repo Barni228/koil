@@ -6690,18 +6690,29 @@ QtObject {
         // ScrollView's Flickable is pixelAligned).
         if (how === "zs" || how === "ze" || span.left >= f.contentX - 0.5 && span.right <= f.contentX + 0.5)
             return;
-        // The column sideRoom from the edge the cursor is past. Going right,
-        // past where its room would reach a name's prefix, which would
-        // scroll back to show all of it (see cursorSpan).
-        const t = bufferText(), ls = Txt.lineStart(t, Math.min(cursor, t.length));
-        const x0 = rectAt(ls).x, room = sideRoom() * charWidth;
-        const col = span.left < f.contentX
-            ? Math.max(Math.ceil((f.contentX + editor.leftPadding + room - x0 - 0.5) / charWidth),
-                Txt.column(t, prefixEnd(t, ls)) + sideRoom() + 1)
-            : Math.floor((f.contentX + f.width - editor.rightPadding - room - x0 + 0.5) / charWidth) - 1;
-        const p = Txt.atColumn(t, ls, Math.max(0, col));
-        if (Txt.column(t, p) < col)
-            return; // the line ends before the view
+        // The character sideRoom from the edge the cursor is past, by where
+        // it's drawn, not its column, as a tab goes on to its tab stop.
+        // Going right, past where its room would reach a name's prefix,
+        // which would scroll back to show all of it (see cursorSpan).
+        const t = bufferText(), ls = Txt.lineStart(t, Math.min(cursor, t.length)), le = Txt.lineEnd(t, ls);
+        const room = sideRoom() * charWidth, y = textTop + (Txt.lineOf(t, ls) - 0.5) * lineHeight;
+        let p;
+        if (span.left < f.contentX) {
+            // The first one that starts there or after.
+            const x = Math.max(f.contentX + editor.leftPadding, rectAt(prefixEnd(t, ls)).x + charWidth) + room - 0.5;
+            p = posAt(x, y);
+            if (p < le && rectAt(p).x < x)
+                p = Txt.charEnd(t, p);
+            if (p >= le)
+                return; // the line ends before the view
+        } else {
+            // The last one that ends there or before.
+            const x = f.contentX + f.width - editor.rightPadding - room + 0.5;
+            let end = posAt(x, y);
+            if (end > ls && rectAt(end).x > x)
+                end = Txt.charStart(t, end - 1);
+            p = end > ls ? Txt.charStart(t, end - 1) : ls;
+        }
         setCursor(p);
         wantCol = Txt.column(t, cursor);
     }

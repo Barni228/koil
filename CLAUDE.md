@@ -2150,7 +2150,17 @@ the scratchpad (see Scratchpad).
   still use a line's natural (taller) height on emoji lines, so the
   selection is drawn by the app (under the text, `z: -0.5`), and all
   overlays use `cellAt` (the whole row, snapped to the grid). The
-  current-line highlight is at `z: -0.6`. In a debug build, 100,000 lines
+  current-line highlight is at `z: -0.6`. Its lines are aligned left, as
+  Qt's layout aligns a block: a TextEdit's text option has no horizontal
+  alignment unless it's set, and in a line without one, Qt takes a tab as
+  wide as its glyph (or nothing) rather than as far as its tab stop, where
+  it's drawn and `cursorToX` puts what's after it. So a line with tabs
+  was narrower than drawn, the view didn't scroll to its end (`$` left
+  the cursor out of it), and `xToCursor` put a click past that width at
+  its end. Its tab stops are every `tabColumns` (4) columns, so what's
+  after a tab is on the grid of columns (Qt's are every 80 pixels,
+  whatever the font); a long line Koil draws itself still has a tab as a
+  space (see Long lines). In a debug build, 100,000 lines
   open in 7.5 s (11 with Qt's layout), 10.5 wrapped (20), and an edit takes
   20 to 40 ms.
 - **Long texts**: a `TextEdit` with over 10,000 characters builds only the
