@@ -610,10 +610,12 @@ Item {
     // The marked lines in the visible lines (see Vim's `marked`), or those
     // : left with while the command line is open, as { start, end } spans
     // (a line, without its line break). They're sorted, so they're found
-    // by binary search, as there can be thousands.
+    // by binary search, as there can be thousands. None while I or A types
+    // on them (Vim's `markedInsert`, which keeps them marked till it
+    // ends), as a block's selection goes while its insert types.
     function markedSpans() {
         const shown = active && vim.visualShown && vim.visualShown.mode === "marked" ? vim.visualShown.marked : marked;
-        if (!shown.length)
+        if (!shown.length || active && vim.markedInsert)
             return [];
         const t = editor.latest.text, v = visibleRange(), to = Math.min(v.to, t.length);
         const spans = [];
@@ -1369,7 +1371,8 @@ Item {
             // while vim edits the other editor, as they stay marked.
             SpanShade {
                 z: -0.52
-                inputs: [view.marked, view.active, view.vim.visualShown, view.layout, view.viewport]
+                inputs: [view.marked, view.active, view.vim.visualShown, view.vim.markedInsert, view.layout,
+                    view.viewport]
                 spans: () => view.markedSpans()
                 color: view.theme.marked
             }

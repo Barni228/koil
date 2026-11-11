@@ -1882,7 +1882,9 @@ the scratchpad (see Scratchpad).
   a macro on each one, unmarked first, so its keys don't act on them all
   (`runOnLines`, as in visual mode, with a copy of them, as it takes its
   lines from the array it's given), `I`, `A` and `gI` type on each one (extra
-  cursors; they stay marked meanwhile: `markedInsert`), and `:` (and `!`
+  cursors; they stay marked meanwhile, `markedInsert`, so the edits move
+  them for `gv`, but aren't drawn, as a block's selection isn't while its
+  insert types), and `:` (and `!`
   and `g!`: `bangLines`) types `'<,'>`, which then stands for them
   (`exRange` gives their `lines`: `:s` keeps to them through
   `selectionRegion`, `:!` with `%` runs on their entries, `pathsOnLines`
