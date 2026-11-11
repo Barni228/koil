@@ -1394,7 +1394,12 @@ the scratchpad (see Scratchpad).
   listing, the path field, a file, the scratchpad). `commandFor` matches
   them after `commandKeys`, which are normal mode's only; in visual mode
   too, so Space there waits for a key rather than moving (`Space q` is
-  one), and Space and another key is a bad command. They come before
+  one), and Space and another key is a bad command. While lines are
+  marked (`parse`'s `marking`), visual mode's match too, before normal
+  mode's with the same keys (or that start them), still after
+  `commandKeys`, and their keys run with the lines marked, so `:`, `d`,
+  `>` and `S` in them act on those as on a selection (see Marked lines).
+  They come before
   vim's own keys, as a vim mapping does: a shortcut on `xa` makes `x`
   wait (no timeout tells it apart), and any key but `a` after it is a bad
   command; `gc`, which vim reads as a bad command, takes nothing. A macro
@@ -1871,13 +1876,19 @@ the scratchpad (see Scratchpad).
   together (`executeMarked`; `parse`'s `marking` makes an operator act at
   once, as in visual mode): `d` and `y` put them in one register, `c`, `p`
   and `J` put what takes their place where the first one is, `>`, case
-  changes and `r` change each one where it is (`markedBlocks`, as one edit
-  through `replaceRanges`), `I`, `A` and `gI` type on each one (extra
+  changes (`U` too, which normal mode doesn't have) and `r` change each
+  one where it is (`markedBlocks`, as one edit through `replaceRanges`),
+  `S` and `gS` surround each run of them (see Surround), `@` and `Q` run
+  a macro on each one, unmarked first, so its keys don't act on them all
+  (`runOnLines`, as in visual mode, with a copy of them, as it takes its
+  lines from the array it's given), `I`, `A` and `gI` type on each one (extra
   cursors; they stay marked meanwhile: `markedInsert`), and `:` (and `!`
   and `g!`: `bangLines`) types `'<,'>`, which then stands for them
   (`exRange` gives their `lines`: `:s` keeps to them through
   `selectionRegion`, `:!` with `%` runs on their entries, `pathsOnLines`
-  taking spans of lines, and a filter takes them together). Other keys are normal
+  taking spans of lines, and a filter takes them together), and a
+  shortcut of the user's for visual mode runs on them (see Shortcuts
+  under Koil). Other keys are normal
   mode's (`u` undoes, `i` types at the cursor), and `.` repeating a change
   isn't on them. A command (or `Esc`) unmarks them (`unmark`), and
   `lastVisual` (mode `"marked"`) keeps them for `gv`: where they are after
@@ -1982,8 +1993,11 @@ the scratchpad (see Scratchpad).
 - **Surround** (Surround in Vim.qml, `parseSurround`): vim-surround's keys,
   `ys{motion}{pair}` (`yss` the line, after its indent), `ds{target}`,
   `cs{target}{pair}` and `S{pair}` in visual mode, which takes the place of
-  vim's visual `S` (change lines; marked lines' `S` is still that, as
-  marked lines are normal mode, which vim-surround leaves `S` to). `yS`,
+  vim's visual `S` (change lines), and on marked lines, around each run
+  of them next to each other (`markedBlocks`), as on those lines selected
+  with `V` (`surroundMarked`, all as one edit and one reindent through
+  `surroundAll`; asking for a tag, they're drawn as `visualShown`, and
+  marked again for the edit, so `gv` marks them where they are). `yS`,
   `ySS`, `cS` and `S` on lines (`gS` on characters) put the pair on lines
   of its own and what's inside a level deeper, as `>` indents it
   (`wrapEdits`), then for brackets and tags reindent what's inside and

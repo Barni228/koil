@@ -328,7 +328,8 @@ function sections(help) {
                 ["`cs`", "Change it: `cs\"'` makes `\"a\"` `'a'`, and `cs)]` makes `(a)` `[a]`."],
                 ["`S`  `gS`", "In visual mode: around the selection, like `S)`. Lines get the pair on lines of "
                     + "its own, a level deeper (with `gS`, not deeper), and a block on each of its lines. "
-                    + "`gS` puts it on lines of its own around characters too."],
+                    + "`gS` puts it on lines of its own around characters too. On marked lines (`:h m`), "
+                    + "around each run of them next to each other."],
                 ["`yS`  `ySS`  `cS`", "As `ys`, `yss` and `cs`, with the pair on lines of its own and "
                     + "what's inside a level deeper. Inside brackets or tags, it's then reindented as `=` "
                     + "does."],
@@ -365,7 +366,8 @@ function sections(help) {
                     + "edits, so one that adds or deletes lines still runs on each. `@:` runs the last command."],
                 ["Your keys", "Your shortcuts: keys of yours (`Space c`, `gc`, `<C-k>`"
                     + (isMac ? ", `⌘K` as `<D-k>`" : "") + ") that run keys as a "
-                    + "macro does, like `:!git add %<CR>`, in normal mode, visual mode or both. A count runs one "
+                    + "macro does, like `:!git add %<CR>`, in normal mode, visual mode (also on marked lines: "
+                    + "see `:h m`) or both. A count runs one "
                     + "that many times. They come before vim's: a shortcut on `xa` makes `x` wait for the `a`. "
                     + "Koil's own keys can't be taken, nor keys that start them or start with them (`g`, `g.x`). "
                     + "F-keys, and keys like `Esc`, `Tab` and `PageDown` with `Shift`, " + (isMac ? "`⌃` or `⌘`" : "`Ctrl`")
@@ -406,8 +408,14 @@ function sections(help) {
                 ["`I`  `A`", "Type at the start or end of each one, like `A.bak<Esc>`."],
                 ["`c`  `p`  `J`", "Change them into one line, put a register in their place, or join them, "
                     + "where the first one is."],
-                ["`>`  `=`  `gU`  `r`", "Indent, reindent, change case or replace characters on each one."],
+                ["`>`  `=`  `U`  `gU`  `r`", "Indent, reindent, change case or replace characters on each "
+                    + "one."],
+                ["`S`  `gS`", "Surround each run of them next to each other, as lines selected (`S)`: see "
+                    + "`:h surround`)."],
+                ["`@a`  `Q`", "Run a macro on each one in turn, from its start, as in visual mode."],
                 ["`:`", "`:'<,'>` is them: `:s/a/b/` changes only them."],
+                ["Your keys", "A shortcut of yours for visual mode runs its keys on them, as on a selection "
+                    + "(before one for normal mode with the same keys)."],
                 ["`Esc`", "Unmark them all. `gv` marks them again (also after using them)."]
             ],
             note: "Other keys work as in normal mode: `u` undoes, `i` and `o` type at the cursor."

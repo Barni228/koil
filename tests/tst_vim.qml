@@ -4025,7 +4025,7 @@ TestCase {
         keys("u");
         compare(render(), "a\nb\nc\nd");
         loadListing("M  a\nC  b\nM  c");
-        keys("mGmSx<Esc>");
+        keys("mGmCx<Esc>");
         compare(render(), "<M:h1>  x\n<C:h2>  b");
         compare(vim.registers["\""].hidden.map(h => h.text), ["h1", "h3"]);
     }
@@ -4167,6 +4167,103 @@ TestCase {
         compare(vim.visualShown.marked, [0, 8]);
         keys("<CR>");
         compare(editor.text, "bbbb\naa\nbbbb");
+    }
+
+    // S and gS on marked lines: around each run of them next to each
+    // other, as on those lines selected with V, as one change, after which
+    // gv marks them again. A tag is asked for with them still drawn.
+    function test_markedSurround() {
+        load("a\nb\nc\nd\ne");
+        keys("mjmjjmS)");
+        compare(render(), "(\n    a\n    b\n)\nc\n(\n    d\n)\ne");
+        compare(vim.marked, []);
+        compare(vim.cursor, 0);
+        keys("gv");
+        compare(vim.marked, [2, 8, 20]);
+        keys("<Esc>u");
+        compare(render(), "a\nb\nc\nd\ne");
+        load("a\nb\nc");
+        keys("mjjmgS]");
+        compare(render(), "[\na\n]\nb\n[\nc\n]");
+        // Brackets have each one's inside reindented by them.
+        load("a\n      b\nc\nd\n      e");
+        keys("mjmjjmjmS{");
+        compare(render(), "{\n    a\n    b\n}\nc\n{\n    d\n    e\n}");
+        load("a\nb\nc");
+        keys("mjjmS<");
+        compare(vim.commandLine, "<");
+        compare(vim.marked, []);
+        compare(vim.visualShown.marked, [0, 4]);
+        keys("p>");
+        compare(render(), "<p>\n    a\n</p>\nb\n<p>\n    c\n</p>");
+        compare(vim.visualShown, null);
+        keys("gv");
+        compare(vim.marked, [4, 21]);
+        // Esc puts in none, and gv marks them again.
+        load("a\nb");
+        keys("mjmS<");
+        keys("p<Esc>");
+        compare(render(), "a\nb");
+        keys("gv");
+        compare(vim.marked, [0, 2]);
+    }
+
+    // U on marked lines makes them uppercase, as in visual mode, and @
+    // and Q run a macro on each one, unmarked first.
+    function test_markedVisualKeys() {
+        load("ab\ncd\nef");
+        keys("mjjmU");
+        compare(render(), "AB\ncd\nEF");
+        compare(vim.marked, []);
+        keys("u");
+        compare(render(), "ab\ncd\nef");
+        load("a\nb\nc\nd");
+        vim.registers["q"] = { text: "A!<Esc>", linewise: false, hidden: [] };
+        keys("jmjjm@q");
+        compare(render(), "a\nb!\nc\nd!");
+        compare(vim.marked, []);
+        compare(vim.running, null);
+        keys("u");
+        compare(render(), "a\nb\nc\nd");
+        keys("gv@@");
+        compare(render(), "a\nb!\nc\nd!");
+        // Q, the one recorded last
+        load("a\nb\nc");
+        keys("qqA!<Esc>qjjmQ");
+        compare(render(), "a!\nb\nc!");
+    }
+
+    // While lines are marked, a shortcut for visual mode runs on them, as
+    // on a selection, before one for normal mode with the same keys.
+    function test_markedShortcuts() {
+        load("a\nb\nc\nd");
+        vim.commandKeys = { "  ": "apply" };
+        vim.shortcuts = [
+            { keys: " c", macro: ":s/^/# /<CR>", label: "Space c", normal: false, visual: true },
+            { keys: " u", macro: "<C-a>", label: "Space u", normal: true, visual: false },
+            { keys: " u", macro: "gU", label: "Space u", normal: false, visual: true }
+        ];
+        keys("mjjm c");
+        compare(editor.text, "# a\nb\n# c\nd");
+        compare(vim.marked, []);
+        // a run is one undo step, after which gv marks them again
+        keys("u");
+        compare(editor.text, "a\nb\nc\nd");
+        keys("gv u");
+        compare(editor.text, "A\nb\nC\nd");
+        // S surrounds them, as in visual mode
+        vim.shortcuts = vim.shortcuts.concat([{ keys: " s", macro: "S)", label: "Space s", normal: false,
+            visual: true }]);
+        keys("ggmjjm s");
+        compare(editor.text, "(\n    A\n)\nb\n(\n    C\n)\nd");
+        // without marks, Space c is a bad command in normal mode, and
+        // Space u is normal mode's
+        load("1\nb");
+        keys(" c");
+        compare(editor.text, "1\nb");
+        compare(vim.pendingKeys, "");
+        keys(" u");
+        compare(editor.text, "2\nb");
     }
 
     // A filter's output goes where the first marked line was, and the

@@ -217,10 +217,11 @@ QtObject {
         "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m"]
     // While lines are marked, the keys that act on them, as they act on a
     // linewise selection in visual mode (see Marked lines): an operator at
-    // once. The others are normal mode's, so u still undoes, and i and o
-    // type at the cursor.
+    // once, S and gS surround (as "surround"), U, and @ and Q on each one.
+    // The others are normal mode's, so u still undoes, and i and o type at
+    // the cursor.
     readonly property var markedActions: ["d", "c", "y", ">", "<", "=", "g~", "gu", "gU", "g?", "!", "g!", "x", "<Del>",
-        "X", "D", "s", "S", "C", "R", "Y", "~", "r", "J", "gJ", "p", "P", "I", "A", "gI", ":"]
+        "X", "D", "s", "C", "R", "Y", "~", "U", "r", "J", "gJ", "p", "P", "I", "A", "gI", ":", "@", "Q", "surround"]
     // Scroll the view sideways (see scrollSideways).
     readonly property var sideScrolls: ["zh", "zl", "zH", "zL", "zs", "ze"]
     // Normal-mode commands that run at every cursor (as do operators and
@@ -1218,7 +1219,7 @@ QtObject {
         cmd.count = c1.count;
         i = c1.next;
         if (i < keys.length && !plain) {
-            const c = commandFor(keys.slice(i), visual);
+            const c = commandFor(keys.slice(i), visual, marking);
             if (c && (c.name || c.shortcut)) {
                 cmd.command = c.name;
                 cmd.shortcut = c.shortcut;
@@ -1230,7 +1231,7 @@ QtObject {
             // (Space l), unless they went on as a name of vim's (gg, where
             // g. is one).
             let started = 0;
-            while (commandFor(keys.slice(i, i + started + 1), visual))
+            while (commandFor(keys.slice(i, i + started + 1), visual, marking))
                 started++;
             if (started && readName(keys, i).next - i <= started)
                 return bad;
@@ -1282,8 +1283,8 @@ QtObject {
             return { status: "ok", cmd };
         }
 
-        // vim-surround's S and gS (see Surround).
-        if (visual && (w.name === "S" || w.name === "gS")) {
+        // vim-surround's S and gS (see Surround), also on marked lines.
+        if ((visual || marking) && (w.name === "S" || w.name === "gS")) {
             const r = parseReplacement(keys, w.next);
             if (r.status !== "ok")
                 return r;
@@ -1308,7 +1309,7 @@ QtObject {
             cmd.motion = m.motion;
             return { status: "ok", cmd };
         }
-        if (!(visual ? visualActions : normalActions).includes(w.name))
+        if (!(visual ? visualActions : normalActions).includes(w.name) && !(marking && markedActions.includes(w.name)))
             return bad;
         cmd.action = w.name;
         if (w.name === "r") {
@@ -1334,8 +1335,11 @@ QtObject {
 
     // The command of commandKeys (visualCommandKeys in visual mode) or the
     // shortcut that `keys` type, as { name } or { shortcut }, or {} while
-    // they're only the start of its keys. Null if none.
-    function commandFor(keys, visual) {
+    // they're only the start of its keys. Null if none. While lines are
+    // marked (`marking`), which keys act on as on a selection, visual
+    // mode's shortcuts take keys too, before normal mode's, so one for a
+    // selection runs on them (see Marked lines).
+    function commandFor(keys, visual, marking) {
         const typing = ks => keys.length <= ks.length && keys.every((t, j) => t === ks[j]);
         const own = visual ? visualCommandKeys : commandKeys;
         for (const k in own) {
@@ -1343,10 +1347,13 @@ QtObject {
             if (typing(ks))
                 return keys.length === ks.length ? { name: own[k] } : {};
         }
-        for (const s of plainKey ? [] : shortcuts) {
-            const ks = macroKeys(s.keys);
-            if ((visual ? s.visual : s.normal) && typing(ks))
-                return keys.length === ks.length ? { shortcut: s } : {};
+        const modes = visual ? ["visual"] : marking ? ["visual", "normal"] : ["normal"];
+        for (const m of plainKey ? [] : modes) {
+            for (const s of shortcuts) {
+                const ks = macroKeys(s.keys);
+                if (s[m] && typing(ks))
+                    return keys.length === ks.length ? { shortcut: s } : {};
+            }
         }
         return null;
     }
@@ -1513,7 +1520,7 @@ QtObject {
             macroFails();
             return;
         }
-        const changing = marking ? !["y", "Y", ":", "!", "g!"].includes(cmd.action) : isChange(cmd);
+        const changing = marking ? !["y", "Y", ":", "!", "g!", "@", "Q"].includes(cmd.action) : isChange(cmd);
         const wasVisual = isVisual;
         // A selection's surround, once its tag is typed, isn't repeated, as
         // visual mode's commands aren't.
@@ -2964,6 +2971,14 @@ QtObject {
             commandOnMarked(a !== ":", a === "!" && bangEntries);
             return;
         }
+        // @ and Q run a macro on each one, as in visual mode (see
+        // runOnLines), once they're unmarked, so its keys don't act on
+        // them all. It takes its lines from a copy, as gv keeps these.
+        if (a === "@" || a === "Q") {
+            unmark(starts);
+            runOnLines(a === "Q" ? lastRecorded : cmd.ch, starts.slice(), Math.max(cmd.count, 1));
+            return;
+        }
         const blocks = markedBlocks(t, starts), lines = linesText(t, blocks), n = starts.length;
         switch (a) {
         case "y":
@@ -2993,7 +3008,6 @@ QtObject {
         }
         case "c":
         case "s":
-        case "S":
         case "C":
         case "R": {
             // As c on lines: the first one's prefix stays (its icon and
@@ -3015,13 +3029,17 @@ QtObject {
         case "=":
             reindentLines(blocks);
             break;
+        case "surround":
+            surroundMarked(t, starts, cmd.surround);
+            break;
         case "~":
         case "g~":
+        case "U":
         case "gu":
         case "gU":
         case "g?":
             editMarked(t, starts, blocks.map(b => {
-                const text = caseChanged(t.slice(b.start, b.end), a === "~" ? "~" : a[1]);
+                const text = caseChanged(t.slice(b.start, b.end), a[a.length - 1]);
                 return { start: b.start, end: b.end, text: text, entries: carriedHidden(b.start, b.end, text) };
             }), false);
             break;
@@ -4905,10 +4923,16 @@ QtObject {
     // execute), which ">" or Enter ends (see finishTag). From visual mode,
     // the selection is kept for it, and stays drawn meanwhile, as for ":".
     function askTag(cmd) {
-        if (isVisual) {
-            lastVisual = visualState();
+        // The selection, or the marked lines, stay drawn while it's typed,
+        // as for :.
+        if (isVisual || !replaying && marked.length) {
+            const visual = isVisual;
+            lastVisual = visual ? visualState() : markedVisual(marked);
             cmd = Object.assign({}, cmd, { surround: Object.assign({}, cmd.surround, { selection: lastVisual }) });
-            leaveVisual();
+            if (visual)
+                leaveVisual();
+            else
+                setMarked([]);
             visualShown = lastVisual;
         }
         surroundTag = cmd;
@@ -5070,13 +5094,29 @@ QtObject {
     // and its closing line, as = does (vim-surround's reindent), so it
     // comes out right however it was indented.
     function surroundWith(t, left, right, pair, lines, indented) {
-        const ends = replaceAll(wrapEdits(t, left, right, pair, lines, indented)), open = pair.open.trim();
+        surroundAll(t, [{ left: left, right: right }], pair, lines, indented);
+    }
+
+    // surroundWith around each of `spans` ({ left, right }, in order and
+    // apart: the marked lines' runs), as one edit, and one reindent.
+    function surroundAll(t, spans, pair, lines, indented) {
+        const groups = spans.map(s => wrapEdits(t, s.left, s.right, pair, lines, indented));
+        const ends = replaceAll([].concat(...groups)), open = pair.open.trim();
         if (!indented || !pair.close || !/[(\[{]$/.test(open) && !(/^<[A-Za-z][^>]*>$/.test(open) && !open.endsWith("/>")))
             return;
-        const u = bufferText(), from = Txt.lineEnd(u, left.start) + 1, to = Txt.lineStart(u, ends[ends.length - 1] - 1);
-        if (from <= to)
-            replaceAll(Txt.reindent(u, [{ from: from, to: to }], Txt.indentUnit(u), !/\.py[iw]?$/i.test(fileName),
-                ls => prefixEnd(u, ls)));
+        // Each one's inside and its closing line: from the line after its
+        // open's (its first edit, at its left.start) to its last edit's.
+        const u = bufferText(), inside = [];
+        let i = 0;
+        for (const g of groups) {
+            const from = Txt.lineEnd(u, ends[i] - g[0].text.length) + 1;
+            i += g.length;
+            const to = Txt.lineStart(u, ends[i - 1] - 1);
+            if (from <= to)
+                inside.push({ from: from, to: to });
+        }
+        if (inside.length)
+            replaceAll(Txt.reindent(u, inside, Txt.indentUnit(u), !/\.py[iw]?$/i.test(fileName), ls => prefixEnd(u, ls)));
     }
 
     // Whether t has only blanks in [from, to) (a part of a line).
@@ -5147,9 +5187,18 @@ QtObject {
     // S (or gS) in visual mode, on the selection `sel` (as lastVisual
     // keeps one): around its characters, or around its lines on lines of
     // their own (S indents them, gS a selection of characters), or around
-    // each line's part of a block, padded to the block's width.
+    // each line's part of a block, padded to the block's width. Marked
+    // lines (mode "marked", after their tag was asked for) are marked
+    // again for it, so it unmarks them as executeMarked does.
     function surroundSelection(sel, s) {
         const t = bufferText(), pair = surroundPair(s, "");
+        if (sel.mode === "marked") {
+            const starts = validStarts(t, sel.marked);
+            setMarked(starts);
+            surroundMarked(t, starts, s);
+            unmark(starts);
+            return;
+        }
         if (sel.mode === "visualBlock") {
             const b = blockShape(t, undefined, undefined, sel), edits = [];
             // Lines that reach the block; the others are left alone.
@@ -5169,6 +5218,20 @@ QtObject {
         surroundWith(t, { start: start, end: start }, { start: end, end: end }, pair, lines, s.g !== lines);
         const u = bufferText();
         setCursor(clampNormal(u, lines ? firstNonBlank(u, start) : start));
+    }
+
+    // S (or gS) on the marked lines (`starts`): around each run of them
+    // next to each other, as on those lines selected with V (see
+    // surroundSelection), all as one edit. The cursor goes to the first
+    // one's open.
+    function surroundMarked(t, starts, s) {
+        const blocks = markedBlocks(t, starts);
+        surroundAll(t, blocks.map(b => {
+            const end = Math.min(b.end + 1, t.length);
+            return { left: { start: b.start, end: b.start }, right: { start: end, end: end } };
+        }), surroundPair(s, ""), true, !s.g);
+        const u = bufferText();
+        setCursor(clampNormal(u, firstNonBlank(u, blocks[0].start)));
     }
 
     // ---- Command line ------------------------------------------------------
