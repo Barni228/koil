@@ -20,14 +20,19 @@ cxx = "1"
 cxx-qt = "0.10"
 cxx-qt-lib = { version = "0.10", features = ["qt_full"] }
 devicons = "0.6"
+# `canonicalize` without the `\\?\` Windows puts before every path, as koil-core's
+dunce = "1.0"
 # watches the open dir, so the listing shows what changes on disk
 notify = "8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# signals to stop a shell command and what it started (its process group)
 [target.'cfg(unix)'.dependencies]
+# signals to stop a shell command and what it started (its process group),
+# and what's mounted where on macOS
 libc = "0.2"
+# the names of a file's owner and group, and the user's groups, which `K` shows
+uzers = { version = "0.12", default-features = false }
 
 # a drive's capacity and free space, which `K` shows
 [target.'cfg(windows)'.dependencies]

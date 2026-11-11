@@ -404,14 +404,7 @@ fn target_rows(path: &Path, target: &io::Result<Metadata>) -> Vec<Row> {
 /// before a drive's path, which koil's paths don't have. None if it can't
 /// be.
 fn real_path(path: &Path) -> Option<PathBuf> {
-    let real = fs::canonicalize(path).ok()?;
-    #[cfg(windows)]
-    if let Some(rest) = real.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
-        && rest.as_bytes().get(1) == Some(&b':')
-    {
-        return Some(PathBuf::from(rest));
-    }
-    Some(real)
+    dunce::canonicalize(path).ok()
 }
 
 /// How big a volume is (a disk, a partition, a disk image, a share), and
@@ -676,8 +669,7 @@ fn system_rows(meta: &Metadata, now: SystemTime) -> Rows {
     }
     rows.push(("Permissions", permissions(&meta.file_type(), meta.mode())));
     let (uid, gid) = (meta.uid(), meta.gid());
-    // SAFETY: geteuid can't fail.
-    let owner = owner_kind(uid, uid == unsafe { libc::geteuid() });
+    let owner = owner_kind(uid, uid == uzers::get_effective_uid());
     rows.push(("Owner", named(user_name(uid), uid, owner)));
     let group = owner_kind(gid, in_group(gid));
     rows.push(("Group", named(group_name(gid), gid, group)));
@@ -798,73 +790,15 @@ fn permissions(kind: &FileType, mode: u32) -> Text {
 /// The name of the user `uid`, if it has one.
 #[cfg(unix)]
 fn user_name(uid: u32) -> Option<String> {
-    // SAFETY: all zeros is a valid `passwd` (null pointers and numbers),
-    // which getpwuid_r fills in, its strings in `buffer`.
-    let mut user: libc::passwd = unsafe { std::mem::zeroed() };
-    with_buffer(|buffer, found: &mut *mut libc::passwd| {
-        // SAFETY: the buffer is as long as the length given, and `user`
-        // and `found` live through the call.
-        let error =
-            unsafe { libc::getpwuid_r(uid, &mut user, buffer.as_mut_ptr(), buffer.len(), found) };
-        // SAFETY: once getpwuid_r found it, its name is a C string in the
-        // buffer, which is still there.
-        (
-            error,
-            (!found.is_null()).then(|| unsafe { c_string(user.pw_name) }),
-        )
-    })
+    let user = uzers::get_user_by_uid(uid)?;
+    Some(user.name().to_string_lossy().into_owned())
 }
 
 /// The name of the group `gid`, if it has one.
 #[cfg(unix)]
 fn group_name(gid: u32) -> Option<String> {
-    // SAFETY: as for `user_name`.
-    let mut group: libc::group = unsafe { std::mem::zeroed() };
-    with_buffer(|buffer, found: &mut *mut libc::group| {
-        // SAFETY: as for `user_name`.
-        let error =
-            unsafe { libc::getgrgid_r(gid, &mut group, buffer.as_mut_ptr(), buffer.len(), found) };
-        // SAFETY: as for `user_name`.
-        (
-            error,
-            (!found.is_null()).then(|| unsafe { c_string(group.gr_name) }),
-        )
-    })
-}
-
-/// What `look_up` (getpwuid_r or getgrgid_r) gives, with a buffer for its
-/// strings big enough for them: one twice as big while it says it's too
-/// small (ERANGE), up to a MB.
-#[cfg(unix)]
-fn with_buffer<T>(
-    mut look_up: impl FnMut(&mut [libc::c_char], &mut *mut T) -> (libc::c_int, Option<String>),
-) -> Option<String> {
-    let mut size = 1024;
-    loop {
-        let mut buffer = vec![0; size];
-        let mut found = std::ptr::null_mut();
-        match look_up(&mut buffer, &mut found) {
-            (libc::ERANGE, _) if size < 1 << 20 => size *= 2,
-            (0, name) => return name,
-            _ => return None,
-        }
-    }
-}
-
-/// The C string at `s`, if it isn't null.
-///
-/// # Safety
-///
-/// `s` is null or a C string that lives through the call.
-#[cfg(unix)]
-unsafe fn c_string(s: *const libc::c_char) -> String {
-    match s.is_null() {
-        true => String::new(),
-        // SAFETY: as the caller says.
-        false => unsafe { std::ffi::CStr::from_ptr(s) }
-            .to_string_lossy()
-            .into_owned(),
-    }
+    let group = uzers::get_group_by_gid(gid)?;
+    Some(group.name().to_string_lossy().into_owned())
 }
 
 /// The flags macOS keeps of a file, as `chflags` sets them, named as

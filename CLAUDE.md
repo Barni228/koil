@@ -595,7 +595,7 @@ the scratchpad (see Scratchpad).
   what a dir has (by kind, and how many are hidden), its times (local, to
   the second, and how long ago; none at 0, which a device's creation is),
   and on Unix when its metadata changed (`ctime`), its permissions as `ls
-  -l` has them and in octal, its owner and group (`getpwuid_r`), its hard
+  -l` has them and in octal, its owner and group (their names from the `uzers` crate), its hard
   links (not a dir's, which count its dirs), and on macOS its flags
   (`chflags`'s: hidden, locked, restricted, not downloaded); on Windows
   its attributes instead (untried, but checked to build for it). Not its
