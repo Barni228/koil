@@ -178,7 +178,15 @@ mod bridge {
             text_document: *mut QObject,
             colors: &QStringList,
             file_name: &QString,
+            icon_colors: &QStringList,
+            directory_color: &QString,
+            executable_color: &QString,
         );
+
+        /// Which lines of a file's QQuickTextDocument have a file that can
+        /// be run (see native.h).
+        #[cxx_name = "setTextEntryLines"]
+        unsafe fn set_text_entry_lines(text_document: *mut QObject, executable_lines: &QStringList);
 
         /// The installed monospaced font families.
         #[cxx_name = "monospaceFamilies"]

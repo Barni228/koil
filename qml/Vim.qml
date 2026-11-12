@@ -138,10 +138,11 @@ QtObject {
     // and two spaces, or three spaces on a line that has none, which the
     // cursor never goes into (see Prefixes). A line without one is plain.
     property bool linePrefixes: false
-    // Whether ! in visual mode, or on marked lines, is for a command on the
-    // lines' entries (Koil's listing): it types '<,'>! and a % for them,
-    // rather than for vim's filter, which g! types (see openBang).
-    property bool bangEntries: false
+    // What ! in visual mode, or on marked lines, types after '<,'>! for a
+    // command on the lines' entries: a % in Koil's listing, a <cfile> in
+    // its scratchpad, where entries are pasted, or nothing, for vim's
+    // filter, which g! types (see openBang).
+    property string bangEntries: ""
     // What a new line starts with, and a line break that starts one.
     readonly property string blankPrefix: linePrefixes ? "   " : ""
     readonly property string lineBreak: "\n" + blankPrefix
@@ -1986,7 +1987,7 @@ QtObject {
             if (a === ":")
                 openCommandLine(":", "'<,'>");
             else
-                openBang("'<,'>", a === "!" && bangEntries);
+                openBang("'<,'>", a === "!" ? bangEntries : "");
             return;
         }
         if (a === "/" || a === "?") {
@@ -2946,8 +2947,9 @@ QtObject {
 
     // : (and ! and g!) while lines are marked: a command line for them, as
     // : in visual mode, with the range '<,'>, which stands for them (see
-    // exRange), and a ! if `bang`, then a % for their entries if `entries`
-    // (see openBang). They stay drawn while it's typed (visualShown).
+    // exRange), and a ! if `bang`, then `entries` (a %, say) for their
+    // entries (see openBang). They stay drawn while it's typed
+    // (visualShown).
     function commandOnMarked(bang, entries) {
         lastVisual = markedVisual(marked);
         visualShown = lastVisual;
@@ -2960,12 +2962,12 @@ QtObject {
 
     // The command line for a shell command on the lines of `range` (none
     // for the cursor's), as !, with `entries`, types it for Koil (see
-    // bangEntries): a % after it for what's on them, with the cursor
-    // before it, where the command goes (:!| %).
+    // bangEntries): a % (or a <cfile>) after it for what's on them, with
+    // the cursor before it, where the command goes (:!| %).
     function openBang(range, entries) {
-        openCommandLine(":", range + "!" + (entries ? " %" : ""));
+        openCommandLine(":", range + "!" + (entries ? " " + entries : ""));
         if (entries)
-            commandCursor -= 2;
+            commandCursor -= entries.length + 1;
     }
 
     // Runs one of markedActions on the marked lines, which it unmarks (see
@@ -2975,7 +2977,7 @@ QtObject {
     function executeMarked(cmd) {
         const t = bufferText(), a = cmd.action, starts = marked;
         if (a === ":" || a === "!" || a === "g!") {
-            commandOnMarked(a !== ":", a === "!" && bangEntries);
+            commandOnMarked(a !== ":", a === "!" ? bangEntries : "");
             return;
         }
         // @ and Q run a macro on each one, as in visual mode (see
@@ -4696,12 +4698,30 @@ QtObject {
         return outOfPrefix(t, Txt.clampNormal(t, p));
     }
 
-    // The first character of p's line that isn't blank, after its prefix
-    // (or the line's end).
-    function firstNonBlank(t, p) {
-        let q = prefixEnd(t, Txt.lineStart(t, p));
+    // Where the blanks after the prefix of the line that starts at ls end
+    // (or the line's end): its indent's end.
+    function indentEnd(t, ls) {
+        let q = prefixEnd(t, ls);
         while (q < t.length && Txt.isBlank(t[q]))
             q++;
+        return q;
+    }
+
+    // The first character of p's line that isn't blank, after its prefix
+    // (or the line's end). Outside Koil's listing, where the cursor can be
+    // on an icon, one that hides text there (the ID of an entry pasted in
+    // the scratchpad) and the blanks after it are indentation too, so ^,
+    // I, gg and the like go to the entry's name, as in the listing, where
+    // the icon is the line's prefix. An icon that hides nothing is a
+    // character like any other.
+    function firstNonBlank(t, p) {
+        let q = indentEnd(t, Txt.lineStart(t, p));
+        const icon = linePrefixes ? null : hiddenAt(q);
+        if (icon) {
+            q += icon.icon.length;
+            while (q < t.length && Txt.isBlank(t[q]))
+                q++;
+        }
         return q;
     }
 
@@ -5152,7 +5172,7 @@ QtObject {
     // between one level deeper (as > indents). A space of the pair's
     // inside goes on a line of its own, and next to a line break.
     function wrapEdits(t, left, right, pair, lines, indented) {
-        const ls = Txt.lineStart(t, left.start), lead = t.slice(prefixEnd(t, ls), firstNonBlank(t, ls));
+        const ls = Txt.lineStart(t, left.start), lead = t.slice(prefixEnd(t, ls), indentEnd(t, ls));
         const unit = Txt.indentUnit(t);
         // Whether what's between goes on to another line, and only blanks
         // are after the open's place or before the close's on their lines.
@@ -5185,7 +5205,7 @@ QtObject {
         // something in it, not counting the close's.
         if (indented) {
             for (let q = lines ? left.start : Txt.lineEnd(t, left.end) + 1; q < c; q = Txt.lineEnd(t, q) + 1) {
-                const f = firstNonBlank(t, q);
+                const f = indentEnd(t, q);
                 if (f < Math.min(c, Txt.lineEnd(t, q)))
                     edits.push({ start: prefixEnd(t, q), end: prefixEnd(t, q), text: unit });
             }

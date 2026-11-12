@@ -43,15 +43,18 @@ function sections(help) {
                     + "in the file it copies. Opening a file that applying copies (or `Space o`, or a "
                     + "shell command) makes the copies first, so they don't get your changes."],
                 ["`Space r`", "Show the entry on the line in " + fileManager + " (from the path field, the "
-                    + "open dir; in a file, the file)."],
+                    + "open dir; in a file, the file; in the scratchpad, the entry pasted on the line, or "
+                    + "the path under the cursor)."],
                 ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
-                    + fileManager + " does (from the path field, the open dir; in a file, the file)."],
+                    + fileManager + " does (from the path field, the open dir; in a file, the file; in the "
+                    + "scratchpad, as `Space r`)."],
                 ["`K`", "Show all about the entry on the line: its path, what it is (a symlink's target), "
                     + "its size (a dir's is counted, but "
                     + (isWindows ? "a drive's root shows the drive's" : "a volume's top dir, like `/`, shows the volume's")
                     + " capacity and what's available instead), what a dir has, its times, "
                     + (isWindows ? "and its attributes" : "permissions, owner and group, and flags")
-                    + " (from the path field, the open dir; in a file, the file). The box stays while you "
+                    + " (from the path field, the open dir; in a file, the file; in the scratchpad, the "
+                    + "entry pasted on the line, or the path under the cursor). The box stays while you "
                     + "move (`j`, `k`), showing the entry you're on, until `Esc`."],
                 ["`!`", "Run a shell command on the entry on the line (or the marked ones: see `:h m`): "
                     + "`!git add` or `!rm`, then `Enter` (see `:h !`)."],
@@ -70,7 +73,12 @@ function sections(help) {
                 ["`_`", "The scratchpad (from a file too): text of your own, never saved, kept as you left "
                     + "it until Koil quits. `_` or `-` there goes back to where you were, a file with its "
                     + "unsaved changes. In a command, `%` is a file of its text (`!wc -w`), and `<cfile>` "
-                    + "the path under the cursor (`:!rm <cfile>`)."],
+                    + "the path under the cursor (`:!rm <cfile>`). Entries pasted there look and work as in "
+                    + "the listing: colored, with where a link points after the line, and the dir of one "
+                    + "that isn't in the open dir. `Enter`, `gf`, `gh`, `K`, `Space r`, `Space o` and `!` "
+                    + "take the one on the line, its icon counts as indentation (`^`, `I` and `gg` go to "
+                    + "the name; `0` to the icon), and `!` with a count, a selection or marked lines types "
+                    + "`<cfile>` for a command on them (`Vj!`, then `git add`)."],
                 ["`:_`", "Show the scratchpad, or stay in it, where `_` would leave it: for a shortcut "
                     + "that should end up there wherever it's run."],
                 ["`:_put`  `:_pu a`", "Put what `p` would paste (or register `a`) after the scratchpad's "
@@ -239,10 +247,12 @@ function sections(help) {
                 + "longer (`:_!cmd`: in the scratchpad). `Esc` stops it.",
             rows: [
                 ["`!`", "Types `:! %` with the cursor before the `%`, for a command on the entry on the "
-                    + "line, like `git add` then `Enter` (in a file or the scratchpad, on the file). With a "
+                    + "line, like `git add` then `Enter` (in a file, on the file; in the scratchpad, on the "
+                    + "entry pasted on the line, or else on its file). With a "
                     + "count (`3!`), in visual mode or with lines marked (`m`), the range of those lines: in "
-                    + "the listing, `%` is their entries, and elsewhere they're put through the command, as "
-                    + "`g!` does."],
+                    + "the listing, `%` is their entries, in the scratchpad `<cfile>` is the entries "
+                    + "pasted on them (or the paths written), and in a file they're put through the "
+                    + "command, as `g!` does."],
                 ["`g!`", "Vim's `!`: `g!!` or `g!ip` types the range of those lines (in visual mode, the "
                     + "selection's), which go through the command you type, like `sort`, and its output "
                     + "takes their place (in the listing, as new entries)."],
@@ -432,8 +442,8 @@ function sections(help) {
             tags: ["hide", "reveal", "icon", "icons", "id", "gh"],
             rows: [
                 ["icons", "In the listing, each icon hides its entry's ID, which whole lines take along."],
-                ["`gh`", "Show what the line's icon hides: an ID shows as its path (so does resting the "
-                    + "mouse on the icon)."],
+                ["`gh`", "Show what the line's icon hides, wherever the cursor is on the line: an ID "
+                    + "shows as its path (so does resting the mouse on the icon)."],
                 ["", "Yanks, undo and copying keep the hidden text. Other apps get the icons."]
             ]
         },

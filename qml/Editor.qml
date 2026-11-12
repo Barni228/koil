@@ -212,14 +212,17 @@ Item {
         // The file's colors go before the listing's come, as two
         // highlighters would each take the other's away.
         if (listingColors)
-            system.setTextColors(editor.textDocument, [], "");
+            system.setTextColors(editor.textDocument, [], "", [], "", "");
         const colors = [];
         for (const icon in iconColors)
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
         system.setListingColors(editor.textDocument, colors, pendingIconColor[theme.dark ? 0 : 1],
             String(theme.infoColor("execute")), listingColors ? String(theme.directory) : "");
+        // In the scratchpad, the lines of the entries pasted there are
+        // colored as the listing's.
         if (!listingColors)
-            system.setTextColors(editor.textDocument, vim.syntax ? theme.syntaxColors() : [], filePath);
+            system.setTextColors(editor.textDocument, vim.syntax ? theme.syntaxColors() : [], filePath,
+                filePath ? [] : colors, String(theme.directory), String(theme.infoColor("execute")));
         applyPendingLines();
     }
 
@@ -230,8 +233,12 @@ Item {
     }
 
     function applyPendingLines() {
+        if (pathField)
+            return;
         if (listingColors)
             formatOnly(() => system.setEntryLines(editor.textDocument, pendingLines.map(String), executableLines.map(String)));
+        else
+            formatOnly(() => system.setTextEntryLines(editor.textDocument, filePath ? [] : executableLines.map(String)));
     }
 
     // A press at x, y in the editor's coordinates, in the room the view
@@ -770,7 +777,10 @@ Item {
         // In the listing, the cursor is never on an icon (see Prefixes in
         // Vim.qml): with nothing under it, gh shows its line's icon's text.
         function onHoverRequested(at) {
-            hover.show(view.listing && !hover.targetAt(at) ? Txt.lineStart(editor.latest.text, at) : at, false);
+            // With nothing there, the icon of the cursor's line, which the
+            // cursor is never on in the listing, and needn't be elsewhere
+            // (an entry pasted in the scratchpad).
+            hover.show(hover.targetAt(at) ? at : Txt.lineStart(editor.latest.text, at), false);
         }
     }
 

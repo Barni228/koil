@@ -383,6 +383,49 @@ pub fn looks(koil: &Koil, ids: impl IntoIterator<Item = Id>) -> Looks {
     looks
 }
 
+/// What the scratchpad shows of the entries pasted in it, as the listing
+/// does (see [`pasted_looks`]).
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct PastedLooks {
+    /// The dir each one that isn't in the open dir is in, by the ID as its
+    /// icon hides it, which the editor shows after its line.
+    pub infos: HashMap<String, String>,
+    /// Where each symlink points (see [`Looks`]).
+    pub links: HashMap<String, LinkTarget>,
+    /// The IDs of the files that can be run, whose names are green.
+    pub executable: Vec<String>,
+}
+
+/// What the scratchpad shows of the entries pasted in it (`ids`, as their
+/// icons hide them) as they are on disk now, as the listing does (see
+/// [`looks`]): where a symlink points, and which files can be run. And
+/// after the line of one that isn't in the open dir, the dir it's in, as
+/// the confirmations show a path (see [`relative`]): there a name alone
+/// doesn't say which file it is (two `main.rs` put aside from two dirs),
+/// and the line's text is the name it gets where it's pasted, so it
+/// can't say.
+pub fn pasted_looks(koil: &Koil, ids: &[String]) -> PastedLooks {
+    let ids: Vec<Id> = ids
+        .iter()
+        .filter_map(|id| id.parse().ok().map(Id))
+        .collect();
+    let looks = looks(koil, ids.iter().copied());
+    let mut infos = HashMap::new();
+    for id in &ids {
+        let dir = koil.path_of(*id).and_then(Path::parent);
+        if let Some(dir) = dir.filter(|dir| *dir != koil.current_dir()) {
+            infos.insert(id.0.to_string(), slashed(relative(koil, dir), true));
+        }
+    }
+    let mut executable: Vec<Id> = looks.executables.into_iter().collect();
+    executable.sort();
+    PastedLooks {
+        infos,
+        links: looks.links,
+        executable: executable.iter().map(|id| id.0.to_string()).collect(),
+    }
+}
+
 /// Whether the file at `path` can be run (see [`Looks`]); false for a dir,
 /// a link, and what can't be read.
 pub fn runs(path: &Path) -> bool {

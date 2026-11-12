@@ -450,9 +450,43 @@ public:
 
   QTextDocument* document() const { return static_cast<QTextDocument*>(parent()); }
 
-  // A format for each SyntaxKind, in its order.
+  // A format for each SyntaxKind, in its order, or none, which colors no
+  // syntax.
   QList<QTextCharFormat> formats;
   SyntaxComments comments{ true, true };
+  // The colors of the icons of entries, by icon, as the listing's (see
+  // ListingHighlighter): in the scratchpad, where entries are pasted. A
+  // line that starts with one is colored as the listing's: its dirs, and
+  // its name on a line in `executable` (see setTextEntryLines).
+  QHash<QString, QTextCharFormat> icons;
+  QTextCharFormat directory;
+  QTextCharFormat executableName;
+  QSet<int> executable;
+
+  // Takes the lines of the files that can be run, and colors those whose
+  // names were colored otherwise, as setEntryLines does: by what each was
+  // colored as (see ColoredAs), not by the lines before, whose numbers an
+  // edit changes.
+  void setExecutable(const QSet<int>& lines)
+  {
+    executable = lines;
+    auto* doc = document();
+    QList<QTextBlock> changed;
+    for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
+      const auto* colored = dynamic_cast<ColoredAs*>(block.userData());
+      if ((colored && colored->executable) != lines.contains(block.blockNumber()))
+        changed.append(block);
+    }
+    if (changed.isEmpty())
+      return;
+    const FormatOnly formatting(doc);
+    const LayoutPaused paused(doc, changed.size() > 20);
+    QTextCursor cursor(doc);
+    cursor.beginEditBlock();
+    for (const auto& block : std::as_const(changed))
+      colorLine(block);
+    cursor.endEditBlock();
+  }
   // Whether the lines must be colored again (see setTextColors).
   bool stale = false;
 
@@ -507,11 +541,54 @@ private:
                                            static_cast<size_t>(text.size()));
     const QTextBlock before = block.previous();
     rust::Vec<SyntaxSpan> spans;
-    block.setUserState(
-      syntaxSpans(line, before.isValid() ? before.userState() : -1, comments, spans));
     QList<QTextLayout::FormatRange> colors;
-    for (const auto& span : spans)
-      colors.append({ span.start, span.length, formats.value(static_cast<int>(span.kind)) });
+    if (formats.isEmpty()) {
+      block.setUserState(-1);
+    } else {
+      block.setUserState(
+        syntaxSpans(line, before.isValid() ? before.userState() : -1, comments, spans));
+      for (const auto& span : spans)
+        colors.append({ span.start, span.length, formats.value(static_cast<int>(span.kind)) });
+    }
+    if (icons.isEmpty())
+      return colors;
+    // Whether it was colored as a file that can be run (see
+    // setExecutable).
+    const bool runs = executable.contains(block.blockNumber());
+    auto* colored = dynamic_cast<ColoredAs*>(block.userData());
+    if (!colored && runs) {
+      colored = new ColoredAs;
+      block.setUserData(colored);
+    }
+    if (colored)
+      colored->executable = runs;
+    const auto entry = entryColors(text, runs);
+    return entry.isEmpty() ? colors : entry;
+  }
+
+  // The colors of a line that starts with an entry's icon (after blanks),
+  // as the listing colors it (see ListingHighlighter), in place of a
+  // file's: its icon, the dirs up to its last `/`, and its name if it can
+  // be run (`runs`). None if it starts with no icon.
+  QList<QTextLayout::FormatRange> entryColors(const QString& text, bool runs) const
+  {
+    qsizetype at = 0;
+    while (at < text.size() && text.at(at).isSpace())
+      at++;
+    if (at == text.size())
+      return {};
+    const qsizetype length = text.at(at).isHighSurrogate() && at + 1 < text.size() ? 2 : 1;
+    const auto icon = icons.constFind(text.mid(at, length));
+    if (icon == icons.cend())
+      return {};
+    const int start = static_cast<int>(at + length), size = static_cast<int>(text.size());
+    QList<QTextLayout::FormatRange> colors{ { static_cast<int>(at), static_cast<int>(length), *icon } };
+    const int slash = static_cast<int>(text.lastIndexOf(u'/'));
+    if (slash >= start)
+      colors.append({ start, slash + 1 - start, directory });
+    const int name = std::max(start, slash + 1);
+    if (runs && size > name)
+      colors.append({ name, size - name, executableName });
     return colors;
   }
 
@@ -1770,13 +1847,19 @@ setSpanColors(QObject* textDocument, const QStringList& spans)
 }
 
 void
-setTextColors(QObject* textDocument, const QStringList& colors, const QString& fileName)
+setTextColors(QObject* textDocument,
+              const QStringList& colors,
+              const QString& fileName,
+              const QStringList& iconColors,
+              const QString& directoryColor,
+              const QString& executableColor)
 {
   auto* document = documentOf(textDocument);
   if (!document)
     return;
   auto* textColors = childOf<TextColors>(textDocument);
-  if (colors.isEmpty()) {
+  const auto icons = colorsByKey(iconColors);
+  if (colors.isEmpty() && icons.isEmpty()) {
     if (textColors) {
       textColors->recolor(true);
       delete textColors;
@@ -1790,18 +1873,26 @@ setTextColors(QObject* textDocument, const QStringList& colors, const QString& f
   if (url < formats.size())
     formats[url].setFontUnderline(true);
   const auto comments = syntaxComments(fileName);
+  const auto directory = colored(directoryColor), executableName = colored(executableColor);
   if (!textColors) {
     textColors = new TextColors(document);
     textColors->formats = formats;
     textColors->comments = comments;
+    textColors->icons = icons;
+    textColors->directory = directory;
+    textColors->executableName = executableName;
     textColors->recolor();
     return;
   }
   if (formats == textColors->formats && comments.hash == textColors->comments.hash &&
-      comments.slashes == textColors->comments.slashes)
+      comments.slashes == textColors->comments.slashes && icons == textColors->icons &&
+      directory == textColors->directory && executableName == textColors->executableName)
     return;
   textColors->formats = formats;
   textColors->comments = comments;
+  textColors->icons = icons;
+  textColors->directory = directory;
+  textColors->executableName = executableName;
   // Once the event loop runs, as another file's name comes right before
   // its text, which setText colors as it puts it in (and then it isn't
   // stale): coloring the old text first laid out a long one again.
@@ -1812,6 +1903,18 @@ setTextColors(QObject* textDocument, const QStringList& colors, const QString& f
       textColors->recolor();
     }
   });
+}
+
+void
+setTextEntryLines(QObject* textDocument, const QStringList& executableLines)
+{
+  auto* textColors = childOf<TextColors>(textDocument);
+  if (!textColors)
+    return;
+  QSet<int> lines;
+  for (const auto& line : executableLines)
+    lines.insert(line.toInt());
+  textColors->setExecutable(lines);
 }
 
 QStringList

@@ -28,6 +28,7 @@ the scratchpad (see Scratchpad).
   each line when sorted by size or a date (`notes`), and whatever it's
   sorted by, a link's target and the files that can be run (`looks`), what changed on
   disk as edits to the text and questions (`sync`, `resolve`, `merge`),
+  what the scratchpad shows of the entries pasted in it (`pasted_looks`),
   and the entries a shell command runs on (`paths_on_lines`, or from the
   path field `paths_in_field`), or what `<cfile>` stands for on a file's
   lines (`links_on_lines`). Its tests (`src/listing/tests.rs`) use a temp
@@ -452,7 +453,9 @@ the scratchpad (see Scratchpad).
   (`leaveFile`): back to the listing, on the file's line, a level up, so
   `3-` goes two up from there (`goUp`), `_`: the scratchpad over the
   file, and `Space r`, `Space o` and `K`, which take the file, as `%` does
-  (`entryPath`; in the scratchpad, they say it isn't on disk). `Space q` lists the user's shortcuts
+  (`entryPath`; in the scratchpad, what `<cfile>` stands for: the entry
+  pasted on the cursor's line, or else the path under the cursor, as gf
+  takes it, `linkTargetAt`, see Scratchpad). `Space q` lists the user's shortcuts
   (see Shortcuts) everywhere, in visual mode too (`visualCommandKeys`), so
   the list can run one on the selection.
   They're only matched at the start of a normal-mode command (so `d-` and
@@ -989,7 +992,38 @@ the scratchpad (see Scratchpad).
   and `openScratch` gives them back (`vim.enterBuffer`). Its hidden text
   comes back too, on purpose: entries pasted there keep their IDs, as in
   a register, so they can be put aside and pasted back into a listing,
-  and `gh` shows their paths. An ID means the same path all session, so
+  and meanwhile work as in the listing, by the ID of the icon their
+  line starts with (`listing::pasted_entry`), wherever the cursor is on
+  it: `gh` shows its path, `K`, `Space r` and `Space o` take it
+  (`entryOnDisk`, and K's box follows the cursor's column too,
+  `infoSpot`, as a path written is the one under it), gf opens it, and
+  `!` with a count, in visual mode or on marked lines types a `<cfile>`
+  for a command on them (`Vim.bangEntries`, a `%` in the listing), where
+  `g!` is the filter, as in the listing; `!` alone types `:! <cfile>` on
+  such a line (`pastedEntryAt`), and else `:! %`, the scratchpad's file.
+  Enter opens it as gf does (`openPasted`; vim's Enter on a line without
+  one). Its icon and the blanks after it are indentation
+  (`Vim.firstNonBlank`, outside the listing, for an icon that hides
+  text): `^`, `I`, `gg`, `NG`, `+`, `-`, `yss` and where `p` and the
+  commands on lines leave the cursor go to the name, so the cursor is
+  seldom on the icon, though `0`, `h` and a click still put it there
+  (it's no prefix: see Prefixes, which also keep new lines and searches
+  out of one). What goes at a line's blanks (`indentEnd`: surround's
+  new lines) doesn't take the icon. Their lines look as the listing's (`setTextColors`'
+  `iconColors`, which Editor.qml gives only with no `filePath`: a line
+  whose first character that isn't blank is an icon of a listing shown
+  gets the listing's colors in place of a file's, also with `:set
+  nosyntax`: its icon, its dirs, and its name green on the lines of
+  `setTextEntryLines`, those of files that can be run). After each
+  line, as the listing's notes (`Editor.infos` and `links`, by ID), is
+  where a symlink points, and for an entry that isn't in the open dir,
+  the dir it's in, as gh shows a path (`listing::pasted_looks`,
+  `scratchLooks`, `updateScratchLooks` in main.qml): two `main.rs` put
+  aside from two dirs read the same otherwise, and the line's text
+  can't say, as it's the name the entry gets where it's pasted (a path
+  written there would move it to that path). They're read from disk as
+  the scratchpad is shown, after a shell command, and after an edit
+  that brings other IDs (a paste), not watched. An ID means the same path all session, so
   one pasted back after its file is gone is an error (`NotOnDisk` in
   koil-core), not another file. Edits don't make it modified, `:w`,
   `Space Space` and Cmd+S only say it isn't saved, `:wq` and `ZZ` quit as
@@ -1056,8 +1090,8 @@ the scratchpad (see Scratchpad).
   of its lines (`3!`: `:.,.+2!`), and in visual mode or on marked lines
   `:'<,'>!` (`:` types `'<,'>` too, leaving visual mode, as in vim),
   each with ` %` after it in the listing (`Vim.bangEntries`), so it's on
-  their entries, but none elsewhere, where it's vim's filter (no key
-  types `<cfile>`). `g!` is vim's `!` operator (`g!{motion}`,
+  their entries, in the scratchpad with ` <cfile>`, for the entries
+  pasted there, but none in a file, where it's vim's filter. `g!` is vim's `!` operator (`g!{motion}`,
   `g!!`, typing the range of the lines it covers, or in visual mode and
   on marked lines `:'<,'>!`), for the filter where `!` isn't; Vim.qml's
   own `!` operator is the same, which Koil's key takes the place of
@@ -1325,7 +1359,10 @@ the scratchpad (see Scratchpad).
   its format for each character of the line (5 ms for a line of a
   megabyte), and not again when only the text's format changed
   (`FormatOnly`: the colors, or a new layout, see Text layout), which
-  had it color every line again; a line's state (in a `/* */`) is its
+  had it color every line again; in the scratchpad a line that starts
+  with an icon is colored as the listing's highlighter colors it
+  instead (`entryColors`, see Scratchpad), and with no syntax colors,
+  only those are colored; a line's state (in a `/* */`) is its
   block's user state, as a highlighter's. Only one highlighter may color a
   document (each would take the other's colors away), so Editor.qml takes
   the listing's
@@ -1966,8 +2003,9 @@ the scratchpad (see Scratchpad).
     insert mode, and cursor steps go through `Txt.charStart`/`charEnd` (never
     `±1`), which treat an emoji with its modifiers as one character, as Qt
     does. Columns count characters (`Txt.column`, `Txt.atColumn`).
-  - Resting the mouse on an icon (a `HoverHandler`) or `gh` (in the listing,
-    on the icon of the cursor's line, unless a problem is under the cursor)
+  - Resting the mouse on an icon (a `HoverHandler`) or `gh` (with nothing
+    under the cursor, a problem say, on the icon the cursor's line starts
+    with: the listing's, which the cursor is never on, or a pasted entry's)
     shows its text in the `HoverBox`, in the window's `Overlay` (so the
     editor doesn't clip it).
     Its text is a read-only `TextEdit` that never takes focus, so keys stay

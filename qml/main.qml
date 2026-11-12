@@ -45,6 +45,14 @@ ApplicationWindow {
     // Where the entries that are symlinks point, by their IDs (see
     // Editor.links), shown after their lines whatever it's sorted by.
     property var links: ({})
+    // What the scratchpad shows of the entries pasted in it, as the
+    // listing does (see updateScratchLooks): after their lines, the dir
+    // each is in, if it isn't the open one (`infos`), and where a symlink
+    // points (`links`), by ID, as the editor takes the listing's; and the
+    // IDs of the files that can be run (`executable`, an object of them),
+    // whose names are green. For the IDs in `ids`, read again only for
+    // others.
+    property var scratchLooks: ({ ids: "", infos: {}, links: {}, executable: {} })
     // When the first of the notes that are times changes ("5 min ago"
     // becomes "6 min ago"), by Date.now(), or 0 if none will (see
     // refreshTimes).
@@ -384,6 +392,7 @@ ApplicationWindow {
         } : null;
         listing = false;
         problems = [];
+        executableLines = []; // the listing's, until updateScratchLooks
         const s = scratchState || { text: "", buffer: null, contentY: 0 };
         // Its hidden text comes back with the buffer: entries pasted there
         // keep their IDs on purpose, so they can be put aside and pasted
@@ -395,6 +404,37 @@ ApplicationWindow {
         f.contentY = Math.max(0, Math.min(s.contentY, f.contentHeight + f.bottomMargin - f.height));
         vim.enterBuffer(s.buffer);
         updatePathSyntax();
+        updateScratchLooks(true);
+    }
+
+    // What the scratchpad shows of the entries pasted in it (the lines
+    // that start with an icon hiding an ID), as the listing does of its
+    // own (see listing::pasted_looks, `scratchLooks`): read from disk as
+    // it's shown and after a shell command (`again`), and after an edit
+    // only if it has other IDs than before (a paste). The lines of the
+    // files that can be run are found after every edit, as the listing's
+    // are (see updatePendingLines).
+    function updateScratchLooks(again) {
+        if (!scratchpad)
+            return;
+        const hidden = vim.hidden, ids = {};
+        for (const h of hidden)
+            ids[h.text] = true;
+        const list = Object.keys(ids).sort(), key = list.join("\n");
+        if (again || key !== scratchLooks.ids) {
+            const looks = list.length ? JSON.parse(koil.pastedLooks(list)) : { infos: {}, links: {}, executable: [] };
+            const runs = {};
+            for (const id of looks.executable)
+                runs[id] = true;
+            scratchLooks = { ids: key, infos: looks.infos, links: looks.links, executable: runs };
+        }
+        const t = editorView.textArea.latest.text, lines = [];
+        for (const h of hidden) {
+            if (scratchLooks.executable[h.text] && /^ *$/.test(t.slice(Txt.lineStart(t, h.at), h.at)))
+                lines.push(Txt.lineOf(t, h.at) - 1);
+        }
+        if (lines.length || executableLines.length)
+            executableLines = lines;
     }
 
     // Keeps what the scratchpad has as it's left (anything else shown in
@@ -919,8 +959,10 @@ ApplicationWindow {
     // !: the command line for a shell command on what % stands for (see
     // runShell), with the cursor before it: :!| %. With a count, or on the
     // marked lines, the range of those lines (as many as there are from
-    // the cursor's), with a % for their entries in the listing (see
-    // Vim.bangEntries), but elsewhere for vim's filter, as g! types it.
+    // the cursor's), with a % for their entries in the listing, or in the
+    // scratchpad a <cfile>, for the entries pasted there and the paths
+    // written (see Vim.bangEntries), but in a file for vim's filter, as g!
+    // types it.
     function bangLines(count) {
         if (vim.marked.length) {
             vim.commandOnMarked(true, vim.bangEntries);
@@ -929,7 +971,10 @@ ApplicationWindow {
             const more = Math.min(count - 1, Txt.countLines(t) - Txt.lineOf(t, vim.cursor));
             vim.openBang(more ? ".,.+" + more : ".", vim.bangEntries);
         } else {
-            vim.openBang("", true);
+            // On a line with an entry pasted in the scratchpad, that entry,
+            // as in the listing; else the scratchpad's file.
+            const t = activeView.textArea.latest.text;
+            vim.openBang("", scratchpad && pastedEntryAt(t, vim.cursor).found ? "<cfile>" : "%");
         }
     }
 
@@ -957,11 +1002,32 @@ ApplicationWindow {
         updateListing(up.open, up.from);
     }
 
-    // Enter in the listing: opens the dir or file on the cursor's line. On a
-    // line without an entry it's vim's Enter.
+    // Enter in the listing: opens the dir or file on the cursor's line, and
+    // in the scratchpad, the entry pasted on it, as gf does. On a line
+    // without an entry it's vim's Enter.
     function openLine(count) {
-        if (!openEntry())
+        if (!(scratchpad ? openPasted() : openEntry()))
             vim.runMotion("<CR>", count);
+    }
+
+    // Opens the entry pasted on the cursor's line of the scratchpad, as gf
+    // does (see openLink). False if the line has none.
+    function openPasted() {
+        if (!pastedEntryAt(editorView.textArea.latest.text, vim.cursor).found)
+            return false;
+        openLink(vim.cursor, "", false);
+        return true;
+    }
+
+    // The entry pasted with its ID on the line of `at` in a file's or the
+    // scratchpad's text `t`, where it is on disk, as { path, message,
+    // found } (see Koil.pastedEntry): `message` says why it has no path,
+    // and `found` is whether the line has one at all.
+    function pastedEntryAt(t, at) {
+        const ls = Txt.lineStart(t, at), le = Txt.lineEnd(t, at);
+        const entry = JSON.parse(koil.pastedEntry(t.slice(ls, le), JSON.stringify(vim.hiddenIn(vim.hidden, ls, le))));
+        entry.found = !!(entry.path || entry.message);
+        return entry;
     }
 
     // Opens the dir or file on the cursor's line in the listing (Enter, gf),
@@ -1031,8 +1097,8 @@ ApplicationWindow {
     // listing's gf take it (see Koil.pastedEntry); else the URL or path
     // there, or the file name there or after it, as vim's gf takes it.
     function linkTargetAt(t, at) {
-        const ls = Txt.lineStart(t, at), le = Txt.lineEnd(t, at), line = t.slice(ls, le);
-        const entry = JSON.parse(koil.pastedEntry(line, JSON.stringify(vim.hiddenIn(vim.hidden, ls, le))));
+        const ls = Txt.lineStart(t, at), line = t.slice(ls, Txt.lineEnd(t, at));
+        const entry = pastedEntryAt(t, at);
         if (entry.message)
             return { error: entry.message };
         if (entry.path)
@@ -1056,11 +1122,11 @@ ApplicationWindow {
         openLink(at, "", false);
     }
 
-    // Space r and Space o: what % stands for in a shell command: where the
-    // entry on the cursor's line is on disk, even if the line renames it,
-    // or from the path field, the open dir, and in a file, the file; or
-    // else "", once the status line says why there's none (the scratchpad
-    // isn't on disk).
+    // Space r and Space o: where the entry on the cursor's line is on disk,
+    // even if the line renames it, or from the path field, the open dir,
+    // and in a file, the file (what % stands for in a shell command); in
+    // the scratchpad, what's under the cursor, as gf takes it (what <cfile>
+    // stands for); or else "", once the status line says why there's none.
     function entryPath() {
         const entry = entryOnDisk();
         if (entry.message)
@@ -1071,8 +1137,16 @@ ApplicationWindow {
     // What entryPath gives, as { path, message }: `message` says why
     // there's no path, which entryPath shows.
     function entryOnDisk() {
+        // The entry pasted on the cursor's line, or the path under the
+        // cursor (see linkTargetAt).
+        if (scratchpad) {
+            const target = linkTargetAt(editorView.textArea.latest.text, vim.cursor);
+            return target.path !== undefined ? { path: target.path, message: "" }
+                : { path: "", message: target.error !== undefined ? target.error
+                    : "“" + target.url + "” isn't a file on disk" };
+        }
         if (!listing)
-            return { path: filePath, message: filePath ? "" : "The scratchpad isn't a file on disk" };
+            return { path: filePath, message: filePath ? "" : "Nothing here is on disk" };
         const t = editorView.textArea.text;
         const line = activeView === pathView ? -1 : Txt.lineOf(t, vim.cursor) - 1;
         return JSON.parse(koil.pathOnLine(t, JSON.stringify(vim.hidden), line));
@@ -1106,16 +1180,18 @@ ApplicationWindow {
 
     // What K's box follows (see followInfo): the cursor's line in the
     // listing (its number, its text and the IDs on it, as an edit can put
-    // another entry there), the open dir from the path field, or the file
-    // shown.
+    // another entry there), and in the scratchpad where the cursor is in
+    // it too (a path written there is the one under it), the open dir from
+    // the path field, or the file shown.
     function infoSpot() {
-        if (!listing)
+        if (!listing && !scratchpad)
             return "file:" + filePath;
         if (activeView === pathView)
             return "dir:" + koil.currentDir();
         const t = editorView.textArea.latest.text, p = vim.cursor;
         const start = Txt.lineStart(t, p), end = Txt.lineEnd(t, p);
-        return "line:" + Txt.lineOf(t, p) + ":" + t.slice(start, end) + JSON.stringify(vim.hiddenIn(vim.hidden, start, end));
+        return "line:" + Txt.lineOf(t, p) + ":" + (scratchpad ? p - start + ":" : "") + t.slice(start, end)
+            + JSON.stringify(vim.hiddenIn(vim.hidden, start, end));
     }
 
     // Shows in K's box what's known of `entry.path` (see Koil.info), read
@@ -1325,6 +1401,9 @@ ApplicationWindow {
             checkFile(true);
         else if (doc.fileChange(path) === "changed")
             vim.replaceTextKeeping(doc.readScratchpad());
+        // What it shows of its entries, which the command may have changed
+        // (a chmod).
+        updateScratchLooks(true);
     }
 
     // The file shown changed on disk (see Document.watchFile), or a shell
@@ -2275,7 +2354,7 @@ ApplicationWindow {
         completer: root.listing && root.activeView === pathView ? (line, cursor) => JSON.parse(koil.complete(line, cursor)) : null
         lineHistory: root.pathHistory
         linePrefixes: root.listing && root.activeView === editorView
-        bangEntries: root.listing
+        bangEntries: root.listing ? "%" : root.scratchpad ? "<cfile>" : ""
         clipboard: system
         fileName: root.listing ? root.location : root.filePath
         lineHeight: editorView.lineHeight
@@ -2342,6 +2421,7 @@ ApplicationWindow {
             "K": "info",
             "-": "back",
             "[": "leave",
+            "<CR>": "open",
             "_": "scratch"
         } : {})
         // With a selection too, so the list can run a shortcut on it.
@@ -2523,9 +2603,9 @@ ApplicationWindow {
         problems: root.problems
         // An ID as the path it stands for, so the hover says whose it is.
         describeHidden: text => koil.idPath(text) || text
-        infos: root.listing ? root.infos : ({})
+        infos: root.listing ? root.infos : root.scratchpad ? root.scratchLooks.infos : ({})
         busyInfos: root.listing ? root.busyInfos : ({})
-        links: root.listing ? root.links : ({})
+        links: root.listing ? root.links : root.scratchpad ? root.scratchLooks.links : ({})
         infoDots: root.infoDots
         onActivated: root.activate(editorView)
         onKeyReleased: root.keyReleased()
@@ -2541,6 +2621,9 @@ ApplicationWindow {
                 Qt.callLater(root.checkModified);
             } else {
                 root.checkModified();
+                // After vim's edit, as for the listing's lines.
+                if (root.scratchpad)
+                    Qt.callLater(root.updateScratchLooks);
             }
         }
     }

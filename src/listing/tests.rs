@@ -291,6 +291,26 @@ fn test_looks() {
     let synced = sync(&mut koil, &rendered.text, &rendered.hidden);
     assert_eq!(synced.looks.links, rendered.looks.links);
     assert_eq!(synced.looks.executables, rendered.looks.executables);
+
+    // The scratchpad shows the same of those pasted there, and of one
+    // that isn't in the open dir, the dir it's in.
+    let ids = ["to-dir/", "run.sh", "text"].map(id_of);
+    let mut pasted = pasted_looks(&koil, &ids);
+    assert!(pasted.infos.is_empty());
+    assert_eq!(pasted.links.get(&ids[0]), Some(&link("dir", false)));
+    assert_eq!(pasted.links.len(), 1);
+    assert_eq!(pasted.executable, [ids[1].clone()]);
+    let dir = path.join("dir").to_string_lossy().into_owned();
+    assert!(navigate(&mut koil, &dir, &settings, None).ok);
+    pasted = pasted_looks(&koil, &ids);
+    let above = slashed(show_path(&fs::canonicalize(path).unwrap()), true);
+    let infos: HashMap<_, _> = ids.iter().map(|id| (id.clone(), above.clone())).collect();
+    assert_eq!(pasted.infos, infos);
+    assert_eq!(pasted.executable, [ids[1].clone()]);
+    assert_eq!(
+        pasted_looks(&koil, &["x".to_string(), "99999".to_string()]),
+        PastedLooks::default()
+    );
 }
 
 #[test]

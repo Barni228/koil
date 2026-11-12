@@ -291,7 +291,10 @@ pub mod qobject {
 
         /// Colors a file's `textDocument` (see syntax.rs): `colors` has a
         /// color for each kind of part, in the order of `SyntaxKind`, and
-        /// `file_name` says which comments it can have. No colors take
+        /// `file_name` says which comments it can have. `icon_colors`
+        /// (the scratchpad's), `directory_color` and `executable_color`
+        /// are the listing's, as `set_listing_colors` takes them, for the
+        /// lines that start with an icon. Neither colors nor icons take
         /// them away.
         #[qinvokable]
         unsafe fn set_text_colors(
@@ -299,6 +302,18 @@ pub mod qobject {
             text_document: *mut QObject,
             colors: &QStringList,
             file_name: &QString,
+            icon_colors: &QStringList,
+            directory_color: &QString,
+            executable_color: &QString,
+        );
+
+        /// Tells `set_text_colors` which lines (numbers, from 0) have a
+        /// file that can be run, whose name is green.
+        #[qinvokable]
+        unsafe fn set_text_entry_lines(
+            self: &System,
+            text_document: *mut QObject,
+            executable_lines: &QStringList,
         );
     }
 
@@ -479,7 +494,11 @@ impl qobject::System {
         set_path_colors(text_document, directory_color: &QString, spans: &QStringList);
         set_keyword_colors(text_document, keyword_colors: &QStringList);
         set_span_colors(text_document, spans: &QStringList);
-        set_text_colors(text_document, colors: &QStringList, file_name: &QString);
+        set_text_colors(
+            text_document, colors: &QStringList, file_name: &QString, icon_colors: &QStringList,
+            directory_color: &QString, executable_color: &QString
+        );
+        set_text_entry_lines(text_document, executable_lines: &QStringList);
     }
 }
 

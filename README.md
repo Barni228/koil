@@ -91,7 +91,10 @@ until you apply, and your edits stay while you go through other dirs.
 - **The scratchpad** (`_`, or `koil -s`) is a text that's never saved, kept
   until Koil quits. `_` opens it from a file too, and `_` again goes back
   to the file, unsaved changes and all. Lines pasted there keep their IDs,
-  so you can put entries aside and paste them into a listing later.
+  so you can put entries aside and paste them into a listing later, and
+  look and work as in the listing meanwhile, with the dir each is in
+  after its line: `Enter`, `gh`, `K`, `Space r`, `Space o` and `!` take
+  the one on the line, and `Vj!` runs a command on those selected.
   `:_put` puts what `p` would paste after its last line without showing
   it (a shortcut of `:_pu<CR>` puts lines aside from anywhere), and `:_`
   shows it, or stays in it, where `_` would leave it.

@@ -362,7 +362,7 @@ TestCase {
         (narrow.contentItem as Flickable).rightMargin = 0;
         vim.singleLine = false;
         vim.linePrefixes = false;
-        vim.bangEntries = false;
+        vim.bangEntries = "";
         vim.commandKeys = {};
         vim.visualCommandKeys = {};
         vim.shortcuts = [];
@@ -1787,6 +1787,46 @@ TestCase {
         compare(vim.putInState("", null, "\n", []), { text: "", state: null });
     }
 
+    // An icon that hides text (an entry pasted in the scratchpad) and the
+    // blanks after it are indentation, outside the listing: ^, I, gg, + and
+    // yss go to what's after them, but 0 to the icon.
+    function test_iconIndent() {
+        const icon = mushroom.length;
+        load("M  one\n  C  two\nm  three\nM");
+        keys("$^");
+        compare(vim.cursor, icon + 2);
+        keys("0");
+        compare(vim.cursor, 0);
+        keys("+");
+        compare(vim.cursor, editor.text.indexOf("two"));
+        keys("2gg");
+        compare(vim.cursor, editor.text.indexOf("two"));
+        keys("gg");
+        compare(vim.cursor, icon + 2);
+        // One that hides nothing is a character.
+        keys("3G");
+        compare(vim.cursor, editor.text.indexOf(mushroom + "  three"));
+        // Alone on its line, it has the cursor.
+        keys("G^");
+        compare(vim.cursor, editor.text.lastIndexOf(mushroom));
+        keys("ggIx<Esc>");
+        compare(render(), "<M:h1>  xone\n  <C:h2>  two\nM  three\n<M:h3>");
+        keys("jyss\"");
+        compare(render(), "<M:h1>  xone\n  <C:h2>  \"two\"\nM  three\n<M:h3>");
+        // On lines of its own, what's after the icon goes a level deeper
+        // than the line's blanks, which the new lines start with (not with
+        // a copy of the icon).
+        load(" M  one");
+        keys("ySSb");
+        compare(render(), " <M:h1>  (\n     one\n )");
+        // In the listing, the icon is the prefix, as before.
+        load("M  one");
+        vim.linePrefixes = true;
+        keys("$^");
+        compare(vim.cursor, icon + 2);
+        vim.linePrefixes = false;
+    }
+
     // p says how many lines it added, if more than two.
     function test_pasteReport() {
         load("a\nb\nc\nd");
@@ -1857,7 +1897,7 @@ TestCase {
     // types vim's filter.
     function test_bangEntries() {
         load("one\ntwo\nthree");
-        vim.bangEntries = true;
+        vim.bangEntries = "%";
         keys("Vj!");
         compare(vim.commandLine, ":'<,'>! %");
         compare(vim.commandCursor, 7);
@@ -1871,11 +1911,23 @@ TestCase {
         keys("<Esc>ggmjmg!");
         compare(vim.commandLine, ":'<,'>!");
         keys("<Esc>");
-        vim.openBang("", true);
+        vim.openBang("", "%");
         compare(vim.commandLine, ":! %");
         compare(vim.commandCursor, 2);
         keys("<Esc>");
-        vim.bangEntries = false;
+        // In the scratchpad, a <cfile>.
+        vim.bangEntries = "<cfile>";
+        keys("Vj!");
+        compare(vim.commandLine, ":'<,'>! <cfile>");
+        compare(vim.commandCursor, 7);
+        keys("rm");
+        compare(vim.commandLine, ":'<,'>!rm <cfile>");
+        keys("<Esc>ggmjm!");
+        compare(vim.commandLine, ":'<,'>! <cfile>");
+        keys("<Esc>gvg!");
+        compare(vim.commandLine, ":'<,'>!");
+        keys("<Esc><Esc>");
+        vim.bangEntries = "";
         keys("Vj!");
         compare(vim.commandLine, ":'<,'>!");
         keys("<Esc>");
@@ -3561,7 +3613,8 @@ TestCase {
         ]);
         keys("\"+p");
         compare(render(), "<M:h1>  a\n<M:h1>  a");
-        keys("v<D-c>$<D-v>");
+        // p left the cursor on the name, after the icon (see firstNonBlank).
+        keys("0v<D-c>$<D-v>");
         compare(render(), "<M:h1>  a\n<M:h1>  <M:h1>a");
     }
 

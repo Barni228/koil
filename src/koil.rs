@@ -205,6 +205,13 @@ pub mod qobject {
         #[qinvokable]
         fn pasted_entry(self: &Koil, line: &QString, hidden: &QString) -> QString;
 
+        /// What the scratchpad shows of the entries pasted in it, whose
+        /// IDs are `ids` (see `listing::pasted_looks`): `{ infos, links,
+        /// executable }`, the first two by ID, as the editor takes the
+        /// listing's, and the IDs of the files that can be run.
+        #[qinvokable]
+        fn pasted_looks(self: &Koil, ids: &QStringList) -> QString;
+
         /// The path the ID `id` (an icon's hidden text) stands for (see
         /// `listing::id_path`), or "" if koil doesn't know it.
         #[qinvokable]
@@ -836,6 +843,11 @@ impl qobject::Koil {
     fn pasted_entry(&self, line: &QString, hidden: &QString) -> QString {
         let entry = listing::pasted_entry(&self.koil, &line.to_string(), &read_hidden(hidden));
         listed("path", entry.unwrap_or(Ok(String::new())))
+    }
+
+    fn pasted_looks(&self, ids: &QStringList) -> QString {
+        let ids: Vec<String> = ids.iter().map(ToString::to_string).collect();
+        to_json(&listing::pasted_looks(&self.koil, &ids))
     }
 
     fn current_dir(&self) -> QString {
