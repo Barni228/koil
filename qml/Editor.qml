@@ -466,9 +466,14 @@ Item {
         return spans;
     }
 
-    // Where to draw a cursor at pos: { cell, character, main, line }, where
-    // character is the whole character there (an emoji, say), or "" for
-    // none (at a line's end or on a tab), and `line` its line's rows. In
+    // Where to draw a cursor at pos: { cell, character, main, line, wide },
+    // where character is the whole character there (an emoji, say), or ""
+    // for none (at a line's end or on a tab), and `line` its line's rows.
+    // On an icon (a Nerd Font's, drawn over the column after its own: see
+    // Icon font) with nothing drawn after it (a space, as after an
+    // entry's, or the line's end), it's `wide`: as wide as the icon is
+    // drawn (see Caret), so the block covers all of it rather than its
+    // left half. In
     // the listing, in normal mode, one on an empty line is where its name
     // would start, as typing there puts a prefix first (see
     // Vim.prefixEmptyLine): at the line's start, it was under the icons (an
@@ -484,12 +489,14 @@ Item {
         }
         if (vim.linePrefixes && vim.mode === "normal" && Txt.lineStart(t, p) === p && Txt.lineEnd(t, p) === p)
             cell = Qt.rect(cell.x + vim.blankPrefix.length * charWidth, cell.y, cell.width, cell.height);
+        const after = t[p + ch.length];
         return {
             cell: cell,
             character: ch === "\t" || ch === "\n" || ch === "\u2029" ? "" : ch,
             main: main,
             line: line,
-            long: !!longSpot(p)
+            long: !!longSpot(p),
+            wide: ch !== "" && Txt.isPrivateUse(ch, 0) && (after === undefined || after === " " || after === "\n")
         };
     }
 
@@ -885,10 +892,21 @@ Item {
         required property string character
         required property string shape // "bar", "block" or "underline"
         property bool shown: true
+        // Whether it's as wide as the character is drawn, into the column
+        // after its own (an icon: see spotAt).
+        property bool wide: false
+        // Where the character's ink ends, from the cell's left, with as
+        // much room after it as before it (a pixel at least).
+        readonly property real inkEnd: {
+            const ink = charMetrics.tightBoundingRect;
+            return Math.ceil(ink.x + ink.width + Math.max(1, ink.x));
+        }
 
         x: cell.x
         y: shape === "underline" ? cell.y + cell.height - height : cell.y
-        width: shape === "bar" ? 2 : charMetrics.advanceWidth
+        width: shape === "bar" ? 2
+            : wide ? Math.min(Math.max(charMetrics.advanceWidth, inkEnd), charMetrics.advanceWidth + view.charWidth)
+            : charMetrics.advanceWidth
         height: shape === "underline" ? Math.max(2, Math.round(cell.height / 8)) : cell.height
         color: editor.color
         visible: shown && (shape !== "bar" || editor.activeFocus)
@@ -1541,6 +1559,7 @@ Item {
 
                         cell: modelData.cell
                         character: modelData.character
+                        wide: modelData.wide
                         shape: view.vim.cursorShape
                         shown: view.vim.commandLine === "" && (!modelData.main || view.vim.mode !== "insert" || modelData.long)
                     }

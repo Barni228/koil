@@ -1393,7 +1393,13 @@ the scratchpad (see Scratchpad).
   characters, like the `=` line, as one. `useNerdFont` adds it and makes it
   Qt's fallback for the icons (Qt 6.8+; Qt only takes application fallbacks
   for real scripts, and treats these as `Script_Common`), so they show in
-  fonts like Menlo. It's also the editor's default font
+  fonts like Menlo. A block cursor on an icon (in the scratchpad or a
+  file: in the listing it's never on one) is as wide as the icon is
+  drawn (`Caret`'s `inkEnd`, from the glyph's `tightBoundingRect`, a
+  column at least and two at most), if nothing is drawn in the column
+  after it (a space, or the line's end: `spotAt`'s `wide`), rather than
+  over the icon's left half. It's also the
+  editor's default font
   (`defaultFontFamily`), by the family Qt gives it (`System.nerdFontFamily`,
   as the font has two names, and which one Qt uses depends on the
   platform). Only the regular weight is shipped: the editor draws no bold.
