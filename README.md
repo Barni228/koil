@@ -92,6 +92,9 @@ until you apply, and your edits stay while you go through other dirs.
   until Koil quits. `_` opens it from a file too, and `_` again goes back
   to the file, unsaved changes and all. Lines pasted there keep their IDs,
   so you can put entries aside and paste them into a listing later.
+  `:_put` puts what `p` would paste after its last line without showing
+  it (a shortcut of `:_pu<CR>` puts lines aside from anywhere), and `:_`
+  shows it, or stays in it, where `_` would leave it.
 - **Colors in a file** (and the scratchpad) suit any file rather than its
   language: strings, numbers, comments, paths and URLs, and the bracket
   that matches the one at the cursor. In Markdown, `#` starts a heading,

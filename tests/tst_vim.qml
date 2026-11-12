@@ -273,6 +273,20 @@ TestCase {
     }
 
     SignalSpy {
+        id: scratches
+
+        target: vim
+        signalName: "scratchRequested"
+    }
+
+    SignalSpy {
+        id: scratchPuts
+
+        target: vim
+        signalName: "scratchPutRequested"
+    }
+
+    SignalSpy {
         id: stops
 
         target: vim
@@ -1677,11 +1691,119 @@ TestCase {
         keys(":_!git log<CR>");
         keys(":%_ !sort<CR>");
         keys(":2_!!<CR>");
-        keys(":_<CR>");
-        compare(vim.message, "E492: Not an editor command: _");
+        keys(":_x<CR>");
+        compare(vim.message, "E492: Not an editor command: _x");
         keys(":_!<CR>");
         compare(vim.message, "E471: Argument required");
         compare(shellCalls(), [["git log", null, "_"], ["sort", "1-4", "_"], ["sort", "2-2", "_"]]);
+    }
+
+    // :_ is for Koil to show the scratchpad, and takes nothing.
+    function test_scratchpadShown() {
+        load("one\ntwo");
+        scratches.clear();
+        keys(":_<CR>");
+        keys(": _ <CR>");
+        compare(scratches.count, 2);
+        keys(":2_<CR>");
+        compare(vim.message, "E481: No range allowed");
+        keys(":_ x<CR>");
+        compare(vim.message, "E488: Trailing characters: x");
+        compare(scratches.count, 2);
+    }
+
+    // :_put gives Koil a register as lines, with its hidden text, to put
+    // in the scratchpad: the unnamed one, or the one named.
+    function test_scratchpadPut() {
+        load("Mone\ntwo three");
+        scratchPuts.clear();
+        const puts = () => scratchPuts.signalArguments.map(a => [a[0], a[1].map(h => h.at + ":" + h.text)]);
+        keys(":_put<CR>");
+        compare(vim.message, "E353: Nothing in register \"");
+        keys("yy:_pu<CR>");
+        // Characters go as a line too.
+        keys("jw\"ayw:_pu a<CR>");
+        keys(":_put \"a<CR>");
+        keys(":_pu \"<CR>");
+        keys(":_ put \"0<CR>");
+        compare(puts(), [[mushroom + "one\n", ["0:h1"]], ["three\n", []], ["three\n", []], ["three\n", []],
+            [mushroom + "one\n", ["0:h1"]]]);
+        keys(":_pu b<CR>");
+        compare(vim.message, "E353: Nothing in register b");
+        keys(":_pu ab<CR>");
+        compare(vim.message, "E488: Trailing characters: b");
+        keys(":2_pu<CR>");
+        compare(vim.message, "E481: No range allowed");
+        keys(":_putx<CR>");
+        compare(vim.message, "E492: Not an editor command: _putx");
+        compare(scratchPuts.count, 5);
+        compare(editor.text, mushroom + "one\ntwo three");
+    }
+
+    // Lines put after the last one, as a change of its own, with the
+    // cursor on the last of them; an empty text is only them.
+    function test_putAtEnd() {
+        load("one\n two");
+        vim.putAtEnd(mushroom + "\n  x\n", [{ at: 0, icon: mushroom, text: "id" }]);
+        compare(render(), "one\n two\n<M:id>\n  x");
+        compare(vim.cursor, editor.text.length - 1);
+        keys("u");
+        compare(render(), "one\n two");
+        keys("<C-r>");
+        compare(render(), "one\n two\n<M:id>\n  x");
+        load("");
+        vim.putAtEnd("a\nb\n", []);
+        compare(editor.text, "a\nb");
+        compare(vim.cursor, 2);
+    }
+
+    // The same in a buffer vim isn't editing, from its text and state.
+    function test_putInState() {
+        load("Mone\n two");
+        keys("lx");
+        const t = editor.text, state = vim.leaveBuffer();
+        const put = vim.putInState(t, state, mushroom + "\n  x\n", [{ at: 0, icon: mushroom, text: "id" }]);
+        // What vim edits meanwhile is left alone.
+        compare(render(), "<M:h1>ne\n two");
+        editor.text = put.text;
+        vim.enterBuffer(put.state);
+        compare(render(), "<M:h1>ne\n two\n<M:id>\n  x");
+        compare(vim.cursor, editor.text.length - 1);
+        keys("u");
+        compare(render(), "<M:h1>ne\n two");
+        keys("u");
+        compare(render(), "<M:h1>one\n two");
+        keys("<C-r><C-r>");
+        compare(render(), "<M:h1>ne\n two\n<M:id>\n  x");
+        // One never shown has no state, and no text.
+        const first = vim.putInState("", null, "a\nb\n", []);
+        compare(first.text, "a\nb");
+        editor.text = first.text;
+        vim.enterBuffer(first.state);
+        compare(vim.cursor, 2);
+        keys("u");
+        compare(editor.text, "");
+        // An empty line in an empty text changes nothing.
+        compare(vim.putInState("", null, "\n", []), { text: "", state: null });
+    }
+
+    // p says how many lines it added, if more than two.
+    function test_pasteReport() {
+        load("a\nb\nc\nd");
+        keys("yyp");
+        compare(vim.message, "");
+        keys("2yyp");
+        compare(vim.message, "");
+        keys("3yyGp");
+        compare(vim.message, "3 more lines");
+        keys(":noh<CR>yy2P");
+        compare(vim.message, "");
+        keys("3P");
+        compare(vim.message, "3 more lines");
+        // Characters with line breaks in them too.
+        load("a\nb\nc\nd\ne");
+        keys("vjjjy$p");
+        compare(vim.message, "3 more lines");
     }
 
     // : and ! in visual mode are for its lines, after it.
@@ -1832,6 +1954,11 @@ TestCase {
         compare(parts(":'<,'>!cp <cfile>:t % \\<cfile> <cfil"),
             ["'<,'>:range", "!:command", "<cfile>:t:file", "%:file", "\\<cfile>:escape"]);
         compare(parts(":.,+2_!sort"), [".,+2:range", "_!:command"]);
+        compare(parts(":_"), ["_:command"]);
+        compare(parts(":_ put a"), ["_ put:command"]);
+        compare(parts(":_pu"), ["_pu:command"]);
+        compare(parts(":_p"), []);
+        compare(parts(":_putx"), []);
         compare(parts(":!!"), ["!!:command"]);
         compare(parts(":%s/a/b/g"), ["%:range", "s:command"]);
         compare(parts(":&&"), ["&&:command"]);

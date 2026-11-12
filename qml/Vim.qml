@@ -196,6 +196,13 @@ QtObject {
     // the scratchpad instead (see replaceWhole), and the lines only go
     // through it.
     signal shellRequested(string command, var range, bool scratchpad)
+    // :_ (Koil's, after the scratchpad's key): Koil shows the scratchpad,
+    // or stays in it, where the key would leave it.
+    signal scratchRequested()
+    // :_put: Koil puts the lines `text` (each with its line break, whose
+    // icons hide `entries`) after the scratchpad's last line, shown or not
+    // (see putAtEnd and putInState).
+    signal scratchPutRequested(string text, var entries)
     // Esc or Ctrl-C while vim waits.
     signal stopRequested()
     // u (or Cmd+Z) with no change left to undo: Koil offers to undo its last
@@ -4129,13 +4136,20 @@ QtObject {
             return;
         const t = bufferText();
         const p = cursor;
+        // More than two new lines are told, as y's and d's are (vim's
+        // 'report').
+        const more = n => {
+            if (n > 2)
+                showMessage(n + " more lines");
+        };
         if (r.blockwise) {
-            const line = Txt.lineOf(t, p);
+            const line = Txt.lineOf(t, p), had = Txt.countLines(t);
             const col = Txt.column(t, p) + (after && p < Txt.lineEnd(t, p) ? 1 : 0);
             putBlock(r, line, col, count);
             const nt = bufferText();
             const ls = Txt.lineToPos(nt, line);
             setCursor(clampNormal(nt, Txt.advance(nt, ls, col, Txt.lineEnd(nt, ls))));
+            more(Txt.countLines(nt) - had);
             return;
         }
         let entries = repeated(r.hidden, r.text.length, count);
@@ -4158,11 +4172,13 @@ QtObject {
             replaceRange(at, at, x.text, x.entries);
             const nt = bufferText();
             setCursor(clampNormal(nt, firstNonBlank(nt, body[0] === "\n" ? at + 1 : at)));
+            more(Txt.lineBreaks(x.text, 0, x.text.length).length);
         } else {
             const at = after && p < Txt.lineEnd(t, p) ? Txt.charEnd(t, p) : p;
             const x = prefixLines(at, at, r.text.repeat(count), entries);
             replaceRange(at, at, x.text, x.entries);
             setCursor(clampNormal(bufferText(), at + Math.max(x.text.length - 1, 0)));
+            more(Txt.lineBreaks(x.text, 0, x.text.length).length);
         }
     }
 
@@ -5293,6 +5309,20 @@ QtObject {
             shellCommand(c.slice(bang[0].length), r.first === undefined ? null : r, !!bang[1]);
             return;
         }
+        // So are :_, which shows the scratchpad, and :_put (:_pu), which
+        // puts a register in it.
+        const scratch = /^_\s*(pu|put)?(?:\s+(.*))?$/.exec(c);
+        if (scratch) {
+            if (r.first !== undefined)
+                showError("E481: No range allowed");
+            else if (scratch[1])
+                scratchPut(scratch[2] || "");
+            else if (scratch[2])
+                showError("E488: Trailing characters: " + scratch[2]);
+            else
+                outside(() => scratchRequested());
+            return;
+        }
         const sub = substituteParts(c);
         if (sub) {
             const range = substituteRange(command, r);
@@ -5445,10 +5475,10 @@ QtObject {
     // The parts of the command line `line` (with its : first) that are
     // colored as it's typed, in order, as { start, end, kind }: its range
     // ("range"), the name of a command runEx knows ("command", and ! and
-    // _!, and a ! after them for the last one), and after it, a shell
-    // command's % and its modifiers ("file") and \% ("escape"), :set's
-    // options ("option"), and :e's path ("file"). A search (/ or ?) has
-    // none.
+    // _!, and a ! after them for the last one, and _ and _put), and after
+    // it, a shell command's % and its modifiers ("file") and \% ("escape"),
+    // :set's options ("option"), and :e's path ("file"). A search (/ or ?)
+    // has none.
     function commandLineParts(line) {
         const parts = [];
         if (line[0] !== ":")
@@ -5479,6 +5509,11 @@ QtObject {
                         k += file.length - 1;
                     }
                 }
+                return parts;
+            }
+            const scratch = /^_(?:\s*put?)?(?![a-zA-Z])/.exec(rest);
+            if (scratch) {
+                add(i, i + scratch[0].length, "command");
                 return parts;
             }
             const letters = /^[a-zA-Z]*/.exec(rest)[0];
@@ -5582,6 +5617,75 @@ QtObject {
             if (n > 2)
                 showMessage(n + " lines filtered");
         });
+    }
+
+    // :_put x (Koil's, after the scratchpad's key and vim's :put): register
+    // `name` (the unnamed one for none; with a " before it or not) goes
+    // after the scratchpad's last line, as lines whatever it holds, as
+    // vim's :put puts them. Koil puts it there (see scratchPutRequested),
+    // as vim may be editing something else.
+    function scratchPut(name) {
+        if (name.length === 2 && name[0] === "\"")
+            name = name[1];
+        if (name.length > 1) {
+            showError("E488: Trailing characters: " + name.slice(1));
+            return;
+        }
+        const r = getRegister(name);
+        if (!r) {
+            showError("E353: Nothing in register " + (name || "\""));
+            return;
+        }
+        const text = r.text.endsWith("\n") ? r.text : r.text + "\n";
+        outside(() => scratchPutRequested(text, r.hidden || []));
+    }
+
+    // What goes at the end of the text `t` to put the lines `text` (each
+    // with its line break, whose icons hide `entries`) after its last
+    // line, or in place of an empty text, which is one empty line: {
+    // text, entries }.
+    function atEnd(t, text, entries) {
+        const lead = t === "" ? "" : "\n";
+        return { text: lead + text.slice(0, -1), entries: shifted(entries, lead.length) };
+    }
+
+    // Puts the lines `text` (see atEnd) after the text's last line, as a
+    // change of its own, with the cursor on the last of them, as vim's
+    // :$put: what :_put puts in the scratchpad, while it's shown.
+    function putAtEnd(text, entries) {
+        batched(() => {
+            beginChange();
+            const t = bufferText(), p = atEnd(t, text, entries);
+            replaceRange(t.length, t.length, p.text, p.entries);
+            const u = bufferText();
+            setCursor(clampNormal(u, firstNonBlank(u, u.length)));
+            commitChange(); // during a run, with it (see commitChange)
+        });
+    }
+
+    // What putAtEnd would make of a buffer vim isn't editing (the
+    // scratchpad, while something else is shown), whose text is `t` and
+    // state `state` (leaveBuffer's, or null): { text, state }, for
+    // enterBuffer, with the change as an undo step of its own.
+    function putInState(t, state, text, entries) {
+        const s = state || {}, p = atEnd(t, text, entries);
+        if (p.text === "")
+            return { text: t, state: state };
+        const u = t + p.text;
+        // The last line's first non-blank, without the listing's prefixes,
+        // which vim may be in.
+        let c = Txt.lineStart(u, u.length);
+        while (c < u.length && Txt.isBlank(u[c]))
+            c++;
+        const step = { start: t.length, removed: "", inserted: own(p.text), removedHidden: [],
+            insertedHidden: p.entries, cursor: s.cursor || 0 };
+        return { text: u, state: Object.assign({}, s, {
+            cursor: Txt.clampNormal(u, c),
+            wantCol: undefined, // the cursor's (see enterBuffer)
+            undoStack: (s.undoStack || []).concat([step]),
+            redoStack: [],
+            hidden: (s.hidden || []).concat(shifted(p.entries, t.length))
+        }) };
     }
 
     // Puts `text` in place of all of the text, as a change of its own: what

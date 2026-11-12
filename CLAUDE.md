@@ -971,7 +971,18 @@ the scratchpad (see Scratchpad).
   `ZZ` asks. In a shell
   command there, `%` is a file of its text, which goes back in it after,
   and `<cfile>` the path under the cursor (see Shell commands), and `:_!`
-  puts a command's output in it. It's the
+  puts a command's output in it. `:_` (Koil's, vim's `scratchRequested`)
+  shows it, or stays in it, where `_` would leave it, so a shortcut can
+  end up there wherever it's run. `:_put` (`:_pu`, `:_pu a`; vim's
+  `scratchPutRequested`, `putInScratch` in main.qml) puts a register
+  after its last line (in place of an empty text), as lines whatever it
+  holds, as vim's `:put`, with its hidden text, and always says how many
+  lines went ("3 lines put in the scratchpad"), as it isn't shown for
+  it: going there and back (`_Gp_`) would update the listing first
+  (failing on its errors), start its undo history over, and clear the
+  message. Shown, it's `Vim.putAtEnd`; else `Vim.putInState` makes the
+  kept text and state (`scratchState`) what that would have, with an
+  undo step of its own, so `u` there takes it back. It's the
   listing's editor, so whatever shows something else in it saves the
   scratchpad's text, cursor, undo history and view first (`keepScratch`,
   from `showListing` and `load`, as anything shown goes through those),
@@ -1712,7 +1723,9 @@ the scratchpad (see Scratchpad).
   registers use the system clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
   `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
-  are read from vim's state and can't be written. `:reg` (`:di`) lists
+  are read from vim's state and can't be written. `p` says how many
+  lines it added, if more than two ("3 more lines"), as `y` and `d` do
+  theirs (vim's `report`). `:reg` (`:di`) lists
   them (`registerList`) in the help box, one line each, cut off. A yank
   shows what it took for 200 ms, as Neovim's `vim.hl.on_yank` does
   (`yanked`, `flashYank`: yy its line, a block its part of each line,
@@ -2082,7 +2095,7 @@ the scratchpad (see Scratchpad).
 - **Command line colors** (`Vim.commandLineParts`, `commandLineHtml` in
   StatusLine.qml, `theme.commandColor`): as a `:` command is typed, the status
   line colors its range, the name of a command `runEx` knows
-  (`exCommands`, `substituteNames`, `!`, `_!`), a shell command's `%` and `<cfile>` with
+  (`exCommands`, `substituteNames`, `!`, `_!`, `_`, `_put`), a shell command's `%` and `<cfile>` with
   their modifiers (in the dirs' color, as a path) and `\%` and
   `\<cfile>`, `:set`'s options and `:e`'s
   path. It's styled text (`<font color>`), where spaces are `&nbsp;`, as

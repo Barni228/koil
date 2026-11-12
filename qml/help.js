@@ -16,7 +16,8 @@ function sections(help) {
             tags: ["koil", "listing", "list", "entry", "entries", "update", "apply", "-", "[", "]", "back",
                 "forward", "enter",
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
-                "gr", "gs", "sorting", "_", "scratch", "scratchpad", "reveal", "finder", "explorer",
+                "gr", "gs", "sorting", "_", ":_", ":_put", ":_pu", "_put", "_pu", "scratch", "scratchpad",
+                "reveal", "finder", "explorer",
                 "app", "K", "info", "stat", "permissions", "symlink", "drive", "drives"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
@@ -70,6 +71,12 @@ function sections(help) {
                     + "it until Koil quits. `_` or `-` there goes back to where you were, a file with its "
                     + "unsaved changes. In a command, `%` is a file of its text (`!wc -w`), and `<cfile>` "
                     + "the path under the cursor (`:!rm <cfile>`)."],
+                ["`:_`", "Show the scratchpad, or stay in it, where `_` would leave it: for a shortcut "
+                    + "that should end up there wherever it's run."],
+                ["`:_put`  `:_pu a`", "Put what `p` would paste (or register `a`) after the scratchpad's "
+                    + "last line, as lines, without showing it, and say how many lines went: a shortcut of "
+                    + "`:_pu<CR>` puts what you yanked aside. Entries keep their IDs, and `u` there takes it "
+                    + "back."],
                 ["icons", "The cursor skips each line's icon and the spaces after it, so `0` goes to the "
                     + "name. `Backspace` there clears the icon (the entry becomes new), then joins lines."],
                 ["quitting", "`:conf q` and `ZZ` ask to apply the changes first. In a file, quitting goes "

@@ -412,6 +412,24 @@ ApplicationWindow {
         scratchFromFile = null;
     }
 
+    // :_put: the lines `text` (each with its line break, whose icons hide
+    // `entries`, so entries keep their IDs, as pasted there) go after the
+    // scratchpad's last line, as a change `u` takes back there. It isn't
+    // shown for it, so the listing isn't updated nor shown again (which
+    // would start its undo history over), and the status line says how
+    // many lines went, as nothing else shows it.
+    function putInScratch(text, entries) {
+        if (scratchpad) {
+            vim.putAtEnd(text, entries);
+        } else {
+            const s = scratchState || { text: "", buffer: null, contentY: 0 };
+            const r = vim.putInState(s.text, s.buffer, text, entries);
+            scratchState = { text: r.text, buffer: r.state, contentY: s.contentY };
+        }
+        const n = Txt.spannedLines(text);
+        vim.showMessage(n + (n === 1 ? " line" : " lines") + " put in the scratchpad");
+    }
+
     // _ or - in the scratchpad opened over a file: the file `file` (see
     // scratchFromFile), as it was left: its unsaved changes, cursor, undo
     // history and view. What changed on disk meanwhile is then read again,
@@ -2340,6 +2358,11 @@ ApplicationWindow {
         onLinkRequested: (at, text, external) => root.openLink(at, text, external)
         onEditRequested: (path, force) => root.edit(path, force)
         onShellRequested: (command, range, scratchpad) => root.runShell(command, range, scratchpad)
+        onScratchRequested: {
+            if (!root.scratchpad)
+                root.openScratch();
+        }
+        onScratchPutRequested: (text, entries) => root.putInScratch(text, entries)
         onStopRequested: system.stopShell()
         onNothingToUndo: {
             if (root.listing && root.activeView === editorView)
