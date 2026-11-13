@@ -130,6 +130,17 @@ QtObject {
             rename: ["#e2c08d", "#895503"] }[kind] || ["#4fc1ff", "#0070c1"]);
     }
 
+    // The color of a time in the undo history by how old it is (see
+    // listing::age): "today" cyan, "days" blue, "weeks" purple, and paler
+    // from there, "months" dim and "years" faint, so the newest stand out.
+    // Not the changes' colors, which the lines under each are in.
+    function ageColor(age) {
+        if (age === "months")
+            return String(dim);
+        return pick({ today: ["#56b6c2", "#0184bc"], days: ["#6cb6ff", "#0b62c4"],
+            weeks: ["#c678dd", "#a626a4"] }[age] || [String(faint), String(faint)]);
+    }
+
     // The color of a kind of part of the command line (see Vim's
     // commandLineParts): "range", "command", "file" (a path, in the dirs'
     // color), "escape" or "option".

@@ -151,7 +151,9 @@ ModalBox {
     // can also have `picked: false` (left out at first) and `blocked` (Yes
     // can't do it, nor then a line that needs it; it can be picked only
     // for `extra`, see below, and starts left out; if it's why, as text, the
-    // line of its text that ends with that is in the error's color): then
+    // line of its text that ends with that is in the error's color), and
+    // `lead`, `{ length, color }`: that many characters at its text's start
+    // are in that color (when an apply was made, by how old it is): then
     // `question` can be a function of how many are picked (and the list of
     // whether each is), and `yes` gets the indexes of the picked ones.
     // `options` can have `keywords`, which colors the word a line of the
@@ -231,11 +233,18 @@ ModalBox {
     // line of `details`), each as `{ word, rest, color, error }`: the
     // keyword it starts with, with the spaces after it, and its color (or
     // none of both), what's after it, and whether it says why the line
-    // can't be done (see ask's `blocked`).
+    // can't be done (see ask's `blocked`). A line to pick from with a
+    // `lead` starts with that, as its first line's word, in its color.
     function rowParts(row) {
         const pick = typeof row !== "string";
         const why = pick && typeof row.blocked === "string" ? row.blocked : "";
-        return (pick ? row.text : row).split("\n").map(line => {
+        const lead = pick && row.lead ? row.lead : null;
+        return (pick ? row.text : row).split("\n").map((line, i) => {
+            if (lead && i === 0) {
+                // With the spaces after it, as a keyword.
+                const end = lead.length + /^\s*/.exec(line.slice(lead.length))[0].length;
+                return { word: line.slice(0, end), rest: line.slice(end), color: lead.color, error: false };
+            }
             const m = /^(\S+)(\s+)(.*)$/.exec(line);
             const kind = m ? keywords[m[1]] : undefined;
             const colored = typeof kind === "string";

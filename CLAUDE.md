@@ -606,7 +606,12 @@ the scratchpad (see Scratchpad).
   lists the applies (and Enter's creates) koil can undo, newest first, in
   `ConfirmDialog` (`listing::history`: each one's time, its dir if it
   isn't the open one, and what undoing it does, up to `SHOWN_STEPS`
-  steps, relative to its dir); koil refuses while changes are pending.
+  steps, relative to its dir). The time is in the color of how old it is
+  (`listing::age`, by what `time_ago` counts it in; `theme.ageColor`:
+  under a day cyan, days blue, weeks purple, months dim, a year or more
+  faint, so the newest stand out, and none is a change's color), which
+  main.qml gives the line as its `lead` (`{ length, color }`, the start
+  of a line to pick from in a color: `rowParts`); koil refuses while changes are pending.
   None is picked at first, and the first is highlighted at once
   (`ask`'s `showRow`). `u` or Cmd+Z with nothing left
   to undo in vim emits `nothingToUndo`, and `undoLast` asks only about

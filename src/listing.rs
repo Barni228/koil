@@ -571,6 +571,29 @@ fn show_time(time: SystemTime) -> String {
     time_ago(time, SystemTime::now()).0
 }
 
+const MINUTE: u64 = 60;
+const HOUR: u64 = 60 * MINUTE;
+const DAY: u64 = 24 * HOUR;
+const WEEK: u64 = 7 * DAY;
+const MONTH: u64 = 30 * DAY;
+const YEAR: u64 = 365 * DAY;
+
+/// How old `time` is at `now`, by what [`time_ago`] counts it in, which
+/// the undo history colors it by: `today` (under a day), `days`, `weeks`,
+/// `months`, or `years` (a year or more, or a time after `now`, both
+/// shown as the time itself).
+pub fn age(time: SystemTime, now: SystemTime) -> &'static str {
+    match now.duration_since(time).map(|ago| ago.as_secs()) {
+        Ok(..DAY) => "today",
+        Ok(DAY..WEEK) => "days",
+        Ok(WEEK..MONTH) => "weeks",
+        Ok(MONTH..YEAR) => "months",
+        Ok(YEAR..) => "years",
+        Err(ahead) if ahead.duration().as_secs() < MINUTE => "today",
+        Err(_) => "years",
+    }
+}
+
 /// How long before `now` `time` was, as people say it, rounded down:
 /// `just now`, `5 min ago`, `3 hours ago`, `2 days ago`, `3 weeks ago`,
 /// `5 months ago`, and in how many seconds after `now` that changes. A
@@ -578,12 +601,6 @@ fn show_time(time: SystemTime) -> String {
 /// moment after it (a clock that's wrong), it's the time in the local time
 /// zone, like `2026-10-06 14:03`, which doesn't change.
 pub fn time_ago(time: SystemTime, now: SystemTime) -> (String, Option<u64>) {
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * MINUTE;
-    const DAY: u64 = 24 * HOUR;
-    const WEEK: u64 = 7 * DAY;
-    const MONTH: u64 = 30 * DAY;
-    const YEAR: u64 = 365 * DAY;
     let ago = match now.duration_since(time) {
         Ok(ago) => ago.as_secs(),
         // A file written as the listing was read can be a moment ahead.
@@ -1939,6 +1956,10 @@ pub struct HistoryLine {
     pub needs: Vec<usize>,
     /// Why it can't be undone now (see `Undoable::blocked`), if it can't.
     pub blocked: Option<String>,
+    /// When it was applied, as `text` starts with it, and how old that is
+    /// (see [`age`]), which colors it.
+    pub time: String,
+    pub age: &'static str,
     /// What undoing it does, every step, relative to the open dir, as `u`
     /// lists the last apply on its own.
     pub steps: Vec<String>,
@@ -1954,9 +1975,10 @@ pub fn history(koil: &Koil) -> Result<Vec<HistoryLine>, String> {
     let lines = undoable.into_iter().rev().map(|undoable| {
         let dir = &undoable.applied.dir;
         let time = show_time(undoable.applied.time);
+        let age = age(undoable.applied.time, SystemTime::now());
         // Where, if it's not the open dir.
         let mut text = match dir == koil.current_dir() {
-            true => time,
+            true => time.clone(),
             false => format!("{time}  {}", show_path(dir)),
         };
         let steps = &undoable.applied.steps;
@@ -1976,6 +1998,8 @@ pub fn history(koil: &Koil) -> Result<Vec<HistoryLine>, String> {
             text,
             needs: undoable.needs.iter().map(|j| newest - j).collect(),
             blocked,
+            time,
+            age,
             steps: steps.iter().map(|step| undo_text(open, step)).collect(),
             applied: undoable.applied,
         }

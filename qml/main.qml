@@ -1899,7 +1899,9 @@ ApplicationWindow {
             return;
         }
         vim.showMessage("");
-        const lines = applies.map(a => Object.assign({ picked: false }, a));
+        // Each one's time in the color of how old it is.
+        const lines = applies.map(a => Object.assign({ picked: false,
+            lead: { length: a.time.length, color: theme.ageColor(a.age) } }, a));
         const any = lines.some(a => !a.blocked);
         const question = (count, picked) => {
             const blocked = lines.filter((a, i) => a.blocked && picked[i]).length;

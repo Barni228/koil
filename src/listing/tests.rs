@@ -1094,6 +1094,16 @@ fn test_time_ago() {
     // a clock a moment off is now, more is the time too
     assert_eq!(time_ago(now + Duration::from_secs(5), now).0, "just now");
     assert_eq!(time_ago(now + Duration::from_secs(HOUR), now).1, None);
+
+    // how old it is, by what it's counted in
+    let old = |secs| age(now - Duration::from_secs(secs), now);
+    assert_eq!([old(0), old(DAY - 1)], ["today", "today"]);
+    assert_eq!([old(DAY), old(7 * DAY - 1)], ["days", "days"]);
+    assert_eq!([old(7 * DAY), old(30 * DAY - 1)], ["weeks", "weeks"]);
+    assert_eq!([old(30 * DAY), old(365 * DAY - 1)], ["months", "months"]);
+    assert_eq!(old(365 * DAY), "years");
+    assert_eq!(age(now + Duration::from_secs(5), now), "today");
+    assert_eq!(age(now + Duration::from_secs(HOUR), now), "years");
 }
 
 #[test]
@@ -2182,6 +2192,8 @@ fn test_history() {
             .iter()
             .all(|line| line.text.starts_with(&(time(line) + "\n")))
     );
+    assert!(lines.iter().all(|line| line.time == time(line)));
+    assert!(lines.iter().all(|line| line.age == "today"));
     // the first rename can't be undone without the second one
     let needs: Vec<&[usize]> = lines.iter().map(|line| line.needs.as_slice()).collect();
     assert_eq!(needs, [&[][..], &[], &[1]]);

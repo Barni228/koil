@@ -5404,5 +5404,18 @@ TestCase {
         confirm.answer("cancel");
         const parts = confirm.rowParts({ text: "12:00\nTRASH a\nCan't be undone: `a` is gone", needs: [], blocked: "`a` is gone" });
         compare(parts.map(part => part.error), [false, false, true]);
+        // What a line to pick from starts with (a time) in a color of its
+        // own, with the spaces after it; only its first line.
+        const led = confirm.rowParts({ text: "2 days ago  ~/src\n2 days", needs: [],
+            lead: { length: 10, color: theme.ageColor("days") } });
+        compare(led[0], { word: "2 days ago  ", rest: "~/src", color: theme.ageColor("days"), error: false });
+        compare(led[1].word, "");
+        compare(confirm.rowParts({ text: "just now", needs: [], lead: { length: 8, color: "red" } })[0],
+            { word: "just now", rest: "", color: "red", error: false });
+        // Each age has its color, the oldest the palest.
+        const ages = ["today", "days", "weeks", "months", "years"].map(age => String(theme.ageColor(age)));
+        compare(ages.filter((color, i) => ages.indexOf(color) === i).length, 5);
+        compare(ages[3], String(theme.dim));
+        compare(ages[4], String(theme.faint));
     }
 }
