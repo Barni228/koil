@@ -574,7 +574,8 @@ function sections(help) {
                     + "undo them."],
                 ["`d`  `D`", "Discard the picked ones (`D`: the highlighted one). In `Space u`: delete them "
                     + "from the history."],
-                ["`u`", "Undo the listing's last edit, a discard too."],
+                ["`u`", "Undo the listing's last edit, a discard, or an apply made here (its changes come "
+                    + "back to pick)."],
                 ["`h`  `l`  `Enter`", "Move between the buttons, press the highlighted one."],
                 ["`c`  `Esc`", "Cancel."]
             ],

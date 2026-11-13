@@ -147,6 +147,13 @@ ApplicationWindow {
     // Whether the listing had changes that aren't applied when it was last
     // shown (koil.hasChanges()), which make it modified whatever its text.
     property bool pendingChanges: false
+    // The applies made from the question to apply (see askToApply), while
+    // it's asked again after them, newest last, for `u` there to undo as if
+    // they never ran (see undoApplied): { unapply (what Koil.apply gave,
+    // for Koil.unapply), and the listing before it: text, hidden, buffer
+    // (see Vim.leaveBuffer), spot (see listingSpot), place (the question's,
+    // see ConfirmDialog.place) }. A new question starts over.
+    property var appliedFrom: []
     // Whether something changed on disk that the listing may not show yet
     // (see syncListing), and whether what goes against the user's edits is
     // being asked about.
@@ -1669,11 +1676,15 @@ ApplicationWindow {
     // Lists `actions` (what Koil.actions gave last) to pick what to apply
     // (y the picked ones, Y the current one or those v selected: see
     // applyLines), or discard (d and D: see discardLines), and u
-    // undoes the listing's last change (see undoInApply). Cancel leaves them all as they are; quitting,
+    // undoes the listing's last change, or the last apply made from it
+    // (see undoInApply). Cancel leaves them all as they are; quitting,
     // there's No too, which quits without them, and no Discard nor u.
     // `keep` asks it as a question was: `{ again }`, with `row` the
-    // current line at that index (see ConfirmDialog.ask).
+    // current line at that index (see ConfirmDialog.ask); without, it's a
+    // new question, whose u doesn't undo the applies of the last one.
     function askToApply(actions, quit, keep) {
+        if (!keep)
+            appliedFrom = [];
         const total = actions.length;
         const these = total === 1 ? "this change" : "these " + total + " changes";
         const question = picked => !picked ? "Pick what to " + (quit ? "apply before quitting" : "apply or discard") + " (Space)"
@@ -1703,10 +1714,21 @@ ApplicationWindow {
 
     // Applies the changes `picked` (indexes into what Koil.actions gave
     // last), then quits (`quit`), or if it was asked (`asked`), asks about
-    // those left, if any, as the list was (`place`, see askAgain).
+    // those left, if any, as the list was (`place`, see askAgain), whose u
+    // can then undo it (see appliedFrom).
     function applyPicked(picked, quit, asked, place) {
         const spot = listingSpot();
+        // As vim starts over after it (see showListing).
+        const before = asked && !quit ? {
+            text: editorView.textArea.latest.text,
+            hidden: editorView.hidden,
+            buffer: activeView === editorView ? vim.leaveBuffer() : editorView.saved,
+            spot: spot,
+            place: place
+        } : null;
         const r = JSON.parse(koil.apply(JSON.stringify(picked)));
+        if (before && r.unapply)
+            appliedFrom = appliedFrom.concat([Object.assign({ unapply: r.unapply }, before)]);
         showListing(true, "", spot);
         report(r);
         if (r.ok && quit)
@@ -1786,22 +1808,28 @@ ApplicationWindow {
     // was: the current line at the same place, and the lines still there
     // picked as they were (one that came back is picked, as a discarded one
     // was). Not if the listing can't be read after it, whose errors then
-    // show, nor with nothing to apply.
+    // show, nor with nothing to apply. With nothing in vim to undo since
+    // the last apply made from the question (after which vim started
+    // over), it undoes that apply (see undoApplied).
     function undoInApply() {
         const row = confirmDialog.row, inPath = activeView === pathView;
         const shown = confirmDialog.items.map(item => item.text).join("\n");
         activate(editorView);
         // Not the last apply, as u with nothing to undo would (see
         // undoLast): it can't be undone while there are changes.
-        let r = null, actions = null;
-        while (vim.undoStack.length) {
+        let r = null, actions = null, same = true;
+        while (same && vim.undoStack.length) {
             vim.startCommand(["u"]);
             r = readListing();
-            if (!r.ok || r.moved)
-                break;
-            actions = JSON.parse(koil.actions());
-            if (actions.map(a => a.text).join("\n") !== shown)
-                break;
+            same = r.ok && !r.moved;
+            if (same) {
+                actions = JSON.parse(koil.actions());
+                same = actions.map(a => a.text).join("\n") === shown;
+            }
+        }
+        if (same && appliedFrom.length) {
+            undoApplied(inPath, row);
+            return;
         }
         if (!r)
             vim.showMessage("Already at oldest change");
@@ -1816,6 +1844,37 @@ ApplicationWindow {
             askToApply(actions, false, { again: true, row: row });
         else
             vim.showMessage("Nothing to apply");
+    }
+
+    // u in askToApply after an apply made from it, with nothing in vim to
+    // undo since (see undoInApply): undoes the apply as if it never ran
+    // (Koil.unapply), its changes pending again, and brings back the
+    // listing as it was before it (see appliedFrom), with vim's undo
+    // history, so the next u goes on from there, then asks again as the
+    // question was before it. If it can't be undone, the status line says
+    // why, and the older ones can't be either; then it asks again as it
+    // was, the current line at `row`. `inPath` puts vim back in the path
+    // field.
+    function undoApplied(inPath, row) {
+        const before = appliedFrom[appliedFrom.length - 1];
+        const u = JSON.parse(koil.unapply(JSON.stringify(before.unapply)));
+        appliedFrom = u.ok ? appliedFrom.slice(0, -1) : [];
+        if (u.ok) {
+            vim.replaceText(before.text, before.hidden);
+            vim.enterBuffer(Object.assign({}, before.buffer, { hidden: before.hidden }));
+            // As Koil has it, which is the same, unless its sizes, say,
+            // sort it another way now: as an edit, which u takes back.
+            showListing(false, "", before.spot);
+        } else {
+            // From scratch: if a step failed, Koil has what's on disk.
+            showListing(true, "", listingSpot());
+        }
+        if (inPath)
+            activate(pathView);
+        report(u);
+        const actions = JSON.parse(koil.actions());
+        if (actions.length)
+            askToApply(actions, false, u.ok ? { again: before.place || true } : { again: true, row: row });
     }
 
     // Space u: lists the applies Koil can undo, of every session (see

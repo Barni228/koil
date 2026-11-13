@@ -551,9 +551,23 @@ the scratchpad (see Scratchpad).
   update of `tryUpdate` without showing it), and it's shown once, after
   the last, then asked again with the current line at the same index
   (`ask`'s `row`), the lines still there picked as they were, and one
-  that came back picked (as a discarded one was). With nothing in vim
-  to undo it says so, rather than ask to undo the last apply (which
-  can't be undone while there are changes). `v` there (in any list to
+  that came back picked (as a discarded one was). With nothing left in
+  vim to undo since an apply made from the question (after which vim
+  started over), it undoes that apply as if it never ran
+  (`undoApplied`): `Koil.apply` gives an `unapply` with it (its time,
+  how many lines it applied, and what was pending before it,
+  koil-core's `Koil::pending`), which main.qml keeps with the listing as
+  it was, its text and vim's buffer (`appliedFrom`, newest last), and
+  `Koil.unapply` gives back to `Koil::unapply`, which undoes it while
+  changes are pending (only the last apply), and has what was pending
+  before it pending again, the applied changes too, in every dir; vim
+  gets the listing back, undo history and all, so the next `u` goes on
+  from there, and the question is asked as it was before it (its
+  `place`), the applied lines picked again. A new question starts over,
+  and so does one that fails, as the older ones need it undone first.
+  With nothing in vim to undo and no apply made from the question, it
+  says so, rather than ask to undo the last apply (which can't be undone
+  while there are changes). `v` there (in any list to
   pick from) selects lines, from the current one to where `j` and `k`
   (or `g` and `G`, the first and last line: `moveToEnd`) take it (`anchor`, drawn in `theme.marked`), which Space or `x` then
   picks, or leaves out if they're all picked (`toggleSelected`), ending

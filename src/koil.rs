@@ -2,13 +2,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
-use koil_core::{Action, Applied, Conflict, Id, KoilError, Report, Settings, Sort, Watched};
+use koil_core::{
+    Action, Applied, Conflict, Id, KoilError, Pending, Report, Settings, Sort, Watched,
+};
 use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::convert::{Coalesced, from_json, path_string, paths, to_json};
@@ -248,9 +251,19 @@ pub mod qobject {
         /// Applies the changes of the lines `picked` (a list of indexes into
         /// what `actions` gave last), keeping the others to apply later,
         /// where what was applied moved them (`Koil::apply_only`), then reads
-        /// the open dir again. Returns `{ ok, message }`.
+        /// the open dir again. Returns `{ ok, message, unapply }`, where
+        /// `unapply` (null if it applied nothing) is what `unapply` takes
+        /// to undo it as if it never ran, which QML keeps as it is.
         #[qinvokable]
         fn apply(self: Pin<&mut Koil>, picked: &QString) -> QString;
+
+        /// Undoes the apply `unapply` (what `apply` gave, as JSON) stands
+        /// for, which must be the last one, and has the changes that were
+        /// pending before it pending again, in place of those pending now
+        /// (`Koil::unapply`), then reads the open dir again: `u` in the
+        /// question asked again after it. Returns `{ ok, message }`.
+        #[qinvokable]
+        fn unapply(self: Pin<&mut Koil>, unapply: &QString) -> QString;
 
         /// Takes back the changes of the lines `picked` (indexes into what
         /// `actions` gave last), and those that need them, changing nothing
@@ -341,6 +354,18 @@ pub struct KoilRust {
     /// whether it can be run, for the watcher (see `Filter`).
     executables: HashSet<Id>,
     files: Arc<HashMap<PathBuf, bool>>,
+}
+
+/// What `unapply` takes to undo an apply as if it never ran, which `apply`
+/// gives QML to keep.
+#[derive(Serialize, Deserialize)]
+struct Unapply {
+    /// The apply's time, which tells it apart in the history.
+    time: SystemTime,
+    /// How many changes it applied, as the question listed them.
+    changes: usize,
+    /// What was pending before it.
+    pending: Pending,
 }
 
 /// Watches dirs for changes on disk, and emits `changedOnDisk` for those
@@ -569,7 +594,7 @@ impl KoilRust {
     }
 }
 
-/// What `open`, `apply`, `undo` and `create` did: the message they show,
+/// What `open`, `undo` and `create` did: the message they show,
 /// or why they failed.
 #[derive(Serialize)]
 struct Outcome {
@@ -923,7 +948,16 @@ impl qobject::Koil {
         let mut this = self.rust_mut();
         let this = &mut *this;
         let actions: Vec<Action> = pick(&this.shown, picked);
+        let (pending, had) = (this.koil.pending(), this.koil.history().len());
         let applied = this.koil.apply_only(&actions);
+        // The apply it made, if it ran anything.
+        let history = this.koil.history();
+        let made = (applied.is_ok() && history.len() > had).then(|| history.last());
+        let unapply = made.flatten().map(|made| Unapply {
+            time: made.time,
+            changes: actions.len(),
+            pending,
+        });
         // As many as the confirmation listed, not Koil's steps (a swap
         // takes three), and how many are left to apply later.
         let done = match this.koil.changes().len() {
@@ -940,7 +974,11 @@ impl qobject::Koil {
             }
         }
         this.history.merge(&mut this.koil);
-        outcome(applied)
+        let (ok, message) = match applied {
+            Ok(message) => (true, message),
+            Err(message) => (false, message),
+        };
+        to_json(&json!({ "ok": ok, "message": message, "unapply": unapply }))
     }
 
     fn discard(self: Pin<&mut Self>, picked: &QString) -> QString {
@@ -997,14 +1035,8 @@ impl qobject::Koil {
         let applies: Vec<Applied> = pick(&rust.shown_history, picked);
         // Those another Koil undid since aren't undone again.
         rust.history.merge(&mut rust.koil);
-        let undone = match rust.koil.undo_only(&applies) {
-            Ok(report) => Ok(report_message(report, "undone")),
-            Err(KoilError::UndoBlocked { blocked, .. }) => Err(format!(
-                "Can't undo: {}",
-                listing::describe_blocked(rust.koil.current_dir(), &blocked)
-            )),
-            Err(error) => Err(listing::describe(&error)),
-        };
+        let undone = rust.koil.undo_only(&applies);
+        let undone = undo_message(&rust.koil, undone);
         // The sizes kept that it changed, before the watcher tells.
         for step in applies.iter().flat_map(|applied| &applied.steps) {
             for path in step.paths() {
@@ -1015,11 +1047,60 @@ impl qobject::Koil {
         outcome(undone)
     }
 
+    fn unapply(self: Pin<&mut Self>, unapply: &QString) -> QString {
+        let Some(Unapply {
+            time,
+            changes,
+            pending,
+        }) = from_json(unapply)
+        else {
+            return outcome(Err(KoilError::NothingToUndo.to_string()));
+        };
+        let mut rust = self.rust_mut();
+        let rust = &mut *rust;
+        // As another Koil left it (undone there, it isn't here).
+        rust.history.merge(&mut rust.koil);
+        let applied = rust.koil.history().iter().find(|a| a.time == time).cloned();
+        let undone = (applied.as_ref().ok_or(KoilError::NothingToUndo))
+            .and_then(|applied| rust.koil.unapply(applied, pending));
+        // As many as the question listed, as `apply` says.
+        let undone = undo_message(
+            &rust.koil,
+            undone.map(|report| Report { changes, ..report }),
+        );
+        // The sizes kept that it changed, before the watcher tells.
+        for path in applied
+            .iter()
+            .flat_map(|a| &a.steps)
+            .flat_map(|step| step.paths())
+        {
+            rust.sizes.changed(path);
+        }
+        rust.history.merge(&mut rust.koil);
+        outcome(undone)
+    }
+
     fn forget_history(self: Pin<&mut Self>, picked: &QString) {
         let mut rust = self.rust_mut();
         let rust = &mut *rust;
         let applies: Vec<Applied> = pick(&rust.shown_history, picked);
         rust.history.forget(&mut rust.koil, &applies);
+    }
+}
+
+/// What the status line says of an undo: like "3 changes undone", or why
+/// it couldn't.
+fn undo_message(
+    koil: &koil_core::Koil,
+    undone: Result<Report, KoilError>,
+) -> Result<String, String> {
+    match undone {
+        Ok(report) => Ok(report_message(report, "undone")),
+        Err(KoilError::UndoBlocked { blocked, .. }) => Err(format!(
+            "Can't undo: {}",
+            listing::describe_blocked(koil.current_dir(), &blocked)
+        )),
+        Err(error) => Err(listing::describe(&error)),
     }
 }
 
