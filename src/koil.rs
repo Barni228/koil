@@ -246,11 +246,18 @@ pub mod qobject {
         fn has_changes(self: &Koil) -> bool;
 
         /// Applies the changes of the lines `picked` (a list of indexes into
-        /// what `actions` gave last), forgetting the others (all of them, if
-        /// none is picked), then reads the open dir again. Returns `{ ok,
-        /// message }`.
+        /// what `actions` gave last), keeping the others to apply later,
+        /// where what was applied moved them (`Koil::apply_only`), then reads
+        /// the open dir again. Returns `{ ok, message }`.
         #[qinvokable]
         fn apply(self: Pin<&mut Koil>, picked: &QString) -> QString;
+
+        /// Takes back the changes of the lines `picked` (indexes into what
+        /// `actions` gave last), and those that need them, changing nothing
+        /// on disk (`Koil::discard_only`), then reads the open dir again.
+        /// Returns `{ ok, message }`.
+        #[qinvokable]
+        fn discard(self: Pin<&mut Koil>, picked: &QString) -> QString;
 
         /// What making the new files or copies at `paths` (a list) before
         /// the other changes are applied takes (see
@@ -916,14 +923,15 @@ impl qobject::Koil {
         let mut this = self.rust_mut();
         let this = &mut *this;
         let actions: Vec<Action> = pick(&this.shown, picked);
-        // As many as the confirmation listed, not Koil's steps (a swap
-        // takes three); with nothing picked, every change is forgotten.
-        let (changes, done) = match actions.len() {
-            0 => (this.shown.len(), "discarded"),
-            n => (n, "applied"),
-        };
         let applied = this.koil.apply_only(&actions);
-        let applied = (applied.map(|report| report_message(Report { changes, ..report }, done)))
+        // As many as the confirmation listed, not Koil's steps (a swap
+        // takes three), and how many are left to apply later.
+        let done = match this.koil.changes().len() {
+            0 => "applied".to_string(),
+            left => format!("applied, {left} left"),
+        };
+        let changes = actions.len();
+        let applied = (applied.map(|report| report_message(Report { changes, ..report }, &done)))
             .map_err(|e| listing::describe(&e));
         // The sizes kept that it changed, before the watcher tells.
         for action in &actions {
@@ -933,6 +941,16 @@ impl qobject::Koil {
         }
         this.history.merge(&mut this.koil);
         outcome(applied)
+    }
+
+    fn discard(self: Pin<&mut Self>, picked: &QString) -> QString {
+        let mut this = self.rust_mut();
+        let actions: Vec<Action> = pick(&this.shown, picked);
+        let discarded = this.koil.discard_only(&actions);
+        outcome(
+            (discarded.map(|report| report_message(report, "discarded")))
+                .map_err(|e| format!("Can't read the listing again: {e}")),
+        )
     }
 
     fn create_steps(&self, paths: &QString) -> QString {

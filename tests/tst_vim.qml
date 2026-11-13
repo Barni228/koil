@@ -4910,7 +4910,7 @@ TestCase {
         help.show("");
         tryCompare(help, "opened", true);
         keys("/Space Space<CR>");
-        compare(help.matches.length, 5);
+        compare(help.matches.length, 6);
         compare(help.matchMarks["0/0t"], "56,67,1");
         compare(help.matchMarks["0/1k"], "0,11,0");
         keys("<Esc><Esc>");
@@ -4971,6 +4971,12 @@ TestCase {
         shows("<C-a>", "Ctrl keys", "`Ctrl-A`  `Ctrl-X`");
         shows("CTRL-D", "Ctrl keys", "`Ctrl-D`  `Ctrl-U`");
         shows("^x", "Ctrl keys", "`Ctrl-A`  `Ctrl-X`");
+        // The list of changes' keys, last, so vim's come first.
+        shows("pick", "Picking changes");
+        shows("D", "Picking changes", "`d`  `D`");
+        shows("u", "The listing", "`u`");
+        shows("d", "Marked lines", "`d`  `y`");
+        shows("Y", "Other keys", "`Y`");
         verify(!help.show("nothing"));
         help.close();
         tryCompare(help, "opened", false);
@@ -5012,11 +5018,223 @@ TestCase {
         compare(confirm.picked, [true, false, true, true]);
         confirm.pickAll();
         compare(confirm.picked, [false, false, false, false]);
+        // Yes does nothing with none picked.
+        verify(!confirm.canAnswer("yes"));
+        confirm.answer("yes");
+        compare(chosen, null);
+        verify(confirm.opened);
 
         confirm.toggle(2);
         confirm.answer("yes");
         compare(chosen, [0, 2]);
         verify(!confirm.opened);
+    }
+
+    // A question can name No Cancel, when No has nothing to do (a list of
+    // changes to pick from, where No would read as leaving them out).
+    function test_confirmCancel() {
+        let chosen = null;
+        confirm.ask("Apply?", [{ text: "A", needs: [] }], picked => chosen = picked, null, null, { cancel: true });
+        tryCompare(confirm, "opened", true);
+        compare(confirm.choices.map(c => c.label), ["[Y]es", "(C)ancel"]);
+        keyClick(Qt.Key_C);
+        verify(!confirm.opened);
+        compare(chosen, null);
+        // With something for No to do, it's No and Cancel.
+        confirm.ask("Quit?", "", () => {}, () => {}, null, { cancel: true });
+        tryCompare(confirm, "opened", true);
+        compare(confirm.choices.map(c => c.answer), ["yes", "no", "cancel"]);
+        keyClick(Qt.Key_Escape);
+        verify(!confirm.opened);
+        // And without the option, No alone.
+        confirm.ask("Undo?", "", () => {});
+        tryCompare(confirm, "opened", true);
+        compare(confirm.choices.map(c => c.label), ["[Y]es", "(N)o"]);
+        keyClick(Qt.Key_Escape);
+    }
+
+    // Asked again with other lines (`again`), as if it never closed: those
+    // still there keep their picks, and the current line stays on its line,
+    // or goes to the next one left, still highlighted, as is the choice.
+    function test_confirmAgain() {
+        const lines = (texts, picked) => texts.map(text => ({ text: text, needs: [], picked: picked }));
+        confirm.ask("Apply?", lines(["A", "B", "C", "D"], true), () => {}, null, null, { cancel: true });
+        tryCompare(confirm, "opened", true);
+        confirm.toggle(1);
+        confirm.toggle(3);
+        keyClick(Qt.Key_J); // shows the current line, the first
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_L);
+        compare(confirm.row, 2);
+        compare(confirm.current, 1);
+        // C went, so the line after it (D) is the current one; E is new.
+        confirm.ask("Apply?", lines(["B", "D", "E"], false), () => {}, null, null, { cancel: true, again: true });
+        compare(confirm.picked, [false, false, false]);
+        compare(confirm.row, 1);
+        verify(confirm.rowShown);
+        compare(confirm.current, 1);
+        // Its own line, if it's still there, and nothing after it: the last.
+        confirm.toggle(0);
+        confirm.ask("Apply?", lines(["A", "B", "D"], true), () => {}, null, null, { again: true });
+        compare(confirm.picked, [true, true, false]);
+        compare(confirm.row, 2);
+        confirm.ask("Apply?", lines(["A"], true), () => {}, null, null, { again: true });
+        compare(confirm.row, 0);
+        // Without it, asked anew.
+        keyClick(Qt.Key_Escape);
+        confirm.ask("Apply?", lines(["A", "B"], true), () => {});
+        tryCompare(confirm, "opened", true);
+        compare(confirm.picked, [true, true]);
+        compare(confirm.row, 0);
+        verify(!confirm.rowShown);
+        compare(confirm.current, 0);
+        keyClick(Qt.Key_Escape);
+    }
+
+    // v selects lines, which Space or x then picks all of, or leaves all
+    // out if they're all picked, ending the selection; Esc ends it before
+    // it cancels.
+    function test_confirmSelectLines() {
+        const lines = ["A", "B", "C", "D"].map(text => ({ text: text, needs: [], picked: false }));
+        confirm.ask("Apply?", lines, () => {});
+        tryCompare(confirm, "opened", true);
+        keyClick(Qt.Key_V);
+        verify(confirm.rowShown);
+        compare(confirm.anchor, 0);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Space);
+        compare(confirm.picked, [true, true, true, false]);
+        compare(confirm.anchor, -1);
+        // All picked: all left out.
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_X);
+        compare(confirm.picked, [true, false, false, false]);
+        // One left out: all picked, upwards too.
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_Space);
+        compare(confirm.picked, [true, true, true, false]);
+        // G and g go to the last line and the first, also selecting.
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.row, 3);
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_G);
+        compare(confirm.row, 0);
+        keyClick(Qt.Key_Space);
+        compare(confirm.picked, [true, true, true, true]);
+        // v again ends it, as Esc does, which cancels only then.
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_V);
+        compare(confirm.anchor, -1);
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_Escape);
+        compare(confirm.anchor, -1);
+        verify(confirm.opened);
+        keyClick(Qt.Key_Escape);
+        verify(!confirm.opened);
+    }
+
+    // u answers with the question's own action, if it has one; and asked
+    // again with `row`, the current line is the one at that index.
+    function test_confirmUndo() {
+        let undone = null;
+        const lines = ["A", "B", "C"].map(text => ({ text: text, needs: [] }));
+        confirm.ask("Apply?", lines, () => {}, null, null, { undo: picked => undone = picked });
+        tryCompare(confirm, "opened", true);
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_U);
+        verify(!confirm.opened);
+        compare(undone, [1, 2]);
+        confirm.ask("Apply?", lines, () => {}, null, null, { again: true, row: 2 });
+        tryCompare(confirm, "opened", true);
+        compare(confirm.row, 2);
+        compare(confirm.picked, [false, true, true]);
+        confirm.ask("Apply?", lines, () => {}, null, null, { again: true, row: 9 });
+        compare(confirm.row, 2);
+        // Without it, u does nothing.
+        keyClick(Qt.Key_U);
+        verify(confirm.opened);
+        keyClick(Qt.Key_Escape);
+    }
+
+    // Shift and the button apart's key does what the button does, with the
+    // current line, or the lines v selected, picked or not; the first only
+    // shows the current line, as j does. And a question can be asked as it
+    // was before another (`place`).
+    function test_confirmExtraOnLines() {
+        let chosen = null;
+        const lines = [
+            { text: "A", needs: [] },
+            { text: "B", needs: [0] },
+            { text: "C", needs: [1] },
+            { text: "D", needs: [] }
+        ];
+        const extra = { label: "(D)iscard", key: Qt.Key_D, action: picked => chosen = picked };
+        confirm.ask("Apply?", lines, () => {}, null, null, { extra: extra });
+        tryCompare(confirm, "opened", true);
+        keyClick(Qt.Key_D, Qt.ShiftModifier);
+        verify(confirm.opened);
+        verify(confirm.rowShown);
+        compare(chosen, null);
+        // Left out, with what needs it, and still D's.
+        keyClick(Qt.Key_Space);
+        compare(confirm.picked, [false, false, false, true]);
+        keyClick(Qt.Key_D, Qt.ShiftModifier);
+        compare(chosen, [0]);
+        verify(!confirm.opened);
+        compare(confirm.withDependents([0]), [0, 1, 2]);
+        compare(confirm.withDependents([1, 3]), [1, 2, 3]);
+        compare(confirm.withNeeds([2]), [0, 1, 2]);
+        compare(confirm.withNeeds([0, 3]), [0, 3]);
+
+        // Y is y with the current line, picked or not.
+        let yes = null;
+        confirm.ask("Apply?", lines, picked => yes = picked, null, null, { extra: extra, showRow: true });
+        tryCompare(confirm, "opened", true);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_Y, Qt.ShiftModifier);
+        compare(yes, [2]);
+        verify(!confirm.opened);
+        // Not with a line Yes can't do.
+        yes = null;
+        confirm.ask("Undo?", [{ text: "A", needs: [] }, { text: "B", needs: [], blocked: true }], picked => yes = picked,
+            null, null, { extra: extra, showRow: true });
+        tryCompare(confirm, "opened", true);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Y, Qt.ShiftModifier);
+        compare(yes, null);
+        verify(confirm.opened);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_Y, Qt.ShiftModifier);
+        compare(yes, [0]);
+
+        confirm.ask("Apply?", lines, () => {}, null, null, { extra: extra, showRow: true });
+        tryCompare(confirm, "opened", true);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_D, Qt.ShiftModifier);
+        compare(chosen, [1, 2]);
+
+        confirm.ask("Apply?", lines, () => {}, null, null, { extra: extra, showRow: true });
+        tryCompare(confirm, "opened", true);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Space);
+        compare(confirm.picked, [true, false, false, true]);
+        const place = confirm.place();
+        confirm.ask("Sure?", "A\nB", () => {});
+        confirm.ask("Apply?", lines, () => {}, null, null, { extra: extra, again: place });
+        compare(confirm.row, 1);
+        verify(confirm.rowShown);
+        compare(confirm.picked, [true, false, false, true]);
+        keyClick(Qt.Key_Escape);
     }
 
     // The undo history's: the first line highlighted at once, so j moves

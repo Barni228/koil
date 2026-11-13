@@ -695,7 +695,7 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#b3654ab1fe3e8c311194bdca51c3239856fb47ae"
+source = "git+https://github.com/Barni228/koil-core#aa0ca847e1d1c00df473282a79714778c40d3053"
 dependencies = [
  "dunce",
  "filetime",

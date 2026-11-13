@@ -22,12 +22,14 @@ TextEdit {
     // naturalWidth, once the text, its font or its layout are new: but not
     // as its own new width (a box as wide as naturalWidth) lays the text out
     // again, which can't change how wide it is unwrapped. Bound to
-    // contentHeight, that was a binding loop.
+    // contentHeight, that was a binding loop. Rounded up, as a layout gives
+    // its items whole pixels: 399.48 made a question 399 wide, which wrapped
+    // its last word.
     function measure() {
         if (!system || measuring)
             return;
         measuring = true;
-        measured = system.layoutWidth(textDocument) + leftPadding + rightPadding;
+        measured = Math.ceil(system.layoutWidth(textDocument) + leftPadding + rightPadding);
         measuring = false;
     }
 

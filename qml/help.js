@@ -30,12 +30,12 @@ function sections(help) {
                 ["`Space Space`", "Apply the changes, listing them first (Settings can skip that). In a file: "
                     + "save."],
                 ["`Space a`", "Apply, always listing the changes first (so does File > Apply Changes…)."],
-                ["󰄲", "In that list: `j` and `k` move, `Space`, `x` or a click picks or leaves out a change "
-                    + "(with what it needs), and `a` picks all or none. What's left out is discarded."],
+                ["󰄲", "In that list, pick what to apply now (the rest stays, to apply later), or to discard: "
+                    + "see `:h pick`."],
                 ["`Space u`", "Undo applies, picked from all of them, also those of earlier sessions, "
                     + "newest first. Picking one picks the newer ones that changed the same paths. "
-                    + "Deleted files come back from the trash. `d` there deletes the picked ones from "
-                    + "the history instead, also those that can't be undone any more."],
+                    + "Deleted files come back from the trash. `d` there deletes them from the history "
+                    + "instead, also those that can't be undone any more (see `:h pick`)."],
                 ["`u`", "Once there's nothing left to undo: undo the last apply, after listing what that "
                     + "does."],
                 ["`Enter`", "Open the dir or file on the line (a renamed one where it is now). A new file "
@@ -555,6 +555,31 @@ function sections(help) {
                     + "selection, theme, folders first, when applying asks, start dir, shell and more. The "
                     + "pointer on a setting's name shows what it does."]
             ]
+        },
+        {
+            // Last, so a key that's no topic (`:h x`) goes to vim's row
+            // first (see HelpPanel.show).
+            title: "Picking changes",
+            tags: ["pick", "picking", "picked", "discard", "changes", "applies"],
+            intro: "`Space Space`, `Space a` and `Space u` list the changes (or applies) to pick from. "
+                + "Uppercase keys act on the highlighted line, picked or not. The list stays open while "
+                + "changes are left.",
+            rows: [
+                ["`j`  `k`", "Move down or up."],
+                ["`g`  `G`", "Go to the first or last line."],
+                ["`Space`  `x`", "Pick or leave out the line (with what it needs, or what needs it)."],
+                ["`v`", "Select several lines; `v` or `Esc` ends it."],
+                ["`a`", "Pick all, or none."],
+                ["`y`  `Y`", "Apply the picked ones (`Y`: the highlighted one); the rest stays. In `Space u`: "
+                    + "undo them."],
+                ["`d`  `D`", "Discard the picked ones (`D`: the highlighted one). In `Space u`: delete them "
+                    + "from the history."],
+                ["`u`", "Undo the listing's last edit, a discard too."],
+                ["`h`  `l`  `Enter`", "Move between the buttons, press the highlighted one."],
+                ["`c`  `Esc`", "Cancel."]
+            ],
+            note: "`Y` and `D` ask first if the line takes others along. Quitting, `n` quits without the "
+                + "changes, and there's no `d` or `u`."
         }
     ];
 }

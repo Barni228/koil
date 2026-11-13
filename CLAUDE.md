@@ -521,16 +521,68 @@ the scratchpad (see Scratchpad).
   (`setKeywordColors`), so the text stays plain. Yes applies the
   picked lines (`Koil.apply(picked)`, indexes into the `shown` actions
   `actions()` kept, given to `Koil::apply_only`, so only what the user saw
-  is applied) and forgets the rest; with none picked, it discards them all
-  ("Discard these 3 changes?", "3 changes discarded"). Then vim starts
+  is applied), and the rest stay pending, to apply later: koil-core moves
+  them along with what was applied (a change inside a renamed dir follows
+  it, one inside a deleted dir goes with it) and keys each by the path its
+  file is at now (`Diff::after_steps`, `Koil::rekey`), so the status line
+  says how many are left ("2 changes applied, 3 left"). Leaving a line
+  out isn't discarding it: Discard (`d`, `ask`'s `extra`, as Delete from
+  History is in the undo history's) takes the picked lines back instead
+  (`Koil.discard`, `Koil::discard_only`: the diff without them, and
+  without those that need one, which couldn't be applied, so it can
+  discard more than is picked; nothing on disk changes), and shows the
+  listing again as an edit (`showListing` not `moved`, as the IDs stay),
+  which `u` takes back, but only for what the listing shows (another
+  dir's changes are gone). With none picked, Yes and Discard are off
+  ("Pick what to apply or discard"). After either, if any are left, the
+  question is asked again about those (`askAgain`, from the listing as
+  it is now), so what was left out can be applied or discarded next, as
+  if it never closed (`ask`'s `again`): a line still there (by its text)
+  picked as it was, so all left out, as the picked ones went (and so is
+  one whose text changed, a move inside a dir that was renamed), the
+  current line on its line, or the next one left, and it highlighted,
+  the list scrolled and the choice highlighted as they were; not after
+  one that failed, whose error the status line shows. `u` there
+  (`ask`'s `undo`, `undoInApply`) undoes the listing's edits, as Esc, `u`
+  and Space a would (from the path field too), as far back as changes
+  what applying does: an update can be a step that doesn't (a renamed
+  entry's icon), which the next update would do again, so `u` never got
+  past it. Koil reads the listing after each step (`readListing`, the
+  update of `tryUpdate` without showing it), and it's shown once, after
+  the last, then asked again with the current line at the same index
+  (`ask`'s `row`), the lines still there picked as they were, and one
+  that came back picked (as a discarded one was). With nothing in vim
+  to undo it says so, rather than ask to undo the last apply (which
+  can't be undone while there are changes). `v` there (in any list to
+  pick from) selects lines, from the current one to where `j` and `k`
+  (or `g` and `G`, the first and last line: `moveToEnd`) take it (`anchor`, drawn in `theme.marked`), which Space or `x` then
+  picks, or leaves out if they're all picked (`toggleSelected`), ending
+  the selection, as `v`, `a`, a click and Esc do (Esc cancels only
+  then). The uppercase of a key that acts on the picked lines acts on
+  the current line, or those `v` selected, picked or not, in any list to
+  pick from (`answerHighlighted`, `answer`'s `lines`, `chosenLines`; the
+  first only shows the current line, if it isn't yet, as `j` does): `Y`
+  (Yes; not on a line Yes can't do) and `D` (Shift and the button
+  apart's key: Discard here, Delete from History in the undo history,
+  which lists what it deletes, `forgetApplies`). What takes more than was
+  chosen asks first, listing them all (`confirmMore`): an apply or an
+  undo the lines it needs (`withNeeds`: `applyLines`, `undoLines`), and
+  a discard the lines that need it (`withDependents`: `discardLines`,
+  `d`'s too); Cancel asks the list again as it was before (`ask`'s
+  `again` taking what `place` gave), and Yes does it, then asks it again
+  so (`applyPicked`, `discardNow`). The choice that isn't Yes is Cancel (`ask`'s `cancel`), as it
+  leaves them all as they are (No would read as leaving them out). After an apply vim starts
   over (koil refreshed: new IDs for renamed paths), with the cursor where it was (`listingSpot`: the
   same line; the listing's cursor even while vim is in the path field) and
-  the view as it was; so does undoing an apply. The "Ask before applying" setting
+  the view as it was; so does undoing an apply. If an action fails, those
+  that didn't run stay pending too. The "Ask before applying" setting
   (`confirmChanges`: always, when deleting, never; `asksFirst`) can skip
   the confirmation (but not `Space a`'s or File > Apply Changes…'s: `ask`),
   applying every line (`deletes` says which delete), and Enter's create's
   too. `:confirm q` and `ZZ` always ask, and their question is whether to
-  quit without the changes.
+  quit without the changes; there, what's left out is lost with them
+  ("Apply 2 of these 5 changes and quit without the rest?"), and there's
+  no Discard, as No quits without them all.
 - **Undo history** (`undoApply`, koil-core's `Koil::undoable` and
   `Koil::undo_only`): `Space u` (from the listing or the path field)
   updates (vim's undo may have taken the buffer back past an update) and
@@ -2411,7 +2463,9 @@ the scratchpad (see Scratchpad).
   (`SelectableText`'s `system`): their rows as tall as the font's lines (a
   `lineHeight` of 0, which follows the zoom), and a list with boxes as the
   listing, its lines going on under their text. They're sized to their
-  text unwrapped (`naturalWidth`, `System.layoutWidth`), which their
+  text unwrapped (`naturalWidth`, `System.layoutWidth`, rounded up, as a
+  layout gives its items whole pixels: a question 399.48 wide got 399,
+  and wrapped its last word), which their
   `implicitWidth` isn't with Koil's layout (see Text layout): its rows'
   advances side by side, with the spaces a row ends with, which Qt's
   advance leaves out (laid out narrower first, a box was sized a space too
@@ -2533,7 +2587,9 @@ the scratchpad (see Scratchpad).
   `gI` isn't `gi`), then in any case, and scrolls to its row of that key
   if it has one (`shownRow`, `keyRow`: a code in the row's keys, `:h gs`);
   a topic no section has goes to the first row with that key (`:h J`),
-  again as typed first. `<C-a>`, `^A` and `CTRL-A` are `Ctrl-A`. The keys
+  again as typed first. So the keys of the list of changes (`:h pick`,
+  "Picking changes") are the last section: before, `:h d` would go to
+  its `d` rather than vim's. `<C-a>`, `^A` and `CTRL-A` are `Ctrl-A`. The keys
   starting with `g`, `z` and Space, and the Ctrl keys, have sections of
   their own (`:h g`, `:h z`, `:h space`, `:h ctrl`), as an index of them,
   pointing to the sections that say more.

@@ -631,6 +631,18 @@ ApplicationWindow {
     // couldn't be opened if it isn't ok, with no problems in the listing
     // or the path field.
     function tryUpdate(open, from, keep) {
+        const r = readListing(open);
+        if (r.ok)
+            showListing(r.moved, from || r.from, keep);
+        if (r.ok && r.message)
+            vim.showMessage(r.message);
+        return r;
+    }
+
+    // Reads the edited listing into Koil, and opens `open` (see
+    // updateListing), without showing it again: what Koil said, and if it
+    // isn't ok, the problems and the status line say why.
+    function readListing(open) {
         // Not a preview (a :s's, the find bar's): the text as it was.
         vim.endPreview();
         const r = JSON.parse(koil.update(pathView.textArea.text, editorView.textArea.text, JSON.stringify(editorView.hidden), open || ""));
@@ -640,11 +652,7 @@ ApplicationWindow {
             if (r.pathProblems.length)
                 pathProblems = r.pathProblems;
             vim.showError(r.message);
-            return r;
         }
-        showListing(r.moved, from || r.from, keep);
-        if (r.message)
-            vim.showMessage(r.message);
         return r;
     }
 
@@ -1628,11 +1636,13 @@ ApplicationWindow {
     }
 
     // Applies the listing's changes once the user confirms them (Space
-    // Space, Space a, File > Apply Changes…), those they leave picked (the
-    // others are forgotten). When confirmChanges says not to ask
-    // (asksFirst), it applies them all, unless `ask` is set (Space a, File
-    // > Apply Changes…). With `quit` (:confirm q, ZZ), it always asks, then
-    // quits, and No quits without applying; if the listing can't be read
+    // Space, Space a, File > Apply Changes…), those they leave picked: the
+    // others stay, to apply later (see Koil::apply_only), and Discard (d)
+    // takes the picked ones back instead (see discardPicked). When
+    // confirmChanges says not to ask (asksFirst), it applies them all,
+    // unless `ask` is set (Space a, File > Apply Changes…). With `quit`
+    // (:confirm q, ZZ), it always asks, then quits (without those left
+    // out), and No quits without applying; if the listing can't be read
     // (its errors, or a path that can't be opened), it asks to quit without
     // the changes, saying why (the status line's error, which updateListing
     // just showed).
@@ -1650,34 +1660,173 @@ ApplicationWindow {
                 vim.showMessage("Nothing to apply");
             return;
         }
-        const apply = picked => {
-            const spot = listingSpot();
-            const r = JSON.parse(koil.apply(JSON.stringify(picked)));
-            showListing(true, "", spot);
-            report(r);
-            if (r.ok && quit)
-                Qt.quit();
-        };
-        if (!ask && !quit && !asksFirst(actions.some(a => a.deletes))) {
-            apply(actions.map((a, i) => i));
-            return;
-        }
-        // With none picked, Yes applies nothing, which forgets them all.
+        if (!ask && !quit && !asksFirst(actions.some(a => a.deletes)))
+            applyPicked(actions.map((a, i) => i), false, false);
+        else
+            askToApply(actions, quit);
+    }
+
+    // Lists `actions` (what Koil.actions gave last) to pick what to apply
+    // (y the picked ones, Y the current one or those v selected: see
+    // applyLines), or discard (d and D: see discardLines), and u
+    // undoes the listing's last change (see undoInApply). Cancel leaves them all as they are; quitting,
+    // there's No too, which quits without them, and no Discard nor u.
+    // `keep` asks it as a question was: `{ again }`, with `row` the
+    // current line at that index (see ConfirmDialog.ask).
+    function askToApply(actions, quit, keep) {
         const total = actions.length;
         const these = total === 1 ? "this change" : "these " + total + " changes";
-        const what = picked => !picked ? "Discard " + these : picked === total ? "Apply " + these
-            : "Apply " + picked + " of " + these;
-        confirmDialog.ask(picked => what(picked) + (quit ? " before quitting?" : "?"), actions, apply,
-            quit ? () => Qt.quit() : null, null, { keywords: changeKeywords });
+        const question = picked => !picked ? "Pick what to " + (quit ? "apply before quitting" : "apply or discard") + " (Space)"
+            : (picked === total ? "Apply " + these : "Apply " + picked + " of " + these)
+            + (!quit ? "?" : picked === total ? " before quitting?" : " and quit without the rest?");
+        confirmDialog.ask(question, actions, lines => applyLines(lines, quit), quit ? () => Qt.quit() : null, null, {
+            keywords: changeKeywords,
+            cancel: true,
+            again: keep?.again,
+            row: keep?.row,
+            undo: quit ? null : undoInApply,
+            extra: quit ? null : { label: "(D)iscard", key: Qt.Key_D, action: discardLines }
+        });
+    }
+
+    // Yes in askToApply: applies the changes `lines` (y the picked ones, Y
+    // the current one or those v selected), with those they need, which
+    // they can't be applied without (see Koil::apply_only); if there are
+    // any, it asks first (see confirmMore).
+    function applyLines(lines, quit) {
+        const all = confirmDialog.withNeeds(lines), more = all.length - lines.length;
+        confirmMore(lines, all, "Apply these " + all.length + " changes" + (quit ? " before quitting? " : "? ")
+            + (more === 1 ? "1 of them is" : more + " of them are") + " needed by the one" + (lines.length === 1 ? "" : "s")
+            + " you chose.", (all, place) => applyPicked(all, quit, true, place),
+            place => askToApply(JSON.parse(koil.actions()), quit, { again: place }));
+    }
+
+    // Applies the changes `picked` (indexes into what Koil.actions gave
+    // last), then quits (`quit`), or if it was asked (`asked`), asks about
+    // those left, if any, as the list was (`place`, see askAgain).
+    function applyPicked(picked, quit, asked, place) {
+        const spot = listingSpot();
+        const r = JSON.parse(koil.apply(JSON.stringify(picked)));
+        showListing(true, "", spot);
+        report(r);
+        if (r.ok && quit)
+            Qt.quit();
+        else if (r.ok && asked)
+            askAgain(place);
+    }
+
+    // Discard in askToApply: takes the changes `lines` back (d the picked
+    // ones, D the current one or those v selected), with those that
+    // need them, which can't stay without them (see Koil::discard_only);
+    // if there are any, it asks first (see confirmMore).
+    function discardLines(lines) {
+        const all = confirmDialog.withDependents(lines), more = all.length - lines.length;
+        confirmMore(lines, all, "Discard these " + all.length + " changes? " + (more === 1 ? "1 of them needs " : more + " of them need ")
+            + (lines.length === 1 ? "the one you chose, and can't stay without it." : "the ones you chose, and can't stay without them."),
+            discardNow, place => askToApply(JSON.parse(koil.actions()), false, { again: place }));
+    }
+
+    // Does `then(all, place)`, where `all` is the lines `lines` of the
+    // list asked with what comes with them (what they need, or what needs
+    // them), and `place` where the list was (see ConfirmDialog.place); if
+    // that's more than `lines`, it asks `question` first, listing them all,
+    // and Cancel asks the list again as it was (`back(place)`).
+    function confirmMore(lines, all, question, then, back) {
+        const place = confirmDialog.place(), items = confirmDialog.items;
+        if (all.length === lines.length) {
+            then(all, place);
+            return;
+        }
+        let done = false;
+        // An empty line between them if one takes several, as in the list.
+        const gap = items.some(item => item.text.includes("\n")) ? "\n\n" : "\n";
+        confirmDialog.ask(question, all.map(i => items[i].text).join(gap), () => {
+            done = true;
+            then(all, place);
+        }, null, () => {
+            if (!done)
+                back(place);
+        }, { keywords: changeKeywords, cancel: true });
+    }
+
+    // Takes the changes `lines` back (see discardLines), as an edit of the
+    // listing, which `u` takes back (only what it shows), then asks about
+    // those left, if any, as the list was (`place`, see askAgain).
+    function discardNow(lines, place) {
+        const spot = listingSpot();
+        const r = JSON.parse(koil.discard(JSON.stringify(lines)));
+        showListing(false, "", spot);
+        report(r);
+        if (r.ok)
+            askAgain(place);
+    }
+
+    // After an apply or a discard the user picked from askToApply: asks
+    // about the changes left, if any, as the listing shows them now, so
+    // what's left out can be applied or discarded next, as if the question
+    // never closed (or as it was before another, `place`): each line as it
+    // was picked, with the current line on its line, or the next one left
+    // (see ConfirmDialog.ask's `again`). One whose text changed (a move
+    // inside a dir that was renamed) is left out, as what was left after
+    // an apply or a discard of the picked ones was. Not after one that
+    // failed, whose error the status line shows, under the listing.
+    function askAgain(place) {
+        const left = JSON.parse(koil.actions());
+        if (left.length)
+            askToApply(left.map(line => Object.assign(line, { picked: false })), false, { again: place || true });
+    }
+
+    // u in askToApply: undoes the listing's changes (a discard, say), as
+    // Esc, u and Space a would, also from the path field, as far back as
+    // changes what applying does: a step that doesn't (a renamed entry's
+    // icon, which updating changes) would be done again by the update, so
+    // u would never get past it. Koil reads the listing after each, and
+    // it's shown again only after the last, as showing it is such a step.
+    // Then it asks again about the changes there are now, as the question
+    // was: the current line at the same place, and the lines still there
+    // picked as they were (one that came back is picked, as a discarded one
+    // was). Not if the listing can't be read after it, whose errors then
+    // show, nor with nothing to apply.
+    function undoInApply() {
+        const row = confirmDialog.row, inPath = activeView === pathView;
+        const shown = confirmDialog.items.map(item => item.text).join("\n");
+        activate(editorView);
+        // Not the last apply, as u with nothing to undo would (see
+        // undoLast): it can't be undone while there are changes.
+        let r = null, actions = null;
+        while (vim.undoStack.length) {
+            vim.startCommand(["u"]);
+            r = readListing();
+            if (!r.ok || r.moved)
+                break;
+            actions = JSON.parse(koil.actions());
+            if (actions.map(a => a.text).join("\n") !== shown)
+                break;
+        }
+        if (!r)
+            vim.showMessage("Already at oldest change");
+        else if (r.ok)
+            showListing(r.moved, r.from);
+        if (inPath)
+            activate(pathView);
+        if (r && !r.ok)
+            return;
+        actions = actions || JSON.parse(koil.actions());
+        if (actions.length)
+            askToApply(actions, false, { again: true, row: row });
+        else
+            vim.showMessage("Nothing to apply");
     }
 
     // Space u: lists the applies Koil can undo, of every session (see
     // history.rs), newest first, to pick from (with the newer ones each
     // needs, see Koil::undoable), none picked, the first highlighted; Yes
-    // undoes the picked ones, and Delete from History (d) forgets them,
-    // once the user confirms it. Those that can't be undone now say why,
-    // and can be picked only to delete them.
-    function undoApply() {
+    // undoes the picked ones (Y the current one or those v selected: see
+    // undoLines), and Delete from History (d, D) forgets them, once
+    // the user confirms it. Those that can't be undone now say why, and
+    // can be picked only to delete them. `keep` asks it as a question was
+    // (see askToApply).
+    function undoApply(keep) {
         const applies = undoHistory();
         if (!applies)
             return;
@@ -1696,26 +1845,36 @@ ApplicationWindow {
                 : count === 1 && picked[0] ? "Undo the last apply?"
                 : "Undo " + count + (count === 1 ? " apply?" : " applies?");
         };
-        confirmDialog.ask(question, lines, picked => {
-            if (picked.length)
-                undoPicked(picked);
-        }, null, null, {
+        confirmDialog.ask(question, lines, undoLines, null, null, {
             keywords: changeKeywords,
             showRow: true,
+            again: keep?.again,
             extra: { label: "(D)elete from History", key: Qt.Key_D, action: forgetApplies }
         });
     }
 
+    // Yes in undoApply: undoes the applies `lines` (y the picked ones, Y
+    // the current one or those v selected), with the newer ones they need
+    // undone first; if there are any, it asks first (see confirmMore).
+    function undoLines(lines) {
+        const all = confirmDialog.withNeeds(lines), more = all.length - lines.length;
+        confirmMore(lines, all, "Undo these " + all.length + " applies? " + (more === 1 ? "1 of them is a newer one" : more
+            + " of them are newer ones") + " the one" + (lines.length === 1 ? "" : "s") + " you chose can't be undone without.",
+            undoPicked, place => undoApply({ again: place }));
+    }
+
     // Forgets the applies `picked` (indexes into what `Koil.history`
-    // gave), once the user confirms it, so they can't be undone.
+    // gave: d the picked ones, D the current one or those v
+    // selected), once the user confirms it, listing them, so they can't be
+    // undone.
     function forgetApplies(picked) {
-        const one = picked.length === 1;
-        const them = one ? "the picked apply" : picked.length + " applies";
+        const one = picked.length === 1, items = confirmDialog.items;
+        const them = one ? "this apply" : "these " + picked.length + " applies";
         confirmDialog.ask("Delete " + them + " from the undo history? " + (one ? "It" : "They")
-            + " can't be undone after that.", "", () => {
+            + " can't be undone after that.", picked.map(i => items[i].text).join("\n\n"), () => {
             koil.forgetHistory(JSON.stringify(picked));
             vim.showMessage((one ? "1 apply" : picked.length + " applies") + " deleted from the undo history");
-        });
+        }, null, null, { keywords: changeKeywords });
     }
 
     // u with no change left to undo: undoes the last apply alone (the
