@@ -162,11 +162,6 @@ mod bridge {
             spans: &QStringList,
         );
 
-        /// Colors the keywords that start the lines of a QQuickTextDocument
-        /// (see native.h).
-        #[cxx_name = "setKeywordColors"]
-        unsafe fn set_keyword_colors(text_document: *mut QObject, keyword_colors: &QStringList);
-
         /// Colors spans of the lines of a QQuickTextDocument (see
         /// native.h).
         #[cxx_name = "setSpanColors"]

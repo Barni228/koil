@@ -182,14 +182,6 @@ void setEntryLines(QObject* textDocument, const QStringList& pendingLines, const
 // start, a length and a color for each part, in that order.
 void setPathColors(QObject* textDocument, const QString& directoryColor, const QStringList& spans);
 
-// Colors the first word of each line of a TextEdit's document (a
-// QQuickTextDocument), after the box before a line to pick from (a Private
-// Use Area character) if there is one, if it's one of the keywords
-// (`keywordColors` alternates keywords and colors), like the CREATE that
-// starts a line of the changes to apply. It follows edits. None takes the
-// colors away.
-void setKeywordColors(QObject* textDocument, const QStringList& keywordColors);
-
 // Colors spans of a TextEdit's document (a QQuickTextDocument), like the
 // parts of what K shows: `spans` holds a line (from 0), a start and a
 // length in it (in UTF-16) and a color for each span, in that order. It

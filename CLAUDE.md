@@ -83,9 +83,8 @@ the scratchpad (see Scratchpad).
   text fields, Koil's text layout (`TextLayout`: `setLineFormat`, see
   Text layout, Long lines and Wrapping),
   `setText`, the listing's and path field's `QSyntaxHighlighter`, a
-  file's colors (`TextColors`: `setTextColors`, with syntax.rs), the
-  confirmations' (`setKeywordColors`) and `K`'s (`setSpanColors`),
-  `redrawText`, and what changed in
+  file's colors (`TextColors`: `setTextColors`, with syntax.rs) and
+  `K`'s (`setSpanColors`), `redrawText`, and what changed in
   a text (`TextChanges`, see Long texts)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
   Koil), and what Finder says is available on a volume
@@ -136,9 +135,12 @@ the scratchpad (see Scratchpad).
   isn't obvious (`qml/help.js`'s `sections`); `:reg` shows the registers
   in it (`showList`), and `:!` what a command wrote (`showText`). `/` and
   `?` search it (see Help).
-- `qml/ConfirmDialog.qml`: the [Y]es/(N)o/(C)ancel box, with a list under
-  the question: `:confirm q`, applying and undoing (lists to pick from),
-  and what changed on disk against the user's edits.
+- `qml/ConfirmDialog.qml`: every question's box, with Yes, No and Cancel
+  as buttons, named by what they do (Apply, Don't Save), that show their
+  keys, and a list under the question:
+  `:confirm q`, applying and undoing (lists to pick from, a row with a
+  checkbox each), and what changed on disk against the user's edits (see
+  Questions).
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,), which scrolls,
   and shows what a setting does with the pointer on it (see Settings).
 - `qml/ShortcutsWindow.qml`: the user's shortcuts, listed, edited,
@@ -149,7 +151,8 @@ the scratchpad (see Scratchpad).
   (see Scrolling boxes) and `SelectableText.qml`, the boxes'; and
   `TextButton.qml`, `Segmented.qml` and `DropList.qml` (with
   `DropOption.qml`, a row of it), the buttons and lists the Settings and
-  Shortcuts windows share, `Toggle.qml`, the switch of a setting that's
+  Shortcuts windows share (a question's buttons are `TextButton`s too,
+  with the key that clicks each after its label, `keys`), `Toggle.qml`, the switch of a setting that's
   on or off, and `Check.qml`, a checkbox, for one of two that are each on
   or off (line numbers' Absolute and Relative, a shortcut's Normal and
   Visual), rather than a choice of neither, one or both. A delegate other
@@ -503,22 +506,22 @@ the scratchpad (see Scratchpad).
 - **Apply and undo**: `Space Space`, `Space a`, File > Apply Changes… update,
   then `ConfirmDialog` lists `listing::actions` (paths relative to
   the open dir; `Koil::changes`, so a swap is its two renames, not the
-  three steps through a temp name), each with a checked box before it
-  (a Nerd Font icon, `boxes`, with two spaces after it), all picked.
+  three steps through a temp name), a row each, with a checked box before
+  it, all picked.
   The user leaves some out (j and k move the current line, Space or x or a
-  click on the box toggles it, a picks all or none; the current line is
-  highlighted only once one of those is used, and the first j or k only
-  shows it, on the first line), and a line goes with
+  click on the row toggles it, a or Select All picks all or none; the
+  current line is highlighted only once one of those keys is used, and
+  the first j or k only shows it, on the first line), and a line goes with
   what it needs (`needs`: a swap's other half, the new dir a file goes
   in): picking one picks those, leaving one out leaves out what needs it.
-  The boxes are text in the one `TextEdit`, so the list still selects and
-  copies as it is. The question counts what's picked, and stays over the
-  list as it scrolls. The word a line starts with (after its box) is
+  Copy copies the list as text (the lines `v` selected, or all of it:
+  `copyText`), as its rows can't be selected with the pointer. The
+  question counts what's picked, and stays over the
+  list as it scrolls. The word a line starts with is
   colored by the change it stands for (`root.changeKeywords`, passed to
   `ask` by the apply, undo and create questions only, as a conflict's
   lines are paths; `theme.changeColor`): CREATE and RESTORE green, DELETE
-  and TRASH red, MOVE yellow, COPY blue, by a `QSyntaxHighlighter`
-  (`setKeywordColors`), so the text stays plain. Yes applies the
+  and TRASH red, MOVE yellow, COPY blue (`rowParts`). Yes applies the
   picked lines (`Koil.apply(picked)`, indexes into the `shown` actions
   `actions()` kept, given to `Koil::apply_only`, so only what the user saw
   is applied), and the rest stay pending, to apply later: koil-core moves
@@ -615,17 +618,19 @@ the scratchpad (see Scratchpad).
   (koil-core's `Undoable::needs`), which picking it picks. One that can't
   be undone now (koil-core checks every step against the disk, with what
   it needs: something gone, or taken, or emptied from the trash) says
-  why and has a crossed out box (`blocked`, the reason). Yes undoes the picked
+  why, in the error's color, and is dimmed, with a crossed out box
+  (`blocked`, the reason). Yes undoes the picked
   ones, newest first (`Koil.undo(picked)`, indexes into the
   `shown_history` that `history()` kept), and is off while one that
   can't be undone is picked (`blockedPicked`); a step koil can see won't run
   undoes nothing. Delete from History (`d`; `ask`'s `extra`, a button
-  on the left, apart from the choices, so Enter never answers it, and
-  off while none is picked) asks again, then forgets the picked ones
+  on the left, apart from the choices, where the highlight doesn't start,
+  so Enter answers it only once it's moved there, and off while none is
+  picked) asks again, then forgets the picked ones
   (`Koil.forgetHistory`, `History::forget`, by their time, also for
   other Koils), so they can't be undone: it's what one that can't be
-  undone is picked for (a filled crossed out box; `a` picks only the
-  others). An older apply that needed one deleted is then checked
+  undone is picked for (its box filled in the error's color, with a
+  cross; `a` picks only the others). An older apply that needed one deleted is then checked
   against the disk without it. Undoing always asks (a `u` too many mustn't change files
   unasked). The history lasts across sessions (`History` in history.rs):
   it's in `history.json` in Koil's data dir (`~/Library/Application
@@ -2117,7 +2122,7 @@ the scratchpad (see Scratchpad).
 - **Quitting**: `:q` with unsaved changes fails (E37); `:confirm q` asks
   instead, in a `ConfirmDialog` rather than a `MessageDialog` (which is native
   on macOS, can't use the editor's font or vim's keys). `ConfirmDialog.ask`
-  takes what Yes and No do; without a No action it offers only [Y]es/(N)o.
+  takes what Yes and No do; without a No action it offers only Yes and No.
   Every file shown has a path, so with none (nothing is shown: the home
   dir couldn't be listed) `:w` is vim's E32.
 - **Surround** (Surround in Vim.qml, `parseSurround`): vim-surround's keys,
@@ -2472,13 +2477,11 @@ the scratchpad (see Scratchpad).
   the text out itself (see Text layout). With notes (sorted by size or a
   date) no row reaches into the notes' room on the right (`noteRoom`,
   `rightMargin`), so each note fits after its line, lined up as in a
-  table. A question's text and list (`ConfirmDialog`: what to apply or
-  undo), the hover box and K's box always wrap so, as the editor would
+  table. The hover box and K's box always wrap so, as the editor would
   (`SelectableText`'s `system`): their rows as tall as the font's lines (a
-  `lineHeight` of 0, which follows the zoom), and a list with boxes as the
-  listing, its lines going on under their text. They're sized to their
+  `lineHeight` of 0, which follows the zoom). They're sized to their
   text unwrapped (`naturalWidth`, `System.layoutWidth`, rounded up, as a
-  layout gives its items whole pixels: a question 399.48 wide got 399,
+  layout gives its items whole pixels: a box 399.48 wide got 399,
   and wrapped its last word), which their
   `implicitWidth` isn't with Koil's layout (see Text layout): its rows'
   advances side by side, with the spaces a row ends with, which Qt's
@@ -2607,12 +2610,53 @@ the scratchpad (see Scratchpad).
   starting with `g`, `z` and Space, and the Ctrl keys, have sections of
   their own (`:h g`, `:h z`, `:h space`, `:h ctrl`), as an index of them,
   pointing to the sections that say more.
-- **Scrolling boxes**: the help, the hover box, the confirmations and the
-  settings are `WheelFlickable`s: `Flickable`s that aren't interactive (a
+- **Scrolling boxes**: the help, the hover box and the settings are
+  `WheelFlickable`s: `Flickable`s that aren't interactive (a
   drag selects their text), scrolled by a `WheelHandler`. It needs
   `acceptedDevices` with
   `PointerDevice.TouchPad`: by default it takes only a mouse wheel, and the
-  trackpad's scrolls go to the popup, which drops them.
+  trackpad's scrolls go to the popup, which drops them. A question's list
+  is a `ListView` scrolled the same way (see Questions).
+- **Questions** (ConfirmDialog.qml): one box asks them all
+  (`confirmDialog.ask`), so a new one needs nothing of its own: the
+  question in the window's font, with `code` in backquotes as the help
+  shows it (a `CodeLabel`), a list under it if it has one, on the
+  editor's background in the editor's font, and the choices as buttons
+  (`TextButton`s with `keys`: `Yes` `y`, `No` `n`, `Cancel` `c`, and the
+  button apart, `extra`, with its key). Yes and No are named by what they
+  do (`ask`'s `yes` and `no`: Apply, Undo, Discard, Save and Don't Save,
+  Reload and Keep Mine; a conflict's come with it, `Question`'s `yes` and
+  `no` in listing.rs, like Delete and Keep), with the same keys, so a new
+  question should name them too, and where the other one does nothing,
+  be asked with `cancel`, as "No" beside a verb reads as another thing to
+  do. The highlighted button (`current`, what it answers), which Enter
+  clicks, is in the accent's color: it starts on Yes, and h and l (Left
+  and Right, Shift+Tab and Tab) move it through every button that's on
+  (`order`, left to right: Select All, the button apart, then the
+  choices; `moveCurrent`), round from the last to the first, so Enter on
+  Select All picks them and leaves the question open (`answer("all")`).
+  The box keeps the keys in one handler:
+  no button or row takes them (`focusPolicy: Qt.NoFocus`, a `TapHandler`
+  a row), as Space picks a row rather than clicks a button. The list is a
+  `ListView`, a row a line of `details` or a line to pick from (`ListRow`:
+  its box drawn as `Check`'s, and each line of its text a keyword in its
+  color and the rest, which wraps under itself; `rowParts`), so only the
+  rows in view are made, however many changes there are. A keyword's
+  `Text` is as wide as its characters (`charWidth`, a `TextMetrics`, as a
+  `FontMetrics`' `advanceWidth` is a function, which a binding doesn't
+  follow as the font changes), as a `Text` leaves the spaces it ends
+  with out of its width. The box is as wide as the list with no line
+  wrapped (`listWidth`, from its longest line, counted in `ask`), and the
+  list as tall as its rows (the `ListView`'s `contentHeight`, or until
+  they're laid out `listHeight`, counted too, without which it would
+  have no height to make rows in). Under a list to pick from are the keys
+  no button shows (`hints`), and by the buttons Select All (`a`) and how
+  many are picked; where the box is too narrow for the list's buttons
+  and the choices side by side, the choices go under them (`buttons`, a
+  grid of one column then, by `sideBySide`, their width in one row, so
+  the box's width doesn't depend on which it is). The layout doesn't
+  shrink a button under its width: in one row they went past the box's
+  edge in a narrow window.
 - **QML's JavaScript**: don't make a binding depend on something by reading it
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The

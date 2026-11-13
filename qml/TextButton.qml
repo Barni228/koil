@@ -2,13 +2,18 @@ import QtQuick
 import QtQuick.Controls
 
 // A button with a label, in a window (Settings, Shortcuts), which Tab
-// reaches, and Space or Enter clicks.
+// reaches, and Space or Enter clicks, or in a question (ConfirmDialog),
+// which keeps the keys itself (no focusPolicy), and shows the key that
+// clicks it after its label (`keys`).
 AbstractButton {
     id: textButton
 
     required property Theme theme
     // The default one, which Enter clicks (Save), in the accent's color.
     property bool primary
+    // The key that does the same, if any, shown as code after the label.
+    property string keys
+    readonly property color textColor: primary ? theme.highlightedText : theme.windowText
 
     implicitWidth: implicitContentWidth + 24 * theme.zoom
     implicitHeight: 26 * theme.zoom
@@ -27,11 +32,32 @@ AbstractButton {
         border.color: textButton.visualFocus ? (textButton.primary ? textButton.theme.windowText : textButton.theme.accent)
             : textButton.primary ? textButton.theme.accent : textButton.theme.fieldBorder
     }
-    contentItem: Text {
-        text: textButton.text
-        font.pixelSize: Math.round(13 * textButton.theme.zoom)
-        color: textButton.primary ? textButton.theme.highlightedText : textButton.theme.windowText
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
+    contentItem: Item {
+        implicitWidth: content.implicitWidth
+        implicitHeight: content.implicitHeight
+
+        Row {
+            id: content
+
+            anchors.centerIn: parent
+            spacing: 7 * textButton.theme.zoom
+
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: textButton.text
+                font.pixelSize: Math.round(13 * textButton.theme.zoom)
+                color: textButton.textColor
+            }
+            KeyCap {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: textButton.keys !== ""
+                theme: textButton.theme
+                text: textButton.keys
+                fontSize: Math.round(11 * textButton.theme.zoom)
+                textColor: textButton.textColor
+                // On the accent's color, a shade that shows on it.
+                color: textButton.primary ? "#33ffffff" : textButton.theme.code
+            }
+        }
     }
 }

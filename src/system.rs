@@ -273,16 +273,6 @@ pub mod qobject {
             spans: &QStringList,
         );
 
-        /// Colors the first word of each line of `textDocument` (after the box
-        /// of a line to pick from) if it's a keyword: `keyword_colors`
-        /// alternates keywords and their colors. None takes the colors away.
-        #[qinvokable]
-        unsafe fn set_keyword_colors(
-            self: &System,
-            text_document: *mut QObject,
-            keyword_colors: &QStringList,
-        );
-
         /// Colors spans of the lines of `textDocument`: `spans` holds a
         /// line (from 0), a start and a length in it (in UTF-16) and a
         /// color for each span, in that order. None takes the colors away.
@@ -494,7 +484,6 @@ impl qobject::System {
             text_document, pending_lines: &QStringList, executable_lines: &QStringList
         );
         set_path_colors(text_document, directory_color: &QString, spans: &QStringList);
-        set_keyword_colors(text_document, keyword_colors: &QStringList);
         set_span_colors(text_document, spans: &QStringList);
         set_text_colors(
             text_document, colors: &QStringList, file_name: &QString, icon_colors: &QStringList,

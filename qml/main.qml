@@ -859,7 +859,7 @@ ApplicationWindow {
             pendingChanges = pendingChanges || koil.hasChanges();
             checkModified();
             koil.watch();
-        }, null, () => Qt.callLater(askConflicts, questions.slice(1)));
+        }, null, () => Qt.callLater(askConflicts, questions.slice(1)), { yes: q.yes, no: q.no });
     }
 
     // Finds the parts of the pattern in the path field again, if the path
@@ -1453,8 +1453,8 @@ ApplicationWindow {
         } else if (!modified) {
             reloadFile(now ? "" : "“" + fileName + "” changed on disk");
         } else {
-            confirmDialog.ask("“" + fileName + "” changed on disk. Read it again, in place of your changes?",
-                "Undo (u) brings them back.", () => reloadFile());
+            confirmDialog.ask("“" + fileName + "” changed on disk. Read it again, in place of your changes? `u` brings them back.",
+                "", () => reloadFile(), null, null, { yes: "Reload", no: "Keep Mine" });
         }
     }
 
@@ -1545,7 +1545,7 @@ ApplicationWindow {
         const name = target.name + (target.dir ? "/" : "");
         const question = target.from === undefined ? "Create it?" : "Copy “" + target.from + "” to it?";
         confirmDialog.ask("“" + name + "” doesn't exist yet. " + question, details, create, null, null,
-            { keywords: changeKeywords });
+            { keywords: changeKeywords, yes: target.from === undefined ? "Create" : "Copy", cancel: true });
     }
 
     // Runs `open`, which lets the user change the file at `path` (in Koil,
@@ -1594,7 +1594,8 @@ ApplicationWindow {
         const which = path ? copies + " of “" + path.split(/[\\/]/).pop() + "”, which would get your changes to it too"
             : copies + ", which would get what the command changes too";
         confirmDialog.ask("Applying the changes makes " + which + ". Make " + (one ? "it" : "them") + " now?",
-            r.copies.steps.join("\n"), copy, null, null, { keywords: changeKeywords });
+            r.copies.steps.join("\n"), copy, null, null,
+            { keywords: changeKeywords, yes: one ? "Make Copy" : "Make Copies", cancel: true });
     }
 
     // Whether changing files asks first, as the confirmChanges setting
@@ -1656,7 +1657,8 @@ ApplicationWindow {
     function applyChanges(quit, ask) {
         if (!updateListing()) {
             if (quit)
-                confirmDialog.ask("The changes can't be applied. Quit without them?", vim.message, () => Qt.quit());
+                confirmDialog.ask("The changes can't be applied. Quit without them?", vim.message, () => Qt.quit(), null, null,
+                    { yes: "Quit", cancel: true });
             return;
         }
         const actions = JSON.parse(koil.actions());
@@ -1687,16 +1689,18 @@ ApplicationWindow {
             appliedFrom = [];
         const total = actions.length;
         const these = total === 1 ? "this change" : "these " + total + " changes";
-        const question = picked => !picked ? "Pick what to " + (quit ? "apply before quitting" : "apply or discard") + " (Space)"
+        const question = picked => !picked ? "Pick what to " + (quit ? "apply before quitting" : "apply or discard")
             : (picked === total ? "Apply " + these : "Apply " + picked + " of " + these)
             + (!quit ? "?" : picked === total ? " before quitting?" : " and quit without the rest?");
         confirmDialog.ask(question, actions, lines => applyLines(lines, quit), quit ? () => Qt.quit() : null, null, {
             keywords: changeKeywords,
+            yes: "Apply",
+            no: "Don't Apply",
             cancel: true,
             again: keep?.again,
             row: keep?.row,
             undo: quit ? null : undoInApply,
-            extra: quit ? null : { label: "(D)iscard", key: Qt.Key_D, action: discardLines }
+            extra: quit ? null : { label: "Discard", key: Qt.Key_D, action: discardLines }
         });
     }
 
@@ -1708,7 +1712,7 @@ ApplicationWindow {
         const all = confirmDialog.withNeeds(lines), more = all.length - lines.length;
         confirmMore(lines, all, "Apply these " + all.length + " changes" + (quit ? " before quitting? " : "? ")
             + (more === 1 ? "1 of them is" : more + " of them are") + " needed by the one" + (lines.length === 1 ? "" : "s")
-            + " you chose.", (all, place) => applyPicked(all, quit, true, place),
+            + " you chose.", "Apply", (all, place) => applyPicked(all, quit, true, place),
             place => askToApply(JSON.parse(koil.actions()), quit, { again: place }));
     }
 
@@ -1745,15 +1749,16 @@ ApplicationWindow {
         const all = confirmDialog.withDependents(lines), more = all.length - lines.length;
         confirmMore(lines, all, "Discard these " + all.length + " changes? " + (more === 1 ? "1 of them needs " : more + " of them need ")
             + (lines.length === 1 ? "the one you chose, and can't stay without it." : "the ones you chose, and can't stay without them."),
-            discardNow, place => askToApply(JSON.parse(koil.actions()), false, { again: place }));
+            "Discard", discardNow, place => askToApply(JSON.parse(koil.actions()), false, { again: place }));
     }
 
     // Does `then(all, place)`, where `all` is the lines `lines` of the
     // list asked with what comes with them (what they need, or what needs
     // them), and `place` where the list was (see ConfirmDialog.place); if
     // that's more than `lines`, it asks `question` first, listing them all,
-    // and Cancel asks the list again as it was (`back(place)`).
-    function confirmMore(lines, all, question, then, back) {
+    // where Yes is named `verb`, and Cancel asks the list again as it was
+    // (`back(place)`).
+    function confirmMore(lines, all, question, verb, then, back) {
         const place = confirmDialog.place(), items = confirmDialog.items;
         if (all.length === lines.length) {
             then(all, place);
@@ -1768,7 +1773,7 @@ ApplicationWindow {
         }, null, () => {
             if (!done)
                 back(place);
-        }, { keywords: changeKeywords, cancel: true });
+        }, { keywords: changeKeywords, yes: verb, cancel: true });
     }
 
     // Takes the changes `lines` back (see discardLines), as an edit of the
@@ -1898,7 +1903,7 @@ ApplicationWindow {
         const any = lines.some(a => !a.blocked);
         const question = (count, picked) => {
             const blocked = lines.filter((a, i) => a.blocked && picked[i]).length;
-            return !count ? (any ? "Pick what to undo (Space)" : "Nothing can be undone now")
+            return !count ? (any ? "Pick what to undo" : "Nothing can be undone now")
                 : blocked ? (blocked < count ? blocked + " of the picked applies"
                     : count === 1 ? "The picked apply" : "The picked applies") + " can't be undone, only deleted"
                 : count === 1 && picked[0] ? "Undo the last apply?"
@@ -1906,9 +1911,11 @@ ApplicationWindow {
         };
         confirmDialog.ask(question, lines, undoLines, null, null, {
             keywords: changeKeywords,
+            yes: "Undo",
+            cancel: true,
             showRow: true,
             again: keep?.again,
-            extra: { label: "(D)elete from History", key: Qt.Key_D, action: forgetApplies }
+            extra: { label: "Delete from History", key: Qt.Key_D, action: forgetApplies }
         });
     }
 
@@ -1919,7 +1926,7 @@ ApplicationWindow {
         const all = confirmDialog.withNeeds(lines), more = all.length - lines.length;
         confirmMore(lines, all, "Undo these " + all.length + " applies? " + (more === 1 ? "1 of them is a newer one" : more
             + " of them are newer ones") + " the one" + (lines.length === 1 ? "" : "s") + " you chose can't be undone without.",
-            undoPicked, place => undoApply({ again: place }));
+            "Undo", undoPicked, place => undoApply({ again: place }));
     }
 
     // Forgets the applies `picked` (indexes into what `Koil.history`
@@ -1933,7 +1940,7 @@ ApplicationWindow {
             + " can't be undone after that.", picked.map(i => items[i].text).join("\n\n"), () => {
             koil.forgetHistory(JSON.stringify(picked));
             vim.showMessage((one ? "1 apply" : picked.length + " applies") + " deleted from the undo history");
-        }, null, null, { keywords: changeKeywords });
+        }, null, null, { keywords: changeKeywords, yes: "Delete", cancel: true });
     }
 
     // u with no change left to undo: undoes the last apply alone (the
@@ -1950,7 +1957,7 @@ ApplicationWindow {
         }
         vim.showMessage("");
         confirmDialog.ask("Undo the last apply?", last.steps.join("\n"), () => undoPicked([0]), null, null,
-            { keywords: changeKeywords });
+            { keywords: changeKeywords, yes: "Undo", cancel: true });
     }
 
     // The applies Koil can undo (`Koil.history`), newest first, or null if
@@ -2055,7 +2062,8 @@ ApplicationWindow {
             if (listing)
                 applyChanges(true);
             else
-                confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => save(true, true), () => quitApp(true));
+                confirmDialog.ask("Save changes to “" + fileName + "”?", "", () => save(true, true), () => quitApp(true), null,
+                    { yes: "Save", no: "Don't Save" });
         } else {
             vim.showError("E37: No write since last change (add ! to override)");
         }
@@ -2107,7 +2115,7 @@ ApplicationWindow {
                 markUnedited();
             }
             open();
-        }, open);
+        }, open, null, { yes: "Save", no: "Don't Save" });
     }
 
     // Opens a file or dir dropped on the window, as File > Open or Open

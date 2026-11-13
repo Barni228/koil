@@ -4996,15 +4996,25 @@ TestCase {
         ], picked => chosen = picked);
         tryCompare(confirm, "opened", true);
         compare(confirm.text, "1:true,false,false,false");
-        const [off, on, blocked] = confirm.boxes;
-        // With an empty line between them, as one takes two lines.
-        compare(confirm.list, on + "A\n" + confirm.pad + "step\n\n" + blocked + "B\n\n" + off + "C\n\n" + off + "D");
-        // The second line of text is the first line's, and the empty one
-        // after it no line's.
-        const at = part => confirm.itemAt(confirm.list.indexOf(part));
-        compare(at("step"), 0);
-        compare(confirm.itemAt(confirm.list.indexOf("step") + 5), -1);
-        compare(at("C"), 2);
+        // A row each, the rows apart, as one takes two lines of text.
+        compare(confirm.rowCount, 4);
+        verify(confirm.spaced);
+        compare(confirm.textLines, 5);
+        compare(confirm.rowParts(confirm.items[0]).map(part => part.rest), ["A", "step"]);
+        // Copy gives them all, or the rows v selected.
+        compare(confirm.copyText(), "A\nstep\n\nB\n\nC\n\nD");
+        confirm.row = 2;
+        confirm.anchor = 1;
+        compare(confirm.copyText(), "B\n\nC");
+        confirm.anchor = -1;
+        confirm.row = 0;
+        // A click on a row is Space on it.
+        confirm.clickRow(2);
+        compare(confirm.picked, [true, false, true, false]);
+        compare(confirm.row, 2);
+        verify(confirm.rowShown);
+        confirm.clickRow(2);
+        compare(confirm.picked, [true, false, false, false]);
 
         // Picking one picks what it needs, and leaving one out leaves out
         // what needs it; one that can't be picked stays out.
@@ -5036,7 +5046,8 @@ TestCase {
         let chosen = null;
         confirm.ask("Apply?", [{ text: "A", needs: [] }], picked => chosen = picked, null, null, { cancel: true });
         tryCompare(confirm, "opened", true);
-        compare(confirm.choices.map(c => c.label), ["[Y]es", "(C)ancel"]);
+        compare(confirm.choices.map(c => c.label), ["Yes", "Cancel"]);
+        compare(confirm.choices.map(c => c.keys), ["y", "c"]);
         keyClick(Qt.Key_C);
         verify(!confirm.opened);
         compare(chosen, null);
@@ -5049,7 +5060,82 @@ TestCase {
         // And without the option, No alone.
         confirm.ask("Undo?", "", () => {});
         tryCompare(confirm, "opened", true);
-        compare(confirm.choices.map(c => c.label), ["[Y]es", "(N)o"]);
+        compare(confirm.choices.map(c => c.label), ["Yes", "No"]);
+        keyClick(Qt.Key_Escape);
+    }
+
+    // Yes and No are named by what they do, if the question says, with the
+    // same keys.
+    function test_confirmLabels() {
+        let saved = false;
+        confirm.ask("Save?", "", () => saved = true, () => {}, null, { yes: "Save", no: "Don't Save" });
+        tryCompare(confirm, "opened", true);
+        compare(confirm.choices.map(c => c.label), ["Save", "Don't Save", "Cancel"]);
+        compare(confirm.choices.map(c => c.keys), ["y", "n", "c"]);
+        keyClick(Qt.Key_Y);
+        verify(saved);
+        // The one that isn't Yes too, or it's Cancel.
+        confirm.ask("Delete?", "", () => {}, null, null, { yes: "Delete", no: "Keep" });
+        compare(confirm.choices.map(c => c.label), ["Delete", "Keep"]);
+        confirm.ask("Delete?", "", () => {}, null, null, { yes: "Delete", cancel: true });
+        compare(confirm.choices.map(c => c.label), ["Delete", "Cancel"]);
+        // And the next question has its own.
+        confirm.ask("Undo?", "", () => {});
+        compare(confirm.choices.map(c => c.label), ["Yes", "No"]);
+        keyClick(Qt.Key_Escape);
+    }
+
+    // h and l (Left and Right, Shift+Tab and Tab) move the highlight
+    // through every button that's on, the list's too, and round, and Enter
+    // clicks the highlighted one.
+    function test_confirmButtons() {
+        let chosen = null, discarded = null;
+        const lines = ["A", "B"].map(text => ({ text: text, needs: [] }));
+        const extra = { label: "Discard", key: Qt.Key_D, action: picked => discarded = picked };
+        confirm.ask("Apply?", lines, picked => chosen = picked, null, null, { extra: extra, cancel: true });
+        tryCompare(confirm, "opened", true);
+        compare(confirm.order, ["all", "extra", "yes", "cancel"]);
+        compare(confirm.current, "yes");
+        keyClick(Qt.Key_L);
+        compare(confirm.current, "cancel");
+        keyClick(Qt.Key_Tab);
+        compare(confirm.current, "all");
+        keyClick(Qt.Key_Right);
+        compare(confirm.current, "extra");
+        keyClick(Qt.Key_H);
+        keyClick(Qt.Key_Left);
+        compare(confirm.current, "cancel");
+        keyClick(Qt.Key_Backtab, Qt.ShiftModifier);
+        compare(confirm.current, "yes");
+        // Enter on Select All picks none, and leaves it open; then Yes and
+        // Discard are off, which the highlight goes past.
+        keyClick(Qt.Key_H);
+        keyClick(Qt.Key_H);
+        compare(confirm.current, "all");
+        keyClick(Qt.Key_Return);
+        verify(confirm.opened);
+        compare(confirm.picked, [false, false]);
+        keyClick(Qt.Key_L);
+        compare(confirm.current, "cancel");
+        keyClick(Qt.Key_L);
+        compare(confirm.current, "all");
+        keyClick(Qt.Key_Return);
+        compare(confirm.picked, [true, true]);
+        // Enter on the button apart clicks it.
+        keyClick(Qt.Key_L);
+        compare(confirm.current, "extra");
+        keyClick(Qt.Key_Return);
+        compare(discarded, [0, 1]);
+        compare(chosen, null);
+        verify(!confirm.opened);
+        // Without a list, only the choices.
+        confirm.ask("Save?", "", () => {}, () => {});
+        tryCompare(confirm, "opened", true);
+        compare(confirm.order, ["yes", "no", "cancel"]);
+        keyClick(Qt.Key_H);
+        compare(confirm.current, "cancel");
+        keyClick(Qt.Key_L);
+        compare(confirm.current, "yes");
         keyClick(Qt.Key_Escape);
     }
 
@@ -5067,18 +5153,21 @@ TestCase {
         keyClick(Qt.Key_J);
         keyClick(Qt.Key_L);
         compare(confirm.row, 2);
-        compare(confirm.current, 1);
+        compare(confirm.current, "cancel");
         // C went, so the line after it (D) is the current one; E is new.
         confirm.ask("Apply?", lines(["B", "D", "E"], false), () => {}, null, null, { cancel: true, again: true });
         compare(confirm.picked, [false, false, false]);
         compare(confirm.row, 1);
         verify(confirm.rowShown);
-        compare(confirm.current, 1);
+        compare(confirm.current, "cancel");
         // Its own line, if it's still there, and nothing after it: the last.
         confirm.toggle(0);
         confirm.ask("Apply?", lines(["A", "B", "D"], true), () => {}, null, null, { again: true });
         compare(confirm.picked, [true, true, false]);
         compare(confirm.row, 2);
+        // A button that's gone (Cancel, as it's No now) leaves Yes
+        // highlighted.
+        compare(confirm.current, "yes");
         confirm.ask("Apply?", lines(["A"], true), () => {}, null, null, { again: true });
         compare(confirm.row, 0);
         // Without it, asked anew.
@@ -5088,7 +5177,7 @@ TestCase {
         compare(confirm.picked, [true, true]);
         compare(confirm.row, 0);
         verify(!confirm.rowShown);
-        compare(confirm.current, 0);
+        compare(confirm.current, "yes");
         keyClick(Qt.Key_Escape);
     }
 
@@ -5174,9 +5263,12 @@ TestCase {
             { text: "C", needs: [1] },
             { text: "D", needs: [] }
         ];
-        const extra = { label: "(D)iscard", key: Qt.Key_D, action: picked => chosen = picked };
+        const extra = { label: "Discard", key: Qt.Key_D, action: picked => chosen = picked };
         confirm.ask("Apply?", lines, () => {}, null, null, { extra: extra });
         tryCompare(confirm, "opened", true);
+        // Its key is on its button, and with Y in the keys listed.
+        compare(confirm.extraKeys, "d");
+        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "YD"]);
         keyClick(Qt.Key_D, Qt.ShiftModifier);
         verify(confirm.opened);
         verify(confirm.rowShown);
@@ -5249,7 +5341,7 @@ TestCase {
             { text: "C", needs: [], picked: false, blocked: true }
         ];
         confirm.ask("Undo?", lines, picked => chosen = picked, null, null,
-            { showRow: true, extra: { label: "(D)elete History", key: Qt.Key_D, action: picked => extra = picked } });
+            { showRow: true, extra: { label: "Delete History", key: Qt.Key_D, action: picked => extra = picked } });
         tryCompare(confirm, "opened", true);
         verify(confirm.rowShown);
         compare(confirm.picked, [false, false, false]);
@@ -5263,8 +5355,7 @@ TestCase {
         keyClick(Qt.Key_J);
         keyClick(Qt.Key_Space);
         compare(confirm.picked, [false, true, true]);
-        const [off, on, blocked, blockedOn] = confirm.boxes;
-        compare(confirm.list, off + "A\n" + on + "B\n" + blockedOn + "C");
+        verify(confirm.blockedPicked);
         verify(!confirm.canAnswer("yes"));
         keyClick(Qt.Key_Y);
         compare(chosen, null);
@@ -5273,6 +5364,7 @@ TestCase {
         keyClick(Qt.Key_A);
         compare(confirm.picked, [true, true, false]);
         verify(confirm.canAnswer("yes"));
+        verify(confirm.allPicked);
         keyClick(Qt.Key_Space);
         keyClick(Qt.Key_D);
         compare(extra, [0, 1, 2]);
@@ -5292,13 +5384,25 @@ TestCase {
     }
 
     // The words lines start with get the color of the change they stand
-    // for, only in the questions that say so.
+    // for, with the spaces after them, only in the questions that say so;
+    // and the line that says why a line can't be done is told apart.
     function test_confirmKeywords() {
-        confirm.ask("Apply?", "MOVE   a -> b", () => {}, null, null, { keywords: { MOVE: "rename", TRASH: "delete" } });
-        compare(confirm.keywordColors, ["MOVE", theme.changeColor("rename"), "TRASH", theme.changeColor("delete")]);
+        confirm.ask("Apply?", "MOVE   a -> b\n\nother c", () => {}, null, null, { keywords: { MOVE: "rename", TRASH: "delete" } });
+        compare(confirm.lines, ["MOVE   a -> b", "", "other c"]);
+        compare(confirm.rowCount, 3);
+        compare(confirm.textLines, 2.5);
+        compare(confirm.longest, 13);
+        compare(confirm.hints, []);
+        compare(confirm.rowParts(confirm.lines[0]),
+            [{ word: "MOVE   ", rest: "a -> b", color: theme.changeColor("rename"), error: false }]);
+        compare(confirm.rowParts(confirm.lines[2]), [{ word: "", rest: "other c", color: "", error: false }]);
+        compare(confirm.copyText(), "MOVE   a -> b\n\nother c");
         confirm.answer("cancel");
-        confirm.ask("Delete it anyway?", "MOVE -> b", () => {});
-        compare(confirm.keywordColors, []);
+        confirm.ask("Delete it anyway?", "MOVE -> b\ntoString x", () => {});
+        compare(confirm.rowParts(confirm.lines[0])[0].word, "");
+        compare(confirm.rowParts(confirm.lines[1])[0].word, "");
         confirm.answer("cancel");
+        const parts = confirm.rowParts({ text: "12:00\nTRASH a\nCan't be undone: `a` is gone", needs: [], blocked: "`a` is gone" });
+        compare(parts.map(part => part.error), [false, false, true]);
     }
 }

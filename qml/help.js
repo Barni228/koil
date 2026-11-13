@@ -567,7 +567,8 @@ function sections(help) {
             rows: [
                 ["`j`  `k`", "Move down or up."],
                 ["`g`  `G`", "Go to the first or last line."],
-                ["`Space`  `x`", "Pick or leave out the line (with what it needs, or what needs it)."],
+                ["`Space`  `x`", "Pick or leave out the line (with what it needs, or what needs it), as a click on it "
+                    + "does."],
                 ["`v`", "Select several lines; `v` or `Esc` ends it."],
                 ["`a`", "Pick all, or none."],
                 ["`y`  `Y`", "Apply the picked ones (`Y`: the highlighted one); the rest stays. In `Space u`: "
@@ -576,7 +577,8 @@ function sections(help) {
                     + "from the history."],
                 ["`u`", "Undo the listing's last edit, a discard, or an apply made here (its changes come "
                     + "back to pick)."],
-                ["`h`  `l`  `Enter`", "Move between the buttons, press the highlighted one."],
+                ["`h`  `l`  `Enter`", "Move between the buttons (round from the last to the first), press the "
+                    + "highlighted one."],
                 ["`c`  `Esc`", "Cancel."]
             ],
             note: "`Y` and `D` ask first if the line takes others along. Quitting, `n` quits without the "

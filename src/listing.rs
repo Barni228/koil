@@ -961,6 +961,10 @@ pub struct Synced {
 pub struct Question {
     pub text: String,
     pub details: String,
+    /// What Yes and No are named, by what they do, like "Delete" and
+    /// "Keep".
+    pub yes: &'static str,
+    pub no: &'static str,
     pub conflicts: Vec<Conflict>,
 }
 
@@ -1368,9 +1372,17 @@ fn question(koil: &Koil, kind: ConflictKind, conflicts: &[&Conflict]) -> Questio
             }
         }
     };
+    let (yes, no) = match kind {
+        ConflictKind::Deleted => ("Delete", "Keep"),
+        ConflictKind::Renamed => ("Keep Disk's", "Keep Mine"),
+        ConflictKind::Gone => ("Create", "Don't Create"),
+        ConflictKind::Taken => ("Replace", "Keep Both"),
+    };
     Question {
         text,
         details: details.join("\n"),
+        yes,
+        no,
         conflicts: conflicts.iter().map(|&c| c.clone()).collect(),
     }
 }
