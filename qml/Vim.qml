@@ -1654,13 +1654,15 @@ QtObject {
             target = range.start;
         } else {
             let r;
+            const blank = iconBlanks(t);
             // "cw" on a word changes to the end of the word, like "ce", but
-            // stays on the current word when the cursor is at its last letter.
+            // stays on the current word when the cursor is at its last letter
+            // (not on an icon that's indentation, which is a blank).
             if (cmd.op === "c" && (cmd.motion.name === "w" || cmd.motion.name === "W")
-                    && Txt.charClass(t[cursor], false) !== 0) {
+                    && Txt.classAt(t, cursor, false, blank) !== 0) {
                 const big = cmd.motion.name === "W";
-                const last = Txt.charClass(t[Txt.charEnd(t, cursor)], big) !== Txt.charClass(t[cursor], big);
-                const end = steps(cursor, last ? count - 1 : count, q => wordStep(t, q, q => Txt.wordEnd(t, q, big)));
+                const last = Txt.classAt(t, Txt.charEnd(t, cursor), big, blank) !== Txt.classAt(t, cursor, big, blank);
+                const end = steps(cursor, last ? count - 1 : count, q => wordStep(t, q, Txt.wordEnd, big));
                 r = { pos: end, type: "inclusive" };
             } else {
                 r = motion(t, cursor, cmd.motion, count, cmd.count > 0, true);
@@ -4715,14 +4717,59 @@ QtObject {
     // the icon is the line's prefix. An icon that hides nothing is a
     // character like any other.
     function firstNonBlank(t, p) {
-        let q = indentEnd(t, Txt.lineStart(t, p));
-        const icon = linePrefixes ? null : hiddenAt(q);
-        if (icon) {
-            q += icon.icon.length;
+        const ls = Txt.lineStart(t, p);
+        return linePrefixes ? indentEnd(t, ls) : pastIndent(t, ls, hidden);
+    }
+
+    // Where the indent of the line that starts at ls ends outside Koil's
+    // listing: its blanks, then an icon that hides text (one of `list`'s,
+    // sorted as `hidden` is) and the blanks after it.
+    function pastIndent(t, ls, list) {
+        let q = ls;
+        while (q < t.length && Txt.isBlank(t[q]))
+            q++;
+        const i = firstAt(list, q);
+        if (i < list.length && list[i].at === q) {
+            q += list[i].icon.length;
             while (q < t.length && Txt.isBlank(t[q]))
                 q++;
         }
         return q;
+    }
+
+    // Whether only blanks are before `at` on its line.
+    function atIndent(t, at) {
+        let q = at;
+        while (q > 0 && Txt.isBlank(t[q - 1]))
+            q--;
+        return q === 0 || t[q - 1] === "\n";
+    }
+
+    // For Txt's word motions: whether t's code unit i is in an icon that's
+    // indentation (see firstNonBlank), which they take as a blank, as
+    // wordStep does a prefix in the listing. Null if there's none to look
+    // for (in the listing, or with no hidden text).
+    function iconBlanks(t) {
+        const list = hidden;
+        if (linePrefixes || !list.length)
+            return null;
+        return i => {
+            const h = list[firstAt(list, i + 1) - 1];
+            return !!h && i < h.at + h.icon.length && atIndent(t, h.at);
+        };
+    }
+
+    // The icons that are indentation (see firstNonBlank) in t, whose
+    // hidden text is `list` (vim's, by default), each with its line's
+    // number, from 0: { line, hidden }. In the scratchpad, the entries
+    // pasted with their IDs, whose lines are colored as the listing's.
+    function indentIcons(t, list) {
+        const r = [];
+        for (const h of list || hidden) {
+            if (atIndent(t, h.at))
+                r.push({ line: Txt.lineOf(t, h.at) - 1, hidden: h });
+        }
+        return r;
     }
 
     // `text` (whose icons hide `entries`) to put in place of [start, end),
@@ -4762,13 +4809,15 @@ QtObject {
         return { text: r + text.slice(i), entries: moved };
     }
 
-    // A step of a word motion (`step`, from q), stepping again while it's
-    // in a prefix, as if that were blank. Stuck in the first line's prefix
-    // (at the text's start), it ends after it.
-    function wordStep(t, q, step) {
-        let r = step(q);
+    // A step of a word motion (Txt's `move`, from q, by WORDs if `big`),
+    // stepping again while it's in a prefix, as if that were blank, as an
+    // icon that's indentation is to `move` (see iconBlanks). Stuck in the
+    // first line's prefix (at the text's start), it ends after it.
+    function wordStep(t, q, move, big) {
+        const blank = iconBlanks(t);
+        let r = move(t, q, big, blank);
         while (inPrefix(t, r)) {
-            const next = step(r);
+            const next = move(t, r, big, blank);
             if (next === r)
                 return outOfPrefix(t, r);
             r = next;
@@ -5691,12 +5740,10 @@ QtObject {
         const s = state || {}, p = atEnd(t, text, entries);
         if (p.text === "")
             return { text: t, state: state };
-        const u = t + p.text;
-        // The last line's first non-blank, without the listing's prefixes,
-        // which vim may be in.
-        let c = Txt.lineStart(u, u.length);
-        while (c < u.length && Txt.isBlank(u[c]))
-            c++;
+        const u = t + p.text, list = (s.hidden || []).concat(shifted(p.entries, t.length));
+        // The last line's first non-blank, as firstNonBlank finds it in the
+        // scratchpad, not in the listing vim may be in.
+        const c = pastIndent(u, Txt.lineStart(u, u.length), list);
         const step = { start: t.length, removed: "", inserted: own(p.text), removedHidden: [],
             insertedHidden: p.entries, cursor: s.cursor || 0 };
         return { text: u, state: Object.assign({}, s, {
@@ -5704,7 +5751,7 @@ QtObject {
             wantCol: undefined, // the cursor's (see enterBuffer)
             undoStack: (s.undoStack || []).concat([step]),
             redoStack: [],
-            hidden: (s.hidden || []).concat(shifted(p.entries, t.length))
+            hidden: list
         }) };
     }
 
@@ -6380,7 +6427,7 @@ QtObject {
             let q = p, prev = p;
             for (let i = 0; i < count && (i === 0 || q !== prev); i++) {
                 prev = q;
-                q = wordStep(t, q, q => Txt.nextWordStart(t, q, big));
+                q = wordStep(t, q, Txt.nextWordStart, big);
             }
             // "dw" on the last word of a line stops at the end of that line.
             if (forOp) {
@@ -6392,17 +6439,17 @@ QtObject {
         }
         case "b":
         case "B": {
-            const q = steps(p, count, q => wordStep(t, q, q => Txt.prevWordStart(t, q, m.name === "B")));
+            const q = steps(p, count, q => wordStep(t, q, Txt.prevWordStart, m.name === "B"));
             return q === p ? null : { pos: q, type: "exclusive" };
         }
         case "e":
         case "E": {
-            const q = steps(p, count, q => wordStep(t, q, q => Txt.wordEnd(t, q, m.name === "E")));
+            const q = steps(p, count, q => wordStep(t, q, Txt.wordEnd, m.name === "E"));
             return q === p ? null : { pos: q, type: "inclusive" };
         }
         case "ge":
         case "gE": {
-            const q = steps(p, count, q => wordStep(t, q, q => Txt.prevWordEnd(t, q, m.name === "gE")));
+            const q = steps(p, count, q => wordStep(t, q, Txt.prevWordEnd, m.name === "gE"));
             return q === p ? null : { pos: q, type: "inclusive" };
         }
         case "f":

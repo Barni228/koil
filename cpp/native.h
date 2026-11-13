@@ -201,10 +201,10 @@ void setSpanColors(QObject* textDocument, const QStringList& spans);
 // with what suits any file (see syntax.rs): its strings, numbers, comments,
 // paths and URLs, in `colors`, one for each SyntaxKind, in its order (URLs
 // are underlined too). `fileName` says which comments it can have. With
-// `iconColors` (the scratchpad, where entries are pasted), a line that
-// starts with an icon is colored as the listing's instead (see
-// setListingColors): its icon, its dirs, and its name if it can be run
-// (see setTextEntryLines). It follows edits. Neither colors nor icons take
+// `iconColors` (the scratchpad, where entries are pasted), a line of an
+// entry pasted with its ID (see setTextEntryLines) is colored as the
+// listing's instead (see setListingColors): its icon, its dirs, and its
+// name if it can be run. It follows edits. Neither colors nor icons take
 // them away.
 void setTextColors(QObject* textDocument,
                    const QStringList& colors,
@@ -213,9 +213,11 @@ void setTextColors(QObject* textDocument,
                    const QString& directoryColor,
                    const QString& executableColor);
 
-// Tells setTextColors which lines (numbers, from 0) have a file that can
-// be run, as setEntryLines tells setListingColors.
-void setTextEntryLines(QObject* textDocument, const QStringList& executableLines);
+// Tells setTextColors which lines (numbers, from 0) start with an icon
+// hiding an entry's ID, and which of those have a file that can be run, as
+// setEntryLines tells setListingColors: a line that only starts with a
+// listing's icon (an `eza --icons` written in the scratchpad) is a file's.
+void setTextEntryLines(QObject* textDocument, const QStringList& entryLines, const QStringList& executableLines);
 
 // The installed font families whose text characters are all the same width,
 // in alphabetical order: the fonts the editor offers. It loads every font,

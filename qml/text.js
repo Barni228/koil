@@ -320,13 +320,21 @@ function charClass(ch, big) {
     return 1;
 }
 
-function nextWordStart(t, p, big) {
+// charClass of t's code unit at i, but 0 (a blank) where `blank(i)`
+// says, if it's given: an icon that's indentation (see Vim.qml's
+// iconBlanks), to the word motions below.
+function classAt(t, i, big, blank) {
+    const c = charClass(t[i], big);
+    return c !== 0 && blank && blank(i) ? 0 : c;
+}
+
+function nextWordStart(t, p, big, blank) {
     const n = t.length;
     if (p >= n)
         return n;
-    const c = charClass(t[p], big);
+    const c = classAt(t, p, big, blank);
     if (c !== 0)
-        while (p < n && charClass(t[p], big) === c)
+        while (p < n && classAt(t, p, big, blank) === c)
             p++;
     while (p < n) {
         if (t[p] === "\n") {
@@ -335,49 +343,49 @@ function nextWordStart(t, p, big) {
                 return p; // an empty line counts as a word
             continue;
         }
-        if (charClass(t[p], big) !== 0)
+        if (classAt(t, p, big, blank) !== 0)
             return p;
         p++;
     }
     return n;
 }
 
-function prevWordStart(t, p, big) {
+function prevWordStart(t, p, big, blank) {
     let q = p - 1;
-    while (q > 0 && charClass(t[q], big) === 0) {
+    while (q > 0 && classAt(t, q, big, blank) === 0) {
         if (t[q] === "\n" && t[q - 1] === "\n")
             return q;
         q--;
     }
     if (q <= 0)
         return 0;
-    const c = charClass(t[q], big);
-    while (q > 0 && charClass(t[q - 1], big) === c)
+    const c = classAt(t, q, big, blank);
+    while (q > 0 && classAt(t, q - 1, big, blank) === c)
         q--;
     return q;
 }
 
-function wordEnd(t, p, big) {
+function wordEnd(t, p, big, blank) {
     const n = t.length;
     let q = charEnd(t, p);
-    while (q < n && charClass(t[q], big) === 0)
+    while (q < n && classAt(t, q, big, blank) === 0)
         q++;
     if (q >= n)
         return p;
-    const c = charClass(t[q], big);
-    for (let e = charEnd(t, q); e < n && charClass(t[e], big) === c; e = charEnd(t, q))
+    const c = classAt(t, q, big, blank);
+    for (let e = charEnd(t, q); e < n && classAt(t, e, big, blank) === c; e = charEnd(t, q))
         q = e;
     return q;
 }
 
-function prevWordEnd(t, p, big) {
+function prevWordEnd(t, p, big, blank) {
     let q = p;
-    const c = charClass(t[q], big);
+    const c = classAt(t, q, big, blank);
     if (c !== 0)
-        while (q > 0 && charClass(t[q - 1], big) === c)
+        while (q > 0 && classAt(t, q - 1, big, blank) === c)
             q--;
     q--;
-    while (q > 0 && charClass(t[q], big) === 0) {
+    while (q > 0 && classAt(t, q, big, blank) === 0) {
         if (t[q] === "\n" && t[q - 1] === "\n")
             return q;
         q--;

@@ -1004,17 +1004,22 @@ the scratchpad (see Scratchpad).
   Enter opens it as gf does (`openPasted`; vim's Enter on a line without
   one). Its icon and the blanks after it are indentation
   (`Vim.firstNonBlank`, outside the listing, for an icon that hides
-  text): `^`, `I`, `gg`, `NG`, `+`, `-`, `yss` and where `p` and the
-  commands on lines leave the cursor go to the name, so the cursor is
+  text, `pastIndent`, which `:_put` puts the cursor after too): `^`,
+  `I`, `gg`, `NG`, `+`, `-`, `yss` and where `p` and the commands on
+  lines leave the cursor go to the name, and the word motions (`w`, `b`,
+  `e`, `ge`, and `cw` on it) take the icon as a blank (`iconBlanks`,
+  `Txt.classAt`, as `wordStep` does a prefix), so the cursor is
   seldom on the icon, though `0`, `h` and a click still put it there
   (it's no prefix: see Prefixes, which also keep new lines and searches
   out of one). What goes at a line's blanks (`indentEnd`: surround's
   new lines) doesn't take the icon. Their lines look as the listing's (`setTextColors`'
-  `iconColors`, which Editor.qml gives only with no `filePath`: a line
-  whose first character that isn't blank is an icon of a listing shown
-  gets the listing's colors in place of a file's, also with `:set
-  nosyntax`: its icon, its dirs, and its name green on the lines of
-  `setTextEntryLines`, those of files that can be run). After each
+  `iconColors`, which Editor.qml gives only with no `filePath`: the
+  lines of `setTextEntryLines`, those whose icon is indentation, by
+  `Vim.indentIcons`, get the listing's colors in place of a file's,
+  also with `:set nosyntax`: its icon, its dirs, and the names of those
+  of files that can be run green). A line that only starts with a
+  listing's icon (`eza --icons` written there, or lines from another
+  Koil, whose IDs a paste drops) is a file's, as it's no entry. After each
   line, as the listing's notes (`Editor.infos` and `links`, by ID), is
   where a symlink points, and for an entry that isn't in the open dir,
   the dir it's in, as gh shows a path (`listing::pasted_looks`,
@@ -1359,8 +1364,8 @@ the scratchpad (see Scratchpad).
   its format for each character of the line (5 ms for a line of a
   megabyte), and not again when only the text's format changed
   (`FormatOnly`: the colors, or a new layout, see Text layout), which
-  had it color every line again; in the scratchpad a line that starts
-  with an icon is colored as the listing's highlighter colors it
+  had it color every line again; in the scratchpad a line of an entry
+  pasted with its ID is colored as the listing's highlighter colors it
   instead (`entryColors`, see Scratchpad), and with no syntax colors,
   only those are colored; a line's state (in a `/* */`) is its
   block's user state, as a highlighter's. Only one highlighter may color a

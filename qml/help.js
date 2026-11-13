@@ -77,7 +77,7 @@ function sections(help) {
                     + "the listing: colored, with where a link points after the line, and the dir of one "
                     + "that isn't in the open dir. `Enter`, `gf`, `gh`, `K`, `Space r`, `Space o` and `!` "
                     + "take the one on the line, its icon counts as indentation (`^`, `I` and `gg` go to "
-                    + "the name; `0` to the icon), and `!` with a count, a selection or marked lines types "
+                    + "the name, and `w` and `b` past it; `0` to the icon), and `!` with a count, a selection or marked lines types "
                     + "`<cfile>` for a command on them (`Vj!`, then `git add`)."],
                 ["`:_`", "Show the scratchpad, or stay in it, where `_` would leave it: for a shortcut "
                     + "that should end up there wherever it's run."],

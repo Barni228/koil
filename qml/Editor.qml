@@ -34,6 +34,10 @@ Item {
     property var pendingIconColor: ["", ""]
     property var pendingLines: []
     property var executableLines: []
+    // In the scratchpad (no `listing`, no `filePath`), the lines of the
+    // entries pasted with their IDs, which get the listing's colors, and
+    // of those, `executableLines` too.
+    property var entryLines: []
     // Whether this is the path field over the listing: one line, in the
     // dirs' color, with no line numbers. `pathSyntax` holds the parts of it
     // to color (a pattern's), as { start, length, kind } (see listing::Span).
@@ -238,7 +242,8 @@ Item {
         if (listingColors)
             formatOnly(() => system.setEntryLines(editor.textDocument, pendingLines.map(String), executableLines.map(String)));
         else
-            formatOnly(() => system.setTextEntryLines(editor.textDocument, filePath ? [] : executableLines.map(String)));
+            formatOnly(() => system.setTextEntryLines(editor.textDocument, filePath ? [] : entryLines.map(String),
+                filePath ? [] : executableLines.map(String)));
     }
 
     // A press at x, y in the editor's coordinates, in the room the view
@@ -317,6 +322,7 @@ Item {
     onColorInputsChanged: applyColors()
     onPendingLinesChanged: applyPendingLines()
     onExecutableLinesChanged: applyPendingLines()
+    onEntryLinesChanged: applyPendingLines()
 
     // Lays the text out on the grid lineFormat gives (see setLineFormat in
     // native.h), which Koil's layout does in place of Qt's: every row the

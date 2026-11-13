@@ -147,11 +147,13 @@ hasFixedWidthText(const QString& family)
 }
 
 // Whether a line was last colored as pending and as a file that can be
-// run (see setEntryLines), as its block's user data. None is as neither.
+// run (see setEntryLines), or as an entry (see setTextEntryLines), as its
+// block's user data. None is as none of them.
 struct ColoredAs : QTextBlockUserData
 {
   bool pending = false;
   bool executable = false;
+  bool entry = false;
 };
 
 // See setListingColors and setPathColors.
@@ -456,25 +458,30 @@ public:
   SyntaxComments comments{ true, true };
   // The colors of the icons of entries, by icon, as the listing's (see
   // ListingHighlighter): in the scratchpad, where entries are pasted. A
-  // line that starts with one is colored as the listing's: its dirs, and
-  // its name on a line in `executable` (see setTextEntryLines).
+  // line in `entries` (one that starts with an icon hiding an ID) is
+  // colored as the listing's: its icon, its dirs, and its name if it's in
+  // `executable` too (see setTextEntryLines).
   QHash<QString, QTextCharFormat> icons;
   QTextCharFormat directory;
   QTextCharFormat executableName;
+  QSet<int> entries;
   QSet<int> executable;
 
-  // Takes the lines of the files that can be run, and colors those whose
-  // names were colored otherwise, as setEntryLines does: by what each was
-  // colored as (see ColoredAs), not by the lines before, whose numbers an
-  // edit changes.
-  void setExecutable(const QSet<int>& lines)
+  // Takes the lines of the entries and of the files that can be run, and
+  // colors those that were colored otherwise, as setEntryLines does: by
+  // what each was colored as (see ColoredAs), not by the lines before,
+  // whose numbers an edit changes.
+  void setEntries(const QSet<int>& entryLines, const QSet<int>& executableLines)
   {
-    executable = lines;
+    entries = entryLines;
+    executable = executableLines;
     auto* doc = document();
     QList<QTextBlock> changed;
     for (QTextBlock block = doc->begin(); block.isValid(); block = block.next()) {
       const auto* colored = dynamic_cast<ColoredAs*>(block.userData());
-      if ((colored && colored->executable) != lines.contains(block.blockNumber()))
+      const int line = block.blockNumber();
+      const bool entry = entries.contains(line), runs = entry && executable.contains(line);
+      if ((colored && colored->entry) != entry || (colored && colored->executable) != runs)
         changed.append(block);
     }
     if (changed.isEmpty())
@@ -552,24 +559,26 @@ private:
     }
     if (icons.isEmpty())
       return colors;
-    // Whether it was colored as a file that can be run (see
-    // setExecutable).
-    const bool runs = executable.contains(block.blockNumber());
+    // What it was colored as (see setEntries).
+    const int number = block.blockNumber();
+    const bool entry = entries.contains(number), runs = entry && executable.contains(number);
     auto* colored = dynamic_cast<ColoredAs*>(block.userData());
-    if (!colored && runs) {
+    if (!colored && entry) {
       colored = new ColoredAs;
       block.setUserData(colored);
     }
-    if (colored)
+    if (colored) {
+      colored->entry = entry;
       colored->executable = runs;
-    const auto entry = entryColors(text, runs);
-    return entry.isEmpty() ? colors : entry;
+    }
+    const auto listed = entry ? entryColors(text, runs) : QList<QTextLayout::FormatRange>();
+    return listed.isEmpty() ? colors : listed;
   }
 
   // The colors of a line that starts with an entry's icon (after blanks),
   // as the listing colors it (see ListingHighlighter), in place of a
   // file's: its icon, the dirs up to its last `/`, and its name if it can
-  // be run (`runs`). None if it starts with no icon.
+  // be run (`runs`). None if it starts with no icon of a listing's.
   QList<QTextLayout::FormatRange> entryColors(const QString& text, bool runs) const
   {
     qsizetype at = 0;
@@ -1906,15 +1915,18 @@ setTextColors(QObject* textDocument,
 }
 
 void
-setTextEntryLines(QObject* textDocument, const QStringList& executableLines)
+setTextEntryLines(QObject* textDocument, const QStringList& entryLines, const QStringList& executableLines)
 {
   auto* textColors = childOf<TextColors>(textDocument);
   if (!textColors)
     return;
-  QSet<int> lines;
-  for (const auto& line : executableLines)
-    lines.insert(line.toInt());
-  textColors->setExecutable(lines);
+  const auto numbers = [](const QStringList& lines) {
+    QSet<int> r;
+    for (const auto& line : lines)
+      r.insert(line.toInt());
+    return r;
+  };
+  textColors->setEntries(numbers(entryLines), numbers(executableLines));
 }
 
 QStringList

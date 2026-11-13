@@ -307,12 +307,14 @@ pub mod qobject {
             executable_color: &QString,
         );
 
-        /// Tells `set_text_colors` which lines (numbers, from 0) have a
-        /// file that can be run, whose name is green.
+        /// Tells `set_text_colors` which lines (numbers, from 0) have an
+        /// entry pasted with its ID, colored as the listing's, and which of
+        /// those a file that can be run, whose name is green.
         #[qinvokable]
         unsafe fn set_text_entry_lines(
             self: &System,
             text_document: *mut QObject,
+            entry_lines: &QStringList,
             executable_lines: &QStringList,
         );
     }
@@ -498,7 +500,9 @@ impl qobject::System {
             text_document, colors: &QStringList, file_name: &QString, icon_colors: &QStringList,
             directory_color: &QString, executable_color: &QString
         );
-        set_text_entry_lines(text_document, executable_lines: &QStringList);
+        set_text_entry_lines(
+            text_document, entry_lines: &QStringList, executable_lines: &QStringList
+        );
     }
 }
 

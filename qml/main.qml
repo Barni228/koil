@@ -30,11 +30,13 @@ ApplicationWindow {
     property Editor activeView: editorView
     // The colors of the icons the listings have shown, and of a pending
     // entry's, and the lines of the pending ones and of files that can be
-    // run (see Editor.iconColors).
+    // run (see Editor.iconColors), and in the scratchpad, of the entries
+    // pasted there (Editor.entryLines).
     property var iconColors: ({})
     property var pendingIconColor: ["", ""]
     property var pendingLines: []
     property var executableLines: []
+    property var entryLines: []
     // What the listing shows after each entry's line, by its ID: its size
     // or a date, when it's sorted by one (see Editor.infos). Sorted by
     // size, `busyInfos` has the dirs whose sizes are being counted (see
@@ -393,6 +395,7 @@ ApplicationWindow {
         listing = false;
         problems = [];
         executableLines = []; // the listing's, until updateScratchLooks
+        entryLines = [];
         const s = scratchState || { text: "", buffer: null, contentY: 0 };
         // Its hidden text comes back with the buffer: entries pasted there
         // keep their IDs on purpose, so they can be put aside and pasted
@@ -412,8 +415,9 @@ ApplicationWindow {
     // own (see listing::pasted_looks, `scratchLooks`): read from disk as
     // it's shown and after a shell command (`again`), and after an edit
     // only if it has other IDs than before (a paste). The lines of the
-    // files that can be run are found after every edit, as the listing's
-    // are (see updatePendingLines).
+    // entries (those Vim takes as indented by their icon: see
+    // Vim.indentIcons), and of those the files that can be run, are found
+    // after every edit, as the listing's are (see updatePendingLines).
     function updateScratchLooks(again) {
         if (!scratchpad)
             return;
@@ -428,13 +432,12 @@ ApplicationWindow {
                 runs[id] = true;
             scratchLooks = { ids: key, infos: looks.infos, links: looks.links, executable: runs };
         }
-        const t = editorView.textArea.latest.text, lines = [];
-        for (const h of hidden) {
-            if (scratchLooks.executable[h.text] && /^ *$/.test(t.slice(Txt.lineStart(t, h.at), h.at)))
-                lines.push(Txt.lineOf(t, h.at) - 1);
-        }
-        if (lines.length || executableLines.length)
-            executableLines = lines;
+        const icons = vim.indentIcons(editorView.textArea.latest.text);
+        if (icons.length || entryLines.length)
+            entryLines = icons.map(i => i.line);
+        const runs = icons.filter(i => scratchLooks.executable[i.hidden.text]).map(i => i.line);
+        if (runs.length || executableLines.length)
+            executableLines = runs;
     }
 
     // Keeps what the scratchpad has as it's left (anything else shown in
@@ -2600,6 +2603,7 @@ ApplicationWindow {
         pendingIconColor: root.pendingIconColor
         pendingLines: root.pendingLines
         executableLines: root.executableLines
+        entryLines: root.entryLines
         problems: root.problems
         // An ID as the path it stands for, so the hover says whose it is.
         describeHidden: text => koil.idPath(text) || text

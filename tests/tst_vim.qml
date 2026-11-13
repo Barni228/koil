@@ -1755,6 +1755,10 @@ TestCase {
         vim.putAtEnd("a\nb\n", []);
         compare(editor.text, "a\nb");
         compare(vim.cursor, 2);
+        // A pasted entry's icon is indentation, as for ^.
+        vim.putAtEnd(mushroom + "  x\n", [{ at: 0, icon: mushroom, text: "id" }]);
+        compare(render(), "a\nb\n<M:id>  x");
+        compare(vim.cursor, editor.text.length - 1);
     }
 
     // The same in a buffer vim isn't editing, from its text and state.
@@ -1783,6 +1787,12 @@ TestCase {
         compare(vim.cursor, 2);
         keys("u");
         compare(editor.text, "");
+        // A pasted entry's icon is indentation, as for ^.
+        const icon = vim.putInState("a", null, " " + mushroom + "  x\n", [{ at: 1, icon: mushroom, text: "id" }]);
+        editor.text = icon.text;
+        vim.enterBuffer(icon.state);
+        compare(render(), "a\n <M:id>  x");
+        compare(vim.cursor, editor.text.length - 1);
         // An empty line in an empty text changes nothing.
         compare(vim.putInState("", null, "\n", []), { text: "", state: null });
     }
@@ -1825,6 +1835,68 @@ TestCase {
         keys("$^");
         compare(vim.cursor, icon + 2);
         vim.linePrefixes = false;
+    }
+
+    // Word motions take an icon that's indentation as a blank, so they go
+    // past it to the name, as ^ does, and as they do a listing's prefix.
+    function test_iconWords() {
+        load("x y\n  M  one two\nM  three\nMfour\na M b");
+        const at = s => editor.text.indexOf(s);
+        keys("w");
+        compare(vim.cursor, at("y"));
+        keys("w");
+        compare(vim.cursor, at("one"));
+        keys("b");
+        compare(vim.cursor, at("y"));
+        keys("e");
+        compare(vim.cursor, at("one") + 2);
+        keys("2w");
+        compare(vim.cursor, at("three"));
+        keys("ge");
+        compare(vim.cursor, at("two") + 2);
+        keys("W");
+        compare(vim.cursor, at("three"));
+        // One with no blank after it too.
+        keys("w");
+        compare(vim.cursor, at("four"));
+        keys("B");
+        compare(vim.cursor, at("three"));
+        keys("E");
+        compare(vim.cursor, at("three") + 4);
+        keys("E");
+        compare(vim.cursor, at("four") + 3);
+        // In a line, it's a character.
+        keys("w");
+        compare(vim.cursor, at("a"));
+        keys("w");
+        compare(vim.cursor, at("a") + 2);
+        // On it, cw changes it as a blank, up to the name, as dw does.
+        load("M  one");
+        keys("0cwx<Esc>");
+        compare(render(), "xone");
+        // An icon that hides nothing is a character.
+        load("x\nm  one");
+        keys("w");
+        compare(vim.cursor, 2);
+        // At the text's start, b goes to it, as vim's to its first column.
+        load("M  one");
+        keys("^b");
+        compare(vim.cursor, 0);
+        // In the listing, the prefix is the blank, as before.
+        load("x\nM  one");
+        vim.linePrefixes = true;
+        keys("w");
+        compare(vim.cursor, at("one"));
+        vim.linePrefixes = false;
+    }
+
+    // The icons that are indentation, by line, for the scratchpad's
+    // colors: not one in a line, nor one that hides nothing.
+    function test_indentIcons() {
+        load("M  a\n\t C  b\nx M\nm  c\n");
+        compare(vim.indentIcons(editor.text).map(i => [i.line, i.hidden.text]), [[0, "h1"], [1, "h2"]]);
+        // Of the text and hidden text given.
+        compare(vim.indentIcons("a\n" + chair, [{ at: 2, icon: chair, text: "id" }]).map(i => i.line), [1]);
     }
 
     // p says how many lines it added, if more than two.
