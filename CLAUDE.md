@@ -628,7 +628,9 @@ the scratchpad (see Scratchpad).
   main.qml gives the heading as its `lead` (`{ length, color }`, the
   start of a row's text in a color: `rowParts`); koil refuses while changes are pending.
   None is picked at first, and the first row is highlighted at once
-  (`ask`'s `showRow`). `u` or Cmd+Z with nothing left
+  (`ask`'s `showRow`). `/` searches them, as any list to pick from (see
+  Questions): typing a file's name shows only what was done with it,
+  and the applies that have it. `u` or Cmd+Z with nothing left
   to undo in vim emits `nothingToUndo`, and `undoLast` asks only about
   the last apply alone: "Undo the last apply?"
   over every step undoing it does, relative to the open dir
@@ -2722,7 +2724,28 @@ the scratchpad (see Scratchpad).
   which cut the second line of the last row off after `G`). A line is
   told apart by its group's `key` and its text (`itemKeys`), as two
   applies can have the same step, and asked again (`place`), the cursor
-  is in the group it was in.
+  is in the group it was in. `/` in a list to pick from searches it
+  (`startFilter`, `setFilter`, a `TextInput` on a line under the rows,
+  as the help's, which has the keys meanwhile: `filtering`): only the
+  lines with every word typed show (`shown`, `updateShown`: in their
+  text or their group's heading, so the undo history's dir counts,
+  smart case, the words as they are, not a regex, as paths have `.`
+  and `[`), as it's typed, so what was done with a file is found by its
+  name. What matched is underlined, in `markColor` (`withMarks`: styled
+  text, only where it matched; its regex is kept as its source, as a
+  `var` property may not keep a `RegExp`). It's a view only: picked
+  lines stay picked, shown or not (the search's line says how many
+  aren't shown, not the count by the buttons, whose width the box
+  takes), and a group has only its lines that show (`shownItems`, in
+  place of `groupItems` for the rows, the cursor, a heading's box and
+  Space, Y and D on it, what a closed one shows and counts; one with
+  none has no heading), as Select All has. Enter keeps it, with the
+  cursor shown (Up and Down move it meanwhile), Esc puts the one
+  before back, and Esc in the list clears it before it cancels. The
+  list stays as tall as it was (`heldHeight`), so the box doesn't
+  change its size at every key. Asked again (`place`'s `filter`), it's
+  searched for still, unless no line has it. A row's index isn't its
+  line's then, also without groups (`rowFrom`, `place`'s `line`).
 - **QML's JavaScript**: don't make a binding depend on something by reading it
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The

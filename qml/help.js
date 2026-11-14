@@ -33,8 +33,8 @@ function sections(help) {
                 ["󰄲", "In that list, pick what to apply now (the rest stays, to apply later), or to discard: "
                     + "see `:h pick`."],
                 ["`Space u`", "Undo applies, or single changes of them, picked from all of them, also "
-                    + "those of earlier sessions, newest first. Picking a change picks the newer ones on the "
-                    + "same paths. "
+                    + "those of earlier sessions, newest first (`/` searches them, by a file's name say). "
+                    + "Picking a change picks the newer ones on the same paths. "
                     + "Deleted files come back from the trash. `d` there deletes them from the history "
                     + "instead, also those that can't be undone any more (see `:h pick`)."],
                 ["`u`", "Once there's nothing left to undo: undo the last apply, after listing what that "
@@ -572,7 +572,12 @@ function sections(help) {
                 ["`Space`  `x`", "Pick or leave out the line (with what it needs, or what needs it), as a click on it "
                     + "does."],
                 ["`v`", "Select several lines; `v` or `Esc` ends it."],
-                ["`a`", "Pick all, or none."],
+                ["`a`", "Pick all, or none (searching, of the lines shown)."],
+                ["`/`", "Search: only the lines with every word typed show, as you type, like the changes "
+                    + "to a file by its name. A word can also be in an apply's heading (its dir). Case counts "
+                    + "only with an uppercase letter. `Enter` keeps it (`↑` `↓` move meanwhile), `Esc` puts "
+                    + "the last one back, and `Esc` in the list shows all of it again. Picked lines stay "
+                    + "picked, shown or not."],
                 ["`y`  `Y`", "Apply the picked ones (`Y`: the highlighted one); the rest stays. In `Space u`: "
                     + "undo them."],
                 ["`d`  `D`", "Discard the picked ones (`D`: the highlighted one). In `Space u`: delete them "
@@ -584,7 +589,7 @@ function sections(help) {
                     + "some until then: the picked ones first, how many more it has, and how many of each "
                     + "kind."],
                 ["`Enter`", "The blue button: apply, or undo."],
-                ["`c`  `Esc`", "Cancel."]
+                ["`c`  `Esc`", "Cancel (`Esc` first ends a selection, then a search)."]
             ],
             note: "`Y` and `D` ask first if the line takes others along. Quitting, `n` quits without the "
                 + "changes, and there's no `d` or `u`."

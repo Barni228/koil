@@ -5150,7 +5150,7 @@ TestCase {
         compare(confirm.rowCount, 14);
         compare([0, 1, 2].map(g => confirm.canClose(g)), [false, false, true]);
         compare(confirm.moreText(2), "… 3 more");
-        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "lhTab", "Y"]);
+        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "/", "lhTab", "Y"]);
         compare(confirm.copyText(), "one\n  A\n  B\ntwo\n  C\n  D\n  E\n  F\n  G\nthree\n  MOVE h\n  MOVE i\n"
             + "  TRASH j\n  MOVE k\n  MOVE l\n  TRASH m");
         // After a closed one's heading, how many of its lines are what,
@@ -5300,6 +5300,225 @@ TestCase {
         verify(!confirm.opened);
     }
 
+    // / searches a list to pick from: only the lines with every word typed
+    // show, as it's typed, whatever their case unless one is uppercase.
+    // Enter keeps it, Esc puts the one before back, and Esc in the list
+    // shows all of it again. Picks stay, shown or not, and Select All is
+    // of the lines that show.
+    function test_confirmSearch() {
+        const lines = () => ["TRASH bob", "MOVE a -> Bob2", "CREATE alice", "TRASH docs/bob  & <x>"]
+            .map(text => ({ text: text, needs: [], picked: false }));
+        const shown = () => confirm.rows.map(at => at.item);
+        let chosen = null;
+        confirm.ask("Apply?", lines(), picked => chosen = picked, null, null, { keywords: { TRASH: "delete" } });
+        tryCompare(confirm, "opened", true);
+        compare(confirm.withMarks("TRASH bob"), "");
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 2);
+        keyClick(Qt.Key_Slash);
+        verify(confirm.filtering);
+        // The keys are the search's: b isn't a key of the list's.
+        keyClick(Qt.Key_B, Qt.NoModifier);
+        keyClick(Qt.Key_O);
+        compare(confirm.filter, "bo");
+        compare(shown(), [0, 1, 3]);
+        compare(confirm.shownCount, 3);
+        // The cursor's line went, so it's on the first.
+        compare(confirm.row, 0);
+        keyClick(Qt.Key_B);
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_T);
+        compare(confirm.filter, "bob t");
+        compare(shown(), [0, 3]);
+        // What matched is underlined, as styled text.
+        const mark = text => "<u><font color=\"" + confirm.markColor + "\">" + text + "</font></u>";
+        compare(confirm.withMarks("TRASH  "), mark("T") + "RASH&nbsp; ");
+        compare(confirm.withMarks("docs/bob  & <x>"), "docs/" + mark("bob") + "&nbsp; &amp; &lt;x&gt;");
+        compare(confirm.withMarks("alice"), "");
+        // Down and Up move the cursor meanwhile, and Enter keeps the
+        // search, with the cursor shown.
+        keyClick(Qt.Key_Down);
+        compare(confirm.row, 1);
+        keyClick(Qt.Key_Return);
+        verify(!confirm.filtering);
+        verify(confirm.opened);
+        compare(confirm.filter, "bob t");
+        verify(confirm.rowShown);
+        // Space picks the line the cursor is on, the last one's.
+        keyClick(Qt.Key_Space);
+        compare(confirm.picked, [false, false, false, true]);
+        keyClick(Qt.Key_G);
+        compare(confirm.row, 0);
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.row, 1);
+        // a picks those that show, or none of them.
+        compare(confirm.allPicked, false);
+        keyClick(Qt.Key_A);
+        compare(confirm.picked, [true, false, false, true]);
+        compare(confirm.allPicked, true);
+        compare(confirm.copyText(), "TRASH bob\nTRASH docs/bob  & <x>");
+
+        // Another search starts from this one, selected, so typing
+        // replaces it; an uppercase letter has the case count.
+        keyClick(Qt.Key_Slash);
+        keyClick("B");
+        compare(confirm.filter, "B");
+        compare(shown(), [1]);
+        compare(confirm.hiddenPicked, 2);
+        // Esc puts the one before back.
+        keyClick(Qt.Key_Escape);
+        verify(confirm.opened);
+        verify(!confirm.filtering);
+        compare(confirm.filter, "bob t");
+        compare(shown(), [0, 3]);
+        // No line has it: none shows, and Enter picks nothing.
+        keyClick(Qt.Key_Slash);
+        keyClick(Qt.Key_Z);
+        compare(shown(), []);
+        compare(confirm.shownCount, 0);
+        keyClick(Qt.Key_Return);
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.picked, [true, false, false, true]);
+        // Emptied, it's no search any more; Backspace then leaves it.
+        keyClick(Qt.Key_Slash);
+        keyClick(Qt.Key_Backspace);
+        compare(shown(), [0, 1, 2, 3]);
+        keyClick(Qt.Key_Backspace);
+        verify(!confirm.filtering);
+        compare(confirm.filter, "");
+
+        // Asked again, it's searched for still, the current line the
+        // next one left that shows.
+        keyClick(Qt.Key_Slash);
+        keyClick(Qt.Key_B);
+        keyClick(Qt.Key_Return);
+        keyClick(Qt.Key_J);
+        compare(shown(), [0, 1, 3]);
+        compare(confirm.row, 1);
+        confirm.ask("Apply?", lines().filter((line, i) => i !== 1), () => {}, null, null, { again: true });
+        compare(confirm.filter, "b");
+        compare(shown(), [0, 2]);
+        compare(confirm.row, 1);
+        compare(confirm.picked, [true, false, true]);
+        // Esc in the list shows all of it again, and only then cancels.
+        keyClick(Qt.Key_Escape);
+        verify(confirm.opened);
+        compare(confirm.filter, "");
+        compare(shown(), [0, 1, 2]);
+        compare(confirm.row, 2);
+        // Yes takes the picked lines, shown or not.
+        keyClick(Qt.Key_Slash);
+        keyClick(Qt.Key_D);
+        keyClick(Qt.Key_Return);
+        compare(shown(), [2]);
+        confirm.ask("Apply?", lines(), picked => chosen = picked, null, null, { again: true });
+        keyClick(Qt.Key_Y);
+        compare(chosen, [0, 3]);
+        verify(!confirm.opened);
+        // Not if no line has it any more, nor in a new question, nor in a
+        // list that's not one to pick from, where / is no key.
+        confirm.ask("Apply?", lines().slice(0, 3), () => {}, null, null, { again: true });
+        compare(confirm.filter, "");
+        confirm.setFilter("bob");
+        confirm.ask("Apply?", lines(), () => {});
+        compare(confirm.filter, "");
+        confirm.ask("Sure?", "A\nB", () => {});
+        keyClick(Qt.Key_Slash);
+        verify(!confirm.filtering);
+        keyClick(Qt.Key_Escape);
+        verify(!confirm.opened);
+    }
+
+    // Searching a list in groups: a group shows the lines that have it,
+    // or all of them if its heading does, and one with none isn't shown.
+    // Its heading's box, Space on it and what's after it are of those.
+    function test_confirmSearchGroups() {
+        const line = (text, group, more) => Object.assign({ text: text, needs: [], group: group, picked: false }, more);
+        const lines = [
+            line("TRASH bob", 0), line("MOVE a -> b", 0),
+            line("CREATE c", 1),
+            line("MOVE bob1", 2), line("MOVE x", 2), line("MOVE bob2", 2), line("TRASH bob3", 2), line("MOVE bob4", 2),
+            line("MOVE bob5", 2), line("MOVE y", 2, { needs: [3] })
+        ];
+        const groups = [
+            { key: "1", text: "now  ~/src" },
+            { key: "2", text: "1 day ago  ~/docs" },
+            { key: "3", text: "2 days ago  ~/src", open: false, note: "7 changes" }
+        ];
+        const options = { groups: groups, keywords: { MOVE: "rename", TRASH: "delete", CREATE: "create" }, showRow: true };
+        const shown = () => confirm.rows.map(at => at.group !== undefined ? "g" + at.group
+            : at.more !== undefined ? "m" + at.more : at.item);
+        const pickedLines = () => confirm.picked.map((p, i) => p ? i : -1).filter(i => i >= 0);
+        let chosen = null;
+        confirm.ask("Undo?", lines, picked => chosen = picked, null, null, options);
+        tryCompare(confirm, "opened", true);
+        compare(shown(), ["g0", 0, 1, "g1", 2, "g2", 3, 4, 5, "m2"]);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 3);
+
+        confirm.setFilter("bob");
+        // The second group has none, so the cursor is on the first row;
+        // the third is closed still, with its first lines that have it.
+        compare(shown(), ["g0", 0, "g2", 3, 5, 6, "m2"]);
+        compare(confirm.row, 0);
+        compare(confirm.moreText(2), "… 2 more");
+        compare(confirm.groupKinds[2], [{ word: "MOVE", count: 4 }, { word: "TRASH", count: 1 }]);
+        compare(confirm.copyText(), "now  ~/src\n  TRASH bob\n2 days ago  ~/src\n  MOVE bob1\n  MOVE bob2\n"
+            + "  TRASH bob3\n  MOVE bob4\n  MOVE bob5");
+        // j and G go by the groups that show.
+        keyClick(Qt.Key_J);
+        compare(confirm.cursorRows, [2, 6]);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 2);
+        keyClick(Qt.Key_G);
+        compare(confirm.row, 0);
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.row, 2);
+        // Space on a heading picks its lines that show, and its box is
+        // theirs.
+        keyClick(Qt.Key_Space);
+        compare(pickedLines(), [3, 5, 6, 7, 8]);
+        compare(confirm.groupPicks(2), 2);
+        compare(confirm.hiddenPicked, 0);
+        // Going in shows all that have it; j stays in them.
+        keyClick(Qt.Key_L);
+        compare(shown(), ["g0", 0, "g2", 3, 5, 6, 7, 8]);
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.row, 7);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 7);
+        // Leaving one out leaves out what needs it, shown or not.
+        keyClick(Qt.Key_G);
+        keyClick(Qt.Key_Space);
+        compare(pickedLines(), [5, 6, 7, 8]);
+        compare(confirm.groupPicks(2), 1);
+
+        // A word of the heading counts for all its lines: both words
+        // must be in a line or its heading.
+        confirm.setFilter("src move");
+        compare(confirm.inside, 2);
+        compare(shown(), ["g0", 1, "g2", 3, 4, 5, 7, 8, 9]);
+        confirm.setFilter("docs");
+        compare(confirm.inside, -1);
+        compare(shown(), ["g1", 2]);
+        compare(confirm.row, 0);
+        // a is of the lines that show.
+        keyClick(Qt.Key_A);
+        compare(pickedLines(), [2, 5, 6, 7, 8]);
+        compare(confirm.hiddenPicked, 4);
+        // Y on a heading takes its lines that show.
+        confirm.setFilter("trash");
+        compare(shown(), ["g0", 0, "g2", 6]);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Y, Qt.ShiftModifier);
+        compare(chosen, [6]);
+        verify(!confirm.opened);
+    }
+
     // Asked again with other lines (`again`), as if it never closed: those
     // still there keep their picks, and the current line stays on its line,
     // or goes to the next one left, still highlighted.
@@ -5422,7 +5641,7 @@ TestCase {
         tryCompare(confirm, "opened", true);
         // Its key is on its button, and with Y in the keys listed.
         compare(confirm.extraKeys, "d");
-        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "YD"]);
+        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "/", "YD"]);
         keyClick(Qt.Key_D, Qt.ShiftModifier);
         verify(confirm.opened);
         verify(confirm.rowShown);
