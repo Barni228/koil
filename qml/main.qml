@@ -1883,36 +1883,46 @@ ApplicationWindow {
     }
 
     // Space u: lists the applies Koil can undo, of every session (see
-    // history.rs), newest first, to pick from (with the newer ones each
-    // needs, see Koil::undoable), none picked, the first highlighted; Yes
-    // undoes the picked ones (Y the current one or those v selected: see
+    // history.rs), newest first, each a heading (when it was applied, in
+    // the color of how old that is, and where) over its steps, the lines
+    // to pick from, so one of them can be undone without the others (with
+    // the steps it needs, see Koil::undoable): none picked, the cursor on
+    // all of the first apply, which Space picks, until l goes into it, on
+    // one of its steps (see ConfirmDialog's groups); an apply with many
+    // shows only some until then. Yes undoes the picked ones (Y the
+    // current apply's or step's, or those of the rows v selected: see
     // undoLines), and Delete from History (d, D) forgets them, once
     // the user confirms it. Those that can't be undone now say why, and
     // can be picked only to delete them. `keep` asks it as a question was
     // (see askToApply).
     function undoApply(keep) {
-        const applies = undoHistory();
-        if (!applies)
+        const history = undoHistory();
+        if (!history)
             return;
-        if (!applies.length) {
+        if (!history.steps.length) {
             vim.showMessage("Nothing to undo");
             return;
         }
         vim.showMessage("");
-        // Each one's time in the color of how old it is.
-        const lines = applies.map(a => Object.assign({ picked: false,
-            lead: { length: a.time.length, color: theme.ageColor(a.age) } }, a));
-        const any = lines.some(a => !a.blocked);
+        const lines = history.steps.map(step => Object.assign({ picked: false }, step));
+        const groups = history.applies.map(apply => ({
+            key: apply.key,
+            text: apply.text,
+            lead: { length: apply.time.length, color: theme.ageColor(apply.age) },
+            open: apply.open,
+            note: apply.steps.length === 1 ? "1 change" : apply.steps.length + " changes"
+        }));
+        const any = lines.some(line => !line.blocked);
         const question = (count, picked) => {
-            const blocked = lines.filter((a, i) => a.blocked && picked[i]).length;
+            const blocked = lines.filter((line, i) => line.blocked && picked[i]).length;
             return !count ? (any ? "Pick what to undo" : "Nothing can be undone now")
-                : blocked ? (blocked < count ? blocked + " of the picked applies"
-                    : count === 1 ? "The picked apply" : "The picked applies") + " can't be undone, only deleted"
-                : count === 1 && picked[0] ? "Undo the last apply?"
-                : "Undo " + count + (count === 1 ? " apply?" : " applies?");
+                : blocked ? (blocked < count ? blocked + " of the picked changes"
+                    : count === 1 ? "The picked change" : "The picked changes") + " can't be undone, only deleted"
+                : "Undo " + count + (count === 1 ? " change?" : " changes?");
         };
         confirmDialog.ask(question, lines, undoLines, null, null, {
             keywords: changeKeywords,
+            groups: groups,
             yes: "Undo",
             cancel: true,
             showRow: true,
@@ -1921,50 +1931,56 @@ ApplicationWindow {
         });
     }
 
-    // Yes in undoApply: undoes the applies `lines` (y the picked ones, Y
-    // the current one or those v selected), with the newer ones they need
-    // undone first; if there are any, it asks first (see confirmMore).
+    // Yes in undoApply: undoes the steps `lines` (y the picked ones, Y the
+    // current row's, or those of the rows v selected), with the ones they
+    // need undone first; if there are any, it asks first (see confirmMore).
     function undoLines(lines) {
         const all = confirmDialog.withNeeds(lines), more = all.length - lines.length;
-        confirmMore(lines, all, "Undo these " + all.length + " applies? " + (more === 1 ? "1 of them is a newer one" : more
-            + " of them are newer ones") + " the one" + (lines.length === 1 ? "" : "s") + " you chose can't be undone without.",
+        confirmMore(lines, all, "Undo these " + all.length + " changes? " + (more === 1 ? "1 of them is" : more
+            + " of them are") + " needed by the one" + (lines.length === 1 ? "" : "s") + " you chose.",
             "Undo", undoPicked, place => undoApply({ again: place }));
     }
 
-    // Forgets the applies `picked` (indexes into what `Koil.history`
-    // gave: d the picked ones, D the current one or those v
-    // selected), once the user confirms it, listing them, so they can't be
-    // undone.
+    // Forgets the steps `picked` (indexes into the steps `Koil.history`
+    // gave: d the picked ones, D the current row's, or those of the rows v
+    // selected), once the user confirms it, listing them, so they can't
+    // be undone; an apply keeps its others.
     function forgetApplies(picked) {
         const one = picked.length === 1, items = confirmDialog.items;
-        const them = one ? "this apply" : "these " + picked.length + " applies";
+        const them = one ? "this change" : "these " + picked.length + " changes";
+        // An empty line between them if one takes several, as in the list.
+        const gap = picked.some(i => items[i].text.includes("\n")) ? "\n\n" : "\n";
         confirmDialog.ask("Delete " + them + " from the undo history? " + (one ? "It" : "They")
-            + " can't be undone after that.", picked.map(i => items[i].text).join("\n\n"), () => {
+            + " can't be undone after that.", picked.map(i => items[i].text).join(gap), () => {
             koil.forgetHistory(JSON.stringify(picked));
-            vim.showMessage((one ? "1 apply" : picked.length + " applies") + " deleted from the undo history");
+            vim.showMessage((one ? "1 change" : picked.length + " changes") + " deleted from the undo history");
         }, null, null, { keywords: changeKeywords, yes: "Delete", cancel: true });
     }
 
     // u with no change left to undo: undoes the last apply alone (the
-    // newest of every session), once the user confirms it, listing what
-    // undoing it does. With nothing to undo it says nothing (u has already).
+    // newest of every session), all of it, once the user confirms it,
+    // listing what undoing it does. With nothing to undo it says nothing
+    // (u has already).
     function undoLast() {
-        const applies = undoHistory();
-        if (!applies?.length)
+        const history = undoHistory();
+        if (!history?.applies.length)
             return;
-        const last = applies[0];
+        const last = history.applies[0];
         if (last.blocked) {
             vim.showError("Can't undo: " + last.blocked);
             return;
         }
         vim.showMessage("");
-        confirmDialog.ask("Undo the last apply?", last.steps.join("\n"), () => undoPicked([0]), null, null,
+        // Its steps are the list's first.
+        const steps = last.steps.map((step, i) => i);
+        confirmDialog.ask("Undo the last apply?", last.steps.join("\n"), () => undoPicked(steps), null, null,
             { keywords: changeKeywords, yes: "Undo", cancel: true });
     }
 
-    // The applies Koil can undo (`Koil.history`), newest first, or null if
-    // the listing can't be read, or nothing can be undone now (which the
-    // status line says why).
+    // The applies Koil can undo, newest first, and their steps
+    // (`Koil.history`: `{ applies, steps }`), or null if the listing can't
+    // be read, or nothing can be undone now (which the status line says
+    // why).
     function undoHistory() {
         // Undo may have taken the listing back to before an update, which
         // Koil must see before anything can be undone.
@@ -1975,11 +1991,11 @@ ApplicationWindow {
             vim.showError(r.message);
             return null;
         }
-        return r.applies;
+        return r.history;
     }
 
-    // Undoes the applies `picked` (indexes into what `Koil.history` gave),
-    // and shows the listing again where it was.
+    // Undoes the steps `picked` (indexes into the steps `Koil.history`
+    // gave), and shows the listing again where it was.
     function undoPicked(picked) {
         const spot = listingSpot();
         const u = JSON.parse(koil.undo(JSON.stringify(picked)));

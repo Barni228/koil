@@ -2173,51 +2173,119 @@ fn test_history() {
     apply_rename(&mut koil, "notes", "notes2");
     apply_rename(&mut koil, "notes2", "notes3");
     apply_rename(&mut koil, "file.rs", "main.rs");
-    let lines = history(&koil).unwrap();
-    // newest first, each with when it was applied and what undoing it does
-    let texts: Vec<Vec<&str>> = (lines.iter())
-        .map(|line| line.text.lines().skip(1).collect())
-        .collect();
+    let list = history(&koil).unwrap();
+    // newest first, each a heading with when it was applied
+    assert_eq!(list.applies.len(), 3);
+    let time = |i: usize| show_time(list.applied[i].time);
+    assert!((0..3).all(|i| list.applies[i].text == time(i)));
+    assert!((0..3).all(|i| list.applies[i].time == time(i)));
+    assert!(list.applies.iter().all(|apply| apply.age == "today"));
+    assert!(list.applies.iter().all(|apply| apply.open));
+    let mut keys: Vec<&str> = list.applies.iter().map(|a| a.key.as_str()).collect();
+    keys.dedup();
+    assert_eq!(keys.len(), 3);
+    // and under each what undoing it does, a line to pick a step
+    let texts: Vec<&str> = list.steps.iter().map(|step| step.text.as_str()).collect();
     assert_eq!(
         texts,
         [
-            ["MOVE    main.rs -> file.rs"],
-            ["MOVE    notes3 -> notes2"],
-            ["MOVE    notes2 -> notes"]
+            "MOVE    main.rs -> file.rs",
+            "MOVE    notes3 -> notes2",
+            "MOVE    notes2 -> notes"
         ]
     );
-    let time = |line: &HistoryLine| show_time(line.applied.time);
-    assert!(
-        lines
-            .iter()
-            .all(|line| line.text.starts_with(&(time(line) + "\n")))
-    );
-    assert!(lines.iter().all(|line| line.time == time(line)));
-    assert!(lines.iter().all(|line| line.age == "today"));
+    let at: Vec<(usize, usize)> = (list.steps.iter())
+        .map(|step| (step.group, step.step))
+        .collect();
+    assert_eq!(at, [(0, 0), (1, 0), (2, 0)]);
     // the first rename can't be undone without the second one
-    let needs: Vec<&[usize]> = lines.iter().map(|line| line.needs.as_slice()).collect();
+    let needs: Vec<&[usize]> = list.steps.iter().map(|s| s.needs.as_slice()).collect();
     assert_eq!(needs, [&[][..], &[], &[1]]);
-    assert!(lines.iter().all(|line| line.blocked.is_none()));
+    assert!(list.steps.iter().all(|step| step.blocked.is_none()));
+    assert!(list.applies.iter().all(|apply| apply.blocked.is_none()));
 
     // what's gone on disk can't be put back
     fs::remove_file(temp.path().join("main.rs")).unwrap();
-    let lines = history(&koil).unwrap();
-    assert_eq!(lines[0].blocked.as_deref(), Some("`main.rs` is gone"));
+    let list = history(&koil).unwrap();
+    assert_eq!(list.steps[0].blocked.as_deref(), Some("`main.rs` is gone"));
     assert_eq!(
-        lines[0].text.lines().last(),
+        list.applies[0].blocked.as_deref(),
+        Some("`main.rs` is gone")
+    );
+    assert_eq!(
+        list.steps[0].text.lines().last(),
         Some("Can't be undone: `main.rs` is gone")
     );
-    assert!(lines[1].blocked.is_none());
+    assert!(list.steps[1].blocked.is_none());
 
     // and where it was applied, from another dir
     let dir = show_path(koil.current_dir());
     koil.open(temp.path().join("dir")).unwrap();
-    let lines = history(&koil).unwrap();
-    let header = format!("{}  {dir}", time(&lines[1]));
-    assert_eq!(lines[1].text.lines().next(), Some(header.as_str()));
-    // while its steps, as `u` lists them, are relative to the open dir
+    let list = history(&koil).unwrap();
+    let header = format!("{}  {dir}", show_time(list.applied[1].time));
+    assert_eq!(list.applies[1].text, header);
+    // its steps are relative to that dir, but as `u` lists them, to the
+    // open one
+    assert_eq!(list.steps[1].text, "MOVE    notes3 -> notes2");
     assert_eq!(
-        lines[1].steps,
+        list.applies[1].steps,
         [format!("MOVE    {dir}/notes3 -> {dir}/notes2")]
     );
+}
+
+/// An apply's steps are lines of their own, each with what it needs, and
+/// one with many shows them only once it's opened.
+#[test]
+fn test_history_steps() {
+    let (temp, mut koil) = koil();
+    for i in 0..12 {
+        fs::write(temp.path().join(format!("many{i:02}")), "").unwrap();
+    }
+    koil.open(temp.path()).unwrap();
+    // one apply renames them all, and another one two files
+    let entries: Vec<Entry> = (koil.listing().into_iter())
+        .map(
+            |entry| match entry.name.to_string_lossy().strip_prefix("many") {
+                Some(n) => Entry {
+                    name: format!("more{n}").into(),
+                    ..entry
+                },
+                None => entry,
+            },
+        )
+        .collect();
+    koil.update(&entries).unwrap();
+    koil.apply().unwrap();
+    let entries: Vec<Entry> = (koil.listing().into_iter())
+        .map(|entry| match entry.name.to_str() {
+            Some("notes") => Entry {
+                name: "notes2".into(),
+                ..entry
+            },
+            Some("more00") => Entry {
+                name: "last".into(),
+                ..entry
+            },
+            _ => entry,
+        })
+        .collect();
+    koil.update(&entries).unwrap();
+    koil.apply().unwrap();
+
+    let list = history(&koil).unwrap();
+    let opens: Vec<bool> = list.applies.iter().map(|apply| apply.open).collect();
+    assert_eq!(opens, [true, false]);
+    assert_eq!(list.steps.len(), 14);
+    let groups: Vec<usize> = list.steps.iter().map(|step| step.group).collect();
+    assert_eq!(groups[..3], [0, 0, 1]);
+    // `many00` back needs `last` back to `more00` first, a step of the
+    // newer apply, and nothing else does
+    let line = |text: &str| list.steps.iter().position(|s| s.text == text).unwrap();
+    let (newer, older) = (
+        line("MOVE    last -> more00"),
+        line("MOVE    more00 -> many00"),
+    );
+    assert_eq!(list.steps[older].needs, [newer]);
+    let others = (0..14).filter(|&i| i != older);
+    assert!(others.clone().all(|i| list.steps[i].needs.is_empty()));
 }

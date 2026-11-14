@@ -601,41 +601,62 @@ the scratchpad (see Scratchpad).
   ("Apply 2 of these 5 changes and quit without the rest?"), and there's
   no Discard, as No quits without them all.
 - **Undo history** (`undoApply`, koil-core's `Koil::undoable` and
-  `Koil::undo_only`): `Space u` (from the listing or the path field)
+  `Koil::undo_some`): `Space u` (from the listing or the path field)
   updates (vim's undo may have taken the buffer back past an update) and
   lists the applies (and Enter's creates) koil can undo, newest first, in
-  `ConfirmDialog` (`listing::history`: each one's time, its dir if it
-  isn't the open one, and what undoing it does, up to `SHOWN_STEPS`
-  steps, relative to its dir). The time is in the color of how old it is
+  `ConfirmDialog` (`listing::history`, a `HistoryList`): each a heading
+  (a group, see Questions: its time, and its dir if it isn't the open
+  one, with how many changes it has at the row's end), over what undoing
+  it does, a step a line to pick from, relative to its dir, so one change
+  of an apply can be undone without the others (it was all of an apply
+  or nothing). The cursor is on all of an apply at first, as it was
+  when an apply was a line: `j` and `k` go from apply to apply, Space
+  picks all of one (its heading's box shows whether all, some or none
+  are picked), and `Y` and `D` take it. `l` (or Right, or Tab) goes into
+  it, where the cursor is on one of its steps, and `j` and `k` stay in
+  it, until `h` (or Left, or Tab again) goes out. An apply with more
+  than `SHOWN_STEPS` (10) steps shows only three of them while the
+  cursor isn't in it, those picked first, then a row that says how many
+  more it has ("… 21 more"), and its heading says how many of its steps
+  are of each kind, in their colors (`16 MOVE · 4 TRASH`), in place of
+  how many it has, so what's in it can be told without going in; going
+  in shows them all, as a click on that row or its arrow does. The
+  time is in the color of how old it is
   (`listing::age`, by what `time_ago` counts it in; `theme.ageColor`:
   under a day cyan, days blue, weeks purple, months dim, a year or more
   faint, so the newest stand out, and none is a change's color), which
-  main.qml gives the line as its `lead` (`{ length, color }`, the start
-  of a line to pick from in a color: `rowParts`); koil refuses while changes are pending.
-  None is picked at first, and the first is highlighted at once
+  main.qml gives the heading as its `lead` (`{ length, color }`, the
+  start of a row's text in a color: `rowParts`); koil refuses while changes are pending.
+  None is picked at first, and the first row is highlighted at once
   (`ask`'s `showRow`). `u` or Cmd+Z with nothing left
   to undo in vim emits `nothingToUndo`, and `undoLast` asks only about
   the last apply alone: "Undo the last apply?"
   over every step undoing it does, relative to the open dir
-  (`HistoryLine::steps`), or says why it can't be undone. Not from the
-  path field, whose undo history is its own. An apply needs the newer
-  ones that changed a path it changed, or one in it or that it's in
-  (koil-core's `Undoable::needs`), which picking it picks. One that can't
-  be undone now (koil-core checks every step against the disk, with what
+  (`HistoryApply::steps`), all of which it undoes, or says why it can't
+  be undone (`HistoryApply::blocked`, the apply's as a whole). Not from the
+  path field, whose undo history is its own. A step needs the steps that
+  run before it (a newer apply's, or one before it in its own) that
+  changed a path it changed, or one in it or that it's in
+  (koil-core's `UndoableStep::needs`), which picking it picks. One that can't
+  be undone now (koil-core checks it against the disk, with the steps
   it needs: something gone, or taken, or emptied from the trash) says
-  why, in the error's color, and is dimmed, with a crossed out box
-  (`blocked`, the reason). Yes undoes the picked
-  ones, newest first (`Koil.undo(picked)`, indexes into the
-  `shown_history` that `history()` kept), and is off while one that
+  why on a line under it, in the error's color, and is dimmed, with a
+  crossed out box (`blocked`, the reason), but the other steps of its
+  apply can still be undone. Yes undoes the picked
+  ones, newest first (`Koil.undo(picked)`, indexes into the steps
+  `history()` gave, which `Koil` keeps as `shown_steps`, each an apply of
+  `shown_history` and one of its steps: `picked_steps`), and is off while one that
   can't be undone is picked (`blockedPicked`); a step koil can see won't run
-  undoes nothing. Delete from History (`d`; `ask`'s `extra`, a button
+  undoes nothing. An apply keeps the steps that weren't undone, under
+  the same time, and goes once it has none. Delete from History (`d`; `ask`'s `extra`, a button
   on the left, apart from the choices, where the highlight doesn't start,
   so Enter answers it only once it's moved there, and off while none is
-  picked) asks again, then forgets the picked ones
-  (`Koil.forgetHistory`, `History::forget`, by their time, also for
-  other Koils), so they can't be undone: it's what one that can't be
+  picked) asks again, then forgets the picked steps
+  (`Koil.forgetHistory`, `History::forget`, by their apply's time and
+  their index in it, also for other Koils; an apply keeps its others),
+  so they can't be undone: it's what one that can't be
   undone is picked for (its box filled in the error's color, with a
-  cross; `a` picks only the others). An older apply that needed one deleted is then checked
+  cross; `a` picks only the others). An older step that needed one deleted is then checked
   against the disk without it. Undoing always asks (a `u` too many mustn't change files
   unasked). The history lasts across sessions (`History` in history.rs):
   it's in `history.json` in Koil's data dir (`~/Library/Application
@@ -2634,12 +2655,10 @@ the scratchpad (see Scratchpad).
   `no` in listing.rs, like Delete and Keep), with the same keys, so a new
   question should name them too, and where the other one does nothing,
   be asked with `cancel`, as "No" beside a verb reads as another thing to
-  do. The highlighted button (`current`, what it answers), which Enter
-  clicks, is in the accent's color: it starts on Yes, and h and l (Left
-  and Right, Shift+Tab and Tab) move it through every button that's on
-  (`order`, left to right: Select All, the button apart, then the
-  choices; `moveCurrent`), round from the last to the first, so Enter on
-  Select All picks them and leaves the question open (`answer("all")`).
+  do. Yes is in the accent's color, and Enter answers it, always: h, l
+  and Tab moved a highlight through the buttons at first, which was
+  little use, and they're the undo history's keys now (see below), so
+  nothing moves it, and in a list without groups they do nothing.
   The box keeps the keys in one handler:
   no button or row takes them (`focusPolicy: Qt.NoFocus`, a `TapHandler`
   a row), as Space picks a row rather than clicks a button. The list is a
@@ -2661,7 +2680,49 @@ the scratchpad (see Scratchpad).
   grid of one column then, by `sideBySide`, their width in one row, so
   the box's width doesn't depend on which it is). The layout doesn't
   shrink a button under its width: in one row they went past the box's
-  edge in a narrow window.
+  edge in a narrow window. The lines to pick from can be in groups
+  (`ask`'s `groups`, the undo history's applies): each a heading row over
+  its lines, which are further in, with a box that is its lines'
+  (`groupPicks`: a dash while only some are picked; Space on it picks
+  those Yes can do, `linesOf`). The list's model is `rows`, what shows
+  (`shownRows`: `{ item }` a line, `{ group }` a heading, and `{ more }`,
+  the row that says how many more lines a closed group has, with no box,
+  as it has no lines of its own), which the current row and `v`'s other
+  end index, so without groups a row's index is its line's, as before.
+  With groups the cursor has two levels (`inside`, the group it's in, or
+  -1). Out of one, `row` is a heading's, and the cursor is on all of that
+  group's rows (`cursorRows`, `spanOf`; `selectedRows` for `v`'s), which
+  the rows draw as one shape: each goes a pixel under the next, in a
+  color made opaque (`Qt.tint` on the base), as see-through ones showed a
+  line between the rows, or a darker one where they overlapped; `j`, `k`,
+  `g` and `G` go by headings (`moveRow`, `moveToEnd`), and Space, `Y` and
+  `D` on a heading are its group's lines. `l`, Right or Tab goes in
+  (`goIn`, `putIn`: `enter` is `Popup`'s own), on the group's first line,
+  where `j` and `k` stop at its first and last, and `h`, Left or Tab goes
+  out (`goOut`), back on all of it. A group asked with `open: false` (and
+  more than `preview` + 1 lines: `canClose`) shows all its lines only
+  while the cursor is in it (`isOpen`); else `preview` (3) of them, those
+  picked first, then the others, in their order (`previewOf`), and the
+  row for the rest, so a pick made inside still shows once the cursor is
+  out, and an apply of thousands of steps makes few rows until it's gone
+  into. A pick can change which show (`syncRows`, after `setPicked` and
+  `pickAll`, which makes the model again only if they're other lines).
+  After such a group's heading is how many of its lines start with each
+  keyword, most first (`groupKinds`, counted in `ask`; `groupNote`,
+  styled text, the keywords in their colors and the editor's font), if
+  they all start with one, else its `note`, which it shows while the
+  cursor is in it. A click picks the line or the group clicked, wherever
+  the cursor is, which goes there only where that moves no row (among
+  the groups, or to a line of the group it's in), and on the row for the
+  rest, or a heading's arrow, the cursor goes into that group
+  (`clickRow`). The model is made again as the cursor goes in or out,
+  so the list is scrolled back as far as it was, then to the cursor's
+  rows (`showRow`: to the last of them, then the first, and twice, as a
+  row made as the list jumps to it is placed by a guess of its height,
+  which cut the second line of the last row off after `G`). A line is
+  told apart by its group's `key` and its text (`itemKeys`), as two
+  applies can have the same step, and asked again (`place`), the cursor
+  is in the group it was in.
 - **QML's JavaScript**: don't make a binding depend on something by reading it
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The

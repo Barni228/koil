@@ -125,14 +125,55 @@ fn test_forget() {
     koil_two.set_history(vec![c.clone()]);
     two.merge(&mut koil_two);
 
-    // as they were shown, before a sync changed their steps
+    // as they were shown, before a sync changed their steps' paths
     let shown = |applied: &Applied| Applied {
-        steps: Vec::new(),
+        steps: vec![Undo::Trash(PathBuf::from("/moved"))],
         ..applied.clone()
     };
-    one.forget(&mut koil_one, &[shown(&b), shown(&c)]);
+    one.forget(&mut koil_one, &[(shown(&b), vec![0]), (shown(&c), vec![0])]);
     assert_eq!(std::slice::from_ref(&a), koil_one.history());
     assert_eq!(Some(vec![a.clone()]), read(&path));
     two.merge(&mut koil_two);
     assert_eq!([a], koil_two.history());
+}
+
+/// Forgetting some of an apply's steps leaves it with the others, for
+/// other Koils too.
+#[test]
+fn test_forget_steps() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("history.json");
+    let (mut one, mut two) = (
+        History::at(Some(path.clone())),
+        History::at(Some(path.clone())),
+    );
+    let (mut koil_one, mut koil_two) = (Koil::default(), Koil::default());
+    let step = |path: &str| Undo::Trash(PathBuf::from(path));
+    let a = Applied {
+        steps: vec![step("/a"), step("/b"), step("/c")],
+        ..applied(1, "/a")
+    };
+    let b = applied(2, "/d");
+    koil_one.set_history(vec![a.clone(), b.clone()]);
+    one.merge(&mut koil_one);
+    two.merge(&mut koil_two);
+    assert_eq!([a.clone(), b.clone()], koil_two.history());
+
+    one.forget(&mut koil_one, &[(a.clone(), vec![0, 2])]);
+    let left = Applied {
+        steps: vec![step("/b")],
+        ..a.clone()
+    };
+    assert_eq!([left.clone(), b.clone()], koil_one.history());
+    two.merge(&mut koil_two);
+    assert_eq!([left.clone(), b.clone()], koil_two.history());
+
+    // not as it was shown before that: its steps are others now
+    two.forget(&mut koil_two, &[(a.clone(), vec![0])]);
+    assert_eq!([left.clone(), b.clone()], koil_two.history());
+    // its last step takes it out
+    two.forget(&mut koil_two, &[(left.clone(), vec![0])]);
+    assert_eq!(std::slice::from_ref(&b), koil_two.history());
+    one.merge(&mut koil_one);
+    assert_eq!([b], koil_one.history());
 }

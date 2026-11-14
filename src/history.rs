@@ -63,15 +63,34 @@ impl History {
         }
     }
 
-    /// Forgets `applies` (told apart by their time, as a sync may have
-    /// changed their steps since), for other Koils too, as if this one
-    /// undid them.
-    pub fn forget(&mut self, koil: &mut Koil, applies: &[Applied]) {
+    /// Forgets steps of applies, for other Koils too, as if this one undid
+    /// them: `picked` has applies (told apart by their time, as a sync may
+    /// have changed their steps' paths since), each with the indexes of
+    /// its steps to forget. An apply keeps the others, and goes once it has
+    /// none. Not those of an apply that has other steps now than it had
+    /// (some were undone since), whose indexes are other steps'.
+    pub fn forget(&mut self, koil: &mut Koil, picked: &[(Applied, Vec<usize>)]) {
         self.merge(koil);
-        let times: HashSet<SystemTime> = applies.iter().map(|a| a.time).collect();
+        let picked: HashMap<SystemTime, (usize, HashSet<usize>)> = (picked.iter())
+            .map(|(applied, steps)| {
+                let steps = steps.iter().copied().collect();
+                (applied.time, (applied.steps.len(), steps))
+            })
+            .collect();
         let kept = (koil.history().iter())
-            .filter(|a| !times.contains(&a.time))
-            .cloned()
+            .filter_map(|applied| match picked.get(&applied.time) {
+                Some((count, steps)) if *count == applied.steps.len() => {
+                    let left: Vec<_> = (applied.steps.iter().enumerate())
+                        .filter(|(k, _)| !steps.contains(k))
+                        .map(|(_, step)| step.clone())
+                        .collect();
+                    (!left.is_empty()).then(|| Applied {
+                        steps: left,
+                        ..applied.clone()
+                    })
+                }
+                _ => Some(applied.clone()),
+            })
             .collect();
         koil.set_history(kept);
         self.merge(koil);

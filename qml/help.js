@@ -32,8 +32,9 @@ function sections(help) {
                 ["`Space a`", "Apply, always listing the changes first (so does File > Apply Changes…)."],
                 ["󰄲", "In that list, pick what to apply now (the rest stays, to apply later), or to discard: "
                     + "see `:h pick`."],
-                ["`Space u`", "Undo applies, picked from all of them, also those of earlier sessions, "
-                    + "newest first. Picking one picks the newer ones that changed the same paths. "
+                ["`Space u`", "Undo applies, or single changes of them, picked from all of them, also "
+                    + "those of earlier sessions, newest first. Picking a change picks the newer ones on the "
+                    + "same paths. "
                     + "Deleted files come back from the trash. `d` there deletes them from the history "
                     + "instead, also those that can't be undone any more (see `:h pick`)."],
                 ["`u`", "Once there's nothing left to undo: undo the last apply, after listing what that "
@@ -504,7 +505,7 @@ function sections(help) {
                 ["`Space Space`", "Apply the changes, listing them first (Settings can skip that). In a "
                     + "file: save."],
                 ["`Space a`", "Apply, always listing the changes first."],
-                ["`Space u`", "Undo applies, picked from all of them, newest first."],
+                ["`Space u`", "Undo applies, or single changes of them, picked from all of them, newest first."],
                 ["`Space r`", "Show the entry on the line (in a file, the file) in " + fileManager + "."],
                 ["`Space o`", "Open the entry on the line (in a file, the file) in its default app."],
                 ["`Space q`", "List your shortcuts, and the built-in ones (see `:h shortcuts`)."]
@@ -561,9 +562,10 @@ function sections(help) {
             // first (see HelpPanel.show).
             title: "Picking changes",
             tags: ["pick", "picking", "picked", "discard", "changes", "applies"],
-            intro: "`Space Space`, `Space a` and `Space u` list the changes (or applies) to pick from. "
-                + "Uppercase keys act on the highlighted line, picked or not. The list stays open while "
-                + "changes are left.",
+            intro: "`Space Space`, `Space a` and `Space u` list the changes to pick from. `Space u` lists "
+                + "each apply's under a heading: there the cursor is on all of an apply, until `l` goes "
+                + "into it. Uppercase keys act on what the cursor is on, picked or not. The list stays "
+                + "open while changes are left.",
             rows: [
                 ["`j`  `k`", "Move down or up."],
                 ["`g`  `G`", "Go to the first or last line."],
@@ -577,8 +579,11 @@ function sections(help) {
                     + "from the history."],
                 ["`u`", "Undo the listing's last edit, a discard, or an apply made here (its changes come "
                     + "back to pick)."],
-                ["`h`  `l`  `Enter`", "Move between the buttons (round from the last to the first), press the "
-                    + "highlighted one."],
+                ["`l`  `h`  `Tab`", "In `Space u`: go into the apply the cursor is on, to pick single "
+                    + "changes of it, and out again (`Tab` does either). One with many changes shows only "
+                    + "some until then: the picked ones first, how many more it has, and how many of each "
+                    + "kind."],
+                ["`Enter`", "The blue button: apply, or undo."],
                 ["`c`  `Esc`", "Cancel."]
             ],
             note: "`Y` and `D` ask first if the line takes others along. Quitting, `n` quits without the "

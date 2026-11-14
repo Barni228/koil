@@ -17,8 +17,8 @@ use devicons::Theme;
 use koil_core::apply::{Blocked, Undo};
 use koil_core::{
     Action, Applied, Conflict, ConflictKind, Edit, Entry, EntryErrorKind, EntryWarning, Id, Koil,
-    KoilError, Location, Metadata, OpenError, Pattern, Settings, Sort, SortBy, UpdateError,
-    UpdateOpenError, Warning, in_drives, with_slashes,
+    KoilError, Location, Metadata, OpenError, Pattern, Settings, Sort, SortBy, Undoable,
+    UpdateError, UpdateOpenError, Warning, in_drives, with_slashes,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1939,72 +1939,119 @@ pub fn describe_create(koil: &Koil, error: &KoilError) -> String {
     }
 }
 
-/// How many of an apply's steps the undo history shows; the rest are
-/// counted.
+/// An apply with more steps than this shows them only once the user opens
+/// it.
 const SHOWN_STEPS: usize = 10;
 
-/// An apply of the undo history, as the confirmation shows it to pick from
-/// (see [`history`]).
+/// The undo history as the confirmation shows it (see [`history`]): the
+/// applies, each a heading, with their steps under them, the lines to pick
+/// from.
+#[derive(Debug, Default, Serialize)]
+pub struct HistoryList {
+    /// Newest first.
+    pub applies: Vec<HistoryApply>,
+    /// An apply's after another's, in the order they'd run.
+    pub steps: Vec<HistoryStep>,
+    /// The applies, as `applies` has them.
+    #[serde(skip)]
+    pub applied: Vec<Applied>,
+}
+
+/// An apply of the undo history: the heading of its steps.
 #[derive(Debug, Serialize)]
-pub struct HistoryLine {
-    /// When it was applied, and where, if not in the open dir, then what
-    /// undoing it does, a step a line (like `TRASH   a`, relative to where
-    /// it was applied), and why it can't be undone now, if it can't.
+pub struct HistoryApply {
+    /// What tells it apart from the others, also when the list is made
+    /// again: when it was applied.
+    pub key: String,
+    /// When it was applied, and where, if not in the open dir.
     pub text: String,
-    /// The lines (in the list) it can't be undone without: newer applies
-    /// that changed the same paths.
-    pub needs: Vec<usize>,
-    /// Why it can't be undone now (see `Undoable::blocked`), if it can't.
-    pub blocked: Option<String>,
     /// When it was applied, as `text` starts with it, and how old that is
     /// (see [`age`]), which colors it.
     pub time: String,
     pub age: &'static str,
+    /// Why it can't all be undone now (see `Undoable::blocked`), if it
+    /// can't.
+    pub blocked: Option<String>,
     /// What undoing it does, every step, relative to the open dir, as `u`
     /// lists the last apply on its own.
     pub steps: Vec<String>,
-    #[serde(skip)]
-    pub applied: Applied,
+    /// Whether its steps show at first: not those of one with many.
+    pub open: bool,
 }
 
-/// Koil's undo history (`Koil::undoable`), newest first, as lines to pick
-/// from. Fails if there are changes that aren't applied.
-pub fn history(koil: &Koil) -> Result<Vec<HistoryLine>, String> {
+/// A step of an apply of the undo history, as the confirmation shows it to
+/// pick from.
+#[derive(Debug, Serialize)]
+pub struct HistoryStep {
+    /// What it does, like `TRASH   a`, relative to where it was applied,
+    /// and on a line after it, why it can't be undone now, if it can't.
+    pub text: String,
+    /// Its apply (in `applies`), and which of its steps it is.
+    pub group: usize,
+    pub step: usize,
+    /// The lines (in `steps`) it can't be undone without: those that run
+    /// before it and changed the same paths.
+    pub needs: Vec<usize>,
+    /// Why it can't be undone now (see `UndoableStep::blocked`), if it
+    /// can't.
+    pub blocked: Option<String>,
+}
+
+/// Koil's undo history (`Koil::undoable`), newest first, as headings and
+/// the lines to pick from. Fails if there are changes that aren't applied.
+pub fn history(koil: &Koil) -> Result<HistoryList, String> {
     let undoable = koil.undoable().map_err(|e| describe(&e))?;
-    let newest = undoable.len().saturating_sub(1);
-    let lines = undoable.into_iter().rev().map(|undoable| {
-        let dir = &undoable.applied.dir;
-        let time = show_time(undoable.applied.time);
-        let age = age(undoable.applied.time, SystemTime::now());
-        // Where, if it's not the open dir.
-        let mut text = match dir == koil.current_dir() {
-            true => time.clone(),
-            false => format!("{time}  {}", show_path(dir)),
-        };
-        let steps = &undoable.applied.steps;
-        for step in steps.iter().take(SHOWN_STEPS) {
-            text += &format!("\n{}", undo_text(dir, step));
-        }
-        if steps.len() > SHOWN_STEPS {
-            text += &format!("\n… {} more", steps.len() - SHOWN_STEPS);
-        }
-        let blocked =
-            (undoable.blocked.as_ref()).map(|(_, blocked)| describe_blocked(dir, blocked));
-        if let Some(why) = &blocked {
-            text += &format!("\nCan't be undone: {why}");
-        }
-        let open = koil.current_dir();
-        HistoryLine {
-            text,
-            needs: undoable.needs.iter().map(|j| newest - j).collect(),
+    // Where each apply's steps start in the list, by its index in koil's.
+    let mut starts = vec![0; undoable.len()];
+    let mut next = 0;
+    for (j, undoable) in undoable.iter().enumerate().rev() {
+        starts[j] = next;
+        next += undoable.steps.len();
+    }
+    let (open, now) = (koil.current_dir(), SystemTime::now());
+    let mut list = HistoryList::default();
+    for (group, undoable) in undoable.into_iter().rev().enumerate() {
+        let Undoable {
+            applied,
             blocked,
-            time,
-            age,
-            steps: steps.iter().map(|step| undo_text(open, step)).collect(),
-            applied: undoable.applied,
+            steps,
+            ..
+        } = undoable;
+        let dir = &applied.dir;
+        for (step, (undo, each)) in applied.steps.iter().zip(steps).enumerate() {
+            let blocked = (each.blocked.as_ref()).map(|(_, why)| describe_blocked(dir, why));
+            let mut text = undo_text(dir, undo);
+            if let Some(why) = &blocked {
+                text += &format!("\nCan't be undone: {why}");
+            }
+            list.steps.push(HistoryStep {
+                text,
+                group,
+                step,
+                needs: each.needs.iter().map(|&(j, k)| starts[j] + k).collect(),
+                blocked,
+            });
         }
-    });
-    Ok(lines.collect())
+        let time = show_time(applied.time);
+        let since = applied.time.duration_since(SystemTime::UNIX_EPOCH);
+        list.applies.push(HistoryApply {
+            key: since.map_or(0, |since| since.as_nanos()).to_string(),
+            // Where, if it's not the open dir.
+            text: match dir == open {
+                true => time.clone(),
+                false => format!("{time}  {}", show_path(dir)),
+            },
+            time,
+            age: age(applied.time, now),
+            blocked: blocked.map(|(_, why)| describe_blocked(dir, &why)),
+            steps: (applied.steps.iter())
+                .map(|step| undo_text(open, step))
+                .collect(),
+            open: applied.steps.len() <= SHOWN_STEPS,
+        });
+        list.applied.push(applied);
+    }
+    Ok(list)
 }
 
 /// What undo `step` of an apply in `dir` does, as the user sees it, like

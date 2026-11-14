@@ -5085,63 +5085,224 @@ TestCase {
         keyClick(Qt.Key_Escape);
     }
 
-    // h and l (Left and Right, Shift+Tab and Tab) move the highlight
-    // through every button that's on, the list's too, and round, and Enter
-    // clicks the highlighted one.
+    // Yes is the button Enter answers, whatever is pressed: h, l, Tab and
+    // the arrows do nothing in a list without groups.
     function test_confirmButtons() {
-        let chosen = null, discarded = null;
+        let chosen = null;
         const lines = ["A", "B"].map(text => ({ text: text, needs: [] }));
-        const extra = { label: "Discard", key: Qt.Key_D, action: picked => discarded = picked };
-        confirm.ask("Apply?", lines, picked => chosen = picked, null, null, { extra: extra, cancel: true });
+        confirm.ask("Apply?", lines, picked => chosen = picked, null, null, { cancel: true });
         tryCompare(confirm, "opened", true);
-        compare(confirm.order, ["all", "extra", "yes", "cancel"]);
-        compare(confirm.current, "yes");
-        keyClick(Qt.Key_L);
-        compare(confirm.current, "cancel");
-        keyClick(Qt.Key_Tab);
-        compare(confirm.current, "all");
-        keyClick(Qt.Key_Right);
-        compare(confirm.current, "extra");
-        keyClick(Qt.Key_H);
-        keyClick(Qt.Key_Left);
-        compare(confirm.current, "cancel");
+        for (const key of [Qt.Key_L, Qt.Key_H, Qt.Key_Tab, Qt.Key_Left, Qt.Key_Right])
+            keyClick(key);
         keyClick(Qt.Key_Backtab, Qt.ShiftModifier);
-        compare(confirm.current, "yes");
-        // Enter on Select All picks none, and leaves it open; then Yes and
-        // Discard are off, which the highlight goes past.
-        keyClick(Qt.Key_H);
-        keyClick(Qt.Key_H);
-        compare(confirm.current, "all");
+        verify(confirm.opened);
+        verify(!confirm.rowShown);
+        compare(confirm.inside, -1);
+        // Select All's button leaves the question open, and with none
+        // picked Enter does nothing.
+        confirm.answer("all");
+        compare(confirm.picked, [false, false]);
         keyClick(Qt.Key_Return);
         verify(confirm.opened);
-        compare(confirm.picked, [false, false]);
-        keyClick(Qt.Key_L);
-        compare(confirm.current, "cancel");
-        keyClick(Qt.Key_L);
-        compare(confirm.current, "all");
+        confirm.answer("all");
         keyClick(Qt.Key_Return);
-        compare(confirm.picked, [true, true]);
-        // Enter on the button apart clicks it.
-        keyClick(Qt.Key_L);
-        compare(confirm.current, "extra");
-        keyClick(Qt.Key_Return);
-        compare(discarded, [0, 1]);
-        compare(chosen, null);
+        compare(chosen, [0, 1]);
         verify(!confirm.opened);
-        // Without a list, only the choices.
-        confirm.ask("Save?", "", () => {}, () => {});
+        // Without a list too.
+        let saved = false;
+        confirm.ask("Save?", "", () => saved = true, () => {});
         tryCompare(confirm, "opened", true);
-        compare(confirm.order, ["yes", "no", "cancel"]);
-        keyClick(Qt.Key_H);
-        compare(confirm.current, "cancel");
         keyClick(Qt.Key_L);
-        compare(confirm.current, "yes");
+        keyClick(Qt.Key_Tab);
+        keyClick(Qt.Key_Return);
+        verify(saved);
+    }
+
+    // Lines in groups: a heading over each one's lines, whose box is all
+    // of theirs. The cursor is on all of a group, and j and k go from one
+    // to the next, until l (or Tab) goes into it, where it's on a line of
+    // it, and h (or Tab) goes out again. One that's closed shows some of
+    // its lines, the picked ones first, then a row for the others, and
+    // what its lines are after its heading, until the cursor goes into it.
+    function test_confirmGroups() {
+        const line = (text, group, more) => Object.assign({ text: text, needs: [], group: group, picked: false }, more);
+        const lines = [
+            line("A", 0), line("B", 0, { needs: [0] }),
+            line("C", 1, { blocked: "gone" }), line("D", 1, { needs: [1] }), line("E", 1), line("F", 1), line("G", 1),
+            line("MOVE h", 2), line("MOVE i", 2), line("TRASH j", 2), line("MOVE k", 2), line("MOVE l", 2),
+            line("TRASH m", 2)
+        ];
+        const groups = [
+            { key: "1", text: "one", note: "2 <changes>" },
+            { key: "2", text: "two" },
+            { key: "3", text: "three", open: false, note: "6 changes" }
+        ];
+        const options = { groups: groups, keywords: { MOVE: "rename", TRASH: "delete" } };
+        const shown = () => confirm.rows.map(at => at.group !== undefined ? "g" + at.group
+            : at.more !== undefined ? "m" + at.more : at.item);
+        const pickedLines = () => confirm.picked.map((p, i) => p ? i : -1).filter(i => i >= 0);
+        let chosen = null;
+        confirm.ask("Undo?", lines, picked => chosen = picked, null, null, Object.assign({ showRow: true }, options));
+        tryCompare(confirm, "opened", true);
+        // The third one shows its first lines, and a row for the others;
+        // the others say nothing of closing.
+        compare(shown(), ["g0", 0, 1, "g1", 2, 3, 4, 5, 6, "g2", 7, 8, 9, "m2"]);
+        compare(confirm.rowCount, 14);
+        compare([0, 1, 2].map(g => confirm.canClose(g)), [false, false, true]);
+        compare(confirm.moreText(2), "… 3 more");
+        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "lhTab", "Y"]);
+        compare(confirm.copyText(), "one\n  A\n  B\ntwo\n  C\n  D\n  E\n  F\n  G\nthree\n  MOVE h\n  MOVE i\n"
+            + "  TRASH j\n  MOVE k\n  MOVE l\n  TRASH m");
+        // After a closed one's heading, how many of its lines are what,
+        // most first; else its note.
+        compare(confirm.groupKinds[2], [{ word: "MOVE", count: 4 }, { word: "TRASH", count: 2 }]);
+        compare(confirm.groupKinds[0], []);
+        compare(confirm.groupNote(2), "4 <font color=\"" + theme.changeColor("rename") + "\">MOVE</font> · 2 <font color=\""
+            + theme.changeColor("delete") + "\">TRASH</font>");
+        compare(confirm.groupNote(0), "2 &lt;changes>");
+        compare(confirm.groupNote(1), "");
+
+        // The cursor is on all of a group, which Space picks, and j and k
+        // go to the next one, g and G to the first and last.
+        compare(confirm.cursorRows, [0, 2]);
+        keyClick(Qt.Key_Space);
+        compare(pickedLines(), [0, 1]);
+        compare(confirm.groupPicks(0), 2);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 3);
+        compare(confirm.cursorRows, [3, 8]);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_J);
+        compare(confirm.cursorRows, [9, 13]);
+        keyClick(Qt.Key_G);
+        compare(confirm.row, 0);
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.row, 9);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_K);
+        compare(confirm.row, 0);
+
+        // l goes into it, on its first line, and j and k stay in it.
+        keyClick(Qt.Key_L);
+        compare(confirm.inside, 0);
+        compare(confirm.cursorRows, [1, 1]);
+        keyClick(Qt.Key_K);
+        compare(confirm.row, 1);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 2);
+        keyClick(Qt.Key_Space);
+        compare(pickedLines(), [0]);
+        keyClick(Qt.Key_G);
+        compare(confirm.row, 1);
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.row, 2);
+        // h goes out, back on all of it; Tab does either.
+        keyClick(Qt.Key_L);
+        compare(confirm.inside, 0);
+        keyClick(Qt.Key_H);
+        compare(confirm.inside, -1);
+        compare(confirm.cursorRows, [0, 2]);
+        compare(confirm.groupPicks(0), 1);
+        keyClick(Qt.Key_H);
+        compare(confirm.row, 0);
+        keyClick(Qt.Key_Tab);
+        compare([confirm.inside, confirm.row], [0, 1]);
+        keyClick(Qt.Key_Tab);
+        compare([confirm.inside, confirm.row], [-1, 0]);
+        keyClick(Qt.Key_Right);
+        compare(confirm.inside, 0);
+        keyClick(Qt.Key_Left);
+        compare(confirm.inside, -1);
+
+        // Going into a closed one shows all its lines, and out of it only
+        // some again: the picked ones first.
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        keyClick(Qt.Key_L);
+        compare(confirm.inside, 2);
+        compare(shown().slice(9), ["g2", 7, 8, 9, 10, 11, 12]);
+        compare(confirm.row, 10);
+        compare(confirm.groupNote(2), "6 changes");
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        compare(confirm.row, 15);
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_Space);
+        compare(pickedLines(), [0, 10, 12]);
+        keyClick(Qt.Key_H);
+        compare(shown().slice(9), ["g2", 7, 10, 12, "m2"]);
+        compare(confirm.row, 9);
+        compare(confirm.cursorRows, [9, 13]);
+        compare(confirm.groupNote(2).indexOf("4 <font"), 0);
+        // Picked from its heading, they're its first again.
+        keyClick(Qt.Key_Space);
+        compare(pickedLines(), [0, 7, 8, 9, 10, 11, 12]);
+        compare(shown().slice(9), ["g2", 7, 8, 9, "m2"]);
+        keyClick(Qt.Key_Space);
+        compare(pickedLines(), [0]);
+
+        // v selects groups, which Space picks: all their lines that Yes can
+        // do, with what they need.
+        keyClick(Qt.Key_K);
+        compare(confirm.row, 3);
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_J);
+        compare(confirm.selectedRows, [3, 13]);
+        keyClick(Qt.Key_X);
+        compare(pickedLines(), [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        compare(confirm.anchor, -1);
+        verify(!confirm.groupBlocked(1));
+
+        // Asked again, the cursor is in the group it was in, on its line.
+        keyClick(Qt.Key_K);
+        keyClick(Qt.Key_L);
+        keyClick(Qt.Key_J);
+        compare([confirm.inside, confirm.row], [1, 5]);
+        const place = confirm.place();
+        confirm.ask("Sure?", "A\nB", () => {});
+        compare(confirm.inside, -1);
+        confirm.ask("Undo?", lines, picked => chosen = picked, null, null, Object.assign({ again: place }, options));
+        compare([confirm.inside, confirm.row], [1, 5]);
+        verify(confirm.rowShown);
+        compare(confirm.pickedCount, 12);
+        // Y on a group is Yes with its lines, shown or not.
+        keyClick(Qt.Key_H);
+        keyClick(Qt.Key_J);
+        compare(confirm.row, 9);
+        keyClick(Qt.Key_Y, Qt.ShiftModifier);
+        compare(chosen, [7, 8, 9, 10, 11, 12]);
+        verify(!confirm.opened);
+
+        // A click on the row for a closed group's other lines goes into
+        // it; one on a line or a heading picks it, wherever the cursor is,
+        // which goes there only in its own group, or among the groups.
+        confirm.ask("Undo?", lines, () => {}, null, null, options);
+        tryCompare(confirm, "opened", true);
+        compare(confirm.inside, -1);
+        confirm.clickRow(13);
+        compare([confirm.inside, confirm.row], [2, 10]);
+        compare(shown().length, 16);
+        confirm.clickRow(0);
+        compare(pickedLines(), [0, 1]);
+        compare([confirm.inside, confirm.row], [2, 10]);
+        confirm.clickRow(12);
+        compare(pickedLines(), [0, 1, 9]);
+        compare(confirm.row, 12);
+        keyClick(Qt.Key_Tab);
+        compare([confirm.inside, confirm.row], [-1, 9]);
+        compare(shown().slice(9), ["g2", 7, 8, 9, "m2"]);
+        confirm.clickRow(5);
+        compare(pickedLines(), [0, 1, 3, 9]);
+        compare(confirm.row, 3);
         keyClick(Qt.Key_Escape);
+        verify(!confirm.opened);
     }
 
     // Asked again with other lines (`again`), as if it never closed: those
     // still there keep their picks, and the current line stays on its line,
-    // or goes to the next one left, still highlighted, as is the choice.
+    // or goes to the next one left, still highlighted.
     function test_confirmAgain() {
         const lines = (texts, picked) => texts.map(text => ({ text: text, needs: [], picked: picked }));
         confirm.ask("Apply?", lines(["A", "B", "C", "D"], true), () => {}, null, null, { cancel: true });
@@ -5151,23 +5312,17 @@ TestCase {
         keyClick(Qt.Key_J); // shows the current line, the first
         keyClick(Qt.Key_J);
         keyClick(Qt.Key_J);
-        keyClick(Qt.Key_L);
         compare(confirm.row, 2);
-        compare(confirm.current, "cancel");
         // C went, so the line after it (D) is the current one; E is new.
         confirm.ask("Apply?", lines(["B", "D", "E"], false), () => {}, null, null, { cancel: true, again: true });
         compare(confirm.picked, [false, false, false]);
         compare(confirm.row, 1);
         verify(confirm.rowShown);
-        compare(confirm.current, "cancel");
         // Its own line, if it's still there, and nothing after it: the last.
         confirm.toggle(0);
         confirm.ask("Apply?", lines(["A", "B", "D"], true), () => {}, null, null, { again: true });
         compare(confirm.picked, [true, true, false]);
         compare(confirm.row, 2);
-        // A button that's gone (Cancel, as it's No now) leaves Yes
-        // highlighted.
-        compare(confirm.current, "yes");
         confirm.ask("Apply?", lines(["A"], true), () => {}, null, null, { again: true });
         compare(confirm.row, 0);
         // Without it, asked anew.
@@ -5177,7 +5332,6 @@ TestCase {
         compare(confirm.picked, [true, true]);
         compare(confirm.row, 0);
         verify(!confirm.rowShown);
-        compare(confirm.current, "yes");
         keyClick(Qt.Key_Escape);
     }
 
