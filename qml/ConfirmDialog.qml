@@ -17,13 +17,11 @@ import QtQuick.Layouts
 // and k (or Up and Down) scroll it, and g and G go to its top and bottom.
 // The list can be one to pick from (what to apply, or to undo), each row
 // with a box before it, checked if it's picked, all picked at first unless
-// a line says otherwise. Then j and k move the current row instead (g and
-// G to the first and last), Space or x (or a click on the row) picks it or
-// leaves it out, along with the lines it needs or that need it, and a (or
-// Select All) picks all of them, or none if all are. v selects rows, from
-// the current one to where j and k take it, and Space or x then picks them
-// all, or leaves them all out if they're all picked, which ends the
-// selection, as Esc and v do (Esc cancels only once there's none). A
+// a line says otherwise. That list is a PickList (`picks`), which has its
+// lines, picks, cursor, selection, groups and search, and the keys for
+// them (j, k, g, G, Space, x, a, v, /, and with groups l, h and Tab: see
+// PickList), as every list to pick from has; this draws it, and has the
+// keys that answer. A
 // question can also have u, which answers it with its own action (see
 // ask's `undo`). Y, and Shift and the key of the button apart (D), do what
 // y and the button do, but with the current row, or the rows v selected,
@@ -34,9 +32,7 @@ import QtQuick.Layouts
 // below): then Yes is off while one is picked (and a leaves them out). Yes
 // is off while none are picked, as that button is. A line to pick can take
 // several lines of text, all after its box, and then the rows are a little
-// apart, so they're told apart. The current row is highlighted only once
-// one of those keys is used (the first j or k shows it where it is, on the
-// first row), unless the question shows it at once. Under a list to pick
+// apart, so they're told apart. Under a list to pick
 // from, the keys that aren't a button's are listed, and by the buttons, how
 // many are picked. The word that starts a line of the list can be colored by what
 // it stands for, like CREATE in green, and a question can have one more
@@ -44,15 +40,13 @@ import QtQuick.Layouts
 // the picked lines, and is off while none are (see ask). Copy copies the
 // list: the rows v selected, or all of it. The lines to pick from can be in
 // groups (the undo history's applies), each a heading over its lines, with
-// a box that picks them all. Then the cursor is on all of a group, and j
-// and k go from group to group, Space picks all of one, and Y and D take
-// it, until l (or Right, or Tab) goes into it: there it's on one of its
-// lines, the first at first, and j and k stay in the group, until h (or
-// Left, or Tab again) goes out. A group with many lines shows only some
+// a box that picks them all. A group with many lines shows only some
 // while the cursor isn't in it (those picked first), then a row that says
 // how many more it has, and after its heading how many of its lines are of
 // each kind; going into it shows them all (see ask's `groups`). / searches
-// a list to pick from (see Search): only the lines with what's typed show.
+// a list to pick from: only the lines with what's typed show, with what
+// matched underlined, in a color of its own (`markColor`), and the
+// search's line (a ListSearch) says how many picked lines aren't shown.
 ModalBox {
     id: dialog
 
@@ -62,7 +56,7 @@ ModalBox {
     // The question, or a function of how many lines are picked (and which)
     // that gives it (see ask).
     property var question: ""
-    readonly property string text: typeof question === "function" ? question(pickedCount, picked) : question
+    readonly property string text: typeof question === "function" ? question(picks.pickedCount, picks.picked) : question
     // The list as text, a row a line, if it's not one to pick from.
     property string details
     readonly property var lines: details === "" ? [] : details.split("\n")
@@ -70,90 +64,54 @@ ModalBox {
     // start a line of the list stands for, like `{ MOVE: "rename" }` (see
     // ask).
     property var keywords: ({})
-    // The lines to pick from (see ask), which of them are picked, and
-    // which need each one (`needs` the other way round).
-    property var items: []
-    property var picked: []
-    property var neededBy: []
-    // The groups the lines to pick from are in, if any (see ask's
-    // `groups`), each a heading over its lines, and the lines of each; and
-    // the group the cursor is in (-1: none, see goIn), where it's on a line
-    // rather than on all of a group.
-    property var groups: []
-    property var groupItems: []
-    property int inside: -1
-    // ---- Search ----
-    // / in a list to pick from types a search, on a line under the list,
-    // as the help's: only the lines that have each of its words show (in
-    // their text, or their group's heading, so a path's dir can be one
-    // word and its name another), whatever the case, unless a letter of it
-    // is uppercase (smart case), with what matched underlined, in a color
-    // of its own (`markColor`). It's shown as it's typed; Enter keeps it,
-    // and the keys are the list's again, on the lines left (Space on a
-    // heading picks those of its lines that show, and a all that show),
-    // and Esc puts back what was searched for before. Esc in the list
-    // then shows all of it again. It only says what shows: a line that's
-    // picked stays picked, shown or not, and the search's line says how
-    // many of those aren't. `filter` is the search (what's typed, while
-    // `filtering`), `shown` whether each line has it (null with no
-    // search), and `shownItems` each group's lines that do, which is what
-    // a group has for the rows, the cursor and the picks from its heading.
-    property string filter: ""
-    property bool filtering: false
-    property string filterBefore: ""
-    property var shown: null
-    property var shownItems: []
-    readonly property int shownCount: shown ? shown.filter(s => s).length : items.length
-    // How many picked lines the search hides.
-    readonly property int hiddenPicked: shown ? picked.filter((p, i) => p && !shown[i]).length : 0
-    // The search's words, as one regex's source and flags, for what
-    // matched in a row's text (see withMarks), or "": strings, as a var
-    // property may not keep a RegExp as one.
-    property string markSource: ""
-    property string markFlags: ""
-    // What matched is in the search highlights' color on a dark theme
-    // (the accent's is too dark there, on the current row's most of all),
-    // and the accent's on a light one, where that one is too pale.
+    // The list to pick from, if the question has one (see ask): its lines
+    // (`items`), which are picked, the rows as shown, the cursor, the
+    // search, and its keys. A line Yes can't do can be picked only for the
+    // button apart. Its rows made again, the list is scrolled back as far
+    // as it was, or to its top, then to the cursor's rows, once it's laid
+    // out.
+    readonly property PickList picks: PickList {
+        property real keptY: 0
+
+        pickBlocked: dialog.extra !== null
+        onReplacing: keptY = list.contentY - list.originY
+        onReplaced: top => {
+            const y = top ? 0 : keptY;
+            Qt.callLater(() => {
+                list.scrollTo(y);
+                dialog.showRow();
+            });
+        }
+        onRowChanged: Qt.callLater(dialog.showRow)
+        onRowShownChanged: Qt.callLater(dialog.showRow)
+        // As tall as the rows' room was before the search started, until
+        // all the lines show again.
+        onFilteringChanged: {
+            if (filtering)
+                dialog.heldHeight = Math.max(dialog.heldHeight, dialog.restHeight);
+            else if (filter === "")
+                dialog.heldHeight = 0;
+        }
+        onFilterChanged: {
+            if (filter === "" && !filtering)
+                dialog.heldHeight = 0;
+        }
+    }
+    // What the search matched is in the search highlights' color on a dark
+    // theme (the accent's is too dark there, on the current row's most of
+    // all), and the accent's on a light one, where that one is too pale.
     readonly property color markColor: theme.dark ? theme.searchMatch : theme.accent
     // How tall the list was as the search started, which it stays at
-    // least, so the box doesn't change its size at every key.
+    // least, so the box doesn't change its size at every key; and how tall
+    // it is while no search is typed (`filtering` shows the search's line
+    // before anything hears of it, which takes its room from the list).
     property real heldHeight: 0
-    // How many lines of a closed group still show, under its heading,
-    // before the row that says how many more it has; and for each group,
-    // the keywords its lines start with and how many do, most first
-    // (`{ word, count }`), or none if a line starts with none, which a
-    // closed one's heading shows (see groupNote).
-    property int preview: 3
-    property var groupKinds: []
-    // The rows of a list to pick from, as shown (see updateRows): `{ item
-    // }`, a line, by its index, and with groups `{ group }`, a group's
-    // heading, with its lines after it, or if it's closed only the first
-    // of them, then `{ more }`, a row for the others (by its group). And
-    // what tells each line apart, for a question asked again (see place).
-    property var rows: []
-    property var itemKeys: []
-    readonly property int pickedCount: picked.filter(p => p).length
-    // Whether a line Yes can't do is picked, which turns Yes off, and
-    // whether all it can do are (Select All then picks none).
-    readonly property bool blockedPicked: items.some((item, i) => item.blocked && picked[i])
-    // Of the lines that show, which are those Select All picks; not with
-    // none of them to pick (a search no line has), so its button isn't
-    // named Select None then, which is wider.
-    readonly property bool allPicked: !items.some((item, i) => !item.blocked && !picked[i] && isShown(i))
-        && items.some((item, i) => !item.blocked && isShown(i))
-    // The row j and k move (its index in `rows`, which is a line's own
-    // without groups), and Space picks or leaves out, and whether it's
-    // highlighted (see moveRow), and the other end of the rows v selected
-    // with it, or -1. With groups, it's a group's heading while the cursor
-    // isn't in one, and the cursor is on all of that group's rows
-    // (`cursorRows`, the first and last of them; `selectedRows`, of those
-    // v selected, or -1).
-    property int row: 0
-    property bool rowShown: false
-    property int anchor: -1
-    readonly property var cursorRows: spanOf(row)
-    readonly property var selectedRows: anchor < 0 ? [-1, -1]
-        : [Math.min(spanOf(anchor)[0], cursorRows[0]), Math.max(spanOf(anchor)[1], cursorRows[1])]
+    property real restHeight: 0
+    // For each group, the keywords its lines (that show) start with and
+    // how many do, most first (`{ word, count }`), or none if a line
+    // starts with none, which a closed one's heading shows (see
+    // groupNote).
+    readonly property var groupKinds: picks.shownItems.map(kindsOf)
     // The list's text, measured as it's asked (see ask): how many
     // characters its longest line has, how many lines each line to pick
     // from takes, or the list as text (an empty one counts half, as it's
@@ -162,8 +120,8 @@ ModalBox {
     property int longest: 0
     property var itemLines: []
     property real detailLines: 0
-    readonly property real textLines: !items.length ? detailLines
-        : rows.reduce((count, row) => count + (row.item === undefined ? 1 : itemLines[row.item] ?? 1), 0)
+    readonly property real textLines: !picks.items.length ? detailLines
+        : picks.rows.reduce((count, row) => count + (row.item === undefined ? 1 : itemLines[row.item] ?? 1), 0)
     property bool spaced: false
     // The list's sizes: the editor's font's, a box, the room over and
     // under a row's text (more in a list to pick from, whose rows are
@@ -178,16 +136,16 @@ ModalBox {
     readonly property real charWidth: metrics.advanceWidth
     readonly property real lineHeight: Math.ceil(fontMetrics.height)
     readonly property real boxSize: 16 * zoom
-    readonly property real rowPad: (items.length ? 3 : 1) * zoom
+    readonly property real rowPad: (picks.items.length ? 3 : 1) * zoom
     readonly property real rowMargin: 6 * zoom
     readonly property real textGap: 8 * zoom
     // With groups, the room before a heading's box for its arrow, and how
     // much further in a line's box is: under its heading's text.
-    readonly property real groupIndent: groups.length ? 14 * zoom : 0
-    readonly property real itemIndent: groups.length ? boxSize + textGap : 0
-    readonly property real textX: rowMargin + (items.length ? groupIndent + itemIndent + boxSize + textGap : 0)
+    readonly property real groupIndent: picks.groups.length ? 14 * zoom : 0
+    readonly property real itemIndent: picks.groups.length ? boxSize + textGap : 0
+    readonly property real textX: rowMargin + (picks.items.length ? groupIndent + itemIndent + boxSize + textGap : 0)
     readonly property real rowGap: spaced ? 4 * zoom : 0
-    readonly property int rowCount: items.length ? rows.length : lines.length
+    readonly property int rowCount: picks.items.length ? picks.rows.length : lines.length
     // How wide the list is with no line wrapped, and how tall, until its
     // rows are laid out (see listFrame).
     readonly property real listWidth: rowCount ? Math.ceil(longest * charWidth) + textX + rowMargin + bar.width
@@ -217,19 +175,20 @@ ModalBox {
     readonly property string extraKeys: extra ? String.fromCharCode(extra.key).toLowerCase() : ""
     // The keys of a list to pick from that no button shows, listed under
     // it: `{ keys, label }` each.
-    readonly property var hints: !items.length ? [] : [
+    readonly property var hints: !picks.items.length ? [] : [
         { keys: ["j", "k"], label: "move" },
         { keys: ["Space"], label: "pick" },
         { keys: ["v"], label: "select" },
         { keys: ["/"], label: "search" }
-    ].concat(groups.length ? [{ keys: ["l", "h", "Tab"], label: "go in, out" }] : [],
+    ].concat(picks.groups.length ? [{ keys: ["l", "h", "Tab"], label: "go in, out" }] : [],
         [{ keys: ["Y"].concat(extra ? [extraKeys.toUpperCase()] : []), label: "current row only" }],
         undoAction ? [{ keys: ["u"], label: "undo" }] : [])
 
     // Asks `question`, with `details` (a list, maybe "") under it. `yes` is
     // what Yes does, and `no` what No does, if anything. `after` runs after
     // either, or if it's closed some other way (the next question, say).
-    // `details` can also be lines to pick from, `{ text, needs }`, where
+    // `details` can also be lines to pick from, `{ text, needs }` (see
+    // PickList.load), where
     // `needs` are the indexes of the lines it can't go without, and a line
     // can also have `picked: false` (left out at first) and `blocked` (Yes
     // can't do it, nor then a line that needs it; it can be picked only
@@ -257,7 +216,7 @@ ModalBox {
     // with `text` (and its `lead`), and `note` after it, dimmed, whose box
     // picks them all or leaves them out, and shows whether all, some or
     // none are picked; its lines show under it, further in, but if `open`
-    // is false only some of them (`preview`, see previewOf), with a row
+    // is false only some of them (PickList's `preview`), with a row
     // after them that says how many more it has, while the cursor isn't in
     // it (l goes into it, or a click on that row or the heading's arrow;
     // h goes out), and then its heading shows how many of its lines start
@@ -286,17 +245,10 @@ ModalBox {
         yesLabel = options.yes || "";
         noLabel = options.no || "";
         const pick = Array.isArray(details);
-        // No rows while their lines are replaced.
-        rows = [];
-        items = pick ? details : [];
-        groups = pick && options.groups || [];
-        const inGroup = groups.map(() => []);
-        if (groups.length)
-            items.forEach((item, i) => inGroup[item.group].push(i));
-        groupItems = inGroup;
-        // Until the search is (see updateShown), all of them.
-        shown = null;
-        shownItems = inGroup;
+        // The keys are the question's, not a search's that was typed.
+        content.focus = true;
+        heldHeight = 0;
+        picks.load(pick ? details : [], { groups: options.groups, was: was, row: options.row, showRow: options.showRow });
         dialog.details = pick ? "" : details || "";
         let most = 0, count = 0;
         const counts = [];
@@ -309,8 +261,8 @@ ModalBox {
             counts.push(count - before);
         }
         // As wide as with every line shown, whatever is searched for.
-        const allKinds = inGroup.map(kindsOf);
-        groups.forEach((group, g) => {
+        const allKinds = picks.groupItems.map(kindsOf);
+        picks.groups.forEach((group, g) => {
             const kinds = allKinds[g].reduce((length, kind) => length + String(kind.count).length + kind.word.length + 4, 0);
             most = Math.max(most, group.text.length + Math.max(group.note ? group.note.length : 0, kinds) + 2
                 - itemIndent / charWidth);
@@ -319,44 +271,7 @@ ModalBox {
         itemLines = pick ? counts : [];
         detailLines = pick ? 0 : count;
         // A group's lines are told apart from the next one's by its heading.
-        spaced = pick && !groups.length && details.some(item => item.text.includes("\n"));
-        itemKeys = items.map(item => (groups.length ? groups[item.group].key + "\n" : "") + item.text);
-        // Each line's index in the last question, or -1 (an object of
-        // keys: a Set is slow, see CLAUDE.md).
-        const index = Object.create(null);
-        was?.keys.forEach((key, i) => index[key] = i);
-        const before = itemKeys.map(key => index[key] ?? -1);
-        picked = items.map((item, i) => !item.blocked && (before[i] >= 0 ? was.picked[before[i]] : item.picked !== false));
-        const by = items.map(() => []);
-        items.forEach((item, i) => {
-            for (const j of item.needs)
-                by[j].push(i);
-        });
-        neededBy = by;
-        // What was searched for, unless no line has it now.
-        filtering = false;
-        content.focus = true;
-        heldHeight = 0;
-        filter = pick && was?.filter || "";
-        updateShown();
-        if (shown && !shownCount) {
-            filter = "";
-            updateShown();
-        }
-        // In the group it was in, if that's still there, with lines to show.
-        inside = was && groups.length && was.inside !== null ? groups.findIndex(group => group.key === was.inside) : -1;
-        if (inside >= 0 && !shownItems[inside].length)
-            inside = -1;
-        updateRows();
-        anchor = -1;
-        const last = Math.max(0, rows.length - 1);
-        // With groups, the row it was on (a group that's closed now has
-        // other rows after it), else as the lines are now.
-        const same = was && groups.length ? rows.findIndex(at => rowKey(at) === was.rowKey) : -1;
-        row = options.row !== undefined ? Math.max(0, Math.min(options.row, last))
-            : !was ? 0 : same >= 0 ? same : groups.length ? Math.min(was.row, last)
-            : rowFrom(rowAfter(before, was.line ?? was.row));
-        rowShown = was ? was.shown : !!options.showRow;
+        spaced = pick && !picks.groups.length && details.some(item => item.text.includes("\n"));
         dialog.question = question;
         yesAction = yes;
         noAction = no || null;
@@ -375,7 +290,8 @@ ModalBox {
     function kindsOf(lines) {
         const counts = [], at = Object.create(null);
         for (const i of lines) {
-            const word = /^\S*/.exec(items[i].text)[0];
+            // No line, while the lines are replaced.
+            const word = /^\S*/.exec(picks.items[i]?.text ?? "")[0];
             if (typeof keywords[word] !== "string")
                 return [];
             if (at[word] === undefined) {
@@ -388,244 +304,15 @@ ModalBox {
         return counts.sort((a, b) => b.count - a.count);
     }
 
-    // Makes `rows` what the list shows (see shownRows).
-    function updateRows() {
-        rows = shownRows();
-    }
-
-    // ---- Search (see `filter`) ----
-
-    // Whether the search leaves line `i`.
-    function isShown(i) {
-        return !shown || shown[i] === true;
-    }
-
-    // Finds the lines that have `filter` (see `shown`), and what the
-    // groups have of them.
-    function updateShown() {
-        const words = filter.split(/\s+/).filter(word => word !== "")
-            .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-        // Smart case, as vim's search.
-        const flags = filter === filter.toLowerCase() ? "i" : "";
-        if (!words.length || !items.length) {
-            shown = null;
-            shownItems = groupItems;
-            markSource = "";
-        } else {
-            const has = words.map(word => new RegExp(word, flags));
-            const inHeading = groups.map(group => has.map(re => re.test(group.text)));
-            shown = items.map(item => has.every((re, w) => (groups.length && inHeading[item.group][w]) || re.test(item.text)));
-            shownItems = groupItems.map(lines => lines.filter(i => shown[i]));
-            // The longest first, so a word that starts another doesn't
-            // take its place.
-            markFlags = "g" + flags;
-            markSource = words.slice().sort((a, b) => b.length - a.length).join("|");
-        }
-        groupKinds = shownItems.map(kindsOf);
-    }
-
-    // Searches for `text`: shows only the lines that have it, with the
-    // cursor on the row it was on, if that still shows, else in its group,
-    // or on the first row.
-    function setFilter(text) {
-        if (text === filter || !items.length)
-            return;
-        const at = row < rows.length ? rows[row] : null;
-        const key = at ? rowKey(at) : "", group = at && groups.length ? groupOf(at) : -1;
-        filter = text;
-        updateShown();
-        if (inside >= 0 && !shownItems[inside].length)
-            inside = -1;
-        anchor = -1;
-        updateRows();
-        let to = rows.findIndex(other => rowKey(other) === key);
-        if (to < 0 && group >= 0)
-            to = inside >= 0 ? headingRow(inside) + 1 : headingRow(group);
-        row = Math.max(0, to);
-        // Once the list is laid out, from its top.
-        Qt.callLater(() => {
-            list.scrollTo(0);
-            showRow();
-        });
-    }
-
-    // /: types a search, starting from the one there is, selected, so
-    // typing replaces it.
-    function startFilter() {
-        if (!items.length)
-            return;
-        if (!filtering) {
-            filterBefore = filter;
-            heldHeight = Math.max(heldHeight, list.height);
-            filtering = true;
-        }
-        searchField.text = filter;
-        searchField.selectAll();
-        searchField.forceActiveFocus();
-    }
-
-    // Enter in the search (`accept`), which keeps it, with the cursor
-    // shown, on a line that has it; or Esc, which puts the one before
-    // back. The keys are the list's again.
-    function finishFilter(accept) {
-        if (!filtering)
-            return;
-        filtering = false;
-        content.forceActiveFocus();
-        if (!accept)
-            setFilter(filterBefore);
-        if (!shown)
-            clearFilter();
-        else if (accept && rows.length)
-            rowShown = true;
-    }
-
-    // Shows all the lines again.
-    function clearFilter() {
-        setFilter("");
-        heldHeight = 0;
-    }
-
     // `text` as styled text with what the search matched in it underlined,
-    // in `markColor`, or "" if nothing did. Styled text runs spaces
-    // together, so one before another is a no-break one.
+    // in `markColor`, or "" if nothing did.
     function withMarks(text) {
-        if (markSource === "" || text === "")
-            return "";
-        const re = new RegExp(markSource, markFlags);
-        const escaped = part => part.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-            .replace(/ (?= )/g, "&nbsp;");
-        let styled = "", at = 0;
-        for (let m = re.exec(text); m !== null && m[0] !== ""; m = re.exec(text)) {
-            styled += escaped(text.slice(at, m.index)) + "<u><font color=\"" + markColor + "\">" + escaped(m[0])
-                + "</font></u>";
-            at = m.index + m[0].length;
-        }
-        return at ? styled + escaped(text.slice(at)) : "";
-    }
-
-    // The row of line `line` without groups, or of the first line after
-    // it that shows, or else the last row.
-    function rowFrom(line) {
-        const r = rows.findIndex(at => at.item >= line);
-        return r >= 0 ? r : Math.max(0, rows.length - 1);
-    }
-
-    // What the list shows: its lines (those that have what's searched
-    // for, see `filter`), or with groups, each one's heading, and its
-    // lines, or of a closed one only some of them (see previewOf) and a
-    // row for the others.
-    function shownRows() {
-        const list = [];
-        if (!groups.length) {
-            items.forEach((item, i) => {
-                if (isShown(i))
-                    list.push({ item: i });
-            });
-        } else {
-            groups.forEach((group, g) => {
-                // Not a group the search leaves no line of.
-                if (!shownItems[g].length)
-                    return;
-                const open = isOpen(g);
-                list.push({ group: g });
-                for (const i of open ? shownItems[g] : previewOf(g))
-                    list.push({ item: i });
-                if (!open)
-                    list.push({ more: g });
-            });
-        }
-        return list;
-    }
-
-    // The lines of a closed group `g` that show: the first `preview` of
-    // those picked, and if they're fewer, the first of the others, in
-    // their order, so what's picked of it shows.
-    function previewOf(g) {
-        const lines = shownItems[g], first = lines.filter(i => picked[i]).slice(0, preview);
-        for (const i of lines) {
-            if (first.length >= preview)
-                break;
-            if (!picked[i])
-                first.push(i);
-        }
-        return first.sort((a, b) => a - b);
-    }
-
-    // After the picks changed: shows other lines of the closed groups, if
-    // they show others now (see previewOf), with the list scrolled as far.
-    function syncRows() {
-        if (!groups.some((group, g) => !isOpen(g)))
-            return;
-        const now = shownRows();
-        if (now.length === rows.length && now.every((at, r) => at.item === rows[r].item))
-            return;
-        const y = list.contentY - list.originY;
-        rows = now;
-        Qt.callLater(() => {
-            list.scrollTo(y);
-            showRow();
-        });
-    }
-
-    // Whether group `g` is closed while the cursor isn't in it: if it says
-    // so (`open` false), and that hides more than the row for its other
-    // lines takes.
-    function canClose(g) {
-        return groups[g]?.open === false && (shownItems[g] || []).length > preview + 1;
-    }
-
-    // Whether all of group `g`'s lines show.
-    function isOpen(g) {
-        return inside === g || !canClose(g);
-    }
-
-    // The row of group `g`'s heading.
-    function headingRow(g) {
-        return rows.findIndex(at => at.group === g);
-    }
-
-    // The first and last of the rows the cursor covers, on row `r`: that
-    // row, or with groups, while the cursor isn't in one, all of the rows
-    // of the group whose heading it is.
-    function spanOf(r) {
-        if (!groups.length || inside >= 0)
-            return [r, r];
-        let last = r;
-        while (last + 1 < rows.length && rows[last + 1].group === undefined)
-            last += 1;
-        return [r, last];
+        return picks.withMarks(text, markColor);
     }
 
     // What the row for a closed group's other lines says.
     function moreText(g) {
-        return qsTr("… %1 more").arg((shownItems[g] || []).length - preview);
-    }
-
-    // What tells the row `at` (one of `rows`) apart from the others.
-    function rowKey(at) {
-        return at.group !== undefined ? "group\n" + groups[at.group].key
-            : at.more !== undefined ? "more\n" + groups[at.more].key : itemKeys[at.item];
-    }
-
-    // The group the row `at` is of, or in.
-    function groupOf(at) {
-        return at.group !== undefined ? at.group : at.more !== undefined ? at.more : items[at.item].group;
-    }
-
-    // How many of group `g`'s lines (that show) are picked: none (0), some
-    // (1), or all that Yes can do, and so the others only if they're all
-    // picked (2).
-    function groupPicks(g) {
-        const lines = shownItems[g] || [];
-        if (!lines.some(i => picked[i]))
-            return 0;
-        return lines.every(i => picked[i] || items[i].blocked) ? 2 : 1;
-    }
-
-    // Whether Yes can do none of group `g`'s lines.
-    function groupBlocked(g) {
-        return (shownItems[g] || []).every(i => items[i].blocked);
+        return qsTr("… %1 more").arg((picks.shownItems[g] || []).length - picks.preview);
     }
 
     // What goes after group `g`'s heading, as styled text: its `note`, or
@@ -635,78 +322,13 @@ ModalBox {
     function groupNote(g) {
         const escaped = text => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
         if (!showsKinds(g))
-            return escaped(groups[g]?.note ?? "");
+            return escaped(picks.groups[g]?.note ?? "");
         return groupKinds[g].map(kind => kind.count + " <font color=\"" + theme.changeColor(keywords[kind.word]) + "\">"
             + escaped(kind.word) + "</font>").join(" · ");
     }
 
     function showsKinds(g) {
-        return g < groups.length && !isOpen(g) && (groupKinds[g] || []).length > 0;
-    }
-
-    // l: goes into the current group, so the cursor is on a line of it, its
-    // first, and all its lines show; but only shows the cursor if it isn't
-    // shown yet, as j does.
-    function goIn() {
-        if (!groups.length || inside >= 0 || !rows.length)
-            return;
-        if (rowShown)
-            putIn(groupOf(rows[row]));
-        rowShown = true;
-    }
-
-    // h: goes out of the group the cursor is in, so it's on all of it
-    // again, and it closes, if it's one that does.
-    function goOut() {
-        if (inside >= 0)
-            putIn(-1);
-    }
-
-    // Puts the cursor in group `g`, on its first line (or with -1 out of
-    // the one it's in, on all of that), with the list scrolled as far as
-    // it was.
-    function putIn(g) {
-        if (g === inside || (g >= 0 && !shownItems[g].length))
-            return;
-        const from = inside >= 0 ? inside : rows.length ? groupOf(rows[row]) : 0;
-        const y = list.contentY - list.originY;
-        inside = g;
-        anchor = -1;
-        updateRows();
-        row = g >= 0 ? headingRow(g) + 1 : headingRow(from);
-        rowShown = true;
-        // Once the list is laid out, as in ask.
-        Qt.callLater(() => {
-            list.scrollTo(y);
-            showRow();
-        });
-    }
-
-    // The lines of rows `first` to `last`, in order: a line's own, and a
-    // heading's, its group's that show (the row for a closed group's other
-    // lines has none, as it only opens it). With `toPick`, those Space would
-    // pick: a line that can be picked, and of a group, those Yes can do,
-    // or if it can do none, those that can be picked.
-    function linesOf(first, last, toPick) {
-        const lines = [], seen = items.map(() => false);
-        const add = i => {
-            if (!seen[i])
-                lines.push(i);
-            seen[i] = true;
-        };
-        for (let r = first; r <= last && r < rows.length; r++) {
-            const at = rows[r];
-            if (at.more !== undefined)
-                continue;
-            if (at.item !== undefined) {
-                if (!toPick || canPick(at.item))
-                    add(at.item);
-                continue;
-            }
-            const all = shownItems[at.group], can = all.filter(i => !items[i].blocked);
-            (!toPick ? all : can.length ? can : all.filter(i => canPick(i))).forEach(add);
-        }
-        return lines.sort((a, b) => a - b);
+        return g < picks.groups.length && !picks.isOpen(g) && (groupKinds[g] || []).length > 0;
     }
 
     // The lines of text of a row of the list (a line to pick from, a
@@ -742,11 +364,13 @@ ModalBox {
     // and its lines after it, further in (also those of a closed one, when
     // it's all of the list).
     function copyText() {
+        const items = picks.items, groups = picks.groups, rows = picks.rows, anchor = picks.anchor, row = picks.row;
         if (!items.length)
             return details;
         const inner = i => groups.length ? "  " + items[i].text.replace(/\n/g, "\n  ") : items[i].text;
         if (anchor < 0 && groups.length)
-            return groups.map((group, g) => shownItems[g].length ? [group.text].concat(shownItems[g].map(inner)).join("\n") : null)
+            return groups.map((group, g) => picks.shownItems[g].length
+                ? [group.text].concat(picks.shownItems[g].map(inner)).join("\n") : null)
                 .filter(text => text !== null).join("\n");
         const first = anchor < 0 ? 0 : Math.min(anchor, row), last = anchor < 0 ? rows.length - 1 : Math.max(anchor, row);
         return rows.slice(first, last + 1).map(at => at.group !== undefined ? groups[at.group].text
@@ -754,31 +378,11 @@ ModalBox {
             .join(spaced ? "\n\n" : "\n");
     }
 
-    // Where the question's lines are, for ask's `again` to ask it again so
-    // after another question: what tells each line apart and whether it's
-    // picked, the group the cursor is in (by its key), the current
-    // row, by its index, its line (without groups) and what tells it
-    // apart, and what's searched for.
+    // Where the question's lines are (see PickList.place), and how far
+    // the list is scrolled, for ask's `again` to ask it again so after
+    // another question.
     function place() {
-        const at = row < rows.length ? rows[row] : null;
-        return { keys: itemKeys, picked: picked, row: row, line: at?.item ?? row, rowKey: at ? rowKey(at) : "",
-            shown: rowShown, inside: inside >= 0 ? groups[inside].key : null, y: list.contentY - list.originY,
-            filter: filter };
-    }
-
-    // The line that's the current one asked again (see ask's `again`),
-    // where `before` is each line's index in the last question (or -1),
-    // and `was` the current one there: its own line, or else the first
-    // after it that's still there, or else the last.
-    function rowAfter(before, was) {
-        let next = -1, last = -1;
-        before.forEach((b, i) => {
-            if (b >= was && (next < 0 || b < before[next]))
-                next = i;
-            if (b >= 0 && (last < 0 || b > before[last]))
-                last = i;
-        });
-        return next >= 0 ? next : last >= 0 ? last : Math.max(0, Math.min(was, items.length - 1));
+        return Object.assign(picks.place(), { y: list.contentY - list.originY });
     }
 
     // Whether `choice` ("yes", "no", "cancel", "extra", "undo", or "all",
@@ -786,9 +390,9 @@ ModalBox {
     // the button apart only once one is picked, and Select All if Yes can
     // do any of those that show.
     function canAnswer(choice) {
-        const none = items.length > 0 && pickedCount === 0;
-        return choice === "all" ? items.some((item, i) => !item.blocked && isShown(i))
-            : choice === "yes" ? !blockedPicked && !none
+        const none = picks.items.length > 0 && picks.pickedCount === 0;
+        return choice === "all" ? picks.items.some((item, i) => !item.blocked && picks.isShown(i))
+            : choice === "yes" ? !picks.blockedPicked && !none
             : choice === "extra" ? extra !== null && !none
             : choice === "undo" ? undoAction !== null : true;
     }
@@ -800,18 +404,18 @@ ModalBox {
         // Select All's, which leaves the question open.
         if (choice === "all") {
             if (canAnswer(choice))
-                clickAll();
+                picks.clickAll();
             return;
         }
         const can = !lines ? canAnswer(choice) : choice === "extra" ? extra !== null
-            : choice === "yes" && !lines.some(i => items[i].blocked);
+            : choice === "yes" && !lines.some(i => picks.items[i].blocked);
         if (!can)
             return;
         const action = choice === "yes" ? yesAction : choice === "no" ? noAction
             : choice === "extra" ? extra?.action : choice === "undo" ? undoAction : null;
         const chosen = lines || [];
         if (!lines) {
-            picked.forEach((p, i) => {
+            picks.picked.forEach((p, i) => {
                 if (p)
                     chosen.push(i);
             });
@@ -825,186 +429,13 @@ ModalBox {
             after();
     }
 
-    // Picks line `i`, with the lines it needs, or leaves it out, with the
-    // lines that need it. One that can't be picked stays as it is.
-    function toggle(i) {
-        if (canPick(i))
-            setPicked([i], !picked[i]);
-    }
-
-    // Space and x: toggles the current line, or the lines v selected (a
-    // heading's are its group's): all of them picked, if one is left out,
-    // else all left out, which ends the selection.
-    function toggleSelected() {
-        const lines = linesOf(anchor < 0 ? row : Math.min(anchor, row), Math.max(anchor, row), true);
-        anchor = -1;
-        if (lines.length)
-            setPicked(lines, lines.some(i => !picked[i]));
-    }
-
     // Y and D: answers `choice` with the current line, or the lines
     // v selected, but only shows the current line if it isn't yet, as the
-    // first j does.
+    // first j does (see PickList.cursorLines).
     function answerHighlighted(choice) {
-        if (!rowShown) {
-            rowShown = true;
-            return;
-        }
-        const lines = chosenLines();
+        const lines = picks.cursorLines();
         if (lines.length)
             answer(choice, lines);
-    }
-
-    // The current line, or the lines v selected, which ends the selection.
-    function chosenLines() {
-        const lines = linesOf(anchor < 0 ? row : Math.min(anchor, row), Math.max(anchor, row), false);
-        anchor = -1;
-        return lines;
-    }
-
-    // `lines`, with every line that needs one of them, also through others,
-    // in order: what can't be done without them.
-    function withDependents(lines) {
-        return closure(lines, j => neededBy[j]);
-    }
-
-    // `lines`, with every line one of them needs, also through others, in
-    // order: what they can't be done without.
-    function withNeeds(lines) {
-        return closure(lines, j => items[j].needs);
-    }
-
-    // `lines`, with those `next` gives for each, and for those, in order.
-    function closure(lines, next) {
-        const with_ = items.map(() => false), todo = lines.slice();
-        while (todo.length) {
-            const j = todo.pop();
-            if (with_[j])
-                continue;
-            with_[j] = true;
-            for (const k of next(j))
-                todo.push(k);
-        }
-        const r = [];
-        with_.forEach((w, i) => {
-            if (w)
-                r.push(i);
-        });
-        return r;
-    }
-
-    // Whether line `i` can be picked: not one Yes can't do, unless there's
-    // a button for the picked lines (see ask).
-    function canPick(i) {
-        return !items[i].blocked || extra !== null;
-    }
-
-    // Picks `lines`, with the lines they need, or leaves them out (`on`
-    // false), with the lines that need them.
-    function setPicked(lines, on) {
-        const p = picked.slice(), todo = lines.slice();
-        while (todo.length) {
-            const j = todo.pop();
-            if (p[j] === on)
-                continue;
-            p[j] = on;
-            for (const k of on ? items[j].needs : neededBy[j])
-                todo.push(k);
-        }
-        picked = p;
-        syncRows();
-    }
-
-    // j and k: moves the current line by `step`, but only shows it if it
-    // isn't yet, as the user hasn't seen where it is. With groups, to the
-    // next group that way, or while the cursor is in one, to its next
-    // line, as far as its first or last.
-    function moveRow(step) {
-        if (!rowShown) {
-            rowShown = true;
-        } else if (!groups.length) {
-            row = Math.max(0, Math.min(rows.length - 1, row + step));
-        } else if (inside >= 0) {
-            const first = headingRow(inside) + 1;
-            row = Math.max(first, Math.min(first + shownItems[inside].length - 1, row + step));
-        } else {
-            let to = row + step;
-            while (to >= 0 && to < rows.length && rows[to].group === undefined)
-                to += step;
-            if (to >= 0 && to < rows.length)
-                row = to;
-        }
-    }
-
-    // g and G: makes the first line the current one (or the last, with
-    // `last`), shown at once, as where it goes doesn't depend on where it
-    // was. With groups, the first or last group, or while the cursor is in
-    // one, its first or last line.
-    function moveToEnd(last) {
-        if (!groups.length) {
-            row = last ? Math.max(0, rows.length - 1) : 0;
-        } else if (inside >= 0) {
-            const first = headingRow(inside) + 1;
-            row = last ? first + shownItems[inside].length - 1 : first;
-        } else {
-            // The last heading: a group the search leaves nothing of has
-            // none.
-            let to = last ? rows.length - 1 : 0;
-            while (to > 0 && rows[to].group === undefined)
-                to -= 1;
-            row = Math.max(0, to);
-        }
-        rowShown = true;
-    }
-
-    // Those Yes can do, or none if they all are; searching, of the lines
-    // that show, with what they need, or what needs them.
-    function pickAll() {
-        const all = items.some((item, i) => !item.blocked && !picked[i] && isShown(i));
-        if (!shown) {
-            picked = items.map(item => all && !item.blocked);
-            syncRows();
-            return;
-        }
-        const lines = [];
-        items.forEach((item, i) => {
-            if (shown[i] && (all ? !item.blocked : picked[i]))
-                lines.push(i);
-        });
-        setPicked(lines, all);
-    }
-
-    // A click on row `i`: picks it or leaves it out, as Space on it. With
-    // groups, it's the line or the group clicked, wherever the cursor is,
-    // which goes there only where that moves no row: to the group, or to
-    // the line of the group it's in; and on the row for a closed group's
-    // other lines, the cursor goes into the group, which shows them.
-    function clickRow(i) {
-        const at = rows[i];
-        anchor = -1;
-        if (!groups.length) {
-            row = i;
-            rowShown = true;
-            toggleSelected();
-            return;
-        }
-        if (at.more !== undefined) {
-            putIn(at.more);
-            return;
-        }
-        const g = groupOf(at), lines = linesOf(i, i, true);
-        if (lines.length)
-            setPicked(lines, lines.some(line => !picked[line]));
-        if (inside >= 0 && (inside !== g || at.item === undefined))
-            return;
-        row = inside < 0 ? headingRow(g) : rows.findIndex(other => other.item === at.item);
-        rowShown = true;
-    }
-
-    // Select All: a, without showing the current row.
-    function clickAll() {
-        anchor = -1;
-        pickAll();
     }
 
     // Scrolls to the rows the cursor is on, if it's shown: to their last,
@@ -1012,11 +443,11 @@ ModalBox {
     // row made as the list jumps to it is placed by a guess of its
     // height: the last line of a row of two was cut off after G.
     function showRow() {
-        if (!items.length || !rowShown || !rows.length)
+        if (!picks.items.length || !picks.rowShown || !picks.rows.length)
             return;
-        const last = Math.min(cursorRows[1], rows.length - 1), first = Math.min(cursorRows[0], last);
+        const last = Math.min(picks.cursorRows[1], picks.rows.length - 1), first = Math.min(picks.cursorRows[0], last);
         for (let pass = 0; pass < 2; pass++) {
-            if (last === rows.length - 1)
+            if (last === picks.rows.length - 1)
                 list.positionViewAtEnd();
             else
                 list.positionViewAtIndex(last, ListView.Contain);
@@ -1025,17 +456,14 @@ ModalBox {
         }
     }
 
-    onRowChanged: Qt.callLater(showRow)
-    onRowShownChanged: Qt.callLater(showRow)
-
     // As wide as the question (up to a width it wraps past), the list and
     // the buttons take, but no wider than the window has room for.
     width: Math.min(parent ? parent.width - 48 * zoom : 500, Math.max(Math.min(questionText.implicitWidth, 560 * zoom),
-        listWidth, buttons.sideBySide, (items.length ? 480 : 280) * zoom) + 2 * padding)
+        listWidth, buttons.sideBySide, (picks.items.length ? 480 : 280) * zoom) + 2 * padding)
     closePolicy: Popup.CloseOnPressOutside
     onClosed: {
         // Not typing a search any more, so the next question has the keys.
-        filtering = false;
+        picks.filtering = false;
         content.focus = true;
         // Closed by a click outside it.
         const after = afterAction;
@@ -1074,20 +502,20 @@ ModalBox {
         readonly property bool isMore: pickable && modelData.more !== undefined
         // Its line, or its group, if it's still there (the rows go before
         // the lines do, but a binding can run in between).
-        readonly property var item: pickable && !isGroup && !isMore ? dialog.items[modelData.item] ?? null : null
-        readonly property var group: isGroup ? dialog.groups[modelData.group] ?? null : null
-        readonly property bool blocked: isGroup ? dialog.groupBlocked(modelData.group) : !!item?.blocked
+        readonly property var item: pickable && !isGroup && !isMore ? dialog.picks.items[modelData.item] ?? null : null
+        readonly property var group: isGroup ? dialog.picks.groups[modelData.group] ?? null : null
+        readonly property bool blocked: isGroup ? dialog.picks.groupBlocked(modelData.group) : !!item?.blocked
         // Whether it's picked: 2, or for a heading, 1 if only some of its
         // lines are.
-        readonly property int picks: isGroup ? dialog.groupPicks(modelData.group)
-            : item && dialog.picked[modelData.item] === true ? 2 : 0
+        readonly property int picks: isGroup ? dialog.picks.groupPicks(modelData.group)
+            : item && dialog.picks.picked[modelData.item] === true ? 2 : 0
         // One of the rows the cursor is on, or of those v selected, and
         // those rows' first and last, whose corners are round.
-        readonly property bool isCurrent: pickable && dialog.rowShown && index >= dialog.cursorRows[0]
-            && index <= dialog.cursorRows[1]
-        readonly property bool selected: pickable && dialog.anchor >= 0 && index >= dialog.selectedRows[0]
-            && index <= dialog.selectedRows[1]
-        readonly property var span: selected ? dialog.selectedRows : isCurrent ? dialog.cursorRows : [index, index]
+        readonly property bool isCurrent: pickable && dialog.picks.rowShown && index >= dialog.picks.cursorRows[0]
+            && index <= dialog.picks.cursorRows[1]
+        readonly property bool selected: pickable && dialog.picks.anchor >= 0 && index >= dialog.picks.selectedRows[0]
+            && index <= dialog.picks.selectedRows[1]
+        readonly property var span: selected ? dialog.picks.selectedRows : isCurrent ? dialog.picks.cursorRows : [index, index]
         readonly property real boxX: dialog.rowMargin + dialog.groupIndent + (isGroup ? 0 : dialog.itemIndent)
 
         width: list.width
@@ -1127,10 +555,10 @@ ModalBox {
         TapHandler {
             enabled: listRow.pickable
             onTapped: point => {
-                if (listRow.isGroup && point.position.x < listRow.boxX && dialog.canClose(listRow.modelData.group))
-                    dialog.putIn(dialog.inside === listRow.modelData.group ? -1 : listRow.modelData.group);
+                if (listRow.isGroup && point.position.x < listRow.boxX && dialog.picks.canClose(listRow.modelData.group))
+                    dialog.picks.putIn(dialog.picks.inside === listRow.modelData.group ? -1 : listRow.modelData.group);
                 else
-                    dialog.clickRow(listRow.index);
+                    dialog.picks.clickRow(listRow.index);
             }
         }
 
@@ -1139,10 +567,10 @@ ModalBox {
         Icon {
             x: dialog.rowMargin - 3 * dialog.zoom
             y: dialog.rowPad + Math.round((dialog.lineHeight - height) / 2)
-            visible: listRow.isGroup && dialog.canClose(listRow.modelData.group)
+            visible: listRow.isGroup && dialog.picks.canClose(listRow.modelData.group)
             theme: dialog.theme
             path: "M6 4.5 L9.5 8 L6 11.5"
-            rotation: listRow.isGroup && dialog.isOpen(listRow.modelData.group) ? 90 : 0
+            rotation: listRow.isGroup && dialog.picks.isOpen(listRow.modelData.group) ? 90 : 0
             color: dialog.theme.dim
         }
 
@@ -1289,56 +717,33 @@ ModalBox {
 
         Keys.onPressed: event => {
             // The search's, which it left.
-            if (dialog.filtering)
+            if (dialog.picks.filtering)
                 return;
+            const pick = dialog.picks.items.length > 0, shift = event.modifiers & Qt.ShiftModifier;
             if (event.matches(StandardKey.Copy))
                 dialog.system?.setClipboardText(dialog.copyText(), "");
             else if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
                 return;
-            else if (dialog.items.length && (event.key === Qt.Key_Slash || event.text === "/"))
-                dialog.startFilter();
-            else if (event.key === Qt.Key_L || event.key === Qt.Key_Right)
-                dialog.goIn();
-            else if (event.key === Qt.Key_H || event.key === Qt.Key_Left)
-                dialog.goOut();
-            else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
-                dialog.inside >= 0 ? dialog.goOut() : dialog.goIn();
-            else if (dialog.items.length && (event.key === Qt.Key_Down || event.key === Qt.Key_J))
-                dialog.moveRow(1);
-            else if (dialog.items.length && (event.key === Qt.Key_Up || event.key === Qt.Key_K))
-                dialog.moveRow(-1);
-            else if (dialog.items.length && event.key === Qt.Key_G)
-                dialog.moveToEnd(event.modifiers & Qt.ShiftModifier);
-            else if (dialog.items.length && (event.key === Qt.Key_Space || event.key === Qt.Key_X)) {
-                dialog.rowShown = true;
-                dialog.toggleSelected();
-            } else if (dialog.items.length && event.key === Qt.Key_V) {
-                dialog.rowShown = true;
-                dialog.anchor = dialog.anchor < 0 ? dialog.row : -1;
-            } else if (dialog.items.length && event.key === Qt.Key_A) {
-                dialog.rowShown = true;
-                dialog.clickAll();
+            else if (dialog.picks.key(event)) {
+                // The list's (see PickList.key).
+            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                // Nothing here to go to.
             } else if (event.key === Qt.Key_Down || event.key === Qt.Key_J)
                 list.scrollBy(dialog.lineHeight);
             else if (event.key === Qt.Key_Up || event.key === Qt.Key_K)
                 list.scrollBy(-dialog.lineHeight);
             else if (event.key === Qt.Key_G)
-                list.scrollTo(event.modifiers & Qt.ShiftModifier ? list.maxY : 0);
+                list.scrollTo(shift ? list.maxY : 0);
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                 dialog.answer("yes");
-            else if (dialog.extra && event.key === dialog.extra.key && dialog.items.length
-                    && (event.modifiers & Qt.ShiftModifier))
+            else if (dialog.extra && event.key === dialog.extra.key && pick && shift)
                 dialog.answerHighlighted("extra");
-            else if (event.key === Qt.Key_Y && dialog.items.length && (event.modifiers & Qt.ShiftModifier))
+            else if (event.key === Qt.Key_Y && pick && shift)
                 dialog.answerHighlighted("yes");
             else if (dialog.extra && event.key === dialog.extra.key)
                 dialog.answer("extra");
             else if (dialog.undoAction && event.key === Qt.Key_U)
                 dialog.answer("undo");
-            else if (event.key === Qt.Key_Escape && dialog.anchor >= 0)
-                dialog.anchor = -1;
-            else if (event.key === Qt.Key_Escape && dialog.filter !== "")
-                dialog.clearFilter();
             else if (event.key === Qt.Key_Y)
                 dialog.answer("yes");
             else if (event.key === Qt.Key_N)
@@ -1380,7 +785,7 @@ ModalBox {
                     dialog.heldHeight) + 2 * margin + searchLine.height,
                 Math.max(dialog.lineHeight + 2 * dialog.rowPad + 2 * margin + searchLine.height,
                     (dialog.parent ? dialog.parent.height : 500) - others))
-            visible: dialog.rowCount > 0 || dialog.items.length > 0
+            visible: dialog.rowCount > 0 || dialog.picks.items.length > 0
             radius: 4 * dialog.zoom
             color: dialog.theme.base
             border.color: dialog.theme.panelBorder
@@ -1408,8 +813,12 @@ ModalBox {
                 clip: true
                 interactive: false
                 keyNavigationEnabled: false
-                model: dialog.items.length ? dialog.rows : dialog.lines
+                model: dialog.picks.items.length ? dialog.picks.rows : dialog.lines
                 spacing: dialog.rowGap
+                onHeightChanged: {
+                    if (!dialog.picks.filtering)
+                        dialog.restHeight = height;
+                }
                 Accessible.role: Accessible.List
 
                 ScrollBar.vertical: ScrollBar {
@@ -1428,91 +837,24 @@ ModalBox {
             Text {
                 x: listFrame.margin + dialog.rowMargin
                 y: listFrame.margin + dialog.rowPad
-                visible: dialog.items.length > 0 && !dialog.rows.length
+                visible: dialog.picks.items.length > 0 && !dialog.picks.rows.length
                 text: qsTr("No line has that")
                 font: dialog.theme.font
                 color: dialog.theme.dim
                 textFormat: Text.PlainText
             }
 
-            // The search's line, as the help's: the search being typed,
-            // else the one the list shows the lines of, how many lines
-            // those are, and how many picked ones aren't among them.
-            Item {
+            // The search's line.
+            ListSearch {
                 id: searchLine
 
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.leftMargin: listFrame.margin + dialog.rowMargin
-                anchors.rightMargin: listFrame.margin + dialog.rowMargin
-                height: visible ? dialog.lineHeight + 8 * dialog.zoom : 0
-                visible: dialog.filtering || dialog.filter !== ""
-
-                Rectangle {
-                    x: -searchLine.anchors.leftMargin + 1
-                    width: listFrame.width - 2
-                    height: 1
-                    color: dialog.theme.panelBorder
-                }
-                Text {
-                    id: searchPrefix
-
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: dialog.filtering ? implicitWidth : Math.min(implicitWidth, shownNote.x - 12 * dialog.zoom)
-                    text: "/" + (dialog.filtering ? "" : dialog.filter)
-                    font: dialog.theme.font
-                    color: dialog.theme.text
-                    textFormat: Text.PlainText
-                    elide: Text.ElideRight
-                }
-                TextInput {
-                    id: searchField
-
-                    anchors.left: searchPrefix.right
-                    anchors.right: shownNote.left
-                    anchors.rightMargin: 12 * dialog.zoom
-                    anchors.baseline: searchPrefix.baseline
-                    visible: dialog.filtering
-                    clip: true
-                    font: dialog.theme.font
-                    color: dialog.theme.text
-                    selectByMouse: true
-                    selectionColor: dialog.theme.highlight
-                    selectedTextColor: dialog.theme.highlightedText
-                    onTextChanged: {
-                        if (dialog.filtering)
-                            dialog.setFilter(text);
-                    }
-                    Keys.onPressed: event => {
-                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                            dialog.finishFilter(true);
-                        else if (event.key === Qt.Key_Escape)
-                            dialog.finishFilter(false);
-                        else if (event.key === Qt.Key_Backspace && text === "")
-                            dialog.finishFilter(true);
-                        else if (event.key === Qt.Key_Down)
-                            dialog.moveRow(1);
-                        else if (event.key === Qt.Key_Up)
-                            dialog.moveRow(-1);
-                        else if (event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backtab)
-                            return;
-                        event.accepted = true;
-                    }
-                }
-                Text {
-                    id: shownNote
-
-                    anchors.right: parent.right
-                    anchors.baseline: searchPrefix.baseline
-                    // Not by the buttons, whose width the box takes.
-                    text: qsTr("%1 of %2").arg(dialog.shownCount).arg(dialog.items.length)
-                        + (dialog.hiddenPicked ? qsTr(" · %1 picked not shown").arg(dialog.hiddenPicked) : "")
-                    font: dialog.theme.font
-                    color: dialog.shownCount ? dialog.theme.dim : dialog.theme.error
-                    textFormat: Text.PlainText
-                }
+                theme: dialog.theme
+                picks: dialog.picks
+                owner: content
+                inset: listFrame.margin + dialog.rowMargin
             }
         }
 
@@ -1521,7 +863,7 @@ ModalBox {
             id: hintRow
 
             Layout.fillWidth: true
-            visible: dialog.items.length > 0
+            visible: dialog.picks.items.length > 0
             spacing: 12 * dialog.zoom
 
             Repeater {
@@ -1540,7 +882,7 @@ ModalBox {
             readonly property real sideBySide: tools.implicitWidth + columnSpacing + answers.implicitWidth
 
             Layout.fillWidth: true
-            columns: dialog.items.length && sideBySide > dialog.availableWidth ? 1 : 2
+            columns: dialog.picks.items.length && sideBySide > dialog.availableWidth ? 1 : 2
             columnSpacing: 8 * dialog.zoom
             rowSpacing: 8 * dialog.zoom
 
@@ -1551,8 +893,8 @@ ModalBox {
                 spacing: 8 * dialog.zoom
 
                 Choice {
-                    visible: dialog.items.length > 0
-                    modelData: ({ label: dialog.allPicked ? qsTr("Select None") : qsTr("Select All"), keys: "a", answer: "all" })
+                    visible: dialog.picks.items.length > 0
+                    modelData: ({ label: dialog.picks.allPicked ? qsTr("Select None") : qsTr("Select All"), keys: "a", answer: "all" })
                 }
                 Choice {
                     visible: dialog.extra !== null
@@ -1563,8 +905,8 @@ ModalBox {
                 Text {
                     Layout.fillWidth: true
                     Layout.leftMargin: 4 * dialog.zoom
-                    visible: dialog.items.length > 0
-                    text: qsTr("%1 of %2").arg(dialog.pickedCount).arg(dialog.items.length)
+                    visible: dialog.picks.items.length > 0
+                    text: qsTr("%1 of %2").arg(dialog.picks.pickedCount).arg(dialog.picks.items.length)
                     font.pixelSize: Math.round(12 * dialog.zoom)
                     color: dialog.theme.dim
                     elide: Text.ElideRight

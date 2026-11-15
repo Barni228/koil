@@ -20,7 +20,8 @@ import QtQuick.Layouts
 // Up and Down pick one, and Enter runs it. The keys it runs can be typed
 // or taken from a macro recorded (a register q records into). Tab goes
 // through all of it (see tab). Export saves the ones picked on a page of
-// their own (startExport) to a JSON file, a list of them as the settings
+// their own (startExport), a list to pick from with the keys every such
+// list has (a PickList), to a JSON file, a list of them as the settings
 // keep it, which Import adds to another Koil's (importFrom).
 Window {
     id: win
@@ -64,11 +65,20 @@ Window {
     // Whether the form shows, and the shortcut it edits (-1 for a new one).
     property bool editing: false
     property int editIndex: -1
-    // Whether the page that asks which shortcuts to export shows, and
-    // which it has picked, a bool for each.
+    // Whether the page that asks which shortcuts to export shows, and its
+    // list to pick from (see startExport), a line a shortcut, by its
+    // index: which are picked, the cursor's row, the rows v selected and
+    // the search, with a list's keys. The view's current row is the
+    // cursor's (see showExportRow).
     property bool exporting: false
-    property var picks: []
-    readonly property int pickedCount: picks.filter(p => p).length
+    readonly property PickList exportPicks: PickList {
+        onReplaced: win.showExportRow()
+        onRowChanged: win.showExportRow()
+    }
+    readonly property int pickedCount: exportPicks.pickedCount
+    // The shortcuts Y exports, the cursor's or those v selected, rather
+    // than the picked ones, by their indexes, or null.
+    property var exportOnly: null
     // What an export or import did, or why it couldn't (`failed`), which
     // the list's hint shows (the export page's, while it stays), until
     // anything else is done.
@@ -267,6 +277,10 @@ Window {
     // search, as in a macOS search field, or with none, it closes.
     function back() {
         if (exporting) {
+            // First a search being typed, the rows v selected, or the
+            // search, as in every list to pick from.
+            if (exportPicks.stepBack())
+                return;
             exporting = false;
             message = "";
             focusSearch();
@@ -316,31 +330,46 @@ Window {
         focusSearch();
     }
     // The page that asks which shortcuts to export, all of them picked, on
-    // the first, which has the keys: Up and Down move, Space picks or
-    // leaves out, `a` picks all or none, Enter exports.
+    // the first, which has the keys, a list's (see PickList): j and k (or
+    // Up and Down) move, Space or x picks or leaves out, `a` picks all or
+    // none, v selects rows, / searches them (by what the list shows of
+    // each, its keys and the keys it runs), Enter exports the picked ones,
+    // and Y the cursor's, or those v selected (see exportCurrent).
     function startExport() {
         if (!shortcuts.length)
             return;
-        picks = shortcuts.map(() => true);
+        exportPicks.load(shortcuts.map(s => ({
+            text: [s.name, s.keys ? app.keysName(s.keys) : "", s.macro].filter(part => part).join("\n")
+        })), { showRow: true });
+        exportOnly = null;
         message = "";
         exporting = true;
-        exportList.currentIndex = 0;
+        showExportRow();
         exportList.forceActiveFocus();
     }
-    function togglePick(index) {
-        const list = picks.slice();
-        list[index] = !list[index];
-        picks = list;
-    }
-    // All of them picked, or if they are, none.
-    function pickAll() {
-        const all = pickedCount < shortcuts.length;
-        picks = shortcuts.map(() => all);
+    // Makes the cursor's row the export page's list's current one, which
+    // the view scrolls to, and which has the keys while the list does (as
+    // a ListView gives them; it makes its first row that whenever its
+    // rows are made again).
+    function showExportRow() {
+        if (exporting)
+            exportList.currentIndex = Math.min(exportPicks.row, exportPicks.rows.length - 1);
     }
     // Asks where to save the ones picked (see writeExport).
     function exportPicked() {
-        if (pickedCount)
-            exportDialog.open();
+        if (!pickedCount)
+            return;
+        exportOnly = null;
+        exportDialog.open();
+    }
+    // Y: asks where to save the cursor's shortcut, or those v selected,
+    // picked or not, as Y in a question takes the current line.
+    function exportCurrent() {
+        const lines = exportPicks.cursorLines();
+        if (!lines.length)
+            return;
+        exportOnly = lines;
+        exportDialog.open();
     }
     // The name of the file at `path`, as messages say it.
     function fileName(path) {
@@ -350,12 +379,13 @@ Window {
         message = text;
         win.failed = !!failed;
     }
-    // Saves the shortcuts picked to the file at `path`, as JSON: a list of
+    // Saves the shortcuts picked (or those Y took, `exportOnly`) to the
+    // file at `path`, as JSON: a list of
     // them as the settings keep it (see app.readShortcuts), so a file can
     // be edited, or its list put in the settings, by hand. Then back to the
     // list, or if it can't, the export page says why.
     function writeExport(path) {
-        const list = shortcuts.filter((s, i) => picks[i]);
+        const list = shortcuts.filter((s, i) => exportOnly ? exportOnly.includes(i) : exportPicks.picked[i]);
         const error = document.writeText(path, JSON.stringify(list, null, 2) + "\n");
         if (error) {
             say(error, true);
@@ -512,10 +542,11 @@ Window {
     // In the form, Enter saves, whatever has the keys (Space clicks a
     // button), as Return does a macOS dialog's default button, and on the
     // export page it exports. Not while the macros are listed, where it
-    // takes one (see macroKey).
+    // takes one (see macroKey), nor while the export page's search is
+    // typed, which it keeps.
     Shortcut {
         sequences: ["Return", "Enter"]
-        enabled: win.focused && (win.editing || win.exporting) && !macroList.visible
+        enabled: win.focused && (win.editing || win.exporting && !win.exportPicks.filtering) && !macroList.visible
         onActivated: win.editing ? win.save() : win.exportPicked()
     }
 
@@ -786,34 +817,45 @@ Window {
         }
     }
 
-    // A shortcut on the export page, with a box that says whether it's
-    // picked: a click on the row (or Space on the current one) picks it or
-    // leaves it out.
+    // A shortcut on the export page (a row of its list: `{ item }`, the
+    // shortcut's index), with a box that says whether it's picked: a click
+    // on the row (or Space on the current one) picks it or leaves it out.
+    // The current one has the keys, as a ListView gives them, which are
+    // the list's, before its own (Space would click it, which picks it
+    // alone, not the rows v selected).
     component ExportRow: AbstractButton {
         id: pick
 
         required property var modelData
         required property int index
-        readonly property bool picked: win.picks[index] === true
-        readonly property bool current: ListView.isCurrentItem && exportList.activeFocus
+        // None, once the page is left (the rows go after it).
+        readonly property var shortcut: win.shortcuts[modelData.item]
+            ?? ({ name: "", keys: "", macro: "", normal: false, visual: false, enabled: false })
+        readonly property bool picked: win.exportPicks.picked[modelData.item] === true
+        readonly property bool current: win.exportPicks.rowShown && index === win.exportPicks.row
+            && (exportList.activeFocus || win.exportPicks.filtering)
+        // One of the rows v selected, drawn as the editor's marked lines.
+        readonly property bool selected: win.exportPicks.anchor >= 0 && index >= win.exportPicks.selectedRows[0]
+            && index <= win.exportPicks.selectedRows[1]
 
         width: ListView.view.width
         implicitHeight: 30 * win.zoom
         focusPolicy: Qt.NoFocus
         hoverEnabled: true
         Accessible.role: Accessible.CheckBox
-        Accessible.name: win.titleOf(modelData)
+        Accessible.name: win.titleOf(shortcut)
         Accessible.checkable: true
         Accessible.checked: picked
+        Keys.onPressed: event => exportList.pressed(event)
         onClicked: {
-            exportList.currentIndex = index;
             exportList.forceActiveFocus();
-            win.togglePick(index);
+            win.exportPicks.clickRow(index);
         }
 
         background: Rectangle {
             radius: 3 * win.zoom
-            color: pick.current ? win.theme.checked : pick.hovered ? win.theme.hover : "transparent"
+            color: pick.selected ? win.theme.marked : pick.current ? win.theme.checked
+                : pick.hovered ? win.theme.hover : "transparent"
         }
         contentItem: RowLayout {
             spacing: 8 * win.zoom
@@ -829,25 +871,25 @@ Window {
             Text {
                 Layout.fillWidth: true
                 // As ShortcutRow shows it.
-                readonly property bool showsKeys: !pick.modelData.name && !pick.modelData.keys
-                text: showsKeys ? win.styledKeys(pick.modelData.macro) : win.titleOf(pick.modelData)
-                font.family: pick.modelData.name ? Application.font.family : win.theme.font.family
+                readonly property bool showsKeys: !pick.shortcut.name && !pick.shortcut.keys
+                text: showsKeys ? win.styledKeys(pick.shortcut.macro) : win.titleOf(pick.shortcut)
+                font.family: pick.shortcut.name ? Application.font.family : win.theme.font.family
                 font.pixelSize: Math.round(13 * win.zoom)
                 color: win.theme.windowText
                 elide: Text.ElideRight
                 textFormat: showsKeys ? Text.StyledText : Text.PlainText
             }
             Text {
-                text: win.modeLabel(pick.modelData)
+                text: win.modeLabel(pick.shortcut)
                 font.pixelSize: Math.round(12 * win.zoom)
                 color: win.theme.windowText
                 opacity: 0.6
             }
             KeyCap {
-                visible: pick.modelData.name !== "" && pick.modelData.keys !== ""
+                visible: pick.shortcut.name !== "" && pick.shortcut.keys !== ""
                 Layout.rightMargin: 4 * win.zoom
                 theme: win.theme
-                text: win.app.keysName(pick.modelData.keys)
+                text: win.app.keysName(pick.shortcut.keys)
                 padding: 5 * win.zoom
                 textColor: win.theme.windowText
             }
@@ -1326,35 +1368,50 @@ Window {
                 color: win.theme.field
                 border.color: exportList.activeFocus ? win.theme.accent : win.theme.fieldBorder
 
-                // Up and Down move (the ListView's own keys), Space picks
-                // the current one or leaves it out (its row, which has the
-                // keys, clicks), `a` all or none.
+                // Its keys, which its current row has (see ExportRow),
+                // or with no row, itself: a list's (see PickList.key), and
+                // Y (see exportCurrent).
                 ListView {
                     id: exportList
 
+                    function pressed(event) {
+                        if (win.exportPicks.key(event))
+                            event.accepted = true;
+                        else if (event.key === Qt.Key_Y && event.modifiers === Qt.ShiftModifier) {
+                            win.exportCurrent();
+                            event.accepted = true;
+                        }
+                    }
+
                     anchors.fill: parent
                     anchors.margins: 4 * win.zoom
+                    anchors.bottomMargin: 4 * win.zoom + exportSearch.height
                     clip: true
-                    model: win.exporting ? win.shortcuts : []
+                    model: win.exporting ? win.exportPicks.rows : []
                     currentIndex: -1
+                    keyNavigationEnabled: false
                     boundsBehavior: Flickable.StopAtBounds
                     Accessible.name: qsTr("Shortcuts to export")
                     ScrollIndicator.vertical: ScrollIndicator {}
-                    // From its current row, which has the keys (as a
-                    // ListView gives them), as from the list.
                     Keys.onTabPressed: event => win.tab(event, exportList)
                     Keys.onBacktabPressed: event => win.tab(event, exportList)
-                    Keys.onPressed: event => {
-                        if (event.key === Qt.Key_Space && currentIndex >= 0)
-                            win.togglePick(currentIndex);
-                        else if (event.key === Qt.Key_A && !event.modifiers)
-                            win.pickAll();
-                        else
-                            return;
-                        event.accepted = true;
-                    }
+                    Keys.onPressed: event => pressed(event)
 
                     delegate: ExportRow {}
+                }
+
+                // The search's line, once / types one.
+                ListSearch {
+                    id: exportSearch
+
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    theme: win.theme
+                    picks: win.exportPicks
+                    owner: exportList
+                    color: win.theme.windowText
+                    inset: 10 * win.zoom
                 }
             }
 
@@ -1375,8 +1432,8 @@ Window {
                 FormButton {
                     id: allButton
 
-                    text: win.pickedCount < win.shortcuts.length ? qsTr("Select All") : qsTr("Select None")
-                    onClicked: win.pickAll()
+                    text: win.exportPicks.allPicked ? qsTr("Select None") : qsTr("Select All")
+                    onClicked: win.exportPicks.clickAll()
                 }
                 Hint {
                     Layout.fillWidth: true

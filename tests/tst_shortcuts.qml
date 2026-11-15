@@ -641,17 +641,19 @@ TestCase {
         verify(win.exporting);
         // its current row, which a ListView gives the keys
         compare(focused(), "Copy");
-        compare(win.picks, [true, true]);
+        const picks = win.exportPicks;
+        compare(picks.picked, [true, true]);
+        verify(picks.rowShown);
         press(Qt.Key_Space);
-        compare(win.picks, [false, true]);
+        compare(picks.picked, [false, true]);
         press(Qt.Key_A);
-        compare(win.picks, [true, true]);
+        compare(picks.picked, [true, true]);
         press(Qt.Key_A);
-        compare(win.picks, [false, false]);
+        compare(picks.picked, [false, false]);
         compare(win.pickedCount, 0);
         press(Qt.Key_Down);
         press(Qt.Key_Space);
-        compare(win.picks, [false, true]);
+        compare(picks.picked, [false, true]);
         const order = [];
         for (let i = 0; i < 4; i++) {
             tab();
@@ -675,6 +677,65 @@ TestCase {
         verify(!win.exporting);
         verify(win.visible);
         compare(win.message, "");
+    }
+
+    // The export page's list has the keys of every list to pick from (see
+    // PickList), as a question's: j, k, g and G move, x picks, v selects
+    // rows, / searches, and Esc ends a selection or a search before it
+    // leaves the page.
+    function test_exportListKeys() {
+        win.startExport();
+        const picks = win.exportPicks;
+        compare(picks.rows.length, 2);
+        compare(picks.row, 0);
+        press(Qt.Key_J);
+        compare(picks.row, 1);
+        press(Qt.Key_K);
+        compare(picks.row, 0);
+        press(Qt.Key_G, Qt.ShiftModifier);
+        compare(picks.row, 1);
+        press(Qt.Key_G);
+        compare(picks.row, 0);
+        press(Qt.Key_X);
+        compare(picks.picked, [false, true]);
+        // v selects both rows, and Space picks them, as one is left out.
+        press(Qt.Key_V);
+        press(Qt.Key_J);
+        compare(picks.selectedRows, [0, 1]);
+        press(Qt.Key_Space);
+        compare(picks.picked, [true, true]);
+        compare(picks.anchor, -1);
+        // Esc ends a selection, and stays on the page.
+        press(Qt.Key_V);
+        press(Qt.Key_Escape);
+        compare(picks.anchor, -1);
+        verify(win.exporting);
+        // / searches: only the shortcuts that have what's typed show, and
+        // Enter keeps the search rather than exporting.
+        press(Qt.Key_Slash);
+        verify(picks.filtering);
+        type("dd");
+        compare(picks.rows.map(row => row.item), [1]);
+        press(Qt.Key_Return);
+        verify(!picks.filtering);
+        verify(win.exporting);
+        compare(focused(), "Space e");
+        // `a` leaves out those that show; the other stays picked.
+        press(Qt.Key_A);
+        compare(picks.picked, [true, false]);
+        // Esc shows them all again, and the next one leaves the page.
+        press(Qt.Key_Escape);
+        compare(picks.filter, "");
+        compare(picks.rows.length, 2);
+        verify(win.exporting);
+        // Y takes the cursor's shortcut, picked or not.
+        win.exportOnly = [1];
+        win.writeExport("/x/one.json");
+        compare(JSON.parse(doc.files["/x/one.json"]), [app.shortcuts[1]]);
+        win.startExport();
+        compare(win.exportOnly, null);
+        press(Qt.Key_Escape);
+        verify(!win.exporting);
     }
 
     // Import adds the shortcuts of a file after the user's, but those

@@ -405,7 +405,9 @@ function sections(help) {
                 ["`Space q`", "List your shortcuts (so do " + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
                     + " and Settings), and under them the built-in ones, with the lock button on. Typing searches "
                     + "them, `↑` and `↓` pick one, and `Enter` or a click runs it, also one with no keys, on the "
-                    + "selection if it's for visual mode. The pencil edits one, and `" + cmdKey + "N` adds one."]
+                    + "selection if it's for visual mode. The pencil edits one, and `" + cmdKey + "N` adds one. "
+                    + "Export lists them to pick from, with that list's keys (`j` `k`, `Space`, `v`, `a`, `/`: "
+                    + "see `:h pick`); `Enter` exports the picked ones, `Y` the one the cursor is on."]
             ]
         },
         {
@@ -642,7 +644,8 @@ function sections(help) {
                 ["`c`  `Esc`", "Cancel (`Esc` first ends a selection, then a search)."]
             ],
             note: "`Y` and `D` ask first if the line takes others along. Quitting, `n` quits without the "
-                + "changes, and there's no `d` or `u`."
+                + "changes, and there's no `d` or `u`. Every list to pick from has the keys that move, pick, "
+                + "select and search, and `Y`: the shortcuts to export too (see `:h shortcuts`)."
         }
     ];
 }

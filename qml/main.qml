@@ -1829,7 +1829,7 @@ ApplicationWindow {
     // they can't be applied without (see Koil::apply_only); if there are
     // any, it asks first (see confirmMore).
     function applyLines(lines, quit) {
-        const all = confirmDialog.withNeeds(lines), more = all.length - lines.length;
+        const all = confirmDialog.picks.withNeeds(lines), more = all.length - lines.length;
         confirmMore(lines, all, "Apply these " + all.length + " changes" + (quit ? " before quitting? " : "? ")
             + (more === 1 ? "1 of them is" : more + " of them are") + " needed by the one" + (lines.length === 1 ? "" : "s")
             + " you chose.", "Apply", (all, place) => applyPicked(all, quit, true, place),
@@ -1867,7 +1867,7 @@ ApplicationWindow {
     // need them, which can't stay without them (see Koil::discard_only);
     // if there are any, it asks first (see confirmMore).
     function discardLines(lines) {
-        const all = confirmDialog.withDependents(lines), more = all.length - lines.length;
+        const all = confirmDialog.picks.withDependents(lines), more = all.length - lines.length;
         confirmMore(lines, all, "Discard these " + all.length + " changes? " + (more === 1 ? "1 of them needs " : more + " of them need ")
             + (lines.length === 1 ? "the one you chose, and can't stay without it." : "the ones you chose, and can't stay without them."),
             "Discard", discardNow, place => askToApply(JSON.parse(koil.actions()), false, { again: place }));
@@ -1880,7 +1880,7 @@ ApplicationWindow {
     // where Yes is named `verb`, and Cancel asks the list again as it was
     // (`back(place)`).
     function confirmMore(lines, all, question, verb, then, back) {
-        const place = confirmDialog.place(), items = confirmDialog.items;
+        const place = confirmDialog.place(), items = confirmDialog.picks.items;
         if (all.length === lines.length) {
             then(all, place);
             return;
@@ -1938,8 +1938,8 @@ ApplicationWindow {
     // the last apply made from the question (after which vim started
     // over), it undoes that apply (see undoApplied).
     function undoInApply() {
-        const row = confirmDialog.row, inPath = activeView === pathView;
-        const shown = confirmDialog.items.map(item => item.text).join("\n");
+        const row = confirmDialog.picks.row, inPath = activeView === pathView;
+        const shown = confirmDialog.picks.items.map(item => item.text).join("\n");
         activate(editorView);
         // Not the last apply, as u with nothing to undo would (see
         // undoLast): it can't be undone while there are changes.
@@ -2056,7 +2056,7 @@ ApplicationWindow {
     // current row's, or those of the rows v selected), with the ones they
     // need undone first; if there are any, it asks first (see confirmMore).
     function undoLines(lines) {
-        const all = confirmDialog.withNeeds(lines), more = all.length - lines.length;
+        const all = confirmDialog.picks.withNeeds(lines), more = all.length - lines.length;
         confirmMore(lines, all, "Undo these " + all.length + " changes? " + (more === 1 ? "1 of them is" : more
             + " of them are") + " needed by the one" + (lines.length === 1 ? "" : "s") + " you chose.",
             "Undo", undoPicked, place => undoApply({ again: place }));
@@ -2067,7 +2067,7 @@ ApplicationWindow {
     // selected), once the user confirms it, listing them, so they can't
     // be undone; an apply keeps its others.
     function forgetApplies(picked) {
-        const one = picked.length === 1, items = confirmDialog.items;
+        const one = picked.length === 1, items = confirmDialog.picks.items;
         const them = one ? "this change" : "these " + picked.length + " changes";
         // An empty line between them if one takes several, as in the list.
         const gap = picked.some(i => items[i].text.includes("\n")) ? "\n\n" : "\n";

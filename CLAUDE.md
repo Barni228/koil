@@ -143,6 +143,11 @@ the scratchpad (see Scratchpad).
   `:confirm q`, applying and undoing (lists to pick from, a row with a
   checkbox each), and what changed on disk against the user's edits (see
   Questions).
+- `qml/PickList.qml`: a list to pick from, without a look: its lines,
+  picks, cursor, selection, groups and search, and the keys for them,
+  which every such list shares, however it's drawn (a question's, the
+  shortcuts to export); `ListSearch.qml`, the line its search is typed on
+  (see Lists to pick from).
 - `qml/SettingsWindow.qml`: the Settings window (Cmd+,), which scrolls,
   and shows what a setting does with the pointer on it (see Settings).
 - `qml/ShortcutsWindow.qml`: the user's shortcuts, listed, edited,
@@ -1631,10 +1636,20 @@ the scratchpad (see Scratchpad).
   Its pencil shows it in a form, as + (or Cmd+N) does a new one, which Save
   saves (Esc and Cancel go back to the list), and its trash deletes it at
   once. Its export button (by +) shows a page of its own (`exporting`,
-  `startExport`) with a box before each shortcut, all picked at first
-  (Space or a click picks the current one or leaves it out, `a` all or
-  none, Enter exports), then a `FileDialog` asks where, and `writeExport`
-  saves them as JSON: a list of them as `settings.shortcuts` has it, so a
+  `startExport`) with a box before each shortcut, all picked at first,
+  a list to pick from (`exportPicks`, a `PickList`, see Lists to pick
+  from), so with a question's list's keys, though it looks as the
+  window's lists do: `j` and `k` (Up and Down) move, Space, `x` or a
+  click picks the current one or leaves it out, `a` all or none, `v`
+  selects rows (drawn in `theme.marked`), `/` searches them (by name,
+  keys and the keys they run; its line shows only then), Enter exports
+  the picked ones, and `Y` the cursor's or those `v` selected
+  (`exportCurrent`, `exportOnly`), and Esc ends a selection or a search
+  before it leaves the page (`back`). The list's current row is the
+  cursor's (`showExportRow`), which a `ListView` gives the keys, so the
+  row hands them to the list's handler before its own (`pressed`: as a
+  button, Space would click it). Then a `FileDialog` asks where, and
+  `writeExport` saves them as JSON: a list of them as `settings.shortcuts` has it, so a
   file can be edited, or put in the settings, by hand. Its import button
   asks for one, and `importFrom` adds what `app.readShortcuts` reads of it
   after the user's, but those already there (the same keys running the
@@ -2747,6 +2762,31 @@ the scratchpad (see Scratchpad).
   `PointerDevice.TouchPad`: by default it takes only a mouse wheel, and the
   trackpad's scrolls go to the popup, which drops them. A question's list
   is a `ListView` scrolled the same way (see Questions).
+- **Lists to pick from** (PickList.qml, ListSearch.qml): the keys of the
+  undo history's list are every such list's, whatever it looks like. A
+  `PickList` is the list without a look (a `QtObject`): its lines
+  (`load`: `{ text, needs, picked, blocked, group }` each, and `groups`),
+  which are picked, the rows as shown (`rows`), the cursor (`row`,
+  `rowShown`, `cursorRows`), the rows `v` selected (`anchor`,
+  `selectedRows`), the group the cursor is in, the search, and what the
+  keys do with those. What draws one makes its rows from that, its own
+  way (ConfirmDialog's `ListRow`, ShortcutsWindow's `ExportRow`), and
+  gives each key event it gets to `key`, which says whether it was the
+  list's (`j`, `k`, `g`, `G`, Space, `x`, `a`, `v`, `/`, with groups `l`,
+  `h` and Tab, and Esc while it ends something, `stepBack`), then does
+  its own with the rest (Enter, the answers' keys, and `Y` with
+  `cursorLines`, the cursor's lines or those `v` selected). The search is
+  typed on a `ListSearch` put at the list's bottom, which takes the keys
+  while `filtering` and gives them back to its `owner`, by `focus`, not
+  forced, as a question closed meanwhile mustn't take them from the
+  editor. A list tells what draws it that its rows were made again
+  (`replacing` before, to keep how far it's scrolled, and `replaced`
+  after, to scroll back there or to the top), and the cursor moving is
+  `rowChanged`. So a new list to pick from (`:reg`, say) is a `PickList`,
+  a view of its `rows`, a `ListSearch`, and `key` in its key handler; a
+  new key for all of them goes in `key`. The names below (`rows`,
+  `groupPicks`, `linesOf`, `inside`, `shown`, `place`) are the
+  `PickList`'s, a question's being `confirmDialog.picks`.
 - **Questions** (ConfirmDialog.qml): one box asks them all
   (`confirmDialog.ask`), so a new one needs nothing of its own: the
   question in the window's font, with `code` in backquotes as the help
