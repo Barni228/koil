@@ -406,7 +406,7 @@ function sections(help) {
                     + " and Settings), and under them the built-in ones, with the lock button on. Typing searches "
                     + "them, `↑` and `↓` pick one, and `Enter` or a click runs it, also one with no keys, on the "
                     + "selection if it's for visual mode. The pencil edits one, and `" + cmdKey + "N` adds one. "
-                    + "Export lists them to pick from, with that list's keys (`j` `k`, `Space`, `v`, `a`, `/`: "
+                    + "Export lists them to pick from, with that list's keys (`j` `k`, `Ctrl-D`, `Space`, `v`, `a`, `/`: "
                     + "see `:h pick`); `Enter` exports the picked ones, `Y` the one the cursor is on."]
             ]
         },
@@ -621,6 +621,8 @@ function sections(help) {
             rows: [
                 ["`j`  `k`", "Move down or up."],
                 ["`g`  `G`", "Go to the first or last line."],
+                ["`Ctrl-D`  `Ctrl-U`", "Move down or up half a page; `Ctrl-F` and `Ctrl-B` (or `PageDown` and "
+                    + "`PageUp`) a page. `Ctrl-E` and `Ctrl-Y` scroll a line, leaving the cursor."],
                 ["`Space`  `x`", "Pick or leave out the line (with what it needs, or what needs it), as a click on it "
                     + "does."],
                 ["`v`", "Select several lines; `v` or `Esc` ends it."],

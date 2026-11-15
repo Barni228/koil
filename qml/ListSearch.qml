@@ -10,7 +10,8 @@ import QtQuick
 // while the search is typed (/ starts it: PickList.startFilter), and gives
 // them back to `owner`, which has the list's, once it's done: Enter keeps
 // the search, Esc puts back the one before, Backspace with nothing typed
-// ends it, and Up and Down move the list's cursor meanwhile.
+// ends it, and Up and Down move the list's cursor meanwhile (PageDown
+// and PageUp a page).
 Item {
     id: line
 
@@ -103,6 +104,10 @@ Item {
                 line.picks.moveRow(1);
             else if (event.key === Qt.Key_Up)
                 line.picks.moveRow(-1);
+            else if (event.key === Qt.Key_PageDown)
+                line.picks.movePage(1);
+            else if (event.key === Qt.Key_PageUp)
+                line.picks.movePage(-1);
             else if (event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backtab)
                 return;
             event.accepted = true;

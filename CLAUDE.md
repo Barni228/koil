@@ -1639,7 +1639,8 @@ the scratchpad (see Scratchpad).
   `startExport`) with a box before each shortcut, all picked at first,
   a list to pick from (`exportPicks`, a `PickList`, see Lists to pick
   from), so with a question's list's keys, though it looks as the
-  window's lists do: `j` and `k` (Up and Down) move, Space, `x` or a
+  window's lists do: `j` and `k` (Up and Down) move, Ctrl-D and the like
+  by pages, Space, `x` or a
   click picks the current one or leaves it out, `a` all or none, `v`
   selects rows (drawn in `theme.marked`), `/` searches them (by name,
   keys and the keys they run; its line shows only then), Enter exports
@@ -2773,7 +2774,14 @@ the scratchpad (see Scratchpad).
   way (ConfirmDialog's `ListRow`, ShortcutsWindow's `ExportRow`), and
   gives each key event it gets to `key`, which says whether it was the
   list's (`j`, `k`, `g`, `G`, Space, `x`, `a`, `v`, `/`, with groups `l`,
-  `h` and Tab, and Esc while it ends something, `stepBack`), then does
+  `h` and Tab, and Esc while it ends something, `stepBack`; and vim's
+  scrolling keys, which move the cursor, as the view follows it: Ctrl-D
+  and Ctrl-U half a page, Ctrl-F and Ctrl-B, or PageDown and PageUp, a
+  page, `movePage`, of `pageRows` rows, which what draws the list says,
+  as it knows its room; with groups, out of one, to the group the row
+  that far is in, the next one at least; Ctrl-E and Ctrl-Y only ask what
+  draws it to scroll a row, `scroll`; Home and End are `g` and `G`),
+  then does
   its own with the rest (Enter, the answers' keys, and `Y` with
   `cursorLines`, the cursor's lines or those `v` selected). The search is
   typed on a `ListSearch` put at the list's bottom, which takes the keys
@@ -2802,7 +2810,10 @@ the scratchpad (see Scratchpad).
   do. Yes is in the accent's color, and Enter answers it, always: h, l
   and Tab moved a highlight through the buttons at first, which was
   little use, and they're the undo history's keys now (see below), so
-  nothing moves it, and in a list without groups they do nothing.
+  nothing moves it, and in a list without groups they do nothing. A
+  list of text (not one to pick from) scrolls with `j`, `k`, `g`, `G`
+  and Ctrl-D, Ctrl-U, Ctrl-F, Ctrl-B, Ctrl-E, Ctrl-Y, PageDown and
+  PageUp, as the help does.
   The box keeps the keys in one handler:
   no button or row takes them (`focusPolicy: Qt.NoFocus`, a `TapHandler`
   a row), as Space picks a row rather than clicks a button. The list is a

@@ -14,7 +14,9 @@ import QtQuick.Layouts
 // backquotes as the help shows it. Under it there can be a list (what
 // applying would do, say), in the editor's font, a row a line, which
 // scrolls if it's long, while the question stays where it is, over it: j
-// and k (or Up and Down) scroll it, and g and G go to its top and bottom.
+// and k (or Up and Down) scroll it, g and G go to its top and bottom, and
+// Ctrl-D and Ctrl-U scroll half a page, Ctrl-F and Ctrl-B (or PageDown
+// and PageUp) a page, as in the help.
 // The list can be one to pick from (what to apply, or to undo), each row
 // with a box before it, checked if it's picked, all picked at first unless
 // a line says otherwise. That list is a PickList (`picks`), which has its
@@ -69,11 +71,14 @@ ModalBox {
     // search, and its keys. A line Yes can't do can be picked only for the
     // button apart. Its rows made again, the list is scrolled back as far
     // as it was, or to its top, then to the cursor's rows, once it's laid
-    // out.
+    // out. A page is the rows the list has room for, if they take a line
+    // each.
     readonly property PickList picks: PickList {
         property real keptY: 0
 
         pickBlocked: dialog.extra !== null
+        pageRows: Math.max(1, Math.floor(list.height / dialog.rowStep))
+        onScroll: rows => list.scrollBy(rows * dialog.rowStep)
         onReplacing: keptY = list.contentY - list.originY
         onReplaced: top => {
             const y = top ? 0 : keptY;
@@ -145,6 +150,8 @@ ModalBox {
     readonly property real itemIndent: picks.groups.length ? boxSize + textGap : 0
     readonly property real textX: rowMargin + (picks.items.length ? groupIndent + itemIndent + boxSize + textGap : 0)
     readonly property real rowGap: spaced ? 4 * zoom : 0
+    // From a row of one line to the next.
+    readonly property real rowStep: lineHeight + 2 * rowPad + rowGap
     readonly property int rowCount: picks.items.length ? picks.rows.length : lines.length
     // How wide the list is with no line wrapped, and how tall, until its
     // rows are laid out (see listFrame).
@@ -720,20 +727,39 @@ ModalBox {
             if (dialog.picks.filtering)
                 return;
             const pick = dialog.picks.items.length > 0, shift = event.modifiers & Qt.ShiftModifier;
+            // A list of text scrolls with Ctrl's keys as the help does
+            // (a list to pick from has its own).
+            const ctrl = !pick && (event.modifiers & ~Qt.KeypadModifier) === dialog.picks.ctrlKey;
             if (event.matches(StandardKey.Copy))
                 dialog.system?.setClipboardText(dialog.copyText(), "");
-            else if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
-                return;
             else if (dialog.picks.key(event)) {
                 // The list's (see PickList.key).
-            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+            } else if (ctrl && event.key === Qt.Key_D)
+                list.scrollBy(list.height / 2);
+            else if (ctrl && event.key === Qt.Key_U)
+                list.scrollBy(-list.height / 2);
+            else if (ctrl && event.key === Qt.Key_F)
+                list.scrollBy(list.height);
+            else if (ctrl && event.key === Qt.Key_B)
+                list.scrollBy(-list.height);
+            else if (ctrl && event.key === Qt.Key_E)
+                list.scrollBy(dialog.lineHeight);
+            else if (ctrl && event.key === Qt.Key_Y)
+                list.scrollBy(-dialog.lineHeight);
+            else if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
+                return;
+            else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
                 // Nothing here to go to.
             } else if (event.key === Qt.Key_Down || event.key === Qt.Key_J)
                 list.scrollBy(dialog.lineHeight);
             else if (event.key === Qt.Key_Up || event.key === Qt.Key_K)
                 list.scrollBy(-dialog.lineHeight);
-            else if (event.key === Qt.Key_G)
-                list.scrollTo(shift ? list.maxY : 0);
+            else if (event.key === Qt.Key_PageDown)
+                list.scrollBy(list.height);
+            else if (event.key === Qt.Key_PageUp)
+                list.scrollBy(-list.height);
+            else if (event.key === Qt.Key_G || event.key === Qt.Key_Home || event.key === Qt.Key_End)
+                list.scrollTo(shift && event.key === Qt.Key_G || event.key === Qt.Key_End ? list.maxY : 0);
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                 dialog.answer("yes");
             else if (dialog.extra && event.key === dialog.extra.key && pick && shift)

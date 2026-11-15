@@ -5541,6 +5541,107 @@ TestCase {
         verify(!confirm.opened);
     }
 
+    // A list to pick from moves by pages: Ctrl-D and Ctrl-U half a page,
+    // Ctrl-F and Ctrl-B (PageDown and PageUp) a page, of the rows the list
+    // has room for, a row at least; the first only shows the cursor, as
+    // j does. With groups, to the group that far, the next one at least,
+    // or inside one, as far as its first and last line. A list of text
+    // scrolls with them instead.
+    function test_confirmPages() {
+        const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
+        const lines = [];
+        for (let i = 0; i < 400; i++)
+            lines.push({ text: "MOVE a" + i + " -> b" + i, needs: [] });
+        confirm.ask("Apply?", lines, () => {}, null, null, { cancel: true });
+        tryCompare(confirm, "opened", true);
+        const picks = confirm.picks;
+        // A page is the rows the list has room for; ten from here on,
+        // whatever room the box has once it's laid out.
+        tryVerify(() => picks.pageRows > 3);
+        picks.pageRows = 10;
+        keyClick(Qt.Key_D, ctrl);
+        verify(picks.rowShown);
+        compare(picks.row, 0);
+        keyClick(Qt.Key_D, ctrl);
+        compare(picks.row, 5);
+        keyClick(Qt.Key_F, ctrl);
+        compare(picks.row, 15);
+        keyClick(Qt.Key_PageDown);
+        compare(picks.row, 25);
+        keyClick(Qt.Key_U, ctrl);
+        compare(picks.row, 20);
+        keyClick(Qt.Key_B, ctrl);
+        compare(picks.row, 10);
+        keyClick(Qt.Key_PageUp);
+        compare(picks.row, 0);
+        keyClick(Qt.Key_U, ctrl);
+        compare(picks.row, 0);
+        keyClick(Qt.Key_End);
+        compare(picks.row, 399);
+        keyClick(Qt.Key_F, ctrl);
+        compare(picks.row, 399);
+        keyClick(Qt.Key_Home);
+        compare(picks.row, 0);
+        // Ctrl-E and Ctrl-Y scroll the rows, with the cursor where it is.
+        picks.scroll(2);
+        tryVerify(() => confirm.place().y > 0);
+        picks.scroll(-2);
+        tryVerify(() => confirm.place().y === 0);
+        keyClick(Qt.Key_E, ctrl);
+        tryVerify(() => confirm.place().y > 0);
+        compare(picks.row, 0);
+        // Not with another modifier, nor another key with Ctrl.
+        keyClick(Qt.Key_D, ctrl | Qt.ShiftModifier);
+        keyClick(Qt.Key_J, ctrl);
+        compare(picks.row, 0);
+        keyClick(Qt.Key_Escape);
+        tryCompare(confirm, "opened", false);
+
+        // Groups: each a heading and two lines, so three rows.
+        const groups = [], items = [];
+        for (let g = 0; g < 30; g++) {
+            groups.push({ key: "g" + g, text: "group " + g });
+            for (let i = 0; i < 2; i++)
+                items.push({ text: "MOVE a" + g + i, needs: [], group: g });
+        }
+        confirm.ask("Undo?", items, () => {}, null, null, { cancel: true, groups: groups, showRow: true });
+        tryCompare(confirm, "opened", true);
+        // To the heading of the group the row a page down is in.
+        keyClick(Qt.Key_F, ctrl);
+        compare(picks.row, 9);
+        verify(picks.rows[picks.row].group !== undefined);
+        keyClick(Qt.Key_B, ctrl);
+        compare(picks.row, 0);
+        // A group at least, however short the page is.
+        picks.movePage(0.01);
+        compare(picks.row, 3);
+        picks.movePage(-0.01);
+        compare(picks.row, 0);
+        // Inside a group, it stays in it.
+        keyClick(Qt.Key_L);
+        compare(picks.row, 1);
+        keyClick(Qt.Key_F, ctrl);
+        compare(picks.row, 2);
+        keyClick(Qt.Key_B, ctrl);
+        compare(picks.row, 1);
+        keyClick(Qt.Key_Escape);
+        tryCompare(confirm, "opened", false);
+
+        // A list of text scrolls.
+        confirm.ask("Quit?", lines.map(line => line.text).join("\n"), () => {});
+        tryCompare(confirm, "opened", true);
+        tryVerify(() => confirm.place().y === 0);
+        keyClick(Qt.Key_D, ctrl);
+        const y = confirm.place().y;
+        verify(y > 0);
+        keyClick(Qt.Key_PageDown);
+        verify(confirm.place().y > y);
+        keyClick(Qt.Key_Home);
+        compare(confirm.place().y, 0);
+        keyClick(Qt.Key_Escape);
+        tryCompare(confirm, "opened", false);
+    }
+
     // / searches a list to pick from: only the lines with every word typed
     // show, as it's typed, whatever their case unless one is uppercase.
     // Enter keeps it, Esc puts the one before back, and Esc in the list

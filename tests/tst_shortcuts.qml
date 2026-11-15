@@ -698,6 +698,30 @@ TestCase {
         compare(picks.row, 0);
         press(Qt.Key_X);
         compare(picks.picked, [false, true]);
+        // Ctrl-D, Ctrl-F and PageDown go down by pages, as far as the last
+        // row, and Ctrl-U, Ctrl-B and PageUp back up; End and Home go to
+        // the last and first.
+        const ctrl = Qt.platform.os === "osx" ? Qt.MetaModifier : Qt.ControlModifier;
+        verify(picks.pageRows > 2);
+        for (const [down, up] of [[Qt.Key_D, Qt.Key_U], [Qt.Key_F, Qt.Key_B]]) {
+            press(down, ctrl);
+            compare(picks.row, 1);
+            press(up, ctrl);
+            compare(picks.row, 0);
+        }
+        press(Qt.Key_PageDown);
+        compare(picks.row, 1);
+        press(Qt.Key_PageUp);
+        compare(picks.row, 0);
+        press(Qt.Key_End);
+        compare(picks.row, 1);
+        press(Qt.Key_Home);
+        compare(picks.row, 0);
+        // Ctrl-E and Ctrl-Y scroll, leaving the cursor.
+        press(Qt.Key_E, ctrl);
+        press(Qt.Key_Y, ctrl);
+        compare(picks.row, 0);
+        compare(picks.picked, [false, true]);
         // v selects both rows, and Space picks them, as one is left out.
         press(Qt.Key_V);
         press(Qt.Key_J);

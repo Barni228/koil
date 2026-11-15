@@ -72,8 +72,10 @@ Window {
     // cursor's (see showExportRow).
     property bool exporting: false
     readonly property PickList exportPicks: PickList {
+        pageRows: Math.max(1, Math.floor(exportList.height / (30 * win.zoom)))
         onReplaced: win.showExportRow()
         onRowChanged: win.showExportRow()
+        onScroll: rows => exportList.scrollBy(rows * 30 * win.zoom)
     }
     readonly property int pickedCount: exportPicks.pickedCount
     // The shortcuts Y exports, the cursor's or those v selected, rather
@@ -332,7 +334,8 @@ Window {
     // The page that asks which shortcuts to export, all of them picked, on
     // the first, which has the keys, a list's (see PickList): j and k (or
     // Up and Down) move, Space or x picks or leaves out, `a` picks all or
-    // none, v selects rows, / searches them (by what the list shows of
+    // none, v selects rows, Ctrl-D, Ctrl-U and the like move by pages, /
+    // searches them (by what the list shows of
     // each, its keys and the keys it runs), Enter exports the picked ones,
     // and Y the cursor's, or those v selected (see exportCurrent).
     function startExport() {
@@ -1374,6 +1377,10 @@ Window {
                 ListView {
                     id: exportList
 
+                    // Ctrl-E and Ctrl-Y: `dy` down, as far as it goes.
+                    function scrollBy(dy) {
+                        contentY = Math.max(originY, Math.min(originY + Math.max(0, contentHeight - height), contentY + dy));
+                    }
                     function pressed(event) {
                         if (win.exportPicks.key(event))
                             event.accepted = true;

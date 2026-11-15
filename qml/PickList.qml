@@ -13,9 +13,12 @@ import QtQuick
 // what Y takes: see cursorLines) with those it leaves. The search is typed
 // on a ListSearch.
 //
-// j and k (or Up and Down) move the current row (g and G to the first and
-// last), Space or x picks it or leaves it out, along with the lines it
-// needs or that need it, and a picks all of them, or none if all are. v
+// j and k (or Up and Down) move the current row (g and G, or Home and
+// End, to the first and last; Ctrl-D and Ctrl-U half a page, Ctrl-F and
+// Ctrl-B, or PageDown and PageUp, a page: see movePage), Ctrl-E and Ctrl-Y
+// scroll a row without moving it, Space or x picks it or leaves it out,
+// along with the lines it needs or that need it, and a picks all of them,
+// or none if all are. v
 // selects rows, from the current one to where j and k take it, and Space
 // or x then picks them all, or leaves them all out if they're all picked,
 // which ends the selection, as Esc and v do. / searches (see Search). The
@@ -106,6 +109,11 @@ QtObject {
     readonly property var cursorRows: spanOf(row)
     readonly property var selectedRows: anchor < 0 ? [-1, -1]
         : [Math.min(spanOf(anchor)[0], cursorRows[0]), Math.max(spanOf(anchor)[1], cursorRows[1])]
+    // How many rows a page is (see movePage): as many as what draws the
+    // list has room for, which it says.
+    property int pageRows: 10
+    // Ctrl is Meta on macOS, where Qt calls Cmd Ctrl.
+    readonly property int ctrlKey: Qt.platform.os === "osx" ? Qt.MetaModifier : Qt.ControlModifier
 
     // The rows are made again: `replacing` before, where what draws them
     // can keep how far it's scrolled, and `replaced` after, where it
@@ -113,6 +121,9 @@ QtObject {
     // cursor's rows. Not from load, after which the list places itself.
     signal replacing
     signal replaced(bool top)
+    // Ctrl-E and Ctrl-Y: what draws the rows scrolls them that many rows
+    // down (or up, if it's less than 0), with the cursor where it is.
+    signal scroll(int rows)
 
     // Takes the lines `lines` to pick from, `{ text, needs }` each: its
     // text, which the search goes through (and which tells it apart, see
@@ -194,14 +205,37 @@ QtObject {
     // A key of the list's, as its event: does what it does, and says
     // whether it was one (what has the keys then accepts it, or else does
     // its own with it). Not while the search is typed, whose keys are its
-    // field's, nor with a modifier but Shift: j, k, Up and Down (moveRow),
-    // g and G (moveToEnd), Space and x (toggleSelected), v, a (pickAll),
-    // / (startFilter), with groups l, h, Left, Right and Tab (goIn,
-    // goOut), and Esc, if it ends something (see stepBack).
+    // field's: j, k, Up and Down (moveRow), g, G, Home and End
+    // (moveToEnd), PageDown and PageUp, and with Ctrl alone D, U, F and B
+    // (movePage), E and Y (scroll), Space and x (toggleSelected), v, a
+    // (pickAll), / (startFilter), with groups l, h, Left, Right and Tab
+    // (goIn, goOut), and Esc, if it ends something (see stepBack). No
+    // other key with a modifier but Shift is one.
     function key(event) {
-        if (filtering || !items.length || (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier)))
+        if (filtering || !items.length)
             return false;
         const k = event.key;
+        if (event.modifiers & ctrlKey) {
+            if (event.modifiers & ~(ctrlKey | Qt.KeypadModifier))
+                return false;
+            if (k === Qt.Key_D)
+                movePage(0.5);
+            else if (k === Qt.Key_U)
+                movePage(-0.5);
+            else if (k === Qt.Key_F)
+                movePage(1);
+            else if (k === Qt.Key_B)
+                movePage(-1);
+            else if (k === Qt.Key_E)
+                scroll(1);
+            else if (k === Qt.Key_Y)
+                scroll(-1);
+            else
+                return false;
+            return true;
+        }
+        if (event.modifiers & ~(Qt.ShiftModifier | Qt.KeypadModifier))
+            return false;
         if (k === Qt.Key_Slash || event.text === "/") {
             startFilter();
         } else if (groups.length && (k === Qt.Key_L || k === Qt.Key_Right)) {
@@ -216,6 +250,10 @@ QtObject {
             moveRow(-1);
         } else if (k === Qt.Key_G) {
             moveToEnd(!!(event.modifiers & Qt.ShiftModifier));
+        } else if (k === Qt.Key_Home || k === Qt.Key_End) {
+            moveToEnd(k === Qt.Key_End);
+        } else if (k === Qt.Key_PageDown || k === Qt.Key_PageUp) {
+            movePage(k === Qt.Key_PageDown ? 1 : -1);
         } else if (k === Qt.Key_Space || k === Qt.Key_X) {
             rowShown = true;
             toggleSelected();
@@ -719,6 +757,29 @@ QtObject {
             if (to >= 0 && to < rows.length)
                 row = to;
         }
+    }
+
+    // Ctrl-D and Ctrl-U (half a page), Ctrl-F, Ctrl-B, PageDown and
+    // PageUp (a page): moves the current line `pages` pages (of
+    // `pageRows` rows; up, if it's less than 0), a row at least, as far
+    // as j or k would get, but only shows it if it isn't yet, as they do.
+    // With groups, while the cursor isn't in one, to the group the row
+    // that far is in, the next one at least.
+    function movePage(pages) {
+        const step = Math.max(1, Math.round(Math.abs(pages) * pageRows)) * (pages < 0 ? -1 : 1);
+        if (!rowShown || !groups.length || inside >= 0) {
+            moveRow(step);
+            return;
+        }
+        if (!rows.length)
+            return;
+        let to = Math.max(0, Math.min(rows.length - 1, row + step));
+        while (to > 0 && rows[to].group === undefined)
+            to -= 1;
+        if (to === row)
+            moveRow(step < 0 ? -1 : 1);
+        else
+            row = to;
     }
 
     // g and G: makes the first line the current one (or the last, with
