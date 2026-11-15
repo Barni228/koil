@@ -494,8 +494,14 @@ QtObject {
         if (singleLine && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                 && (tok === null || mode === "insert" && tok !== "<CR>" && tok !== "<S-CR>"))
             return true;
-        if (commandLine !== "")
+        if (commandLine !== "") {
+            // Paste types the clipboard there (Ctrl+V too, as while typing).
+            if (event.matches(StandardKey.Paste) || tok === "<C-v>") {
+                pasteInCommandLine();
+                return true;
+            }
             return typedKey(tok, event);
+        }
         if (!isVisual && mode !== "insert")
             message = "";
         // Ctrl+Y is also Redo on Windows and Linux, and Paste (yank) on
@@ -1047,6 +1053,26 @@ QtObject {
     function editCommandLine(from, to, text) {
         commandCursor = from + text.length;
         commandLine = commandLine.slice(0, from) + text + commandLine.slice(to);
+    }
+
+    // Cmd+V in the command line: types the clipboard's text at its cursor,
+    // as one line (its line breaks are spaces, but those it ends with, as a
+    // yanked line's), without the characters that can't be typed. A macro
+    // being recorded keeps the keys that type it, not the paste, as the
+    // clipboard has something else when it runs.
+    function pasteInCommandLine() {
+        const r = getRegister("+");
+        const text = r ? r.text.replace(/[\r\n]+$/, "").replace(/\r\n?|\n/g, " ").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+            : "";
+        if (!text)
+            return;
+        if (recording) {
+            for (const c of text.match(/[\s\S]/gu))
+                recordKeys.push(c === "\t" ? "<Tab>" : c);
+        }
+        chainedRuns = 0;
+        historyIndex = -1;
+        editCommandLine(commandCursor, commandCursor, text);
     }
 
     function commandLineKey(tok) {

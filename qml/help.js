@@ -219,6 +219,7 @@ function sections(help) {
                     + "with `g`), or a key, like `:h gJ`."],
                 ["`↑`  `↓`", "In the command line: earlier and later commands (or searches)."],
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
+                [isMac ? "`⌘V`" : "`Ctrl+V`", "In the command line: paste the clipboard, as one line."],
                 ["`@:`", "Run the last command again."]
             ]
         },
@@ -370,7 +371,7 @@ function sections(help) {
                 "mapping", "mappings"],
             rows: [
                 ["`\"+`  `\"*`", "The system clipboard, e.g. `\"+yy`. Plain `y` and `p` don't use it; "
-                    + (isMac ? "`⌘C` and `⌘V` do." : "`Ctrl+C` does, and `Ctrl+V` while typing.")],
+                    + (isMac ? "`⌘C` and `⌘V` do." : "`Ctrl+C` does, and `Ctrl+V` while typing or in the command line.")],
                 ["`\"a` … `\"z`", "Named registers, e.g. `\"ayw`. `\"A` appends to `a`."],
                 ["`\"0`  `\"_`", "The last yank; the black hole (`\"_dd` changes no register)."],
                 ["`\"1` … `\"9`  `\"-`", "Deleted lines, the newest in `1`; text deleted within a line."],
@@ -517,7 +518,7 @@ function sections(help) {
             tags: ["ctrl", "control", "ctrl-a", "ctrl-x", "ctrl-e", "ctrl-y", "ctrl-d", "ctrl-u", "ctrl-f",
                 "ctrl-b", "ctrl-r", "ctrl-c", "ctrl-n", "ctrl-p", "ctrl-w"],
             intro: isMac ? "The `Ctrl` key, not `⌘`."
-                : "On Windows, `Ctrl+F` is Find, and `Ctrl+V` pastes while typing.",
+                : "On Windows, `Ctrl+F` is Find, and `Ctrl+V` pastes while typing or in the command line.",
             rows: [
                 ["`Ctrl-D`  `Ctrl-U`", "Down or up half a page."],
                 ["`Ctrl-F`  `Ctrl-B`", "Down or up a page."],

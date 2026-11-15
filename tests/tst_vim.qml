@@ -2069,6 +2069,41 @@ TestCase {
         vim.shellRequested.disconnect(wait);
     }
 
+    // Cmd+V in the command line types the clipboard's text at its cursor,
+    // as one line, and a macro recorded meanwhile keeps the text.
+    function test_commandLinePaste() {
+        load("a b\na b\na b");
+        clipboard.text = "x y";
+        keys(":s/a/<D-v>");
+        compare(vim.commandLine, ":s/a/x y");
+        compare(vim.commandCursor, 8);
+        keys("<CR>");
+        compare(editor.text, "x y b\na b\na b");
+        // at the cursor, a yanked line without its line break, and line
+        // breaks inside as spaces
+        clipboard.text = "one\r\ntwo\n\n";
+        keys(":ab<Left><D-v>");
+        compare(vim.commandLine, ":aone twob");
+        compare(vim.commandCursor, 9);
+        keys("<Esc>");
+        // nothing to paste
+        clipboard.text = "\n";
+        keys(":<D-v>");
+        compare(vim.commandLine, ":");
+        keys("<Esc>");
+        // a search too
+        clipboard.text = "b";
+        keys("gg/<D-v><CR>");
+        compare(vim.cursor, 4);
+        // a macro keeps what was pasted, not the paste
+        clipboard.text = "<CR>\tz";
+        keys("jqq:s/a/<D-v><CR>q");
+        compare(editor.text, "x y b\n<CR>\tz b\na b");
+        clipboard.text = "other";
+        keys("j@q");
+        compare(editor.text, "x y b\n<CR>\tz b\n<CR>\tz b");
+    }
+
     // The parts of the command line that are colored, as "text:kind".
     function test_commandLineParts() {
         const parts = line => vim.commandLineParts(line).map(p => line.slice(p.start, p.end) + ":" + p.kind);

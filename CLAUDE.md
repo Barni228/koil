@@ -1867,7 +1867,12 @@ the scratchpad (see Scratchpad).
   go on from (`colKept`). But `gg` and `NG` go to the line's first
   non-blank, as Vim's `startofline` has them, and `G` alone to the
   text's last character. Only the `"+`/`"*`
-  registers use the system clipboard. Registers follow vim's (`setRegister`): `"0` only yanks,
+  registers use the system clipboard. Cmd+V in the command line (Ctrl+V
+  too, as in insert mode: `pasteInCommandLine`, from `keyPressed`, as its
+  `<D-v>` is a key the command line drops) types the clipboard's text
+  at its cursor, as one line: its line breaks spaces, but those it ends
+  with (a yanked line's), and a macro being recorded keeps the keys that
+  type it, not the paste. Registers follow vim's (`setRegister`): `"0` only yanks,
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
   `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
   are read from vim's state and can't be written. `p` says how many
