@@ -1219,7 +1219,7 @@ Window {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 0
                     Layout.topMargin: -4 * win.zoom
-                    text: qsTr("Keys as q records them, like <CR> for Enter and <Esc>.")
+                    text: qsTr("Keys as q records them, like <CR> and <Esc> (see :h keynames).")
                     wrapMode: Text.NoWrap
                     elide: Text.ElideRight
                 }

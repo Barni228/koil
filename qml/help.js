@@ -213,7 +213,7 @@ function sections(help) {
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
                 ["`:norm keys`", "Press keys, as a macro does, like `:norm gss` (keys such as `<CR>` and `<Esc>` "
-                    + "written as in a shortcut). With a range, on each line, from its start (`:%norm A;`). "
+                    + "written as in a shortcut: see `:h keynames`). With a range, on each line, from its start (`:%norm A;`). "
                     + "`:norm!` leaves your shortcuts out."],
                 ["`koil -c 'cmd'`", "Run a command once Koil has opened, like `koil ~/src -c 'set sort=size'`. "
                     + "Several `-c`s run in turn."],
@@ -400,12 +400,52 @@ function sections(help) {
                     + "Koil's own keys can't be taken, nor keys that start them or start with them (`g`, `g.x`). "
                     + "F-keys, and keys like `Esc`, `Tab` and `PageDown` with `Shift`, " + (isMac ? "`⌃` or `⌘`" : "`Ctrl`")
                     + ", are keys too (`<F12>`, `<S-Tab>`, " + (isMac ? "`<D-Esc>` for `⌘Esc`" : "`<C-Esc>`")
-                    + "); in the form, `Tab`, `Esc` and `Enter` alone go through it."],
+                    + "); in the form, `Tab`, `Esc` and `Enter` alone go through it. `:h keynames` lists "
+                    + "every name."],
                 ["`Space q`", "List your shortcuts (so do " + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
                     + " and Settings), and under them the built-in ones, with the lock button on. Typing searches "
                     + "them, `↑` and `↓` pick one, and `Enter` or a click runs it, also one with no keys, on the "
                     + "selection if it's for visual mode. The pencil edits one, and `" + cmdKey + "N` adds one."]
             ]
+        },
+        {
+            title: "Key names",
+            tags: ["keynames", "keyname", "key-names", "names", "key", "notation", "key-notation", "keycodes",
+                "<>", "special"],
+            intro: "How keys are written where keys are run: a shortcut's (see `:h shortcuts`), `:norm`, "
+                + "`koil -c 'norm …'`, and what `q` records. A key with no name is its character: `a`, `A`, "
+                + "`5`, `:`, and a space for `Space`. These are all the names, written as here: `<cr>` or "
+                + "`<C-A>` is no key, and types its characters.",
+            rows: [
+                ["`<Esc>`", "`Esc` (`Ctrl-[` is `<Esc>` too)."],
+                ["`<CR>`", "`Enter`."],
+                ["`<Tab>`", "`Tab`."],
+                ["`<BS>`  `<Del>`", "`Backspace` and `Delete`. They take no `S-` or `C-`."],
+                ["`<Left>`  `<Right>`  `<Up>`  `<Down>`", "The arrows."],
+                ["`<Home>`  `<End>`  `<PageUp>`  `<PageDown>`", "The keys of those names."],
+                ["`<F1>` … `<F35>`", "The F-keys, which do nothing but run a shortcut."],
+                ["`<S-CR>`  `<S-Tab>`  `<S-Left>`  `<S-F5>`", "`Shift` and a key with a name (any above but "
+                    + "`<BS>` and `<Del>`). `<S-CR>` is vim's `Enter` in the listing, and `<S-Tab>` the dir "
+                    + "before while completing a path; the others are the key alone, unless a shortcut takes "
+                    + "them. `Shift` and a character is that character: `A`, `?`."],
+                ["`<C-a>` … `<C-z>`", "`Ctrl` and a letter, lowercase" + (isMac ? " (the `⌃` key, not `⌘`)" : "")
+                    + ", as in `:h ctrl`. `Ctrl` and a digit or a sign is no key."],
+                ["`<C-CR>`  `<C-Esc>`  `<C-Left>`  `<C-F5>`  `<C-S-Left>`", "`Ctrl` and a key with a name (not "
+                    + "`<BS>` or `<Del>`), with `Shift` too (`C-` first), which do nothing but run a shortcut."]
+            ].concat(isMac ? [
+                ["`<D-k>`  `<D-K>`  `<D-1>`  `<D-/>`", "`⌘` and a letter (uppercase with `⇧`), a digit or a "
+                    + "sign (but `>`), which do nothing but run a shortcut. Not those Koil's menus take, "
+                    + "like `⌘S` and `⌘C`."],
+                ["`<D-CR>`  `<D-Esc>`  `<D-Left>`  `<D-F5>`  `<D-S-Left>`", "`⌘` and a key with a name, with "
+                    + "`⇧` too (`D-` first), for a shortcut as well."],
+                ["`<D-BS>`", "`⌘⌫`: while typing, deletes to the line's start (in the listing, the name's), "
+                    + "and in the command line, to its start."]
+            ] : []),
+            note: "`" + (isMac ? "⌥" : "Alt") + "` has no name" + (isMac ? ", as it types characters" : "")
+                + ". Nor have vim's `<Space>`, `<lt>`, `<Bar>`, `<Leader>` and `<Nop>`: write a space, `<` "
+                + "and `|`. A name is always its key, so keys can't type the text of one, like `<CR>`. In "
+                + "the shortcuts' form, `Tab`, `Esc` and `Enter` alone go through it, and with `Shift`"
+                + (isMac ? ", `⌃` or `⌘`" : " or `Ctrl`") + " they're keys."
         },
         {
             title: "Visual block and multiple cursors",

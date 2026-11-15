@@ -2706,7 +2706,10 @@ the scratchpad (see Scratchpad).
   its `d` rather than vim's. `<C-a>`, `^A` and `CTRL-A` are `Ctrl-A`. The keys
   starting with `g`, `z` and Space, and the Ctrl keys, have sections of
   their own (`:h g`, `:h z`, `:h space`, `:h ctrl`), as an index of them,
-  pointing to the sections that say more.
+  pointing to the sections that say more. Key names (`:h keynames`)
+  lists every name a key can have where keys are written (a shortcut's,
+  `:norm`), which are those `Vim.keysIn` reads: a new one goes in both,
+  as `test_helpKeyNames` checks each name listed is one key to a macro.
 - **Output box** (Output in HelpPanel.qml): what a shell command wrote
   is the help's box in another look (`output`), as a terminal's: the
   command in the editor's font over it (not the help's big title), how

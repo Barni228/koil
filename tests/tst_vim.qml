@@ -5157,6 +5157,31 @@ TestCase {
         help.searchHistory = [];
     }
 
+    // Every name of a key the help lists (:h keynames) is one key to a
+    // macro, and those it says aren't keys are their characters.
+    function test_helpKeyNames() {
+        const section = help.sections.find(s => s.title === "Key names");
+        verify(section);
+        let names = 0;
+        for (const row of section.rows) {
+            for (const code of Txt.parseCode(row[0], false).codes) {
+                compare(vim.macroKeys(code.text), [code.text], code.text);
+                names++;
+            }
+        }
+        verify(names > 25);
+        for (const none of ["<cr>", "<C-A>", "<Space>", "<lt>", "<Bar>", "<Leader>", "<Nop>", "<S-BS>", "<C-Del>",
+                "<C-1>", "<F36>", "<M-a>", "<A-a>"])
+            verify(vim.macroKeys(none).length > 1, none);
+        verify(help.show("keynames"));
+        compare(help.sections[help.shownSection].title, "Key names");
+        // A name that's no topic of another section (<CR> is the
+        // listing's Enter).
+        verify(help.show("<PageDown>"));
+        compare(help.sections[help.shownSection].title, "Key names");
+        help.close();
+    }
+
     // :h goes to a topic's section, and to the row of a key in it, or
     // else to the first row of that key.
     function test_helpTopics() {
