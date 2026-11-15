@@ -246,7 +246,8 @@ function sections(help) {
                 "%:r", "%:e", "<cfile>", "cfile", "terminal", "run"],
             intro: "`:!cmd` runs `cmd` in the shell (`:set shell`, or Settings), in the dir that's open, like "
                 + "`:!git status`. What it writes shows in the status line, or in a box like this one if it's "
-                + "longer (`:_!cmd`: in the scratchpad). `Esc` stops it.",
+                + "longer (`:_!cmd`: in the scratchpad). One that takes a while shows what it writes in the "
+                + "box as it comes, like its progress. `Esc` stops it.",
             rows: [
                 ["`!`", "Types `:! %` with the cursor before the `%`, for a command on the entry on the "
                     + "line, like `git add` then `Enter` (in a file, on the file; in the scratchpad, on the "

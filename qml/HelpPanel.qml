@@ -12,7 +12,7 @@ import "text.js" as Txt
 // keys starting with g, z and Space, Ctrl keys and other keys.
 // :help topic scrolls to a section, or a key's row (see show). :reg shows
 // the registers in it too (showList), and :! what a command wrote
-// (showText).
+// (showText), also while it runs (see Output).
 // Keys scroll it as in a vim help buffer, / and ? search it (see Search);
 // Esc, q or Enter (as after vim's :!) closes it. Its text can be selected
 // with the mouse and copied.
@@ -90,13 +90,6 @@ ModalBox {
         showPlain(title, { title: "", rows: rows, plain: true, keyColumns: keyColumns });
     }
 
-    // Opens the box with `title` over `text`, as it is in the editor's
-    // font, with its line breaks, and `note` after it (what a shell command
-    // wrote).
-    function showText(title, text, note) {
-        showPlain(title, { title: "", intro: text, plain: true, rows: [], note: note });
-    }
-
     function showPlain(title, section) {
         showSections(title, [section], 0, -1);
     }
@@ -104,6 +97,13 @@ ModalBox {
     // Opens the box with `title` over `list`, at the section `section` and
     // its row `row` (-1 for its top).
     function showSections(title, list, section, row) {
+        output = false;
+        running = false;
+        live = false;
+        showBox(title, list, section, row);
+    }
+
+    function showBox(title, list, section, row) {
         heading = title;
         shownSections = list;
         clearSearch();
@@ -130,6 +130,173 @@ ModalBox {
     function scrollBy(dy) {
         shownSection = -1;
         scroller.scrollBy(dy);
+        scrolled();
+    }
+
+    // ---- Output ------------------------------------------------------------
+    // What a shell command wrote, as a terminal's: its command over it, in
+    // the editor's font, with how it ended beside it (or that it runs
+    // still, and for how long), its text on the editor's background, and
+    // the keys under it. Shown once it's done (showText), or as it runs
+    // (showRunning, then addOutput as more comes, and endOutput): the view
+    // then stays at the end as more is written (`following`), until it's
+    // scrolled off it.
+
+    // Whether it shows a command's output, and whether that's running
+    // still: Esc then stops it (stopRequested) rather than closing the box,
+    // which nothing else closes.
+    property bool output: false
+    property bool running: false
+    // Whether it was opened while the command ran: it then grows down from
+    // where its top is at its tallest, so what's written stays where it is
+    // as more comes.
+    property bool live: false
+    // How it ended: "done", "failed" (with outputLabel, like "Exit 2") or
+    // "stopped".
+    property string outputState: ""
+    property string outputLabel: ""
+    // When it started, how long it took (ms, -1 if that's not known), and
+    // the time as the timer has it while it runs, which steps `pulse` too.
+    property real outputStart: 0
+    property real outputTook: -1
+    property real outputNow: 0
+    property bool pulse: false
+    // How many of its first lines aren't shown (see shell::Ran::cut).
+    property int outputCut: 0
+    // The lines shown that ended, by their lengths, where they end in the
+    // text (before the line being written), and that line.
+    property var outputLengths: []
+    property int outputEnd: 0
+    property string outputLine: ""
+    // Whether the view stays at the text's end as more is written: until
+    // it's scrolled off the end, and again once it's scrolled back there
+    // (see scrolled).
+    property bool following: false
+
+    readonly property string outputStatus: {
+        const took = running ? outputNow - outputStart : outputTook;
+        const what = running ? qsTr("Running") : outputState === "done" ? qsTr("Done")
+            : outputState === "stopped" ? qsTr("Stopped") : outputLabel;
+        return what + (took >= (running ? 1000 : 0) ? " · " + duration(took, running) : "");
+    }
+    readonly property color outputColor: running ? theme.accent
+        : outputState === "done" ? theme.changeColor("create")
+        : outputState === "stopped" ? theme.changeColor("rename") : theme.error
+
+    // Esc or Ctrl-C while the command runs.
+    signal stopRequested
+
+    // `ms` as "0.4s", "12s" or "1m 5s" (in whole seconds, if `whole`).
+    function duration(ms, whole) {
+        const s = ms / 1000;
+        if (s < 10 && !whole)
+            return s.toFixed(1) + "s";
+        if (s < 60)
+            return Math.floor(s) + "s";
+        return Math.floor(s / 60) + "m " + Math.floor(s % 60) + "s";
+    }
+
+    function openOutput(title, isLive) {
+        output = true;
+        running = isLive;
+        live = isLive;
+        following = isLive;
+        outputState = "";
+        outputLabel = "";
+        outputTook = -1;
+        outputCut = 0;
+        outputLengths = [];
+        outputEnd = 0;
+        outputLine = "";
+        outputText.clear();
+        showBox(title, [], -1, -1);
+        scroller.contentY = 0;
+    }
+
+    // Opens the box with `title` (the command) over `text`, what it wrote,
+    // as it is in the editor's font, with its line breaks. `info`, if
+    // given, says more: `failed`, how it failed (like "Exit 2"), `took`,
+    // how long it ran (ms), and `cut`, how many lines before `text` aren't
+    // shown.
+    function showText(title, text, info) {
+        openOutput(title, false);
+        outputText.text = text;
+        outputState = info?.failed ? "failed" : "done";
+        outputLabel = info?.failed ?? "";
+        outputTook = info?.took ?? -1;
+        outputCut = info?.cut ?? 0;
+    }
+
+    // Opens the box with `title` (the command) for what it writes while it
+    // runs, since `start` (a time, in ms).
+    function showRunning(title, start) {
+        openOutput(title, true);
+        outputStart = start;
+        outputNow = Date.now();
+    }
+
+    // What the command wrote since (a shell::Output): the first lines go,
+    // those that ended since are put after the others, and the line being
+    // written after them, in place of what it was. The view stays at the
+    // end if it was there, else on the lines it shows.
+    function addOutput(out) {
+        if (!running)
+            return;
+        const t = outputText;
+        if (out.reset || out.drop > 0 && out.drop >= outputLengths.length) {
+            t.clear();
+            outputLengths = [];
+            outputEnd = 0;
+            outputLine = "";
+        } else if (out.drop > 0) {
+            let n = 0;
+            for (let i = 0; i < out.drop; i++)
+                n += outputLengths[i] + 1;
+            const gone = t.positionToRectangle(n).y - t.positionToRectangle(0).y;
+            t.remove(0, n);
+            outputLengths.splice(0, out.drop);
+            outputEnd -= n;
+            if (!following)
+                scroller.scrollTo(scroller.contentY - gone);
+        }
+        if (out.lines.length || out.line !== outputLine) {
+            let count = outputLengths.length, ended = "";
+            for (const line of out.lines) {
+                ended += (count++ ? "\n" : "") + line;
+                outputLengths.push(line.length);
+            }
+            t.remove(outputEnd, t.length);
+            t.insert(outputEnd, ended + (out.line === "" ? "" : (count ? "\n" : "") + out.line));
+            outputEnd += ended.length;
+            outputLine = out.line;
+        }
+        outputCut = out.cut;
+        if (following)
+            scroller.scrollTo(scroller.maxY);
+    }
+
+    // The command is done: how (see outputState), and `label` for one that
+    // failed.
+    function endOutput(state, label) {
+        if (!running)
+            return;
+        running = false;
+        outputState = state;
+        outputLabel = label || "";
+        outputTook = Date.now() - outputStart;
+    }
+
+    // What the output shows, for the tests.
+    function outputShown() {
+        return outputText.text;
+    }
+
+    // The view was scrolled (by a key, the wheel, the scroll bar or a
+    // search): it follows what a running command writes only at the end.
+    // Not by the view's place changing, which it also does as the box
+    // grows.
+    function scrolled() {
+        following = live && scroller.contentY >= scroller.maxY - 1;
     }
 
     // The text with a selection. Each text selects on its own, so selecting
@@ -184,6 +351,8 @@ ModalBox {
     // text }, where key is CodeText's), and each key's place in that order.
     readonly property var searchTexts: {
         const list = [], order = {};
+        if (output)
+            return { list: [{ key: "output", text: outputText.text }], order: { output: 0 } };
         shownSections.forEach((section, s) => {
             const add = (part, markup) => {
                 if (!markup)
@@ -253,6 +422,7 @@ ModalBox {
         const y = matchY(matches[i]);
         if (y < scroller.contentY || y + height > scroller.contentY + scroller.height)
             scroller.contentY = Math.max(0, Math.min(scroller.maxY, y - (scroller.height - height) / 2));
+        scrolled();
     }
 
     // The match a search goes to, from `from` (a match, maybe of another
@@ -317,6 +487,7 @@ ModalBox {
     // go to (vim's 'incsearch').
     function previewSearch(pattern) {
         scroller.contentY = searchStart.contentY;
+        scrolled();
         searchPattern = pattern || searchStart.pattern;
         const target = pattern ? nextMatch(searchKind === "/", searchStart.from) : null;
         matchIndex = pattern ? (target ? target.index : -1) : searchStart.index;
@@ -331,6 +502,7 @@ ModalBox {
         searchKind = "";
         scroller.forceActiveFocus();
         scroller.contentY = searchStart.contentY;
+        scrolled();
         searchPattern = searchStart.pattern;
         matchIndex = searchStart.index;
         if (!accept || !typed && !lastPattern)
@@ -375,13 +547,34 @@ ModalBox {
         searchFailed = false;
     }
 
+    // How tall it may be, and the room between the output's frame and its
+    // text.
+    readonly property real maxHeight: parent ? parent.height - 48 * zoom : 500
+    readonly property real framePad: output ? 8 * zoom : 0
+
     width: Math.min(parent ? parent.width - 48 * zoom : 700, 760 * zoom)
-    height: Math.min(parent ? parent.height - 48 * zoom : 500,
-        body.height + header.height + searchLine.height + 2 * padding)
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    height: Math.min(maxHeight,
+        body.height + header.height + footer.height + searchLine.height + 2 * padding + 2 * framePad)
+    // In the middle, but one that grows as a command writes (see live).
+    anchors.centerIn: live ? undefined : parent
+    x: Math.round(((parent ? parent.width : width) - width) / 2)
+    y: Math.round(((parent ? parent.height : maxHeight) - maxHeight) / 2)
+    closePolicy: running ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
     onClosed: {
+        running = false;
         if (selected)
             selected.deselect();
+    }
+
+    // The time a command has run for, and its dot's pulse.
+    Timer {
+        interval: 500
+        repeat: true
+        running: help.running && help.opened
+        onTriggered: {
+            help.outputNow = Date.now();
+            help.pulse = !help.pulse;
+        }
     }
 
     FontMetrics {
@@ -534,15 +727,22 @@ ModalBox {
             HelpText {
                 id: title
 
-                // A long one (a shell command) wraps, clear of the keys.
-                readonly property real room: parent.width - keysHint.implicitWidth - 12 * help.zoom
+                // A long one (a shell command) wraps, clear of the keys (or
+                // of how the command ended).
+                // That's given room for a time, so the command isn't cut
+                // off elsewhere as it's counted.
+                readonly property real room: parent.width - 12 * help.zoom
+                    - (help.output ? Math.max(outputStatus.implicitWidth + 16 * help.zoom, 150 * help.zoom)
+                        : keysHint.implicitWidth)
 
                 width: Math.min(implicitWidth, room)
                 wrapMode: TextEdit.WrapAnywhere
                 leftPadding: help.codePadding // as CodeText's
                 text: help.shownHeading
-                font.pixelSize: Math.round(18 * help.zoom)
-                font.bold: true
+                // A command in the editor's font, as it was typed.
+                font.family: help.output ? help.monoFamily : help.font.family
+                font.pixelSize: Math.round((help.output ? 14 : 18) * help.zoom)
+                font.bold: !help.output
                 color: help.theme.text
             }
             TextMetrics {
@@ -561,30 +761,83 @@ ModalBox {
 
                 anchors.right: parent.right
                 anchors.baseline: title.baseline
+                visible: !help.output
                 markup: "`/` to search · `j` `k` to scroll · `Esc` or `q` to close"
                 font.pixelSize: Math.round(12 * help.zoom)
                 color: help.theme.dim
             }
+
+            // How the command ended, or that it runs still, after a dot in
+            // its color, which pulses while it runs.
+            Text {
+                id: outputStatus
+
+                anchors.right: parent.right
+                anchors.rightMargin: help.codePadding
+                anchors.baseline: title.baseline
+                visible: help.output
+                text: help.outputStatus
+                textFormat: Text.PlainText
+                font.pixelSize: Math.round(12 * help.zoom)
+                color: help.running ? help.theme.dim : help.outputColor
+            }
+            Rectangle {
+                anchors.right: outputStatus.left
+                anchors.rightMargin: 6 * help.zoom
+                anchors.verticalCenter: outputStatus.verticalCenter
+                visible: help.output
+                width: 8 * help.zoom
+                height: width
+                radius: width / 2
+                color: help.outputColor
+                opacity: help.running && help.pulse ? 0.35 : 1
+            }
+        }
+
+        // Behind a command's output: the editor's background, framed.
+        Rectangle {
+            anchors.top: header.bottom
+            anchors.bottom: footer.top
+            width: parent.width
+            visible: help.output
+            radius: 4 * help.zoom
+            color: help.theme.base
+            border.color: help.theme.panelBorder
         }
 
         WheelFlickable {
             id: scroller
 
             anchors.top: header.bottom
-            anchors.bottom: searchLine.top
-            width: parent.width
+            anchors.bottom: footer.top
+            anchors.topMargin: help.framePad
+            anchors.bottomMargin: help.framePad
+            x: help.framePad
+            // Its scroll bar clear of the frame's border.
+            width: parent.width - x - (help.output ? 2 * help.zoom : 0)
             contentWidth: width
             contentHeight: body.height
             focus: true
             wheelStep: 3 * help.lineStep
-            onScrolled: help.shownSection = -1
-            onMaxYChanged: help.showSection()
+            onScrolled: {
+                help.shownSection = -1;
+                help.scrolled();
+            }
+            onMaxYChanged: {
+                help.showSection();
+                if (help.following)
+                    scrollTo(maxY);
+            }
 
             Connections {
                 target: scroller.scrollBar
 
                 function onPressedChanged() {
                     help.shownSection = -1;
+                    if (scroller.scrollBar.pressed)
+                        help.following = false;
+                    else
+                        help.scrolled();
                 }
             }
 
@@ -592,13 +845,22 @@ ModalBox {
             Keys.onPressed: event => {
                 const ctrl = event.modifiers & (help.isMac ? Qt.MetaModifier : Qt.ControlModifier);
                 const page = height - help.lineStep;
-                if (event.matches(StandardKey.Copy))
+                // While a command runs, Esc and Ctrl-C stop it (Ctrl+C
+                // copies a selection first, where it's Copy), and nothing
+                // closes the box.
+                const selection = help.selected !== null && help.selected.selectedText !== "";
+                if (help.running && (event.key === Qt.Key_Escape && !help.searchShown
+                        || ctrl && event.key === Qt.Key_C && !selection))
+                    help.stopRequested();
+                else if (event.matches(StandardKey.Copy))
                     help.copySelection();
                 else if (event.key === Qt.Key_Escape && help.searchShown)
                     help.clearSearch();
                 else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q && !event.modifiers
-                        || event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                    help.close();
+                        || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    if (!help.running)
+                        help.close();
+                }
                 else if (!ctrl && (event.text === "/" || event.text === "?"))
                     help.startSearch(event.text);
                 else if (!ctrl && (event.text === "n" || event.text === "N"))
@@ -628,8 +890,18 @@ ModalBox {
                 id: body
 
                 width: scroller.width - 12 * help.zoom // clear of the scroll bar
-                spacing: 18 * help.zoom
+                spacing: (help.output ? 6 : 18) * help.zoom
                 onHeightChanged: help.showSection()
+
+                // Over a command's output, if its first lines aren't kept.
+                CodeText {
+                    width: parent.width
+                    visible: help.output && help.outputCut > 0
+                    markup: "… " + help.outputCut + (help.outputCut === 1 ? " earlier line" : " earlier lines")
+                        + " not shown: `:_!` puts all of it in the scratchpad (`_`)."
+                    font.pixelSize: Math.round(12 * help.zoom)
+                    color: help.theme.dim
+                }
 
                 Repeater {
                     id: sectionRepeater
@@ -709,6 +981,112 @@ ModalBox {
                         }
                     }
                 }
+
+                // A command's output: plain text, which is added to as
+                // more comes (see addOutput), rather than set again, so
+                // only what's new is laid out. Its search matches in view
+                // are drawn over it, each part of one on a row (`marks`),
+                // with its text in black, as CodeText's rich text has it.
+                HelpText {
+                    id: outputText
+
+                    property var marks: []
+                    readonly property var markInputs: [help.matches, help.matchIndex, scroller.contentY,
+                        scroller.height, width, contentHeight]
+
+                    function placeMarks() {
+                        const found = help.output ? help.matches : [];
+                        if (!found.length) {
+                            if (marks.length)
+                                marks = [];
+                            return;
+                        }
+                        const top = Math.max(0, scroller.contentY - y);
+                        const first = positionAt(0, top), last = positionAt(width, top + scroller.height);
+                        const t = text, list = [];
+                        found.forEach((m, i) => {
+                            if (m.end <= first || m.start > last)
+                                return;
+                            let from = m.start, at = positionToRectangle(from);
+                            for (let p = from + 1; p <= m.end; p++) {
+                                const next = positionToRectangle(p);
+                                if (p < m.end && next.y === at.y)
+                                    continue;
+                                // To where the next character starts, or
+                                // past the row's last one.
+                                const right = next.y === at.y ? next.x
+                                    : positionToRectangle(p - 1).x + outputMetrics.advanceWidth(t[p - 1]);
+                                list.push({ x: at.x, y: at.y, width: right - at.x, height: at.height,
+                                    text: t.slice(from, p).replace(/\n/g, ""), current: i === help.matchIndex });
+                                from = p;
+                                at = next;
+                            }
+                        });
+                        marks = list;
+                    }
+
+                    width: parent.width
+                    visible: help.output
+                    leftPadding: help.codePadding
+                    textFormat: TextEdit.PlainText
+                    wrapMode: TextEdit.WrapAnywhere
+                    font.family: help.monoFamily
+                    font.pixelSize: Math.round(13 * help.zoom)
+                    color: help.theme.text
+                    onMarkInputsChanged: Qt.callLater(placeMarks)
+                    Component.onCompleted: help.textItems.set("output", outputText)
+
+                    FontMetrics {
+                        id: outputMetrics
+
+                        font: outputText.font
+                    }
+
+                    Repeater {
+                        model: outputText.marks
+
+                        Rectangle {
+                            id: mark
+
+                            required property var modelData
+
+                            x: modelData.x
+                            y: modelData.y
+                            width: modelData.width
+                            height: modelData.height
+                            radius: 2 * help.zoom
+                            color: modelData.current ? help.theme.currentMatch : help.theme.searchMatch
+
+                            Text {
+                                text: mark.modelData.text
+                                textFormat: Text.PlainText
+                                font: outputText.font
+                                color: "black"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Under a command's output: the keys.
+        Item {
+            id: footer
+
+            anchors.bottom: searchLine.top
+            width: parent.width
+            height: visible ? footerHint.height + 10 * help.zoom : 0
+            visible: help.output
+
+            CodeText {
+                id: footerHint
+
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 2 * help.zoom
+                markup: help.running ? "`Esc` to stop · `/` to search · `j` `k` to scroll"
+                    : "`/` to search · `j` `k` to scroll · `Esc` or `q` to close"
+                font.pixelSize: Math.round(12 * help.zoom)
+                color: help.theme.dim
             }
         }
 

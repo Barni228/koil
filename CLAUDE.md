@@ -42,8 +42,9 @@ the scratchpad (see Scratchpad).
 - `src/shell.rs`: shell commands (see Shell commands): the shell's kind
   (`Kind`), `%` in a command (`expand`), running one (`start`, then
   `Started::finish` on a thread) and stopping it (`Running::stop`), the
-  environment it runs in (`environment`), its output as shown
-  (`as_shown`), and the shells installed (`shells`). Its
+  environment it runs in (`environment`), its output as shown, as it
+  comes (`Screen`, `as_shown`, and `Live`, which tells what's new of it
+  while it runs), and the shells installed (`shells`). Its
   tests (`src/shell/tests.rs`) run sh on Unix.
 - `src/sizes.rs`: `Sizes`, which counts the sizes of dirs on its own
   threads and keeps them (see Kept sizes). Its tests
@@ -133,8 +134,9 @@ the scratchpad (see Scratchpad).
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`, `:h key`), a box listing what
   isn't obvious (`qml/help.js`'s `sections`); `:reg` shows the registers
-  in it (`showList`), and `:!` what a command wrote (`showText`). `/` and
-  `?` search it (see Help).
+  in it (`showList`), and `:!` what a command wrote (`showText`), also
+  as it runs (`showRunning`; see Output box). `/` and `?` search it (see
+  Help).
 - `qml/ConfirmDialog.qml`: every question's box, with Yes, No and Cancel
   as buttons, named by what they do (Apply, Don't Save), that show their
   keys, and a list under the question:
@@ -1252,14 +1254,39 @@ the scratchpad (see Scratchpad).
   stops; `endWait` goes on), and `boxOpen` keeps the menu, drops and syncs
   from changing anything. Its stdout and stderr come through one pipe
   (`io::pipe`), in order, shown as a terminal would show them
-  (`shell::as_shown`: no escapes, `\r` and backspaces writing over, tabs
-  as spaces), the first `SHOWN_LINES` (1000: the help box took half a
-  second to lay out 3000): a line that fits goes in the status line
-  (`StatusLine.fits`), more in the help box (`help.showText`, plain, where `/`
-  searches it, and Enter closes it, as vim's "Press ENTER"), under the
-  command, which loses its middle past three rows (`shownHeading`), as
-  the status line's message does: `%` on 100 entries took all of the box,
-  and the output under it couldn't be scrolled to. A failure
+  (`shell::Screen`: no escapes, `\r` and backspaces writing over, tabs
+  as spaces), its last `SHOWN_LINES` (1000, as a terminal keeps the last;
+  `Ran::cut` is how many came before, which the box says over them): a
+  line that fits goes in the status line (`StatusLine.fits`), more in
+  the output box (`help.showText`, see Output box, where `/` searches it,
+  and Enter closes it, as vim's "Press ENTER"). A `Screen` is given what's
+  written as it comes (`write`), so an escape, a character or a BOM cut
+  in two by a read waits for the rest (`Escape`, `Decoder`: UTF-8, or
+  UTF-16 after its BOM, as `document::decode_lossy` reads all of it), and
+  what it costs is by what's written, not by all of it each time;
+  `as_shown` is one given everything (a filter's stderr is one too, but
+  its stdout and `:_!`'s are kept as written, `Kept`). While the command
+  runs, `Started::finish` tells what's new (`Live::due`, a
+  `shell::Output`, at most every `LIVE_EVERY`, 100 ms, and all of it
+  before it returns; `System.shellOutput`): the lines that ended since,
+  the line being written as it is now (a progress bar, as `\r` wrote it
+  last), and how many of the lines told before aren't kept any more
+  (`drop`, or `reset` for all, once more was written between two tells
+  than is kept), so Koil adds to what it shows rather than taking it all
+  again. Blank lines at the end are told only once something follows
+  them, as they're left out in the end. Until the box shows it,
+  `shellOutput` in main.qml keeps it (`shellRun.lines`) and the status
+  line shows its last line that isn't blank, in place of the command, as
+  it does all the while for `:_!`. Once the command wrote something and
+  has run for `liveDelay` (400 ms: `showLive`, from `shellOutput` and
+  `liveTimer`), the box opens on what it wrote so far, and takes what
+  comes from then on (`help.addOutput`) until `shellDone` says how it
+  ended (`help.endOutput`), after which it stays open; a command done
+  sooner shows its output as before, so a quick one opens no box for a
+  line. Not a filter's, whose output is its lines. The command still
+  writes to a pipe, not a terminal: one that draws its bar only on a
+  terminal (cargo, pip, npm) shows none, and most buffer their stdout,
+  which comes in bursts (a pty would fix both). A failure
   ("shell returned 1") is an error, which stops a macro. What it starts
   with `&` keeps its output open, which is read only `AFTER_EXIT` longer.
   Koil quitting stops it (`SystemRust`'s `Drop`). The Settings window's
@@ -2643,6 +2670,36 @@ the scratchpad (see Scratchpad).
   starting with `g`, `z` and Space, and the Ctrl keys, have sections of
   their own (`:h g`, `:h z`, `:h space`, `:h ctrl`), as an index of them,
   pointing to the sections that say more.
+- **Output box** (Output in HelpPanel.qml): what a shell command wrote
+  is the help's box in another look (`output`), as a terminal's: the
+  command in the editor's font over it (not the help's big title), how
+  it ended on its right after a dot in its color (`outputStatus`: Done
+  green, `Exit 2` red, Stopped yellow, with how long it ran, or Running,
+  whose dot pulses and time counts by a `Timer`, not an animation), its
+  text on the editor's background in a frame, as a question's list, and
+  the keys under it. The text is one plain `TextEdit` (`outputText`), not
+  a section's rich text: `addOutput` takes its first lines off and puts
+  the new ones and the line being written at its end (by `outputLengths`
+  and `outputEnd`, so the text isn't read to find where), which lays out
+  only those; setting 1000 lines of rich text again at every tell took
+  too long. Search goes through it as through the help's texts
+  (`searchTexts`, its key "output"), and it draws its matches in view
+  itself (`marks`: a part a row, with the matched text again in black
+  over the highlight, as plain text can't color it). While the command
+  runs (`running`), Esc and Ctrl-C emit `stopRequested` (Ctrl+C copies a
+  selection first, where it's Copy), and nothing closes the box (`q`,
+  Enter, a click outside), but something else taking the keys (see Help;
+  main.qml then shows the last line in the status line again,
+  `shellRun.closed`). The view stays at the end as more is written
+  (`following`) until it's scrolled off it, and again once it's scrolled
+  back; that's told from the scrolls themselves (`scrolled`: keys, the
+  wheel, the scroll bar, a search), as the view's place also changes
+  when the box grows, which Qt tells before `maxY` follows. A box opened
+  while the command ran (`live`) isn't in the middle: its top is where
+  it would be at its tallest, and it grows down, so the lines stay where
+  they are as more come (in the middle, each new line moved them all).
+  The command's room in the header leaves a fixed width for the status,
+  or its middle was cut elsewhere as the seconds counted.
 - **Scrolling boxes**: the help, the hover box and the settings are
   `WheelFlickable`s: `Flickable`s that aren't interactive (a
   drag selects their text), scrolled by a `WheelHandler`. It needs

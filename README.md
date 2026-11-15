@@ -126,7 +126,8 @@ until you apply, and your edits stay while you go through other dirs.
   visual mode (or with lines marked) runs one on every selected entry,
   and `g!` is vim's `!`, which puts the lines through a command (`g!ip`,
   then `fmt`). `<cfile>` is the path or URL under the cursor, as `gf`
-  opens it.
+  opens it. A command that takes a while shows what it writes as it
+  comes, like its progress, in a box that `Esc` stops it from.
   `:_!cmd` puts what it writes in the scratchpad, like `:_!git log`, where
   `%` is a file of its text (`!echo hi >> %` adds a line).
 - **Shortcuts** (`Space q`, _Koil → Shortcuts…_, or Settings): keys of

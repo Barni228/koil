@@ -7,6 +7,7 @@
 //! a path is quoted in it (see `Kind`). One runs at a time, on another
 //! thread, while Koil waits for it; `Running::stop` ends it.
 
+use std::collections::VecDeque;
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -23,10 +24,11 @@ use serde::{Deserialize, Serialize};
 use crate::{document, listing};
 
 /// How much of a command's output (stdout and stderr together) is kept to
-/// show, and how many of its lines are shown: the help box lays out all of
-/// what it shows at once (3000 lines took half a second).
-const SHOWN_BYTES: usize = 1 << 20;
+/// show, its last lines: how many of them, of how many bytes together, and
+/// how long a line may be, in characters (see `Screen::last`).
 const SHOWN_LINES: usize = 1000;
+const SHOWN_BYTES: usize = 1 << 20;
+const SHOWN_COLUMNS: usize = 1 << 16;
 /// How much of a filter's output (or one for the scratchpad) is kept: past
 /// that, it isn't put in, as the lines would be lost (or the rest of it).
 const FILTER_BYTES: usize = 256 << 20;
@@ -38,6 +40,8 @@ const AFTER_EXIT: Duration = Duration::from_millis(500);
 /// How long a command `stop` sent Ctrl-C's signal has to end, before it's
 /// killed.
 const KILL_AFTER: Duration = Duration::from_secs(1);
+/// How often what a running command wrote is told at most (see `Live`).
+const LIVE_EVERY: Duration = Duration::from_millis(100);
 
 /// The shells whose environment can be read (see `environment`), and that
 /// get `-l` if it couldn't be, so they read the profile at least, as
@@ -265,7 +269,8 @@ pub struct Ran {
     pub output: String,
     /// What a filter wrote to stderr, as shown.
     pub errors: String,
-    /// How many lines of what's shown were left out, as it was too long.
+    /// How many lines of what's shown were left out, as it was too long:
+    /// its first ones, as a terminal keeps the last.
     pub cut: usize,
     /// Its exit code; none if a signal ended it.
     pub code: Option<i32>,
@@ -446,13 +451,16 @@ fn read(
 impl Started {
     /// Waits for the command to end, keeping what it writes, and a moment
     /// longer for what it started (`&`), if that still has its output open.
-    pub fn finish(mut self, running: &Running) -> Ran {
-        let limit = if self.filter || self.scratchpad {
-            FILTER_BYTES
-        } else {
-            SHOWN_BYTES
-        };
-        let mut kept = [Kept::new(limit), Kept::new(SHOWN_BYTES)];
+    /// Meanwhile `tell` gets what it wrote since, as shown (see `Live`),
+    /// and all of it has been told once this returns; not a filter's, whose
+    /// output is the lines it gives back.
+    pub fn finish(mut self, running: &Running, mut tell: impl FnMut(Output)) -> Ran {
+        // A filter's stdout and what goes in the scratchpad are kept as
+        // written; what's shown, as shown (the scratchpad's too, while it
+        // runs).
+        let mut kept = Kept::new(FILTER_BYTES);
+        let mut live = Live::default();
+        let mut errors = Screen::last();
         let mut open = if self.filter { 2 } else { 1 };
         let mut ended: Option<Instant> = None;
         let mut status = None;
@@ -462,11 +470,22 @@ impl Started {
                 None => POLL,
             };
             match self.output.recv_timeout(wait) {
-                Ok((stream, Some(bytes))) => kept[stream].add(&bytes),
+                Ok((0, Some(bytes))) => {
+                    if self.filter || self.scratchpad {
+                        kept.add(&bytes);
+                    }
+                    if !self.filter {
+                        live.add(&bytes);
+                    }
+                }
+                Ok((_, Some(bytes))) => errors.write(&bytes),
                 Ok((_, None)) => open -= 1,
                 Err(RecvTimeoutError::Timeout) if ended.is_some() => break,
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
+            }
+            if let Some(output) = live.due(false) {
+                tell(output);
             }
             if ended.is_none()
                 && let Ok(Some(s)) = self.child.try_wait()
@@ -481,39 +500,41 @@ impl Started {
             None => self.child.wait(),
         };
         let stopped = running.end();
-        let [out, err] = kept;
+        live.screen.end();
+        errors.end();
+        if let Some(output) = live.due(true) {
+            tell(output);
+        }
         let mut ran = Ran {
             code: status.as_ref().ok().and_then(|s| s.code()),
             stopped,
             error: status.err().map(|e| e.to_string()).unwrap_or_default(),
             ..Ran::default()
         };
-        if (self.filter || self.scratchpad) && out.over {
+        if kept.over {
             ran.error = "The output is too long to put in".to_string();
         }
         if self.filter {
-            let output = document::decode_lossy(out.bytes).replace("\r\n", "\n");
+            let output = document::decode_lossy(kept.bytes).replace("\r\n", "\n");
             ran.output = match output.strip_suffix('\n') {
                 Some(output) => output.to_string(),
                 None => output,
             };
-            (ran.errors, ran.cut) = shown_lines(as_shown(err.bytes, false), err.more_lines);
+            (ran.errors, ran.cut) = (errors.text(), errors.cut());
         } else if self.scratchpad {
-            ran.output = as_shown(out.bytes, true);
+            ran.output = as_shown(kept.bytes, true);
         } else {
-            (ran.output, ran.cut) = shown_lines(as_shown(out.bytes, false), out.more_lines);
+            (ran.output, ran.cut) = (live.screen.text(), live.screen.cut());
         }
         ran
     }
 }
 
-/// What's kept of what a command wrote: up to `limit` bytes, and how many
-/// lines there were after.
+/// What's kept of what a command wrote, as written: up to `limit` bytes.
 struct Kept {
     bytes: Vec<u8>,
     limit: usize,
     over: bool,
-    more_lines: usize,
 }
 
 impl Kept {
@@ -522,7 +543,6 @@ impl Kept {
             bytes: Vec::new(),
             limit,
             over: false,
-            more_lines: 0,
         }
     }
 
@@ -530,83 +550,373 @@ impl Kept {
         let room = self.limit.saturating_sub(self.bytes.len());
         let (kept, rest) = bytes.split_at(room.min(bytes.len()));
         self.bytes.extend_from_slice(kept);
-        if !rest.is_empty() {
-            self.over = true;
-            self.more_lines += rest.iter().filter(|&&b| b == b'\n').count();
+        self.over |= !rest.is_empty();
+    }
+}
+
+/// What a running command wrote since it was last told, as shown (see
+/// `Screen`), for Koil to show it as it comes: the lines it has are those
+/// told so far, less the first `drop` of them, with `lines` after them, and
+/// then `line`.
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Output {
+    /// Whether none of the lines told before are kept any more: so much
+    /// was written since that lines between them and `lines` are gone too.
+    pub reset: bool,
+    /// How many of the lines told before, from the first, aren't kept any
+    /// more (see `SHOWN_LINES`).
+    pub drop: usize,
+    /// The lines that ended since.
+    pub lines: Vec<String>,
+    /// The line being written, as it is now (a progress bar, as `\r` wrote
+    /// it last).
+    pub line: String,
+    /// How many lines aren't kept in all (see `Ran::cut`).
+    pub cut: usize,
+}
+
+/// What a running command wrote so far, as shown, which `due` tells as it
+/// changes (see `Output`), at most every `LIVE_EVERY`. Blank lines at the
+/// end aren't told until something comes after them, as `Screen::text`
+/// leaves them out, so what's been told is what that gives in the end.
+#[derive(Default)]
+struct Live {
+    screen: Screen,
+    /// Whether more was written since `due` last looked, and when it did.
+    changed: bool,
+    looked: Option<Instant>,
+    /// Of the lines that ended (counted from the first ever), the first
+    /// one told that's still kept, and the one after the last told.
+    from: usize,
+    told: usize,
+    /// The line being written, as told last.
+    line: String,
+}
+
+impl Live {
+    fn add(&mut self, bytes: &[u8]) {
+        self.screen.write(bytes);
+        self.changed = true;
+    }
+
+    /// What changed since it last told, if anything did and it's time to
+    /// tell it (or `now`).
+    fn due(&mut self, now: bool) -> Option<Output> {
+        if !self.changed || !now && self.looked.is_some_and(|at| at.elapsed() < LIVE_EVERY) {
+            return None;
+        }
+        self.changed = false;
+        self.looked = Some(Instant::now());
+        let screen = &self.screen;
+        let first = screen.cut();
+        let line = screen.current();
+        let start = self.told.max(first);
+        let mut end = screen.ended;
+        while line.is_empty() && end > start && screen.lines[end - 1 - first].is_empty() {
+            end -= 1;
+        }
+        let output = Output {
+            reset: first > self.told,
+            drop: first.min(self.told).saturating_sub(self.from),
+            lines: (start..end)
+                .map(|i| screen.lines[i - first].clone())
+                .collect(),
+            line,
+            cut: first,
+        };
+        if !output.reset && output.drop == 0 && output.lines.is_empty() && output.line == self.line
+        {
+            return None;
+        }
+        self.from = self.from.max(first);
+        self.told = end;
+        self.line.clone_from(&output.line);
+        Some(output)
+    }
+}
+
+/// How two bytes make a unit of UTF-16.
+type Unit = fn([u8; 2]) -> u16;
+
+/// Reads what a command writes as text, as it comes, as
+/// `document::decode_lossy` reads all of it: UTF-8, or UTF-16 after its
+/// BOM, with what isn't text as `�`. A character whose bytes haven't all
+/// come waits for the rest.
+#[derive(Default)]
+struct Decoder {
+    /// Whether the first bytes said how it's stored: as UTF-16, whose
+    /// units two bytes make so, or else as UTF-8.
+    started: bool,
+    utf16: Option<Unit>,
+    /// The bytes not read yet: a character's first ones, or a BOM's.
+    rest: Vec<u8>,
+}
+
+impl Decoder {
+    fn read(&mut self, bytes: &[u8]) -> String {
+        self.rest.extend_from_slice(bytes);
+        if !self.started {
+            let boms: [(&[u8], Option<Unit>); 3] = [
+                (&[0xef, 0xbb, 0xbf], None),
+                (&[0xff, 0xfe], Some(u16::from_le_bytes)),
+                (&[0xfe, 0xff], Some(u16::from_be_bytes)),
+            ];
+            // It may still be one, once the rest of it comes.
+            let rest = &self.rest;
+            if boms
+                .iter()
+                .any(|(bom, _)| bom.len() > rest.len() && bom.starts_with(rest))
+            {
+                return String::new();
+            }
+            if let Some((bom, utf16)) = boms.iter().find(|(bom, _)| rest.starts_with(bom)) {
+                self.utf16 = *utf16;
+                self.rest.drain(..bom.len());
+            }
+            self.started = true;
+        }
+        let bytes = std::mem::take(&mut self.rest);
+        match self.utf16 {
+            None => self.utf8(&bytes),
+            Some(unit) => self.utf16(&bytes, unit),
+        }
+    }
+
+    fn utf8(&mut self, bytes: &[u8]) -> String {
+        let mut text = String::new();
+        let mut chunks = bytes.utf8_chunks().peekable();
+        while let Some(chunk) = chunks.next() {
+            text.push_str(chunk.valid());
+            let invalid = chunk.invalid();
+            // A character's first bytes at the end: the rest may come.
+            let cut_off = chunks.peek().is_none()
+                && std::str::from_utf8(invalid).is_err_and(|e| e.error_len().is_none());
+            if cut_off {
+                self.rest = invalid.to_vec();
+            } else if !invalid.is_empty() {
+                text.push(char::REPLACEMENT_CHARACTER);
+            }
+        }
+        text
+    }
+
+    fn utf16(&mut self, bytes: &[u8], unit: Unit) -> String {
+        let (pairs, odd) = bytes.as_chunks();
+        let mut units: Vec<u16> = pairs.iter().map(|&pair| unit(pair)).collect();
+        let mut read = bytes.len() - odd.len();
+        // Half a character at the end: the other half may come.
+        if units.last().is_some_and(|u| (0xd800..0xdc00).contains(u)) {
+            units.pop();
+            read -= 2;
+        }
+        self.rest = bytes[read..].to_vec();
+        char::decode_utf16(units)
+            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect()
+    }
+
+    /// What the bytes still waiting are, as nothing more comes: `�`, or
+    /// nothing (a BOM alone, or half a unit of UTF-16, which
+    /// `decode_lossy` drops too).
+    fn end(&mut self) -> String {
+        let rest = std::mem::take(&mut self.rest);
+        let lost = self.utf16.is_none() || rest.len() >= 2;
+        self.started = true;
+        match lost && !rest.is_empty() {
+            true => char::REPLACEMENT_CHARACTER.to_string(),
+            false => String::new(),
         }
     }
 }
 
-/// `text` with at most `SHOWN_LINES` lines, and how many were left out (and
-/// `more` before that).
-fn shown_lines(text: String, more: usize) -> (String, usize) {
-    let Some((end, _)) = text.match_indices('\n').nth(SHOWN_LINES - 1) else {
-        return (text, more);
-    };
-    let left = text[end + 1..].split('\n').count();
-    (text[..end].to_string(), more + left)
+/// An escape sequence a `Screen` is in, which is left out.
+#[derive(Clone, Copy, Default)]
+enum Escape {
+    #[default]
+    None,
+    /// After ESC.
+    Started,
+    /// CSI: parameters and intermediates, then its final byte.
+    Csi,
+    /// OSC (a title, a link): up to BEL or ESC \.
+    Osc,
+    /// After an ESC in an OSC.
+    OscEnd,
 }
 
-/// Output as a terminal would show it, as plain text: without what's for
-/// the terminal (colors and other escapes, the control characters), with
-/// what `\r` or a backspace went back and wrote over written over (a
-/// progress bar, a man page's bold), tabs as spaces (to every 8th column;
-/// with `tabs`, kept, each a column), and no blanks at the ends of lines, or
-/// blank lines at the end.
-pub fn as_shown(bytes: Vec<u8>, tabs: bool) -> String {
-    let text = document::decode_lossy(bytes);
-    let mut lines: Vec<String> = Vec::new();
-    let mut line: Vec<char> = Vec::new();
-    let mut column: usize = 0;
-    let mut chars = text.chars().peekable();
-    // over what's there, as a terminal writes
-    let put = |line: &mut Vec<char>, column: &mut usize, c: char| {
-        if *column < line.len() {
-            line[*column] = c;
-        } else {
-            line.push(c);
+/// What a command wrote as a terminal would show it, as plain text, given
+/// as it comes (`write`): without what's for the terminal (colors and other
+/// escapes, the control characters), with what `\r` or a backspace went
+/// back and wrote over written over (a progress bar, a man page's bold),
+/// tabs as spaces (to every 8th column; with `tabs`, kept, each a column),
+/// and no blanks at the ends of lines.
+struct Screen {
+    tabs: bool,
+    /// How many lines are kept at most, the last ones, and bytes of them
+    /// (but the last line always), and how long a line may be, in
+    /// characters: what's written past that is left out.
+    keep: usize,
+    room: usize,
+    width: usize,
+    decoder: Decoder,
+    escape: Escape,
+    /// The lines that ended, those kept, with how many bytes they have,
+    /// and how many ended in all.
+    lines: VecDeque<String>,
+    bytes: usize,
+    ended: usize,
+    /// The line being written, and where in it.
+    line: Vec<char>,
+    column: usize,
+}
+
+impl Default for Screen {
+    fn default() -> Screen {
+        Screen::last()
+    }
+}
+
+impl Screen {
+    /// All of it.
+    fn all(tabs: bool) -> Screen {
+        Screen {
+            tabs,
+            keep: usize::MAX,
+            room: usize::MAX,
+            width: usize::MAX,
+            decoder: Decoder::default(),
+            escape: Escape::None,
+            lines: VecDeque::new(),
+            bytes: 0,
+            ended: 0,
+            line: Vec::new(),
+            column: 0,
         }
-        *column += 1;
-    };
-    while let Some(c) = chars.next() {
-        match c {
-            '\n' => {
-                lines.push(line.drain(..).collect::<String>().trim_end().to_string());
-                column = 0;
-            }
-            '\r' => column = 0,
-            '\x08' => column = column.saturating_sub(1),
-            '\t' if tabs => put(&mut line, &mut column, c),
-            '\t' => {
-                for _ in 0..8 - column % 8 {
-                    put(&mut line, &mut column, ' ');
+    }
+
+    /// As much as Koil shows of a command's output: its last lines.
+    fn last() -> Screen {
+        Screen {
+            keep: SHOWN_LINES,
+            room: SHOWN_BYTES,
+            width: SHOWN_COLUMNS,
+            ..Screen::all(false)
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let text = self.decoder.read(bytes);
+        self.write_text(&text);
+    }
+
+    /// Nothing more comes.
+    fn end(&mut self) {
+        let text = self.decoder.end();
+        self.write_text(&text);
+    }
+
+    fn write_text(&mut self, text: &str) {
+        for c in text.chars() {
+            // An escape that's going on takes it, or ends before it.
+            match self.escape {
+                Escape::None => {}
+                Escape::Started => {
+                    self.escape = match c {
+                        '[' => Escape::Csi,
+                        ']' => Escape::Osc,
+                        _ => Escape::None,
+                    };
+                    continue;
                 }
-            }
-            '\x1b' => match chars.next() {
-                // CSI: parameters and intermediates, then its final byte
-                Some('[') => {
-                    while chars.next_if(|c| ('\x20'..'\x40').contains(c)).is_some() {}
-                    chars.next_if(|c| ('\x40'..'\x7f').contains(c));
-                }
-                // OSC (a title, a link): up to BEL or ESC \
-                Some(']') => {
-                    while let Some(c) = chars.next() {
-                        if c == '\x07' || c == '\x1b' && chars.next_if_eq(&'\\').is_some() {
-                            break;
-                        }
+                Escape::Csi => {
+                    if ('\x20'..'\x40').contains(&c) {
+                        continue;
+                    }
+                    self.escape = Escape::None;
+                    if ('\x40'..'\x7f').contains(&c) {
+                        continue;
                     }
                 }
-                _ => {}
-            },
-            c if c.is_control() => {}
-            c => put(&mut line, &mut column, c),
+                Escape::Osc | Escape::OscEnd => {
+                    self.escape = match c {
+                        '\\' if matches!(self.escape, Escape::OscEnd) => Escape::None,
+                        '\x07' => Escape::None,
+                        '\x1b' => Escape::OscEnd,
+                        _ => Escape::Osc,
+                    };
+                    continue;
+                }
+            }
+            match c {
+                '\n' => self.end_line(),
+                '\r' => self.column = 0,
+                '\x08' => self.column = self.column.saturating_sub(1),
+                '\t' if !self.tabs => {
+                    for _ in 0..8 - self.column % 8 {
+                        self.put(' ');
+                    }
+                }
+                '\x1b' => self.escape = Escape::Started,
+                c if c.is_control() && c != '\t' => {}
+                c => self.put(c),
+            }
         }
     }
-    lines.push(line.into_iter().collect::<String>().trim_end().to_string());
-    while lines.last().is_some_and(String::is_empty) {
-        lines.pop();
+
+    /// Writes `c` over what's there, as a terminal does.
+    fn put(&mut self, c: char) {
+        if self.column >= self.width {
+            return;
+        }
+        if self.column < self.line.len() {
+            self.line[self.column] = c;
+        } else {
+            self.line.push(c);
+        }
+        self.column += 1;
     }
-    lines.join("\n")
+
+    fn end_line(&mut self) {
+        let line = self.current();
+        self.line.clear();
+        self.column = 0;
+        self.bytes += line.len();
+        self.lines.push_back(line);
+        self.ended += 1;
+        while self.lines.len() > self.keep || self.bytes > self.room && self.lines.len() > 1 {
+            self.bytes -= self.lines.pop_front().map_or(0, |line| line.len());
+        }
+    }
+
+    /// The line being written, as it is now.
+    fn current(&self) -> String {
+        let line: String = self.line.iter().collect();
+        line.trim_end().to_string()
+    }
+
+    /// How many lines ended that aren't kept any more.
+    fn cut(&self) -> usize {
+        self.ended - self.lines.len()
+    }
+
+    /// The lines kept and the one being written, without the blank lines
+    /// at the end.
+    fn text(&self) -> String {
+        let mut lines: Vec<String> = self.lines.iter().cloned().collect();
+        lines.push(self.current());
+        while lines.last().is_some_and(String::is_empty) {
+            lines.pop();
+        }
+        lines.join("\n")
+    }
+}
+
+/// All of `bytes` as a terminal would show it (see `Screen`), without the
+/// blank lines at the end.
+pub fn as_shown(bytes: Vec<u8>, tabs: bool) -> String {
+    let mut screen = Screen::all(tabs);
+    screen.write_text(&document::decode_lossy(bytes));
+    screen.text()
 }
 
 /// The environment commands run in (see `environment`).

@@ -184,16 +184,104 @@ fn test_as_shown() {
 }
 
 #[test]
-fn test_shown_lines() {
-    let text = (1..=SHOWN_LINES + 5)
-        .map(|n| n.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let (shown, cut) = shown_lines(text, 2);
-    assert_eq!(shown.lines().count(), SHOWN_LINES);
-    assert_eq!(shown.lines().last(), Some(SHOWN_LINES.to_string().as_str()));
-    assert_eq!(cut, 7);
-    assert_eq!(shown_lines("a\nb".into(), 0), ("a\nb".into(), 0));
+fn test_screen() {
+    // given in pieces, it's as given at once: an escape, a character and a
+    // line can each come in two
+    let text = "a\x1b[1;31mred\x1b[0m\r\né\x1b]0;title\x1b\\x\n10%\r20%";
+    for at in 0..=text.len() {
+        let mut screen = Screen::last();
+        screen.write(&text.as_bytes()[..at]);
+        screen.write(&text.as_bytes()[at..]);
+        screen.end();
+        assert_eq!(screen.text(), "ared\néx\n20%", "cut at {at}");
+        assert_eq!(screen.current(), "20%");
+    }
+    // the last lines are kept, and those before are counted
+    let mut screen = Screen::last();
+    for n in 1..=SHOWN_LINES + 5 {
+        screen.write(format!("{n}\n").as_bytes());
+    }
+    screen.write(b"\n\n");
+    assert_eq!(screen.cut(), 7);
+    let text = screen.text();
+    assert_eq!(text.lines().next(), Some("8"));
+    assert_eq!(text.lines().count(), SHOWN_LINES - 2);
+    assert_eq!(
+        text.lines().last(),
+        Some((SHOWN_LINES + 5).to_string().as_str())
+    );
+    // a line's end past SHOWN_COLUMNS is left out
+    let mut screen = Screen::last();
+    screen.write("x".repeat(SHOWN_COLUMNS + 9).as_bytes());
+    assert_eq!(screen.current().len(), SHOWN_COLUMNS);
+    // UTF-16 after its BOM, which can come a byte at a time, and what
+    // isn't text
+    let mut screen = Screen::last();
+    for byte in [0xff, 0xfe, b'a', 0, 0x3d, 0xd8, 0x00, 0xde, b'b', 0, 7] {
+        screen.write(&[byte]);
+    }
+    screen.end();
+    assert_eq!(screen.text(), "a😀b");
+    let mut screen = Screen::last();
+    screen.write(&[0xef, 0xbb]);
+    screen.write(&[0xbf, b'a', 0xff, b'b', 0xe2, 0x82]);
+    screen.end();
+    assert_eq!(screen.text(), "a\u{fffd}b\u{fffd}");
+    let mut screen = Screen::last();
+    screen.write(&[0xef]);
+    screen.end();
+    assert_eq!(screen.text(), "\u{fffd}");
+}
+
+#[test]
+fn test_live() {
+    let output = |reset, drop, lines: &[&str], line: &str, cut| Output {
+        reset,
+        drop,
+        lines: lines.iter().map(|l| l.to_string()).collect(),
+        line: line.to_string(),
+        cut,
+    };
+    let mut live = Live::default();
+    assert_eq!(live.due(true), None);
+    live.add(b"one\ntwo\nha");
+    assert_eq!(
+        live.due(false),
+        Some(output(false, 0, &["one", "two"], "ha", 0))
+    );
+    // not again so soon, but `now`
+    live.add(b"lf\r");
+    assert_eq!(live.due(false), None);
+    assert_eq!(live.due(true), Some(output(false, 0, &[], "half", 0)));
+    // nor what's the same
+    live.add(b"half\r");
+    assert_eq!(live.due(true), None);
+    // blank lines at the end wait for what comes after them
+    live.add(b"\n\n\n");
+    assert_eq!(live.due(true), Some(output(false, 0, &["half"], "", 0)));
+    live.add(b"\n");
+    assert_eq!(live.due(true), None);
+    live.add(b"x");
+    assert_eq!(
+        live.due(true),
+        Some(output(false, 0, &["", "", ""], "x", 0))
+    );
+    assert_eq!(live.screen.text(), "one\ntwo\nhalf\n\n\n\nx");
+    // the first lines told go as more are kept than SHOWN_LINES
+    let more: String = (0..SHOWN_LINES - 4).map(|n| format!("\n{n}")).collect();
+    live.add(more.as_bytes());
+    let told = live.due(true).unwrap();
+    assert_eq!((told.reset, told.drop, told.cut), (false, 2, 2));
+    assert_eq!(told.lines.len(), SHOWN_LINES - 4);
+    assert_eq!(told.lines[0], "x");
+    // and all of them, once so many more were written
+    let many: String = (0..2 * SHOWN_LINES).map(|n| format!("\n{n}")).collect();
+    live.add(many.as_bytes());
+    let told = live.due(true).unwrap();
+    assert_eq!((told.reset, told.drop), (true, SHOWN_LINES));
+    assert_eq!(told.lines.len(), SHOWN_LINES);
+    assert_eq!(told.cut, 2 + 2 * SHOWN_LINES);
+    assert_eq!(told.line, (2 * SHOWN_LINES - 1).to_string());
 }
 
 #[cfg(unix)]
@@ -214,7 +302,7 @@ mod running {
     fn run_request(request: Request) -> Ran {
         let running = Running::default();
         let (_, started) = start(&request, &running).unwrap();
-        started.finish(&running)
+        started.finish(&running, |_| {})
     }
 
     #[test]
@@ -239,7 +327,7 @@ mod running {
         let running = Running::default();
         let (line, started) = start(&request, &running).unwrap();
         assert_eq!(line, "printf '[%s]' 'a b'");
-        assert_eq!(started.finish(&running).output, "[a b]");
+        assert_eq!(started.finish(&running, |_| {}).output, "[a b]");
         // <cfile> with none: vim's error, or why
         let request = Request {
             command: "ls <cfile>".into(),
@@ -347,11 +435,63 @@ mod running {
             thread::sleep(Duration::from_millis(200));
             stopper.stop();
         });
-        let ran = started.finish(&running);
+        let ran = started.finish(&running, |_| {});
         assert!(ran.stopped);
         assert_eq!(ran.output, "started");
         assert!(begun.elapsed() < Duration::from_secs(5));
         assert!(!running.is_running());
+    }
+
+    #[test]
+    fn test_live_output() {
+        // what it writes is told as it comes: a progress bar as \r wrote it
+        // last, and in the end all of it, as `output` has it
+        let temp = tempfile::tempdir().unwrap();
+        let request = |input: Option<&str>| Request {
+            shell: "/bin/sh".into(),
+            command:
+                r"printf 'one\nhalf\r'; sleep 0.4; printf 'most\r'; sleep 0.4; printf '\ndone\n\n'"
+                    .into(),
+            cwd: temp.path().into(),
+            input: input.map(String::from),
+            ..Request::default()
+        };
+        let running = Running::default();
+        let (_, started) = start(&request(None), &running).unwrap();
+        let mut told = Vec::new();
+        let ran = started.finish(&running, |output| told.push(output));
+        let lines: Vec<&str> = told
+            .iter()
+            .flat_map(|o| o.lines.iter().map(String::as_str))
+            .collect();
+        let current: Vec<&str> = told.iter().map(|o| o.line.as_str()).collect();
+        assert_eq!(lines, ["one", "most", "done"]);
+        assert_eq!(current, ["half", "most", ""]);
+        assert!(told.iter().all(|o| !o.reset && o.drop == 0 && o.cut == 0));
+        assert_eq!(ran.output, "one\nmost\ndone");
+        // not a filter's, which are the lines it gives back
+        let (_, started) = start(&request(Some("a")), &running).unwrap();
+        let mut told = Vec::new();
+        let ran = started.finish(&running, |output| told.push(output));
+        assert_eq!(told, []);
+        assert_eq!(ran.output, "one\nhalf\rmost\ndone\n");
+        // the last lines of a long one, and how many came before
+        let mut told = Vec::new();
+        let (_, started) = start(
+            &Request {
+                shell: "/bin/sh".into(),
+                command: "seq 1 3000".into(),
+                cwd: temp.path().into(),
+                ..Request::default()
+            },
+            &running,
+        )
+        .unwrap();
+        let ran = started.finish(&running, |output| told.push(output));
+        assert_eq!(ran.cut, 3000 - SHOWN_LINES);
+        assert_eq!(ran.output.lines().count(), SHOWN_LINES);
+        assert_eq!(ran.output.lines().last(), Some("3000"));
+        assert_eq!(told.last().unwrap().cut, ran.cut);
     }
 
     #[test]

@@ -112,6 +112,12 @@ pub mod qobject {
         #[qsignal]
         fn shell_done(self: Pin<&mut System>, result: QString);
 
+        /// Emitted while that command runs, with what it wrote since, as
+        /// shown (a `shell::Output`, as JSON), and all of it before
+        /// `shell_done`.
+        #[qsignal]
+        fn shell_output(self: Pin<&mut System>, output: QString);
+
         /// Lays out a TextEdit's text as Koil does: every line's rows
         /// `line_height` tall, its baseline `baseline` down a row, clear of
         /// the `right_margin`, broken after spaces or at a word's edge (not
@@ -417,7 +423,11 @@ impl qobject::System {
                 let thread = self.qt_thread();
                 let running = self.running.clone();
                 thread::spawn(move || {
-                    let ran = started.finish(&running);
+                    let ran = started.finish(&running, |output| {
+                        let _ = thread.queue(move |system| {
+                            system.shell_output(to_json(&output));
+                        });
+                    });
                     let _ = thread.queue(move |system| system.shell_done(to_json(&ran)));
                 });
                 (line, String::new())

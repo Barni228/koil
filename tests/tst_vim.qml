@@ -4976,6 +4976,83 @@ TestCase {
         tryCompare(help, "opened", false);
     }
 
+    // What a command writes while it runs is added to the box as it
+    // comes, where Esc stops it rather than closing the box, until it's
+    // done.
+    function test_helpOutput() {
+        const out = (lines, line, more) => Object.assign({ reset: false, drop: 0, lines: lines, line: line, cut: 0 }, more);
+        let stops = 0;
+        const stop = () => stops++;
+        help.stopRequested.connect(stop);
+        help.showRunning(":!make", Date.now());
+        tryCompare(help, "opened", true);
+        verify(help.running);
+        compare(help.outputStatus, "Running");
+        // the lines that ended, then the one being written, which the next
+        // takes the place of
+        help.addOutput(out(["one", "two"], "10%"));
+        compare(help.outputShown(), "one\ntwo\n10%");
+        help.addOutput(out([], "20%"));
+        compare(help.outputShown(), "one\ntwo\n20%");
+        // the first lines go as more are kept than are shown
+        help.addOutput(out(["20%"], "", { drop: 1, cut: 1 }));
+        compare(help.outputShown(), "two\n20%");
+        compare(help.outputCut, 1);
+        help.addOutput(out(["", "x"], "y", { cut: 1 }));
+        compare(help.outputShown(), "two\n20%\n\nx\ny");
+        // it's searched as the help is
+        keys("/x<CR>");
+        compare(help.matches.length, 1);
+        compare(help.matches[0].start, 9);
+        keys("<Esc>");
+        compare(help.searchPattern, "");
+        // all of them go
+        help.addOutput(out(["z"], "", { drop: 4, cut: 5 }));
+        compare(help.outputShown(), "z");
+        help.addOutput(out(["", "a"], "b", { reset: true, cut: 9 }));
+        compare(help.outputShown(), "\na\nb");
+        compare(help.outputCut, 9);
+        // Esc stops it, and nothing closes the box
+        keys("q<CR>");
+        verify(help.opened);
+        compare(stops, 0);
+        keys("<Esc>");
+        verify(help.opened);
+        compare(stops, 1);
+        keys("<C-c>");
+        compare(stops, 2);
+        help.endOutput("failed", "Exit 2");
+        verify(!help.running);
+        verify(help.outputStatus.startsWith("Exit 2 · "), help.outputStatus);
+        help.addOutput(out(["late"], ""));
+        compare(help.outputShown(), "\na\nb");
+        keys("<Esc>");
+        tryCompare(help, "opened", false);
+        compare(stops, 2);
+        help.stopRequested.disconnect(stop);
+
+        // One that's done, with how it ended.
+        help.showText(":!ls", "a\nb", { failed: "", took: 1234, cut: 3 });
+        tryCompare(help, "opened", true);
+        verify(!help.running);
+        compare(help.outputShown(), "a\nb");
+        compare(help.outputStatus, "Done · 1.2s");
+        compare(help.outputCut, 3);
+        compare(help.duration(75000, false), "1m 15s");
+        compare(help.duration(12900, true), "12s");
+        keys("q");
+        tryCompare(help, "opened", false);
+        // The help isn't one.
+        help.showList("Test", [["a", "one"]], 4);
+        tryCompare(help, "opened", true);
+        verify(!help.output);
+        keys("<Esc>");
+        tryCompare(help, "opened", false);
+        // as it was, for the other tests
+        help.lastPattern = "";
+        help.searchHistory = [];
+    }
+
     // :h goes to a topic's section, and to the row of a key in it, or
     // else to the first row of that key.
     function test_helpTopics() {

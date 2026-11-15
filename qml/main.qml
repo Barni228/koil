@@ -1343,6 +1343,16 @@ ApplicationWindow {
             }
             shellRun = {
                 line: r.line,
+                // When it started; what it wrote so far, until the box
+                // shows that (see shellOutput): the lines that ended, the
+                // line being written, and how many lines came before; and
+                // whether the box shows it, or did until it was closed.
+                started: Date.now(),
+                lines: [],
+                current: "",
+                cut: 0,
+                box: false,
+                closed: false,
                 filter: filter && !scratch ? { first: range.first, last: last, lines: lines, text: t, view: activeView,
                     listing: listing, path: filePath, scratchpad: scratchpad } : null,
                 scratch: scratch,
@@ -1353,6 +1363,7 @@ ApplicationWindow {
             };
             vim.showMessage((scratch ? ":_!" : ":!") + r.line);
             vim.waiting = "Running";
+            liveTimer.restart();
         };
         // It could change any file, so the copies applying would make are
         // made first, as they'd get its changes (see copyFirst). But not
@@ -1378,34 +1389,97 @@ ApplicationWindow {
         return spans;
     }
 
+    // How long a command runs before the box shows what it writes as it
+    // comes (ms): one that's done sooner shows it as before, a line in the
+    // status line, more in the box.
+    readonly property int liveDelay: 400
+
+    // What the command running wrote since (a shell::Output). The box
+    // shows it as it comes (see showLive); until it does, the status line
+    // shows its last line that isn't blank, in place of the command (a
+    // progress bar, moving), as it does all the while for :_!, whose output
+    // goes in the scratchpad.
+    function shellOutput(out) {
+        const run = shellRun;
+        if (!run)
+            return;
+        if (run.box) {
+            help.addOutput(out);
+            return;
+        }
+        if (out.reset)
+            run.lines = [];
+        run.lines.splice(0, out.drop);
+        for (const line of out.lines)
+            run.lines.push(line);
+        run.current = out.line;
+        run.cut = out.cut;
+        let last = out.line;
+        for (let i = run.lines.length - 1; i >= 0 && !last; i--)
+            last = run.lines[i];
+        if (last)
+            vim.showMessage(last);
+        showLive();
+    }
+
+    // Shows what the command running wrote so far in the box, where what
+    // it writes from then on is seen as it comes (help.addOutput), until
+    // it's done (see shellDone): once it wrote something and has run for
+    // liveDelay. Not a filter's, nor :_!'s, whose output goes elsewhere,
+    // nor again once the box was closed.
+    function showLive() {
+        const run = shellRun;
+        if (!run || run.box || run.closed || run.scratch || run.filter || confirmDialog.opened
+                || Date.now() - run.started < liveDelay || !(run.lines.length || run.current))
+            return;
+        run.box = true;
+        const title = ":!" + run.line;
+        vim.showMessage(title);
+        help.showRunning(title, run.started);
+        help.addOutput({ reset: true, drop: 0, lines: run.lines, line: run.current, cut: run.cut });
+        run.lines = [];
+    }
+
     // The command runShell started is done: `ran` is what it did (see
     // shell::Ran). A failed one says why in the status line, which stops
-    // a macro running it.
+    // a macro running it. The box, if it shows what it wrote already,
+    // stays, with how it ended.
     function shellDone(ran) {
         const run = shellRun, title = (run.scratch ? ":_!" : ":!") + run.line;
         shellRun = null;
+        liveTimer.stop();
+        // In place of the last line it wrote (see shellOutput).
+        vim.showMessage(title);
         const exit = ran.code === 0 ? "" : ran.code === null ? "killed" : "shell returned " + ran.code;
+        // As the box says it.
+        const failed = ran.code === 0 ? "" : ran.code === null ? "Killed" : "Exit " + ran.code;
         const f = run.filter;
         if (ran.stopped) {
             vim.showMessage("Interrupted");
+            help.endOutput("stopped");
         } else if (ran.error) {
             vim.showError(ran.error);
+            help.endOutput("failed", "Failed");
         } else if (run.scratch) {
             // A macro that ran it goes on in the scratchpad.
             vim.endWait(false, () => showInScratch(title, ran.output, exit));
             return;
+        } else if (run.box) {
+            help.endOutput(exit ? "failed" : "done", failed);
+            if (exit)
+                vim.showError(title + " (" + exit + ")");
         } else if (!f) {
-            showOutput(title, ran.output, ran.cut, exit);
+            showOutput(title, ran.output, ran.cut, exit, failed, Date.now() - run.started);
         } else if (exit) {
             // The lines stay.
-            showOutput(title, ran.errors, ran.cut, exit);
+            showOutput(title, ran.errors, ran.cut, exit, failed, Date.now() - run.started);
         } else if (activeView !== f.view || listing !== f.listing || filePath !== f.path || scratchpad !== f.scratchpad
                 || f.view.textArea.latest.text !== f.text) {
             vim.showError("The text changed while the command ran, so its output wasn't put in");
         } else {
             vim.filterLines(f.first, f.last, ran.output, f.lines);
             if (ran.errors)
-                showOutput(title, ran.errors, ran.cut, "");
+                showOutput(title, ran.errors, ran.cut, "", "", Date.now() - run.started);
         }
         vim.endWait(ran.stopped, run.disk ? () => afterShell(run.disk) : null);
     }
@@ -1473,27 +1547,25 @@ ApplicationWindow {
             vim.showMessage(title);
     }
 
-    // What a shell command wrote (`text`, and `cut` lines after it), and
-    // why it failed (`exit`, like "shell returned 1"): in the status line,
-    // if it's a line that fits there, else in a box over the editor (the
-    // help's, where / searches it).
-    function showOutput(title, text, cut, exit) {
-        const failed = exit ? title + " (" + exit + ")" : "";
+    // What a shell command wrote (`text`, after `cut` lines that aren't
+    // kept), and why it failed (`exit`, like "shell returned 1", or as the
+    // box says it, `failed`: "Exit 1"): in the status line, if it's a line
+    // that fits there, else in a box over the editor (the help's, where /
+    // searches it), with how long it ran (`took`, in ms).
+    function showOutput(title, text, cut, exit, failed, took) {
+        const error = exit ? title + " (" + exit + ")" : "";
         if (!text) {
-            if (failed)
-                vim.showError(failed);
+            if (error)
+                vim.showError(error);
         } else if (!cut && !text.includes("\n") && statusLine.fits(text)) {
             if (exit)
                 vim.showError(text);
             else
                 vim.showMessage(text);
         } else {
-            const notes = (exit ? [exit[0].toUpperCase() + exit.slice(1) + "."] : []).concat(cut
-                ? [cut + (cut === 1 ? " more line" : " more lines") + " not shown: `:_!` puts all of it in "
-                    + "the scratchpad (`_`)."] : []);
-            help.showText(title, text, notes.join(" "));
-            if (failed)
-                vim.showError(failed);
+            help.showText(title, text, { failed: failed, took: took, cut: cut });
+            if (error)
+                vim.showError(error);
         }
     }
 
@@ -2451,6 +2523,7 @@ ApplicationWindow {
 
         onOpenFailed: message => vim.showError(message)
         onShellDone: result => root.shellDone(JSON.parse(result))
+        onShellOutput: output => root.shellOutput(JSON.parse(output))
     }
 
     // -p on the command line prints the scratchpad's text as Koil quits,
@@ -2520,6 +2593,15 @@ ApplicationWindow {
 
     // Syncs the listing a moment after something changed on disk (once for
     // a burst of changes), and then not again for a while if it took long.
+    // Shows what a command writes as it comes, once it ran a while (see
+    // showLive).
+    Timer {
+        id: liveTimer
+
+        interval: root.liveDelay
+        onTriggered: root.showLive()
+    }
+
     Timer {
         id: syncTimer
 
@@ -3001,9 +3083,16 @@ ApplicationWindow {
         defaultFontFamily: root.defaultFontFamily
         onAboutToHide: hadKeys = !root.activeFocusItem || holds(root.activeFocusItem)
         onClosed: {
+            // Closed while the command it shows runs (something took the
+            // keys): the status line shows what it writes from here.
+            if (root.shellRun && root.shellRun.box) {
+                root.shellRun.box = false;
+                root.shellRun.closed = true;
+            }
             if (hadKeys)
                 root.activeView.textArea.forceActiveFocus();
         }
+        onStopRequested: system.stopShell()
     }
 
     // :confirm q with unsaved changes, and applying the listing's changes
