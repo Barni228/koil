@@ -1685,7 +1685,8 @@ the scratchpad (see Scratchpad).
   the keys so far with them), and Enter's make no line break in the path
   field. Shift and a key vim knows (`<S-Esc>`, `<S-PageDown>`) is that
   key alone, but for a shortcut that takes it in normal or visual mode
-  (`runKey`), as Shift+Enter is `<S-CR>`. They can't be Koil's own, start
+  (`runKey`), as Shift+Enter is `<S-CR>`, and but for the arrows, Home
+  and End in the command line, which select there. They can't be Koil's own, start
   them, or start with them (`g`, `g.x`), nor a key Koil's menus or the
   editor's copy, paste and undo take before vim gets it
   (`root.menuShortcuts`, which the list doesn't show: Cmd keys on macOS,
@@ -1899,7 +1900,29 @@ the scratchpad (see Scratchpad).
   `<D-v>` is a key the command line drops) types the clipboard's text
   at its cursor, as one line: its line breaks spaces, but those it ends
   with (a yanked line's), and a macro being recorded keeps the keys that
-  type it, not the paste. Registers follow vim's (`setRegister`): `"0` only yanks,
+  type it, not the paste. The command line has a text field's other keys
+  too (`commandLineEdit`, before vim's own, `commandLineKey`): the
+  arrows move by a word with Option (Ctrl off macOS) and to the line's
+  ends with Cmd (Home and End), and select with Shift (`commandAnchor`,
+  the selection's other end; `commandSelecting` and its start and end
+  are properties, for the status line's bindings); Backspace and Delete
+  take a word with Option, or the selection; Cmd+A selects all of it,
+  Cmd+C and Cmd+X copy and cut what's selected (the text alone, to the
+  clipboard, not through a register), and what's typed or pasted takes
+  its place. Ctrl+C with nothing selected still closes it, as in vim
+  (it's Copy on Windows). They're read from the key event, as Option
+  isn't in vim's names for keys (it types characters on macOS), so a
+  macro being recorded keeps what they did as vim's keys: each move of
+  the cursor as `<Left>`s or `<Right>`s (`moveCommandCursor`), and what's
+  deleted as `<BS>`s (`deleteCommandRange`), so it runs the same with
+  nothing selected. Any of vim's keys ends the selection, but not a
+  modifier alone (no token), which Cmd+C starts with. StatusLine.qml
+  draws the selection in the editor's selection colors, its text again
+  over it, and no cursor then, and gives the pointer's presses
+  (`commandLineClick`: a press puts the cursor there, Shift or a drag
+  selects; `commandLineWord` for a double click), finding the place by
+  the widths of the line's starts (`commandPositionAt`); its `MouseArea`
+  never takes the keys, which stay the editor's. Registers follow vim's (`setRegister`): `"0` only yanks,
   deletes and changes go in `"1` (shifting to `"9`) or `"-`, and `".`,
   `":`, `"/` and `"%` (`fileName`: the file, or the listing's location)
   are read from vim's state and can't be written. `p` says how many

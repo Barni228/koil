@@ -219,7 +219,13 @@ function sections(help) {
                     + "with `g`), or a key, like `:h gJ`."],
                 ["`↑`  `↓`", "In the command line: earlier and later commands (or searches)."],
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
-                [isMac ? "`⌘V`" : "`Ctrl+V`", "In the command line: paste the clipboard, as one line."],
+                [isMac ? "`⌥←`  `⌥→`  `⌘←`  `⌘→`" : "`Ctrl+←`  `Ctrl+→`  `Home`  `End`",
+                    "In the command line, as in a text field: a word back or on, and to the start or the end. "
+                    + "With `Shift`, or the mouse, they select. " + (isMac ? "`⌥⌫`" : "`Ctrl+Backspace`")
+                    + " deletes a word."],
+                [isMac ? "`⌘A`  `⌘C`  `⌘X`  `⌘V`" : "`Ctrl+A`  `Ctrl+C`  `Ctrl+X`  `Ctrl+V`",
+                    "In the command line: select all of it, copy or cut what's selected, and paste the "
+                    + "clipboard, as one line."],
                 ["`@:`", "Run the last command again."]
             ]
         },

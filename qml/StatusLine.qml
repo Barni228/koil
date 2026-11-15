@@ -2,7 +2,8 @@ import QtQuick
 import QtQuick.Controls
 
 // The status line under the editor: vim's message, mode or command line
-// (with its cursor), and the cursor's position or what vim waits for.
+// (with its cursor and selection, which the mouse sets too), and the
+// cursor's position or what vim waits for.
 Pane {
     id: bar
 
@@ -21,6 +22,21 @@ Pane {
             at = p.end;
         }
         return shown + html(line.slice(at));
+    }
+
+    // The place in the command line the pointer at `x` is nearest to: an
+    // index as Vim's commandCursor, after the character it's past the
+    // middle of.
+    function commandPositionAt(x) {
+        const line = bar.vim.commandLine;
+        let left = statusFont.advanceWidth(line.slice(0, 1));
+        for (let i = 1; i < line.length; i++) {
+            const right = statusFont.advanceWidth(line.slice(0, i + 1));
+            if (x < (left + right) / 2)
+                return i;
+            left = right;
+        }
+        return line.length;
     }
 
     // Whether `text` fits in the status line.
@@ -70,6 +86,61 @@ Pane {
             font: status.font
             text: commandCursor.character || " "
         }
+        TextMetrics {
+            id: beforeSelection
+
+            font: status.font
+            text: bar.vim.commandLine.slice(0, Math.max(0, bar.vim.commandSelectionStart))
+        }
+        TextMetrics {
+            id: selected
+
+            font: status.font
+            text: bar.vim.commandSelecting
+                ? bar.vim.commandLine.slice(bar.vim.commandSelectionStart, bar.vim.commandSelectionEnd) : ""
+        }
+        // For a press's place (see commandPositionAt).
+        FontMetrics {
+            id: statusFont
+
+            font: status.font
+        }
+
+        // The command line's selection (see Vim's commandLineEdit), in
+        // the editor's selection colors, with its text over it. The cursor
+        // isn't drawn then, as in a text field.
+        Rectangle {
+            visible: bar.vim.commandSelecting
+            x: beforeSelection.advanceWidth
+            width: Math.min(selected.advanceWidth, status.width - x)
+            height: parent.height
+            clip: true
+            color: bar.theme.highlight
+
+            Text {
+                text: selected.text
+                font: status.font
+                color: bar.theme.highlightedText
+                textFormat: Text.PlainText
+            }
+        }
+
+        // The pointer in the command line, as in a text field: a press
+        // puts the cursor there, with Shift or dragged it selects, and a
+        // double click selects a word. It never takes the keys.
+        MouseArea {
+            anchors.fill: parent
+            enabled: bar.vim.commandLine !== ""
+            visible: enabled
+            cursorShape: Qt.IBeamCursor
+            onPressed: mouse => bar.vim.commandLineClick(bar.commandPositionAt(mouse.x),
+                (mouse.modifiers & Qt.ShiftModifier) !== 0)
+            onPositionChanged: mouse => {
+                if (pressed)
+                    bar.vim.commandLineClick(bar.commandPositionAt(mouse.x), true);
+            }
+            onDoubleClicked: mouse => bar.vim.commandLineWord(bar.commandPositionAt(mouse.x))
+        }
 
         // Command-line cursor: a block over the character it's on.
         Rectangle {
@@ -77,7 +148,7 @@ Pane {
 
             readonly property string character: bar.vim.commandLine.charAt(bar.vim.commandCursor)
 
-            visible: bar.vim.commandLine !== ""
+            visible: bar.vim.commandLine !== "" && !bar.vim.commandSelecting
             x: beforeCursor.advanceWidth
             width: underCursor.advanceWidth
             height: parent.height

@@ -2104,6 +2104,109 @@ TestCase {
         compare(editor.text, "x y b\n<CR>\tz b\n<CR>\tz b");
     }
 
+    // The command line has a text field's keys: by words, to its ends,
+    // selecting with Shift, copying and cutting, and a macro recorded
+    // meanwhile does the same.
+    function test_commandLineField() {
+        load("a b\na b");
+        const word = isMac ? Qt.AltModifier : Qt.ControlModifier;
+        const selection = () => [vim.commandSelectionStart, vim.commandSelectionEnd];
+        keys(":foo bar.baz");
+        keyClick(Qt.Key_Left, word);
+        compare(vim.commandCursor, 9);
+        keyClick(Qt.Key_Left, word);
+        compare(vim.commandCursor, 8);
+        keyClick(Qt.Key_Left, word);
+        compare(vim.commandCursor, 5);
+        keyClick(Qt.Key_Right, word);
+        compare(vim.commandCursor, 8);
+        verify(!vim.commandSelecting);
+        keys("<Home>");
+        compare(vim.commandCursor, 1);
+        // with Shift it selects, which Copy takes
+        keyClick(Qt.Key_Right, word | Qt.ShiftModifier);
+        compare(selection(), [1, 4]);
+        keys("<D-c>");
+        compare(clipboard.text, "foo");
+        compare(vim.commandLine, ":foo bar.baz");
+        compare(selection(), [1, 4]);
+        // what's typed takes its place
+        keys("x");
+        compare(vim.commandLine, ":x bar.baz");
+        compare(vim.commandCursor, 2);
+        verify(!vim.commandSelecting);
+        // to the end, and Cut
+        keyClick(Qt.Key_End, Qt.ShiftModifier);
+        compare(selection(), [2, 10]);
+        keys("<D-x>");
+        compare(vim.commandLine, ":x");
+        compare(clipboard.text, " bar.baz");
+        // all of it, which a paste takes the place of
+        keys("<D-a>");
+        compare(selection(), [1, 2]);
+        clipboard.text = "new";
+        keys("<D-v>");
+        compare(vim.commandLine, ":new");
+        // an arrow alone goes to the selection's end that way
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        compare(selection(), [2, 4]);
+        keys("<Right>");
+        compare(vim.commandCursor, 4);
+        verify(!vim.commandSelecting);
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        keys("<Left>");
+        compare(vim.commandCursor, 2);
+        // back over the anchor, nothing is selected
+        keyClick(Qt.Key_Right, Qt.ShiftModifier);
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        verify(!vim.commandSelecting);
+        // a word deleted, back and on, and a selection by Backspace
+        keys("<Esc>:one two");
+        keyClick(Qt.Key_Backspace, word);
+        compare(vim.commandLine, ":one ");
+        keys("<Home>");
+        keyClick(Qt.Key_Delete, word);
+        compare(vim.commandLine, ": ");
+        keys("ab");
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        keys("<BS>");
+        compare(vim.commandLine, ": ");
+        compare(vim.commandCursor, 1);
+        // vim's keys end a selection, and so does closing it
+        keys("abc");
+        keyClick(Qt.Key_Left, Qt.ShiftModifier);
+        keys("<C-b>");
+        verify(!vim.commandSelecting);
+        compare(vim.commandLine, ":abc ");
+        keyClick(Qt.Key_End, Qt.ShiftModifier);
+        keys("<Esc>");
+        compare(vim.commandLine, "");
+        compare(vim.commandAnchor, -1);
+        // the pointer: a press, a drag (or Shift), and a double click
+        keys(":hello world");
+        vim.commandLineWord(8);
+        compare(selection(), [7, 12]);
+        vim.commandLineClick(3, false);
+        compare(vim.commandCursor, 3);
+        verify(!vim.commandSelecting);
+        vim.commandLineClick(6, true);
+        compare(selection(), [3, 6]);
+        vim.commandLineClick(1, true);
+        compare(selection(), [1, 3]);
+        keys("<Esc>");
+        // a macro runs the same, with nothing selected
+        keys("qq:s/a/xyz");
+        keyClick(Qt.Key_Left, word | Qt.ShiftModifier);
+        compare(selection(), [5, 8]);
+        keys("Q<CR>q");
+        compare(editor.text, "Q b\na b");
+        keys("j@q");
+        compare(editor.text, "Q b\nQ b");
+    }
+
     // The parts of the command line that are colored, as "text:kind".
     function test_commandLineParts() {
         const parts = line => vim.commandLineParts(line).map(p => line.slice(p.start, p.end) + ":" + p.kind);
@@ -2836,10 +2939,11 @@ TestCase {
         keys("v<S-Down>");
         compare([vim.mode, cursorLine()], ["visual", 2]);
         keys("<Esc>");
-        // and in the command line, the key alone
-        keys(":ab<S-Left>c");
-        compare(vim.commandLine, ":acb");
-        keys("<Esc>");
+        // and in the command line, the key alone (but the arrows, which
+        // select there)
+        keys(":ab<S-Up><S-Esc>");
+        compare(vim.commandLine, "");
+        compare(vim.mode, "normal");
     }
 
     // Shift+Esc is Esc, but for a shortcut that takes it, in normal or

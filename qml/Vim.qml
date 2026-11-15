@@ -34,6 +34,14 @@ QtObject {
     // Index in commandLine that the command-line cursor sits on (1 or more;
     // index 0 holds the ":", "/" or "?").
     property int commandCursor: 1
+    // The other end of the command line's selection, an index like
+    // commandCursor, or -1: what's selected is between the two (see
+    // commandLineEdit), [commandSelectionStart, commandSelectionEnd).
+    property int commandAnchor: -1
+    readonly property bool commandSelecting: commandLine !== "" && commandAnchor >= 1
+        && commandAnchor <= commandLine.length && commandAnchor !== commandCursor
+    readonly property int commandSelectionStart: commandSelecting ? Math.min(commandAnchor, commandCursor) : -1
+    readonly property int commandSelectionEnd: commandSelecting ? Math.max(commandAnchor, commandCursor) : -1
     property string message: ""
     property bool messageIsError: false
     // :set number and :set relativenumber (the view draws the line numbers),
@@ -428,8 +436,10 @@ QtObject {
     onCommandLineChanged: {
         previewSubstitute();
         previewSearch();
-        if (commandLine === "")
+        if (commandLine === "") {
             visualShown = null;
+            commandAnchor = -1;
+        }
     }
     // The options are for where they were found (completing sets them again
     // after it moves the cursor).
@@ -494,14 +504,8 @@ QtObject {
         if (singleLine && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                 && (tok === null || mode === "insert" && tok !== "<CR>" && tok !== "<S-CR>"))
             return true;
-        if (commandLine !== "") {
-            // Paste types the clipboard there (Ctrl+V too, as while typing).
-            if (event.matches(StandardKey.Paste) || tok === "<C-v>") {
-                pasteInCommandLine();
-                return true;
-            }
-            return typedKey(tok, event);
-        }
+        if (commandLine !== "")
+            return commandLineEdit(tok, event) || typedKey(tok, event);
         if (!isVisual && mode !== "insert")
             message = "";
         // Ctrl+Y is also Redo on Windows and Linux, and Paste (yank) on
@@ -1047,35 +1051,197 @@ QtObject {
     function openCommandLine(kind, text) {
         commandLine = kind + (text || "");
         commandCursor = commandLine.length;
+        commandAnchor = -1;
     }
 
     // Replaces commandLine[from, to) with text and puts the cursor after it.
     function editCommandLine(from, to, text) {
         commandCursor = from + text.length;
+        commandAnchor = -1;
         commandLine = commandLine.slice(0, from) + text + commandLine.slice(to);
     }
 
-    // Cmd+V in the command line: types the clipboard's text at its cursor,
-    // as one line (its line breaks are spaces, but those it ends with, as a
-    // yanked line's), without the characters that can't be typed. A macro
-    // being recorded keeps the keys that type it, not the paste, as the
-    // clipboard has something else when it runs.
+    // ---- The command line as a text field ----------------------------------
+    // The keys every text field has work in the command line too, beside
+    // vim's (see commandLineKey): the arrows move by a word with Option
+    // (Ctrl elsewhere) and to the line's ends with Cmd (Home and End),
+    // and select with Shift; Backspace and Delete take a word with Option
+    // (Ctrl); Cmd+A selects it all, Cmd+C and Cmd+X copy and cut what's
+    // selected, which what's typed or pasted takes the place of. The
+    // status line draws the selection, and gives the mouse's presses
+    // (commandLineClick, commandLineWord). These come as key events, not
+    // as vim's keys (Option isn't told apart there), so a macro being
+    // recorded keeps what they did as vim's keys instead: the cursor's
+    // moves as <Left> and <Right>, and what was deleted as <BS>, each as
+    // many times, so it runs the same without a selection.
+
+    // The command line's selection, { start, end }, or null.
+    function commandSelection() {
+        return commandSelecting ? { start: commandSelectionStart, end: commandSelectionEnd } : null;
+    }
+
+    // Where the word before `p` in the command line starts (past the
+    // blanks before `p`), and where the one after it ends: a word as
+    // Ctrl-W takes it, letters and digits, or other signs.
+    function commandWordStart(p) {
+        const line = commandLine;
+        let s = p;
+        while (s > 1 && Txt.isBlank(line[s - 1]))
+            s--;
+        const cls = Txt.charClass(line[s - 1], false);
+        while (s > 1 && !Txt.isBlank(line[s - 1]) && Txt.charClass(line[s - 1], false) === cls)
+            s--;
+        return s;
+    }
+
+    function commandWordEnd(p) {
+        const line = commandLine, n = line.length;
+        let e = p;
+        while (e < n && Txt.isBlank(line[e]))
+            e++;
+        const cls = Txt.charClass(line[e], false);
+        while (e < n && !Txt.isBlank(line[e]) && Txt.charClass(line[e], false) === cls)
+            e++;
+        return e;
+    }
+
+    // Puts the command line's cursor at `p`; with `extend`, what's between
+    // where the selection started (or the cursor was) and there is
+    // selected, else nothing is.
+    function moveCommandCursor(p, extend) {
+        const c = commandCursor, to = Math.max(1, Math.min(commandLine.length, p));
+        const anchor = !extend ? -1 : commandSelecting ? commandAnchor : c;
+        if (recording) {
+            for (let i = Math.abs(to - c); i > 0; i--)
+                recordKeys.push(to < c ? "<Left>" : "<Right>");
+        }
+        commandCursor = to;
+        commandAnchor = anchor;
+    }
+
+    // Deletes commandLine[from, to).
+    function deleteCommandRange(from, to) {
+        moveCommandCursor(to, false);
+        if (recording) {
+            for (let i = from; i < to; i++)
+                recordKeys.push("<BS>");
+        }
+        historyIndex = -1;
+        editCommandLine(from, to, "");
+    }
+
+    // A key in the command line that's a text field's (see above): whether
+    // it was one. Others are vim's (commandLineKey), which end the
+    // selection.
+    function commandLineEdit(tok, event) {
+        const c = commandCursor, n = commandLine.length, sel = commandSelection();
+        const shift = (event.modifiers & Qt.ShiftModifier) !== 0;
+        // By a word, and (on macOS, where Home and End are rare) to the
+        // line's ends.
+        const byWord = (event.modifiers & (isMac ? Qt.AltModifier : Qt.ControlModifier)) !== 0;
+        const toEnd = isMac && (event.modifiers & Qt.ControlModifier) !== 0;
+        // Ctrl+V too, as while typing.
+        if (event.matches(StandardKey.Paste) || tok === "<C-v>") {
+            chainedRuns = 0;
+            pasteInCommandLine();
+            return true;
+        }
+        if (event.matches(StandardKey.Copy) || event.matches(StandardKey.Cut)) {
+            // With nothing selected, Ctrl-C closes the command line, as
+            // in vim (it's Copy on Windows).
+            if (!sel)
+                return tok !== "<C-c>";
+            if (clipboard)
+                clipboard.setClipboardText(commandLine.slice(sel.start, sel.end), "");
+            if (event.matches(StandardKey.Cut))
+                deleteCommandRange(sel.start, sel.end);
+            return true;
+        }
+        if (event.matches(StandardKey.SelectAll)) {
+            moveCommandCursor(n, false);
+            commandAnchor = 1;
+            return true;
+        }
+        const left = event.key === Qt.Key_Left, right = event.key === Qt.Key_Right;
+        const home = event.key === Qt.Key_Home, end = event.key === Qt.Key_End;
+        if (left || right || home || end) {
+            // The key alone, with nothing selected, is vim's.
+            if (!(shift || byWord || toEnd || sel))
+                return false;
+            // Without Shift, from a selection to its end that way.
+            const to = home || left && toEnd ? 1 : end || right && toEnd ? n
+                : byWord ? (left ? commandWordStart(c) : commandWordEnd(c))
+                : sel && !shift ? (left ? sel.start : sel.end) : c + (left ? -1 : 1);
+            moveCommandCursor(to, shift);
+            return true;
+        }
+        const back = event.key === Qt.Key_Backspace, del = event.key === Qt.Key_Delete;
+        if (sel && (back || del || tok === "<C-u>" || tok === "<C-w>")) {
+            deleteCommandRange(sel.start, sel.end);
+            return true;
+        }
+        if ((back || del) && byWord) {
+            if (back)
+                deleteCommandRange(commandWordStart(c), c);
+            else
+                deleteCommandRange(c, commandWordEnd(c));
+            return true;
+        }
+        // What's typed takes the selection's place.
+        if (sel && tok !== null && (!isSpecial(tok) || tok === "<Tab>"))
+            deleteCommandRange(sel.start, sel.end);
+        return false;
+    }
+
+    // A press in the command line (the status line's) at `p`: the cursor
+    // goes there, or with `extend` (Shift, or a drag from a press), the
+    // selection reaches there.
+    function commandLineClick(p, extend) {
+        if (commandLine !== "")
+            moveCommandCursor(p, extend);
+    }
+
+    // A double click there: the word at `p` is selected (or the blanks).
+    function commandLineWord(p) {
+        const line = commandLine, n = line.length;
+        if (n < 2)
+            return;
+        const at = Math.max(1, Math.min(n - 1, p)), cls = Txt.charClass(line[at], false);
+        let s = at, e = at + 1;
+        while (s > 1 && Txt.charClass(line[s - 1], false) === cls)
+            s--;
+        while (e < n && Txt.charClass(line[e], false) === cls)
+            e++;
+        moveCommandCursor(s, false);
+        moveCommandCursor(e, true);
+    }
+
+    // Cmd+V in the command line: types the clipboard's text at its cursor
+    // (in place of what's selected), as one line (its line breaks are
+    // spaces, but those it ends with, as a yanked line's), without the
+    // characters that can't be typed. A macro being recorded keeps the keys
+    // that type it, not the paste, as the clipboard has something else when
+    // it runs.
     function pasteInCommandLine() {
         const r = getRegister("+");
         const text = r ? r.text.replace(/[\r\n]+$/, "").replace(/\r\n?|\n/g, " ").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
             : "";
         if (!text)
             return;
+        if (commandSelecting)
+            deleteCommandRange(commandSelectionStart, commandSelectionEnd);
         if (recording) {
             for (const c of text.match(/[\s\S]/gu))
                 recordKeys.push(c === "\t" ? "<Tab>" : c);
         }
-        chainedRuns = 0;
         historyIndex = -1;
         editCommandLine(commandCursor, commandCursor, text);
     }
 
     function commandLineKey(tok) {
+        // Not a modifier alone, which Cmd+C starts with.
+        if (tok !== null)
+            commandAnchor = -1;
         if (tok === "<Up>" || tok === "<Down>") {
             browseHistory(tok === "<Up>" ? -1 : 1);
             return true;
@@ -1118,13 +1284,7 @@ QtObject {
         } else if (tok === "<C-u>" || tok === "<D-BS>") {
             editCommandLine(1, c, "");
         } else if (tok === "<C-w>") {
-            let s = c;
-            while (s > 1 && Txt.isBlank(commandLine[s - 1]))
-                s--;
-            const cls = Txt.charClass(commandLine[s - 1], false);
-            while (s > 1 && !Txt.isBlank(commandLine[s - 1]) && Txt.charClass(commandLine[s - 1], false) === cls)
-                s--;
-            editCommandLine(s, c, "");
+            editCommandLine(commandWordStart(c), c, "");
         } else if (tok === "<Tab>") {
             editCommandLine(c, c, "\t");
         } else if (tok !== null && !isSpecial(tok)) {
