@@ -64,8 +64,10 @@ function sections(help) {
                     + (isWindows ? ", and above a drive's root (`C:/`), the drives, at `/`" : "")
                     + ". In a file: back to the listing, and in the scratchpad, to where you were (`3-`: and "
                     + "`-` twice more from there)."],
-                ["`[`  `]`", "Back to the dir listed before (`3[`: three back), and forward again, as a "
-                    + "browser's back and forward (so do "
+                ["`[`  `]`", "Back to the dir you stopped at before (`3[`: three back), and forward again, as "
+                    + "a browser's back and forward, but not through the dirs you only passed with `Enter` "
+                    + "or `-`: only those you did something in (an edit, a file opened, a yank, `m`, `K`, a "
+                    + "shell command, an apply), typed the path of, or left by typing one (so do "
                     + (isMac ? "`Cmd+[` and `Cmd+]`, and the mouse's buttons"
                         : "`Alt+Left` and `Alt+Right`, the mouse's buttons, and a keyboard's Back and Forward keys")
                     + "), with the cursor where it was "

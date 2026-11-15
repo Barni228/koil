@@ -334,10 +334,24 @@ the scratchpad (see Scratchpad).
   change undo takes back, and a field edited since starts over
   (`lineBrowse.shown`).
 - **Back and forward** (`visits` in main.qml, `stepVisits`): apart from
-  the path history, the locations listed in the order they were gone to,
-  as a browser's history: `[` (`3[`) goes back through them, `]`
-  forward again, and going to another location (`onLocationChanged`)
-  drops those after the one shown (`visitAt`), keeping the newest 100.
+  the path history, the locations the user stopped at, in the order they
+  were gone to, as a browser's history: `[` (`3[`) goes back through
+  them, `]` forward again, and going to another location
+  (`onLocationChanged`) drops those after the one shown (`visitAt`),
+  keeping the newest 100. Not the ones only walked through, so `[` goes
+  back to where something was done, not through every dir on the way
+  there: a location gone to by Enter on a dir or `-` (`walkTo`, which
+  sets `walking`; the visit's `walked`), left the same way, with nothing
+  done in it (`used`), is dropped as it's left, and walking back to the
+  stop before it (into a dir and out again) is that visit again, not
+  another. Something done (`usedHere`) is the listing edited (checked as
+  `showListing` replaces or leaves it, `isEdited`), a file opened from
+  it, an entry yanked or marked (vim's `yanked` and `marked`), K, Space
+  r, Space o, a shell command, an apply, an undo or a create. Anything
+  else that goes to a location is a jump (the path field, `:e`, Open
+  Folder, a drop, startup), which makes both the one left and the one
+  gone to stops; so does `[` or `]` itself (`walked` off for the one it
+  goes to), so the other key always goes back.
   Each keeps where the cursor was when it was left (`spot`, saved by
   `showListing` as the location changes: `listingSpot`, or `fileSpot`
   from a file), which going back to it gives `showListing` as its `keep`,

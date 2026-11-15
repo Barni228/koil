@@ -109,15 +109,21 @@ ApplicationWindow {
     // Every location listed since Koil started, oldest first, each once,
     // which k and j in the path field put back (see Vim.lineHistory).
     property var pathHistory: []
-    // The locations listed in the order they were gone to, as a browser's
-    // history, which `[` goes back through and `]` forward again (see
-    // stepVisits): { path, spot }, the location as shown and where the
-    // cursor was in its listing when it was left (see listingSpot).
-    // `visitAt` is the one shown, and `stepping` is set while [ or ] goes
-    // to one, which the location changing then doesn't add.
+    // The locations the user stopped at, in the order they were gone to,
+    // as a browser's history, which `[` goes back through and `]` forward
+    // again (see stepVisits): { path, spot, walked, used }, the location as
+    // shown and where the cursor was in its listing when it was left (see
+    // listingSpot). Not those only walked through: one gone to by Enter on
+    // a dir or `-` (`walked`; `walking` is set while those open one), left
+    // the same way, with nothing done in it (`used`, see usedHere), is
+    // dropped as it's left, so [ goes back to where something was done, or
+    // a path was typed, not through every dir on the way. `visitAt` is the
+    // one shown, and `stepping` is set while [ or ] goes to one, which the
+    // location changing then doesn't add.
     property var visits: []
     property int visitAt: -1
     property bool stepping: false
+    property bool walking: false
     // The listing's entry a file was opened from (with Enter), which `-`
     // goes back to; "" for a file opened otherwise.
     property string openedFrom: ""
@@ -237,7 +243,7 @@ ApplicationWindow {
             own("<CR>", qsTr("Open the dir or file on the line"), listing),
             own("<S-CR>", qsTr("Update, staying in the path field"), qsTr("Path field")),
             own("-", qsTr("The dir above (in a file, back to the listing)")),
-            own("[", qsTr("Back to the dir listed before (in a file, back to the listing)")),
+            own("[", qsTr("Back to the dir you did something in before (in a file, back to the listing)")),
             own("]", qsTr("Forward again, to the dir [ went back from"), listing),
             own("<Tab>", qsTr("Go between the listing and the path field"), listing),
             own("g.", qsTr("Toggle hidden entries"), listing),
@@ -279,12 +285,20 @@ ApplicationWindow {
         if (!location)
             return;
         pathHistory = pathHistory.filter(p => p !== location).concat([location]).slice(-100);
+        if (stepping)
+            return;
         // A visit after the one shown, as a browser's, so those `]` went
-        // forward to are dropped.
-        if (!stepping) {
-            visits = visits.slice(0, visitAt + 1).concat([{ path: location, spot: null }]).slice(-100);
-            visitAt = visits.length - 1;
-        }
+        // forward to are dropped, and so is the one left, if it was only
+        // walked through (see `visits`).
+        const left = visits[visitAt];
+        const passed = left && left.walked && walking && !left.used;
+        let v = visits.slice(0, visitAt + (passed ? 0 : 1));
+        // Back where the walk started (into a dir and out again): the same
+        // visit.
+        if (!v.length || v[v.length - 1].path !== location)
+            v = v.concat([{ path: location, spot: null, walked: walking, used: false }]);
+        visits = v.slice(-100);
+        visitAt = visits.length - 1;
     }
     // The file shown is watched for changes on disk (see checkFile).
     onFilePathChanged: {
@@ -364,6 +378,7 @@ ApplicationWindow {
             if (!updateListing())
                 return;
             fileSpot = listingSpot();
+            usedHere();
         }
         listing = false;
         problems = [];
@@ -549,6 +564,10 @@ ApplicationWindow {
     // that were marked stay marked (see Vim.markTexts), wherever they go.
     // Vim stays in the path field if it was there.
     function showListing(moved, from, keep) {
+        // The listing shown was edited: something done there (the text is
+        // still its own, and Koil has just read it, or it's left).
+        if (listing && isEdited())
+            usedHere();
         // Before it's the listing, whose prefixes vim would keep out of.
         keepScratch();
         // Vim's :set options, as one typed in a file left them: nothing of
@@ -663,12 +682,14 @@ ApplicationWindow {
         return r;
     }
 
-    // [ (`steps` -1, or -3 for 3[) and ] (1): the location listed before
-    // the one shown, or the one after it, which `[` came back from, as far
-    // as there are (else an error, which stops a macro), with the cursor
-    // where it was there (going back up, on the dir it came from, as for
-    // `-`). One that can't be opened any more is dropped, so the next
-    // goes past it.
+    // [ (`steps` -1, or -3 for 3[) and ] (1): the location the user
+    // stopped at before the one shown (see `visits`), or the one after it,
+    // which `[` came back from, as far as there are (else an error, which
+    // stops a macro), with the cursor where it was there (going back up, on
+    // the dir it came from, as for `-`). The one it leaves stays, whatever
+    // was done there, so the other key goes back to it, and so does the
+    // one it goes to, if it's walked on from. One that can't be opened any
+    // more is dropped, so the next goes past it.
     function stepVisits(steps) {
         const to = Math.max(0, Math.min(visits.length - 1, visitAt + steps));
         if (to === visitAt || visitAt < 0) {
@@ -681,7 +702,7 @@ ApplicationWindow {
         stepping = false;
         if (r.ok) {
             visitAt = to;
-            setVisit(to, { path: location });
+            setVisit(to, { path: location, walked: false });
         } else if (!r.problems.length && !r.pathProblems.length) {
             dropVisit(to);
         }
@@ -691,6 +712,25 @@ ApplicationWindow {
     // compiled, a `var` property's array may be a copy.
     function setVisit(i, change) {
         visits = visits.map((v, j) => j === i ? Object.assign({}, v, change) : v);
+    }
+
+    // Something was done in the location shown, so [ and ] stop at it (see
+    // `visits`): its listing edited, a file opened from it, an entry
+    // yanked, marked or looked at (K, Space r, Space o), a shell command
+    // run, changes applied or undone.
+    function usedHere() {
+        if (visitAt >= 0 && !visits[visitAt].used)
+            setVisit(visitAt, { used: true });
+    }
+
+    // updateListing for Enter on a dir and `-`, which walk from a dir to
+    // the next: one only walked through is no stop of [ and ] (see
+    // `visits`).
+    function walkTo(open, from) {
+        walking = true;
+        const ok = updateListing(open, from);
+        walking = false;
+        return ok;
     }
 
     // Forgets the visit `i`, which can't be opened. The two on either side
@@ -1017,7 +1057,7 @@ ApplicationWindow {
         const t = editorView.textArea.text;
         const p = activeView === editorView ? vim.cursor : editorView.saved?.cursor ?? 0;
         const up = JSON.parse(koil.up(t, JSON.stringify(editorView.hidden), Txt.lineOf(t, p) - 1, count));
-        updateListing(up.open, up.from);
+        walkTo(up.open, up.from);
     }
 
     // Enter in the listing: opens the dir or file on the cursor's line, and
@@ -1058,7 +1098,7 @@ ApplicationWindow {
         } else if (target.error !== undefined) {
             vim.showError(target.error);
         } else if (target.dir !== undefined) {
-            updateListing(target.dir);
+            walkTo(target.dir);
         } else if (target.new !== undefined) {
             createFile(target.new);
         } else if (target.copy !== undefined) {
@@ -1174,6 +1214,8 @@ ApplicationWindow {
     // Finder (Explorer on Windows).
     function reveal() {
         const path = entryPath();
+        if (path)
+            usedHere();
         const why = path && system.reveal(path);
         if (why)
             vim.showError(why);
@@ -1185,7 +1227,10 @@ ApplicationWindow {
     // and follows the cursor (see followInfo) until Esc closes it. A dir's
     // size is counted meanwhile, which infoTimer shows as it goes.
     function showInfo() {
-        showInfoOf(entryOnDisk(), true);
+        const entry = entryOnDisk();
+        if (entry.path)
+            usedHere();
+        showInfoOf(entry, true);
     }
 
     // K's box, once the cursor moved, or something else is shown (a file,
@@ -1267,6 +1312,7 @@ ApplicationWindow {
         const path = entryPath();
         if (!path)
             return;
+        usedHere();
         // Where it can be changed, as in Koil.
         copyFirst(path, () => {
             const why = system.openInApp(path);
@@ -1341,6 +1387,7 @@ ApplicationWindow {
                 vim.showError(r.error);
                 return;
             }
+            usedHere();
             shellRun = {
                 line: r.line,
                 // When it started; what it wrote so far, until the box
@@ -1590,6 +1637,7 @@ ApplicationWindow {
         }
         const create = () => {
             const spot = listingSpot();
+            usedHere();
             const c = JSON.parse(koil.create(JSON.stringify([target.path])));
             // From scratch, as after an apply: undo mustn't bring back its
             // line without its ID, which Koil would read as new again.
@@ -1600,7 +1648,7 @@ ApplicationWindow {
             }
             if (target.dir) {
                 vim.showMessage(c.message);
-                updateListing(target.name);
+                walkTo(target.name);
                 return;
             }
             readFile(target.path, target.name);
@@ -1802,6 +1850,7 @@ ApplicationWindow {
             spot: spot,
             place: place
         } : null;
+        usedHere();
         const r = JSON.parse(koil.apply(JSON.stringify(picked)));
         if (before && r.unapply)
             appliedFrom = appliedFrom.concat([Object.assign({ unapply: r.unapply }, before)]);
@@ -2070,6 +2119,7 @@ ApplicationWindow {
     // gave), and shows the listing again where it was.
     function undoPicked(picked) {
         const spot = listingSpot();
+        usedHere();
         const u = JSON.parse(koil.undo(JSON.stringify(picked)));
         showListing(true, "", spot);
         report(u);
@@ -2783,6 +2833,17 @@ ApplicationWindow {
                 Qt.callLater(root.followInfo);
         }
         onHighlightsCleared: root.closeInfo()
+        // An entry yanked or marked is something done in its dir, which [
+        // and ] then stop at (see usedHere). Not the marks a visit gets
+        // back as [ or ] shows it, before it's the one shown.
+        onYankedChanged: {
+            if (vim.yanked && root.listing && root.activeView === editorView)
+                root.usedHere();
+        }
+        onMarkedChanged: {
+            if (vim.marked.length && root.listing && root.activeView === editorView && !root.stepping)
+                root.usedHere();
+        }
         onShowHiddenChanged: root.settingChanged()
         onGitignoreChanged: root.settingChanged()
         onRegexChanged: root.settingChanged()
