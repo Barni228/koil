@@ -256,19 +256,20 @@ ApplicationWindow {
     }
     // The keys Koil's menus (and the editor's copy, paste and undo, and
     // back and forward's Cmd+[ and Cmd+]) take before vim gets them, as vim
-    // names them (see Vim.tokenFor: Cmd on macOS, Ctrl elsewhere, with
-    // Shift only for Cmd), which no shortcut can have, as ownShortcuts
-    // are, but which the list doesn't show.
+    // names them (see Vim.tokenFor: Cmd on macOS, with Option M-, Ctrl
+    // elsewhere, and Shift in the character), which no shortcut can have,
+    // as ownShortcuts are, but which the list doesn't show.
     readonly property var menuShortcuts: {
-        const key = (k, name) => ({ keys: "<" + (isMac ? "D" : "C") + "-" + k + ">", name: name, normal: true,
-            visual: true, where: "" });
+        const key = (k, name) => ({ keys: "<" + (isMac ? k.length > 1 ? "" : "D-" : "C-") + k + ">", name: name,
+            normal: true, visual: true, where: "" });
         const both = [key("o", qsTr("Open…")), key("s", qsTr("Save")), key("q", qsTr("Quit")), key("f", qsTr("Find")),
-            key("g", qsTr("Find Next")), key("z", qsTr("Undo")), key("c", qsTr("Copy"))];
-        return both.concat(isMac ? [key("O", qsTr("Open Folder…")), key("S", qsTr("Save As…")),
-            key(",", qsTr("Settings…")), key("G", qsTr("Find Previous")), key("=", qsTr("Zoom In")),
-            key("+", qsTr("Zoom In")), key("-", qsTr("Zoom Out")), key("0", qsTr("Actual Size")),
-            key("Z", qsTr("Redo")), key("x", qsTr("Cut")), key("v", qsTr("Paste")), key("a", qsTr("Select All")),
-            key("h", qsTr("Hide Koil")), key("[", qsTr("Back")), key("]", qsTr("Forward"))]
+            key("g", qsTr("Find Next")), key("z", qsTr("Undo")), key("c", qsTr("Copy")),
+            key("O", qsTr("Open Folder…")), key("S", qsTr("Save As…")), key(",", qsTr("Settings…")),
+            key("G", qsTr("Find Previous")), key("=", qsTr("Zoom In")), key("+", qsTr("Zoom In")),
+            key("-", qsTr("Zoom Out")), key("0", qsTr("Actual Size")), key("Z", qsTr("Redo"))];
+        return both.concat(isMac ? [key("x", qsTr("Cut")), key("v", qsTr("Paste")), key("a", qsTr("Select All")),
+            key("h", qsTr("Hide Koil")), key("[", qsTr("Back")), key("]", qsTr("Forward")),
+            key("M-D-f", qsTr("Replace…"))]
             : [key("h", qsTr("Replace…"))]);
     }
     // Whether the shortcuts' list shows Koil's own under the user's (saved).

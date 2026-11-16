@@ -1722,19 +1722,43 @@ the scratchpad (see Scratchpad).
   (`keyName`: Esc, Enter, Tab, the arrows, Home, End, PageUp, PageDown,
   F1 to F35) is one of its own with Shift, Ctrl or Cmd (`<S-F12>`,
   `<C-S-Left>`, `<D-Esc>`: `modifiedName`; not Backspace and Delete, and
-  Alt isn't told apart, as Option types characters). F-keys, Shift+Tab
-  and the Ctrl and Cmd ones are keys only a shortcut takes
+  Alt alone isn't told apart, as Option types characters). Ctrl takes a
+  letter, digit or sign as Cmd does, each the character Shift makes of
+  it (`<C-K>` is Ctrl+Shift+K, `<C-?>` Ctrl+Shift+/, as `<D-K>`; not
+  `>`, and Ctrl+[ alone is `<Esc>`, so `<C-[>` is no key), and `S-` goes
+  only before a key with a name: Qt gives a sign as Shift has it, so
+  there's no telling `<D-S-/>`, and one rule covers letters too. Every
+  modifier held is in a key's name, in one order, Ctrl, Alt, Cmd, Shift
+  (`C-`, `M-`, `D-`, `S-`: `<C-M-k>`, `<C-D-K>`, `<C-M-D-S-Left>`),
+  which `keysIn` reads only so. Alt is one only with Ctrl or Cmd, as
+  alone it types characters or opens a menu, and off macOS not where
+  Ctrl+Alt types one (AltGr, by the event's text). On macOS, Qt gives
+  the letter as the key whatever is held (Option too, though the text is
+  `˚`), and a digit or sign with Ctrl as it is, or as Shift has it,
+  tried with System Events' `key code` on a window that logs its key
+  events; untried elsewhere. F-keys, Shift+Tab, the Ctrl and Cmd ones
+  with a name, a digit or sign with Ctrl, and a character with Ctrl or
+  Cmd and another of the two or Alt, are keys only a shortcut takes
   (`shortcutOnly`): without one they do nothing, not even end a command,
   as before they had names (`runKey` reads them only if a shortcut takes
   the keys so far with them), and Enter's make no line break in the path
   field. Shift and a key vim knows (`<S-Esc>`, `<S-PageDown>`) is that
-  key alone, but for a shortcut that takes it in normal or visual mode
-  (`runKey`), as Shift+Enter is `<S-CR>`, and but for the arrows, Home
-  and End in the command line, which select there. They can't be Koil's own, start
+  key alone, and Ctrl+Shift and a letter is Ctrl and the letter (`<C-K>`
+  is `<C-k>`, as vim reads it, also written by hand; `keyPressed` reads
+  it so before its own Ctrl+V, and a macro records the `<C-k>`), but for
+  a shortcut that takes it in normal or visual mode
+  (`unshifted`), as Shift+Enter is `<S-CR>`, and but for the arrows, Home
+  and End in the command line, which select there. Keys a shortcut (or
+  `commandKeys`) takes, or starts with, where vim alone has no command of
+  them, go to it before the editor's own standard keys (`shortcutTakes`,
+  first in `keyPressed`): on macOS Ctrl+K is one of Qt's Cuts and Ctrl+Y
+  one of its Pastes, which swallowed a shortcut on `<C-k>`, and
+  elsewhere Ctrl+A is Select All. They can't be Koil's own, start
   them, or start with them (`g`, `g.x`), nor a key Koil's menus or the
   editor's copy, paste and undo take before vim gets it
   (`root.menuShortcuts`, which the list doesn't show: Cmd keys on macOS,
-  Ctrl elsewhere), nor another enabled shortcut's,
+  with Replace's `<M-D-f>`, Ctrl elsewhere), nor another enabled
+  shortcut's,
   in the same mode, nor start with a count or `"`, which vim reads first
   (`problemOf`). What of vim's they take the place of is said, in the
   warning's color, but they can be saved (`noteOf`, `Vim.vimCommandIn`:

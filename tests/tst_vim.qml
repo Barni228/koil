@@ -59,8 +59,10 @@ TestCase {
     }
 
     // Types keys: characters, and names like <Esc>, <CR>, <F12>, <S-Tab>,
-    // <C-v> (Ctrl) or <D-c> (Cmd on macOS, Ctrl elsewhere), and named keys
-    // with those (<S-CR>, <C-Esc>, <D-S-F12>).
+    // <C-v> (Ctrl) or <D-c> (Cmd on macOS, Ctrl elsewhere), named keys
+    // with those (<S-CR>, <C-Esc>, <D-S-F12>), and either with more
+    // modifiers (<C-K> with Shift, <C-M-k>, <C-D-K>, <C-M-D-S-Left>), and
+    // digits and signs with them (<C-1>, <C-/>).
     function keys(s) {
         const named = {
             "Esc": Qt.Key_Escape,
@@ -84,19 +86,19 @@ TestCase {
                 continue;
             }
             const name = m.slice(1, -1);
-            const k = /^([CD]-)?(S-)?(\w+)$/.exec(name);
-            const key = k && (/^F\d+$/.test(k[3]) ? Qt.Key_F1 + Number(k[3].slice(1)) - 1 : named[k[3]]);
+            const k = /^(C-)?(M-)?(D-)?(S-)?(.+)$/.exec(name);
+            const mods = k ? (k[1] ? ctrl : 0) | (k[2] ? Qt.AltModifier : 0) | (k[3] ? Qt.ControlModifier : 0)
+                | (k[4] ? Qt.ShiftModifier : 0) : 0;
+            const key = k && (/^F\d+$/.test(k[5]) ? Qt.Key_F1 + Number(k[5].slice(1)) - 1 : named[k[5]]);
             if (name === "S-Tab")
                 keyClick(Qt.Key_Backtab, Qt.ShiftModifier);
-            else if (/^C-[a-z]$/.test(name))
-                keyClick(Qt.Key_A + name.charCodeAt(2) - 97, ctrl);
-            else if (/^D-[a-z]$/.test(name))
-                keyClick(Qt.Key_A + name.charCodeAt(2) - 97, Qt.ControlModifier);
-            else if (name === "D-BS")
-                keyClick(Qt.Key_Backspace, Qt.ControlModifier);
+            else if (k && (k[1] || k[3]) && /^[a-zA-Z]$/.test(k[5]))
+                keyClick(Qt.Key_A + k[5].toLowerCase().charCodeAt(0) - 97,
+                    mods | (k[5] < "a" ? Qt.ShiftModifier : 0));
             else if (key !== undefined && key !== null)
-                keyClick(key, (k[1] === "C-" ? ctrl : k[1] === "D-" ? Qt.ControlModifier : Qt.NoModifier)
-                    | (k[2] ? Qt.ShiftModifier : Qt.NoModifier));
+                keyClick(key, mods);
+            else if (k && (k[1] || k[3]) && /^[!-~]$/.test(k[5]))
+                keyClick(k[5].charCodeAt(0), mods);
             else
                 fail("unknown key " + m);
         }
@@ -2981,6 +2983,114 @@ TestCase {
             "<", "F", "3", "6", ">", "<C-S-PageDown>", "<S-Home>"]);
     }
 
+    // Every modifier held is in a key's name, in one order: Ctrl, Alt
+    // (only with Ctrl or Cmd), Cmd, and Shift, which is in a character
+    // (<C-K>, <C-?>) and S- only before a key with a name.
+    function test_modifierNames() {
+        const name = (key, modifiers, text) => vim.tokenFor({ key: key, modifiers: modifiers, text: text || "" });
+        const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
+        const shift = Qt.ShiftModifier, alt = Qt.AltModifier;
+        compare([name(Qt.Key_K, ctrl), name(Qt.Key_K, ctrl | shift), name(Qt.Key_K, ctrl | alt),
+            name(Qt.Key_K, ctrl | alt | shift), name(Qt.Key_Left, ctrl | alt), name(Qt.Key_F5, ctrl | alt | shift),
+            name(Qt.Key_Left, alt | shift), name(Qt.Key_BracketLeft, ctrl), name(Qt.Key_BracketLeft, ctrl | alt),
+            name(Qt.Key_1, ctrl), name(Qt.Key_Question, ctrl | shift), name(Qt.Key_Greater, ctrl | shift),
+            name(Qt.Key_Space, ctrl), name(Qt.Key_K, alt, "˚"), name(Qt.Key_K, alt | shift, "")],
+            ["<C-k>", "<C-K>", "<C-M-k>", "<C-M-K>", "<C-M-Left>", "<C-M-S-F5>", "<S-Left>", "<Esc>", "<C-M-[>",
+                "<C-1>", "<C-?>", null, null, "˚", null]);
+        if (isMac) {
+            const cmd = Qt.ControlModifier;
+            // Option types a character, which the key's name doesn't follow
+            compare([name(Qt.Key_K, cmd | ctrl), name(Qt.Key_K, cmd | ctrl | shift), name(Qt.Key_K, cmd | alt, "˚"),
+                name(Qt.Key_K, cmd | ctrl | alt | shift), name(Qt.Key_1, cmd | alt), name(Qt.Key_Slash, cmd | ctrl),
+                name(Qt.Key_Left, cmd | ctrl), name(Qt.Key_Left, cmd | ctrl | alt | shift),
+                name(Qt.Key_Backspace, cmd), name(Qt.Key_Backspace, cmd | ctrl), name(Qt.Key_K, ctrl | alt, "˚")],
+                ["<C-D-k>", "<C-D-K>", "<M-D-k>", "<C-M-D-K>", "<M-D-1>", "<C-D-/>", "<C-D-Left>",
+                    "<C-M-D-S-Left>", "<D-BS>", null, "<C-M-k>"]);
+        } else {
+            // AltGr comes as Ctrl+Alt, and types
+            compare(name(Qt.Key_Q, ctrl | alt, "@"), "@");
+        }
+        compare(vim.macroKeys("<C-K><C-M-k><C-M-K><C-D-K><M-D-k><C-M-D-1><C-M-D-S-F5><M-D-Left><C-1><C-?><C-M-[>"),
+            ["<C-K>", "<C-M-k>", "<C-M-K>", "<C-D-K>", "<M-D-k>", "<C-M-D-1>", "<C-M-D-S-F5>", "<M-D-Left>", "<C-1>",
+                "<C-?>", "<C-M-[>"]);
+        // not in another order, nor Alt alone, nor S- and a character, nor
+        // Ctrl+[, which is Esc
+        for (const none of ["<S-C-k>", "<M-C-k>", "<D-C-k>", "<D-M-k>", "<M-k>", "<M-Left>", "<M-S-Left>", "<S-k>",
+                "<C-S-k>", "<D-S-k>", "<C-M-BS>", "<C-[>", "<C->>"])
+            verify(vim.macroKeys(none).length > 1, none);
+    }
+
+    // A shortcut on Ctrl and a letter runs whatever the editor or vim has
+    // on it (on macOS, Ctrl+K is Qt's Cut, Ctrl+Y its Paste).
+    function test_ctrlShortcuts() {
+        const shortcut = (k, macro) => ({ keys: k, macro: macro, label: k, normal: true, visual: true });
+        const failed = [];
+        for (let i = 0; i < 26; i++) {
+            const k = "<C-" + String.fromCharCode(97 + i) + ">";
+            load("a\nb");
+            vim.shortcuts = [shortcut(k, "rx")];
+            keys(k);
+            if (editor.text !== "x\nb")
+                failed.push(k);
+            load("a\nb");
+            keys("v" + k);
+            if (editor.text !== "x\nb")
+                failed.push("v" + k);
+            keys("<Esc>");
+        }
+        vim.shortcuts = [];
+        compare(failed, []);
+    }
+
+    // Ctrl+Shift and a letter is Ctrl and the letter, but for a shortcut
+    // that takes it; with Alt (or Cmd) too, or a digit or a sign, a key
+    // only a shortcut takes.
+    function test_modifierShortcuts() {
+        load("1\n1");
+        const shortcut = (k, macro) => ({ keys: k, macro: macro, label: k, normal: true, visual: false });
+        keys("<C-A>");
+        compare(editor.text, "2\n1");
+        keys("qa<C-A>q");
+        compare(vim.getRegister("a").text, "<C-a>");
+        // written by hand (a shortcut's keys), as vim reads it
+        vim.shortcuts = [shortcut("gz", "<C-A>")];
+        keys("gz");
+        compare(editor.text, "4\n1");
+        vim.shortcuts = [shortcut("<C-A>", "j"), shortcut("<C-M-k>", "<C-x>"), shortcut("g<C-M-S-Left>", "k"),
+            shortcut("<C-1>", "<C-a>"), shortcut("<C-?>", "<C-x>")];
+        keys("<C-A>");
+        compare([editor.text, cursorLine()], ["4\n1", 2]);
+        keys("<C-a>");
+        compare(editor.text, "4\n2");
+        keys("2<C-M-k>");
+        compare(editor.text, "4\n0");
+        keys("<C-1><C-1><C-?>");
+        compare(editor.text, "4\n1");
+        keys("g<C-M-S-Left>");
+        compare(cursorLine(), 1);
+        keys("qb<C-A>q");
+        compare([vim.getRegister("b").text, cursorLine()], ["<C-A>", 2]);
+        // only normal mode's: while typing and in the command line, the
+        // key without Shift
+        keys("ggv<C-A>");
+        compare([vim.mode, cursorLine()], ["visual", 1]);
+        keys("<Esc>:ab<C-U>");
+        compare(vim.commandLine, ":");
+        keys("<Esc>");
+        if (isMac) {
+            vim.shortcuts = [shortcut("<C-D-K>", "<C-a>"), shortcut("<M-D-k>", "<C-x><C-x>")];
+            keys("<C-D-K>");
+            compare(editor.text, "5\n1");
+            keys("<M-D-k>");
+            compare(editor.text, "3\n1");
+        }
+        // without a shortcut they do nothing, not even end a command
+        vim.shortcuts = [];
+        load("a b\n1");
+        keys("d<C-M-k><C-M-S-Left><C-1><C-?>w");
+        compare(editor.text, "b\n1");
+    }
+
     // An F-key does nothing but a shortcut's, and Shift and a key vim
     // knows is the key, but for a shortcut that takes it.
     function test_namedKeyShortcuts() {
@@ -5301,8 +5411,8 @@ TestCase {
             }
         }
         verify(names > 25);
-        for (const none of ["<cr>", "<C-A>", "<Space>", "<lt>", "<Bar>", "<Leader>", "<Nop>", "<S-BS>", "<C-Del>",
-                "<C-1>", "<F36>", "<M-a>", "<A-a>"])
+        for (const none of ["<cr>", "<c-a>", "<Space>", "<lt>", "<Bar>", "<Leader>", "<Nop>", "<S-BS>", "<C-Del>",
+                "<C-S-k>", "<C-[>", "<F36>", "<M-a>", "<A-a>"])
             verify(vim.macroKeys(none).length > 1, none);
         verify(help.show("keynames"));
         compare(help.sections[help.shownSection].title, "Key names");

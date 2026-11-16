@@ -501,6 +501,10 @@ QtObject {
     }
 
     function keyPressed(tok, event) {
+        // Ctrl+Shift and a letter is Ctrl and the letter (Ctrl+Shift+V
+        // pastes while typing), but for a shortcut that takes it.
+        if (tok && /^<C-[A-Z]>$/.test(tok))
+            tok = unshifted(tok);
         // Enter with a modifier vim doesn't type (Cmd+Enter), which the
         // editor would make a line break.
         if (singleLine && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
@@ -510,6 +514,11 @@ QtObject {
             return commandLineEdit(tok, event) || typedKey(tok, event);
         if (!isVisual && mode !== "insert")
             message = "";
+        // A shortcut's keys come before the editor's own: on macOS, Ctrl+K
+        // is Qt's Cut and Ctrl+Y its Paste, and elsewhere Ctrl+A is Select
+        // All.
+        if (shortcutTakes(tok))
+            return typedKey(tok, event);
         // Ctrl+Y is also Redo on Windows and Linux, and Paste (yank) on
         // macOS, except outside insert mode, where it scrolls as in vim.
         const scrollKey = mode !== "insert" && tok === "<C-y>";
@@ -588,12 +597,7 @@ QtObject {
         // Enter and Shift+Enter while typing are normal mode's (Koil's).
         if (tok === "<S-CR>" && (commandLine !== "" || inserting && !singleLine))
             tok = "<CR>";
-        // Shift and a key vim knows (Shift+Esc, Shift+PageDown) is the key
-        // alone, but for a shortcut that takes it (in normal or visual mode).
-        const plain = tok && /^<S-(Esc|Left|Right|Up|Down|Home|End|PageUp|PageDown)>$/.exec(tok);
-        if (plain && (commandLine !== "" || inserting
-                || parse(keys.concat([tok]), isVisual, !isVisual && marked.length > 0).status === "bad"))
-            tok = "<" + plain[1] + ">";
+        tok = unshifted(tok);
         if (commandLine !== "")
             return commandLineKey(tok);
         if (mode === "insert" && completer && (completion || tok === "<Tab>") && completionKey(tok))
@@ -611,8 +615,9 @@ QtObject {
             return insertKey(tok, event);
         // Cmd+Backspace deletes only while typing (and in the command line).
         // Shift+Tab only picks from the completion's options, and F-keys,
-        // and keys with a name with Ctrl or Cmd, do nothing, not even end a
-        // command, unless a shortcut takes them (see shortcutOnly).
+        // keys with a name with Ctrl or Cmd, and characters with Ctrl that
+        // aren't vim's, do nothing, not even end a command, unless a
+        // shortcut takes them (see shortcutOnly).
         if (tok === null || tok === "<D-BS>" || shortcutOnly(tok)
                 && parse(keys.concat([tok]), isVisual, !isVisual && marked.length > 0).status === "bad")
             return true;
@@ -628,6 +633,33 @@ QtObject {
         }
         feed(tok);
         return true;
+    }
+
+    // The key `tok` without its Shift, where vim has no use for that: Shift
+    // and a key vim knows (Shift+Esc, Shift+PageDown) is the key alone, and
+    // Ctrl+Shift and a letter (<C-K>) is Ctrl and the letter (<C-k>, as
+    // vim reads it), but for a shortcut that takes it (in normal or visual
+    // mode).
+    function unshifted(tok) {
+        const plain = tok && (/^<()S-(Esc|Left|Right|Up|Down|Home|End|PageUp|PageDown)>$/.exec(tok)
+            || /^<(C-)([A-Z])>$/.exec(tok));
+        if (plain && (commandLine !== "" || inserting
+                || parse(keys.concat([tok]), isVisual, !isVisual && marked.length > 0).status === "bad"))
+            return "<" + plain[1] + (plain[1] ? plain[2].toLowerCase() : plain[2]) + ">";
+        return tok;
+    }
+
+    // Whether, in normal or visual mode, the keys typed so far and `tok`
+    // are a shortcut's or one of commandKeys', or start one, where vim
+    // alone has no command of them.
+    function shortcutTakes(tok) {
+        if (tok === null || inserting || commandLine !== "")
+            return false;
+        const ks = keys.concat([tok]), marking = !isVisual && marked.length > 0;
+        const r = parse(ks, isVisual, marking);
+        if (r.status === "ok")
+            return r.cmd.shortcut !== undefined || r.cmd.command !== undefined;
+        return r.status === "more" && parse(ks, isVisual, marking, true).status === "bad";
     }
 
     // Called when the editor's cursor or selection changes, e.g. by the mouse.
@@ -862,43 +894,48 @@ QtObject {
 
     // Turns a key event into a vim key: a character, or a name like "<Esc>",
     // "<CR>", "<F12>", "<S-PageDown>", "<C-r>", "<C-Esc>" or (Cmd on macOS,
-    // as MacVim names it) "<D-k>". Returns null for keys vim doesn't handle.
+    // as MacVim names it) "<D-k>". With Ctrl or Cmd, a letter, digit or
+    // sign is the character Shift makes of it ("<C-K>", "<C-?>", "<D-K>"),
+    // and every modifier held is in the name, in this order: "<C-M-k>",
+    // "<C-D-K>", "<C-M-D-S-Left>". M is Alt (Option on macOS), a modifier
+    // only with Ctrl or Cmd: alone it types characters, or opens a menu.
+    // Returns null for keys vim doesn't handle.
     function tokenFor(event) {
-        const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
-        if ((event.modifiers & ctrl) && !(event.modifiers & Qt.AltModifier)) {
-            if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
-                return "<C-" + String.fromCharCode(event.key - Qt.Key_A + 97) + ">";
-            if (event.key === Qt.Key_BracketLeft)
+        const mods = event.modifiers;
+        const ctrl = (mods & (isMac ? Qt.MetaModifier : Qt.ControlModifier)) !== 0;
+        const cmd = isMac && (mods & Qt.ControlModifier) !== 0;
+        const alt = (mods & Qt.AltModifier) !== 0;
+        const text = event.text;
+        const typed = text.length > 0 && text.charCodeAt(0) >= 32 && text !== "\x7f";
+        if (cmd && !ctrl && event.key === Qt.Key_Backspace)
+            return "<D-BS>";
+        // Off macOS, Ctrl+Alt is AltGr too, which types a character.
+        if ((ctrl || cmd) && (isMac || !alt || !typed)) {
+            const prefix = (ctrl ? "C-" : "") + (alt ? "M-" : "") + (cmd ? "D-" : "");
+            if (event.key === Qt.Key_BracketLeft && prefix === "C-")
                 return "<Esc>";
-            return modifiedName(event, "C-");
-        }
-        // Cmd and a letter (<D-K> with Shift), digit or sign, which only the
-        // user's shortcuts do something with: Koil's menus take theirs
-        // first (see menuShortcuts in main.qml).
-        if (isMac && (event.modifiers & Qt.ControlModifier)) { // Cmd
-            if (event.key === Qt.Key_Backspace)
-                return "<D-BS>";
-            if (event.modifiers & (Qt.AltModifier | Qt.MetaModifier))
-                return null;
+            // Qt gives a letter as its key whatever is held, and a digit
+            // or sign as Shift has it (Ctrl+Shift+/ is "?"). Which only
+            // the user's shortcuts do something with, but vim's Ctrl
+            // letters: Koil's menus take theirs first (see menuShortcuts
+            // in main.qml).
             if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
-                return "<D-" + String.fromCharCode(event.key - Qt.Key_A
-                    + (event.modifiers & Qt.ShiftModifier ? 65 : 97)) + ">";
+                return "<" + prefix + String.fromCharCode(event.key - Qt.Key_A
+                    + (mods & Qt.ShiftModifier ? 65 : 97)) + ">";
             if (event.key > 0x20 && event.key < 0x7f && event.key !== 0x3e) // not ">"
-                return "<D-" + String.fromCharCode(event.key) + ">";
-            return modifiedName(event, "D-");
+                return "<" + prefix + String.fromCharCode(event.key) + ">";
+            return modifiedName(event, prefix);
         }
         // With Shift, a key of its own (<S-F12>, <S-Esc>), which is the key
-        // alone where vim has no use for it (see runKey); but Backspace and
-        // Delete. Alt isn't told apart, as on macOS it types characters.
+        // alone where vim has no use for it (see unshifted); but Backspace
+        // and Delete. Alt alone isn't told apart, as on macOS it types
+        // characters.
         const name = keyName(event.key);
         if (name === "BS" || name === "Del")
             return "<" + name + ">";
         if (name)
             return "<" + (hasShift(event) ? "S-" : "") + name + ">";
-        const text = event.text;
-        if (text.length > 0 && text.charCodeAt(0) >= 32 && text !== "\x7f")
-            return text;
-        return null;
+        return typed ? text : null;
     }
 
     // vim's name of a key that has one ("Esc", "PageDown", "F12"), else
@@ -930,20 +967,24 @@ QtObject {
         return event.key === Qt.Key_Backtab || (event.modifiers & Qt.ShiftModifier) !== 0;
     }
 
-    // A key with a name (see keyName) with Ctrl (`prefix` "C-") or Cmd
-    // ("D-"), and Shift, as vim names them ("<C-Esc>", "<D-S-F12>"), which
-    // only the user's shortcuts take (see shortcutOnly); null for another
-    // key, and Backspace and Delete, whose Ctrl and Alt are the editor's.
+    // A key with a name (see keyName) with Ctrl, Alt or Cmd (`prefix`:
+    // "C-", "D-", "C-M-"), and Shift, as vim names them ("<C-Esc>",
+    // "<D-S-F12>"), which only the user's shortcuts take (see
+    // shortcutOnly); null for another key, and Backspace and Delete, whose
+    // Ctrl and Alt are the editor's.
     function modifiedName(event, prefix) {
         const name = keyName(event.key);
         return name && name !== "BS" && name !== "Del" ? "<" + prefix + (hasShift(event) ? "S-" : "") + name + ">" : null;
     }
 
     // Keys vim has no use for outside insert mode, which only the user's
-    // shortcuts take: Shift+Tab, F-keys, and keys with a name with Ctrl or
-    // Cmd (see modifiedName).
+    // shortcuts take: Shift+Tab, F-keys, keys with a name with Ctrl or Cmd
+    // (see modifiedName), a digit or sign with Ctrl, and a character with
+    // Ctrl or Cmd and another modifier (Cmd alone and one is a bad
+    // command, and Ctrl+Shift and a letter is Ctrl and the letter, see
+    // unshifted).
     function shortcutOnly(tok) {
-        return /^<(?:S-Tab|(?:[CD]-)?(?:S-)?F\d+|[CD]-(?:S-)?(?:Esc|CR|Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown))>$/
+        return /^<(?:S-Tab|(?:C-(?:M-)?(?:D-)?|M-D-|D-)?(?:S-)?F\d+|(?:C-(?:M-)?(?:D-)?|M-D-|D-)(?:S-)?(?:Esc|CR|Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown)|C-[!-=?@\[-`{-~]|(?:C-M-(?:D-)?|C-D-|M-D-)[!-=?-~])>$/
             .test(tok);
     }
 
@@ -3445,9 +3486,12 @@ QtObject {
     }
 
     // Register text as it's written: a key's name, like <CR>, or a
-    // character.
+    // character. A name's modifiers are in tokenFor's order (C-, M-, D-,
+    // S-), M- only after C- or before D-, and S- only before a key with a
+    // name: a character has Shift in it (<C-K>). Ctrl+[ is <Esc>, so
+    // <C-[> is no key.
     function keysIn(text) {
-        return text.match(/<(?:(?:[CD]-)?(?:S-)?(?:Esc|CR|Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|F(?:[1-9]|[12]\d|3[0-5]))|BS|Del|C-[a-z]|D-BS|D-[!-=?-~])>|[\s\S]/gu) || [];
+        return text.match(/<(?:(?:C-(?:M-)?(?:D-)?|M-D-|D-)?(?:S-)?(?:Esc|CR|Tab|Left|Right|Up|Down|Home|End|PageUp|PageDown|F(?:[1-9]|[12]\d|3[0-5]))|BS|Del|D-BS|(?!C-\[>)(?:C-(?:M-)?(?:D-)?|M-D-|D-)[!-=?-~])>|[\s\S]/gu) || [];
     }
 
     // Register text (a shortcut's macro) in parts, as { text, special }:

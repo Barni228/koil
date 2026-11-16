@@ -430,7 +430,7 @@ Window {
                 same++;
                 continue;
             }
-            if (s.enabled && (problemOf(s, list) !== "" || !isMac && s.keys.includes("<D-"))) {
+            if (s.enabled && (problemOf(s, list) !== "" || !isMac && /<(?:C-)?(?:M-)?D-/.test(s.keys))) {
                 s.enabled = false;
                 off++;
             }
@@ -487,7 +487,7 @@ Window {
         macroField.input.forceActiveFocus();
     }
     // A key typed in the form's key box, which goes after its keys, as vim
-    // names it (Space, g, <C-k>, <S-Tab>, <D-Esc>): Backspace takes the
+    // names it (Space, g, <C-k>, <C-K>, <S-Tab>, <D-Esc>): Backspace takes the
     // last one back, and Cmd+Backspace all of them. Tab, Enter and Esc
     // alone go through the form (the window's shortcuts take Enter and
     // Esc), so with a modifier they're keys, and Shift+Tab doesn't go back.
@@ -504,8 +504,8 @@ Window {
             keyBox.keys = "";
         else if (typed !== null)
             keyBox.keys += typed;
-        // Nor a key vim has no name for (Cmd+Option+Tab), which Qt's
-        // own Tab would take somewhere.
+        // Nor a Tab vim has no name for (AltGr's), which Qt's own Tab
+        // would take somewhere.
         else if (event.key !== Qt.Key_Tab && event.key !== Qt.Key_Backtab)
             return;
         event.accepted = true;

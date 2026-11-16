@@ -14,6 +14,8 @@ function sections(help) {
     const isMac = help.isMac, isWindows = help.isWindows, cmdKey = help.cmdKey, altKey = help.altKey;
     const fileManager = help.fileManager, systemShell = help.systemShell;
     const defaultFontFamily = help.defaultFontFamily;
+    // The Alt key's name, without altKey's "+".
+    const alt = isMac ? "⌥" : "Alt";
     return [
         {
             title: "The listing",
@@ -414,8 +416,8 @@ function sections(help) {
                 ["`@a`  `Q`", "In visual mode: run the macro on each selected line in turn, from its start, as "
                     + "Neovim's do (`:'<,'>normal @a`). A line it fails on is skipped, and the lines go with its "
                     + "edits, so one that adds or deletes lines still runs on each. `@:` runs the last command."],
-                ["Your keys", "Your shortcuts: keys of yours (`Space c`, `gc`, `<C-k>`"
-                    + (isMac ? ", `⌘K` as `<D-k>`" : "") + ") that run keys as a "
+                ["Your keys", "Your shortcuts: keys of yours (`Space c`, `gc`, `<C-k>`, `" + (isMac ? "⌃⇧K" : "Ctrl+Shift+K")
+                    + "` as `<C-K>`" + (isMac ? ", `⌘K` as `<D-k>`" : "") + ") that run keys as a "
                     + "macro does, like `:!git add %<CR>`, in normal mode, visual mode (also on marked lines: "
                     + "see `:h m`) or both. A count runs one "
                     + "that many times. They come before vim's: a shortcut on `xa` makes `x` wait for the `a`. "
@@ -439,7 +441,7 @@ function sections(help) {
             intro: "How keys are written where keys are run: a shortcut's (see `:h shortcuts`), `:norm`, "
                 + "`koil -c 'norm …'`, and what `q` records. A key with no name is its character: `a`, `A`, "
                 + "`5`, `:`, and a space for `Space`. These are all the names, written as here: `<cr>` or "
-                + "`<C-A>` is no key, and types its characters.",
+                + "`<c-a>` is no key, and types its characters.",
             rows: [
                 ["`<Esc>`", "`Esc` (`Ctrl-[` is `<Esc>` too)."],
                 ["`<CR>`", "`Enter`."],
@@ -453,20 +455,35 @@ function sections(help) {
                     + "before while completing a path; the others are the key alone, unless a shortcut takes "
                     + "them. `Shift` and a character is that character: `A`, `?`."],
                 ["`<C-a>` … `<C-z>`", "`Ctrl` and a letter, lowercase" + (isMac ? " (the `⌃` key, not `⌘`)" : "")
-                    + ", as in `:h ctrl`. `Ctrl` and a digit or a sign is no key."],
-                ["`<C-CR>`  `<C-Esc>`  `<C-Left>`  `<C-F5>`  `<C-S-Left>`", "`Ctrl` and a key with a name (not "
-                    + "`<BS>` or `<Del>`), with `Shift` too (`C-` first), which do nothing but run a shortcut."]
+                    + ", as in `:h ctrl`. A shortcut on one comes before vim's, and before what the "
+                    + "key does in a text field" + (isMac ? " (`⌃K`)" : " (`Ctrl+A`)") + "."],
+                ["`<C-A>` … `<C-Z>`", "`Ctrl`, `Shift` and a letter: the uppercase letter, with no `S-`. "
+                    + "It's `Ctrl` and the letter (`<C-a>`, as vim reads it) unless a shortcut takes it."],
+                ["`<C-1>`  `<C-/>`  `<C-?>`", "`Ctrl` and a digit or a sign (but `>`), as `Shift` makes it: "
+                    + "`<C-?>` is `Ctrl`, `Shift` and `/`. They do nothing but run a shortcut. `Ctrl-[` is "
+                    + "`<Esc>`."],
+                ["`<C-M-k>`  `<C-M-K>`  `<C-M-1>`", "`Ctrl`, `" + alt + "` and a letter (uppercase with "
+                    + "`Shift`), digit or sign, which do nothing but run a shortcut" + (isMac ? ""
+                    : " (not where they type a character, as `AltGr` does)") + ". `M-` goes after `C-`."],
+                ["`<C-CR>`  `<C-Esc>`  `<C-Left>`  `<C-F5>`  `<C-S-Left>`  `<C-M-Left>`", "`Ctrl` and a key "
+                    + "with a name (not `<BS>` or `<Del>`), with `" + alt + "` and `Shift` too (in that "
+                    + "order: `<C-M-S-Left>`), which do nothing but run a shortcut."]
             ].concat(isMac ? [
                 ["`<D-k>`  `<D-K>`  `<D-1>`  `<D-/>`", "`⌘` and a letter (uppercase with `⇧`), a digit or a "
                     + "sign (but `>`), which do nothing but run a shortcut. Not those Koil's menus take, "
                     + "like `⌘S` and `⌘C`."],
-                ["`<D-CR>`  `<D-Esc>`  `<D-Left>`  `<D-F5>`  `<D-S-Left>`", "`⌘` and a key with a name, with "
-                    + "`⇧` too (`D-` first), for a shortcut as well."],
+                ["`<C-D-k>`  `<M-D-k>`  `<C-M-D-K>`", "`⌘` and those with `⌃`, `⌥` or both before it (`C-`, "
+                    + "`M-`, then `D-`), and `⇧` still an uppercase letter: `⌃⌘K`, `⌥⌘K`, and all four with `K`."],
+                ["`<D-CR>`  `<D-Esc>`  `<D-Left>`  `<D-F5>`  `<D-S-Left>`  `<C-M-D-S-Left>`", "`⌘` and a key "
+                    + "with a name, with `⇧` too (`D-` first), and `⌃` and `⌥` before it, for a shortcut as "
+                    + "well."],
                 ["`<D-BS>`", "`⌘⌫`: while typing, deletes to the line's start (in the listing, the name's), "
                     + "and in the command line, to its start."]
             ] : []),
-            note: "`" + (isMac ? "⌥" : "Alt") + "` has no name" + (isMac ? ", as it types characters" : "")
-                + ". Nor have vim's `<Space>`, `<lt>`, `<Bar>`, `<Leader>` and `<Nop>`: write a space, `<` "
+            note: "`Shift` is `S-` only before a key with a name; with a character, it's in the "
+                + "character (`<C-K>`, not `<C-S-k>`). `" + alt + "` alone has no name" + (isMac ? ", as it types characters" : "")
+                + ": it's `M-` only with `" + (isMac ? "⌃` or `⌘" : "Ctrl")
+                + "`. Nor have vim's `<Space>`, `<lt>`, `<Bar>`, `<Leader>` and `<Nop>`: write a space, `<` "
                 + "and `|`. A name is always its key, so keys can't type the text of one, like `<CR>`. In "
                 + "the shortcuts' form, `Tab`, `Esc` and `Enter` alone go through it, and with `Shift`"
                 + (isMac ? ", `⌃` or `⌘`" : " or `Ctrl`") + " they're keys."
