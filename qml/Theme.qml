@@ -83,6 +83,9 @@ QtObject {
     readonly property color specialKey: dark ? "#c586c0" : "#af00db"
     // A dir's name in Koil's listing, and the path it lists.
     readonly property color directory: dark ? "#6cb6ff" : "#0b62c4"
+    // A link to the help (`:h topic` in a text, see HelpLink): the color
+    // of a link in the editor.
+    readonly property color link: directory
     // The parts of a pattern on the listing's path line (see listing::Span),
     // as VS Code colors a regex's: all of it in the text's color, apart
     // from the dirs before it, and its special characters over that.

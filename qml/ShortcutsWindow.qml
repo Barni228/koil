@@ -915,6 +915,18 @@ Window {
         Accessible.name: text
     }
 
+    // A hint with `code` in it, where `:h topic` is a link to the help,
+    // which a click shows in a window of its own (main.qml's openHelp), as
+    // this one has no `:`.
+    component LinkHint: CodeLabel {
+        theme: win.theme
+        links: true
+        font.pixelSize: Math.round(12 * win.zoom)
+        color: win.theme.windowText
+        opacity: 0.6
+        onHelpRequested: topic => win.app.openHelp(topic)
+    }
+
     // The list and the form, as tall as the taller one.
     StackLayout {
         id: pages
@@ -1071,15 +1083,21 @@ Window {
                 }
             }
 
-            // Or what an export or import did, or why it couldn't.
+            // Or what an export or import did, or why it couldn't (not as
+            // code: a file's name can have a backquote).
+            LinkHint {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                visible: !win.message
+                markup: qsTr("`↑` and `↓` pick one, and `Enter` or a click runs it. More in `:h shortcuts`.")
+            }
             Hint {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
-                text: win.message || qsTr("↑ and ↓ pick one, and Enter or a click runs it.")
-                color: win.message && win.failed ? win.theme.error : win.theme.windowText
-                opacity: win.message ? 1 : 0.6
-                wrapMode: win.message ? Text.WordWrap : Text.NoWrap
-                elide: win.message ? Text.ElideNone : Text.ElideRight
+                visible: !!win.message
+                text: win.message
+                color: win.failed ? win.theme.error : win.theme.windowText
+                opacity: 1
             }
         }
 
@@ -1260,13 +1278,13 @@ Window {
                 // One line, so the form is as tall before it's first laid
                 // out (when the window's height is worked out) as after.
                 Item {}
-                Hint {
+                LinkHint {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 0
                     Layout.topMargin: -4 * win.zoom
-                    text: qsTr("Keys as q records them, like <CR> and <Esc> (see :h keynames).")
-                    wrapMode: Text.NoWrap
-                    elide: Text.ElideRight
+                    markup: qsTr("Keys as `q` records them, like `<CR>`: see `:h keynames`.")
+                    wrapMode: TextEdit.NoWrap
+                    clip: true
                 }
 
                 FormLabel {
@@ -1357,10 +1375,10 @@ Window {
         ColumnLayout {
             spacing: 10 * win.zoom
 
-            Hint {
+            LinkHint {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
-                text: qsTr("Pick the shortcuts to export to a file, which Import adds to Koil elsewhere.")
+                markup: qsTr("Pick the shortcuts to export to a file, which Import adds to Koil elsewhere. The list's keys are in `:h pick`.")
                 opacity: 1
             }
 

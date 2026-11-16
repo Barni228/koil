@@ -6,7 +6,10 @@
 // the :help topics that go to it, an optional intro and note, and rows of
 // [keys, what they do]. The help folds each to its title; one that's a
 // `part` of the section before shows with it, with no fold of its own. `code` in any of them (a key, in keys) is shown in
-// the editor's font, on a shade of its own as in a Tip (see CodeText).
+// the editor's font, on a shade of its own as in a Tip (see CodeText), and
+// a `:h topic` outside the keys is a link to that topic, which a click
+// goes to: so where a text points to another section, it says `:h` and a
+// topic of it (the tests check each goes somewhere).
 function sections(help) {
     const isMac = help.isMac, isWindows = help.isWindows, cmdKey = help.cmdKey, altKey = help.altKey;
     const fileManager = help.fileManager, systemShell = help.systemShell;
@@ -148,7 +151,7 @@ function sections(help) {
                 ["`hidden`  `hid`", "Show entries starting with `.`."],
                 ["`gitignore`  `ignore`", "Hide what git ignores, and `.git`."],
                 ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."],
-                ["`sort`", "What the listing is sorted by (see `gs`), like `:set sort=size`: `name`, "
+                ["`sort`", "What the listing is sorted by (see `:h gs`), like `:set sort=size`: `name`, "
                     + "`natural`, `extension`, `size`, `disk`, `modified`, `created` or `accessed`. Default "
                     + "`name`."],
                 ["`sortreverse`  `sr`", "Sort the other way round."],
@@ -230,7 +233,9 @@ function sections(help) {
                     + "Several `-c`s run in turn."],
                 ["`:h`  `:help [topic]`", "This help, its sections folded to their titles, with the topic's "
                     + "unfolded, e.g. `:h set`, `:h macros`, `:h g` (the keys starting with `g`), or a key, "
-                    + "like `:h gJ`."],
+                    + "like `:h gJ`. One written in a text, in blue, is a link: a click goes to it "
+                    + "(`Ctrl-O` goes back), or from another window or a question, shows it in a help "
+                    + "window of its own."],
                 ["`Enter`  `Space`  `Tab`", "In the help: unfold or fold the section the cursor is on, as a click on "
                     + "its title does (`l` unfolds it and `h` folds it; so do `za`, `zo` and `zc`). `j` and "
                     + "`k` move the cursor over the titles, through an unfolded section's text first. A "
@@ -533,7 +538,7 @@ function sections(help) {
             rows: [
                 ["`gg`", "The first line, at its first character that isn't blank (`5gg`: line 5)."],
                 ["`ge`  `gE`", "Back to the end of the word before (`gE`: of the WORD, between blanks)."],
-                ["`gj`  `gk`", "Down or up a row of a line that wraps (see `:set wrap`)."],
+                ["`gj`  `gk`", "Down or up a row of a line that wraps (see `:h wrap`)."],
                 ["`gI`", "Type at the line's very start, before its indent (in the listing, at the name)."],
                 ["`gJ`", "Join the lines, adding no space between them."],
                 ["`gS`", "In visual mode: put a pair on lines of its own around the selection (see `:h surround`)."],
@@ -591,7 +596,7 @@ function sections(help) {
         {
             title: "Ctrl keys",
             tags: ["ctrl", "control", "ctrl-a", "ctrl-x", "ctrl-e", "ctrl-y", "ctrl-d", "ctrl-u", "ctrl-f",
-                "ctrl-b", "ctrl-r", "ctrl-c", "ctrl-n", "ctrl-p", "ctrl-w"],
+                "ctrl-b", "ctrl-r", "ctrl-c", "ctrl-n", "ctrl-p", "ctrl-w", "ctrl-o"],
             intro: isMac ? "The `Ctrl` key, not `⌘`."
                 : "On Windows, `Ctrl+F` is Find, and `Ctrl+V` pastes while typing or in the command line.",
             rows: [
@@ -601,6 +606,7 @@ function sections(help) {
                 ["`Ctrl-R`", "Redo."],
                 ["`Ctrl-A`  `Ctrl-X`", "Add to or subtract from the number at or after the cursor."],
                 ["`Ctrl-V`", "Visual block (see `:h block`)."],
+                ["`Ctrl-O`", "In the help: back to where a link, like `:h block`, was clicked."],
                 ["`Ctrl-C`", "Stop a macro or shell command that's running, or close the command line, "
                     + "as `Esc` does."],
                 ["`Ctrl-N`  `Ctrl-P`", "While completing a path: the next or previous dir."],

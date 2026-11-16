@@ -1003,7 +1003,8 @@ function searchRegExp(pattern, ignoreCase) {
 
 // Text with `code` as the text it shows: each code without its
 // backticks, and the spaces between collapsed, as rich text shows
-// them; and where each code is in it. `plain` text is as it is.
+// them; and where each code is in it, with the help topic it's a link to
+// (`link`, see helpTopic; null for most). `plain` text is as it is.
 function parseCode(text, plain) {
     if (plain)
         return { text: text, codes: [] };
@@ -1011,7 +1012,7 @@ function parseCode(text, plain) {
     let shown = "";
     text.split("`").forEach((part, i) => {
         if (i % 2 === 1)
-            codes.push({ start: shown.length, text: part });
+            codes.push({ start: shown.length, text: part, link: helpTopic(part) });
         else
             part = part.replace(/ +/g, " ");
         shown += part;
@@ -1019,15 +1020,26 @@ function parseCode(text, plain) {
     return { text: shown, codes: codes };
 }
 
+// The help topic a code is a link to, if it's what's typed to show one
+// (`:h pick`, `:help set`; "" for `:h` alone, the help as it opens), or
+// null: what shows the code as a link opens it on a click (see HelpLink).
+function helpTopic(code) {
+    const m = /^:h(?:elp)?(?: (\S+))?$/.exec(code);
+    return m ? m[1] || "" : null;
+}
+
 // The rich text that shows parsed text (see parseCode): its codes in
 // `family` (the editor's font), with letter spacing (`padding`) on the
 // characters before and at the end of each, which makes room for its
 // shade and copies as nothing, and the search matches in `marks` ([start,
 // end, current]) in black, as they're on a highlight. Spaces in a code (or
-// in plain text) don't break or collapse, and copy as spaces.
-function codeHtml(parsed, marks, plain, family, padding) {
+// in plain text) don't break or collapse, and copy as spaces. With a
+// `linkColor`, the codes that are links to the help are in it (their
+// underline is HelpLink's, as rich text's would go on under a code's
+// letter spacing).
+function codeHtml(parsed, marks, plain, family, padding, linkColor) {
     const t = parsed.text;
-    const inCode = 1, spaced = 2, marked = 4;
+    const inCode = 1, spaced = 2, marked = 4, linked = 8;
     const flags = new Uint8Array(t.length);
     // Letter spacing goes after a character, so on both of a pair of
     // surrogates.
@@ -1038,8 +1050,9 @@ function codeHtml(parsed, marks, plain, family, padding) {
     };
     for (const code of parsed.codes) {
         const end = code.start + code.text.length;
+        const kind = inCode | (linkColor && code.link !== null ? linked : 0);
         for (let i = code.start; i < end; i++)
-            flags[i] |= inCode;
+            flags[i] |= kind;
         if (code.start > 0)
             space(code.start - 1);
         space(end - 1);
@@ -1060,7 +1073,8 @@ function codeHtml(parsed, marks, plain, family, padding) {
         if (plain)
             run = run.replace(/\n/g, "<br>");
         const style = (f & inCode ? "font-family:'" + family + "';" : "")
-            + (f & spaced ? "letter-spacing:" + padding + "px;" : "") + (f & marked ? "color:black;" : "");
+            + (f & spaced ? "letter-spacing:" + padding + "px;" : "")
+            + (f & marked ? "color:black;" : f & linked ? "color:" + linkColor + ";" : "");
         html += style ? "<span style=\"" + style + "\">" + run + "</span>" : run;
     }
     return html;

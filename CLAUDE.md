@@ -111,7 +111,8 @@ the scratchpad (see Scratchpad).
   file) and the path field are one (`pathField`).
 - `qml/CodeLabel.qml`: text with `code` in backquotes, each in the
   editor's font on a shade, as the help shows them, for `Tip` and the
-  Settings window's notes (see Theme).
+  Settings window's notes (see Theme); `qml/HelpLink.qml`, a `:h topic`
+  in one, or in the help, as a link (see Help links).
 - `qml/HoverBox.qml`: the VS Code-style box that shows what an icon hides (an
   ID, as its path), or a warning's or error's message.
 - `qml/InfoBox.qml`: what `K` shows of an entry, in the middle of the
@@ -2760,9 +2761,38 @@ the scratchpad (see Scratchpad).
   `Shortcut` in the panel, as a modal popup keeps its window's own from
   running. After `?` it opens once the key is up, as the Shortcuts
   window after `Space q` (the Shift can go first, so a modifier's
-  release doesn't count). Whatever else should point to the help from a
-  box or a window of its own (the Shortcuts window's key names, its
-  export page) emits a topic for `helpWindow.open` the same way.
+  release doesn't count). Whatever else points to the help from a box
+  or a window of its own does it with a link (see Help links).
+- **Help links** (HelpLink.qml, `Txt.helpTopic`): a code that's what's
+  typed to show a topic (`:h pick`, `:help set`, or `:h` alone) is a
+  link to it wherever it's written, so a text that says "see `:h
+  keynames`" needs nothing more: `Txt.parseCode` gives each code its
+  `link` (the topic, or null), and `Txt.codeHtml`, given a color, has
+  the links in it (`theme.link`, the dirs' blue, as a link in the
+  editor). Over each link's shade is a `HelpLink`, a `MouseArea` that
+  underlines it (not rich text's underline, which would go on under the
+  code's letter spacing), makes the pointer a hand, shades it more with
+  the pointer on it, and tells a click (`followed`). In the help
+  (`CodeText`, but not a row's keys, which are what's typed: `links`
+  off, so `:h` and `:help [topic]` there aren't), a click goes to the
+  topic in that same help, box or window (`follow`, `topicPlace`, which
+  `show` uses too): its section unfolded with the others as they are,
+  so what was being read stays, and Ctrl-O goes back (`goBack`, `jumps`:
+  the view, the folds and the cursor's section as they were, which the
+  header's keys say while there's one to go back to; `shownY` has the
+  view there again once the sections unfolded again are laid out). A
+  list in the help's box (About's `:h`) gives way to the help. Anywhere
+  else it's a `CodeLabel` with `links` on, which asks for the topic
+  (`helpRequested`), and what shows it opens the help window: a
+  question's text (ConfirmDialog's own `helpRequested`), and the
+  Settings and Shortcuts windows, which have no `:` to type it in
+  (main.qml's `openHelp`: the Settings window's Shortcuts note and its
+  line by Restore Defaults, `:h set`; the Shortcuts window's hints,
+  `LinkHint`: `:h shortcuts` under the list, `:h keynames` under the
+  keys a shortcut runs, `:h pick` over the export's list). Not in a
+  `Tip`, which goes as the pointer leaves for it. A link has no key:
+  it's the pointer's. `test_helpLinks` checks every link in help.js
+  goes somewhere, so a new "see" there should name a topic.
 - **Help folds** (Folds in HelpPanel.qml): the help's sections are
   folded, each to its title (an arrow before it, as a group's heading in
   a question's list), so `:h` alone is a list of what there's help for,

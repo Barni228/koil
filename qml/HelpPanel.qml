@@ -48,12 +48,13 @@ ModalBox {
     // What it says, section by section (see help.js).
     readonly property var sections: Help.sections(help)
 
-    // Opens the help with only the section for `topic` unfolded (none if
-    // ""), at its row of that key if it has one (`:h gs`), or else at the
-    // first row of that key (`:h zs`). Tags and keys match as typed first,
-    // so `gI` isn't `gi`, then in any case. `<C-a>`, `^A` and `CTRL-A` are
-    // `Ctrl-A`. False if there's no help for it.
-    function show(topic) {
+    // Where :h `topic` goes: its section and its row of that key if it
+    // has one (`:h gs`), or else the first row of that key (`:h zs`; -1
+    // for a section's top), and whether there's a topic at all. Tags and
+    // keys match as typed first, so `gI` isn't `gi`, then in any case.
+    // `<C-a>`, `^A` and `CTRL-A` are `Ctrl-A`. Null if there's no help for
+    // it.
+    function topicPlace(topic) {
         const t = topic.trim().replace(/^:/, "").replace(/^'(.*)'$/, "$1")
             .replace(/^(?:<c-(.)>|\^(.)|ctrl[-+](.))$/i, (m, a, b, c) => "Ctrl-" + (a || b || c).toUpperCase());
         const lower = t.toLowerCase();
@@ -71,17 +72,69 @@ ModalBox {
                 break;
             }
         }
-        if (i < 0)
+        return i < 0 ? null : { section: i, row: row, named: t !== "" };
+    }
+
+    // Opens the help with only the section for `topic` unfolded (none if
+    // ""), at where the topic is (see topicPlace). False if there's no
+    // help for it.
+    function show(topic) {
+        const at = topicPlace(topic);
+        if (!at)
             return false;
         output = false;
         running = false;
         live = false;
-        let fold = i;
+        let fold = at.section;
         while (fold > 0 && sections[fold].part)
             fold--;
-        showBox("Koil Help", sections, i, row, sections.map((s, k) => t !== "" && k === fold));
+        showBox("Koil Help", sections, at.section, at.row, sections.map((s, k) => at.named && k === fold));
         current = fold;
         return true;
+    }
+
+    // Where the links followed came from, oldest first: the view, the
+    // folds and the cursor's section as they were, which Ctrl-O goes back
+    // to (goBack), as in vim's help.
+    property var jumps: []
+
+    // A click on a link in a text (`:h pick`, see HelpLink). In the help,
+    // it goes to the topic as :h does, but unfolds its section with the
+    // others as they are, so what was being read stays, and Ctrl-O goes
+    // back to it. Anything else shown (About) gives way to the help.
+    function follow(topic) {
+        if (output)
+            return;
+        if (!folds) {
+            if (!show(topic))
+                show("");
+            return;
+        }
+        const at = topicPlace(topic);
+        if (!at)
+            return;
+        jumps = jumps.concat([{ contentY: scroller.contentY, unfolded: unfolded, current: current }]).slice(-100);
+        if (at.named)
+            setOpen(foldOf(at.section), true);
+        else
+            current = foldOf(at.section);
+        unsettle();
+        shownSection = at.section;
+        shownRow = at.row;
+        settle();
+    }
+
+    // Ctrl-O: back to where the last link followed was.
+    function goBack() {
+        if (!folds || !jumps.length)
+            return;
+        const to = jumps[jumps.length - 1];
+        jumps = jumps.slice(0, -1);
+        unsettle();
+        unfolded = to.unfolded;
+        current = to.current;
+        shownY = to.contentY;
+        settle();
     }
 
     // The row of `section` with `key` in its keys (as written, or unless
@@ -129,6 +182,7 @@ ModalBox {
         }
         current = 0;
         zPending = false;
+        jumps = [];
         clearSearch();
         open();
         unsettle();
@@ -142,11 +196,14 @@ ModalBox {
     // layout changes (settle), until the user scrolls (unsettle). So are
     // the match a search went to in a section it unfolded (shownMatch),
     // and the section a key or a click folded or unfolded (keptSection),
-    // whose rows are made and laid out only then.
+    // whose rows are made and laid out only then, and where the view was
+    // before a link was followed (shownY, -1 for none), which the sections
+    // unfolded again reach only once they're laid out.
     property int shownSection: -1
     property int shownRow: -1
     property var shownMatch: null
     property int keptSection: -1
+    property real shownY: -1
 
     function settle() {
         if (shownSection >= 0) {
@@ -157,6 +214,8 @@ ModalBox {
             scroller.contentY = Math.min(row ? row.mapToItem(body, 0, 0).y : item.y, scroller.maxY);
         } else if (shownMatch) {
             showMatch(shownMatch);
+        } else if (shownY >= 0) {
+            scroller.contentY = Math.min(shownY, scroller.maxY);
         } else if (keptSection >= 0) {
             // As much of it as fits, from its title.
             const s = span(keptSection);
@@ -171,6 +230,7 @@ ModalBox {
         shownSection = -1;
         shownMatch = null;
         keptSection = -1;
+        shownY = -1;
     }
 
     function scrollBy(dy) {
@@ -845,6 +905,10 @@ ModalBox {
 
         property string markup
         property bool plain
+        // Whether its codes that show the help (`:h pick`) are links,
+        // which a click follows (see follow): not a row's keys, which are
+        // what's typed.
+        property bool links: true
         // Which text of shownSections it is ("" for none), which search
         // goes through (see searchTexts).
         property string key
@@ -859,6 +923,8 @@ ModalBox {
         readonly property var layout: [text, width, contentWidth, contentHeight]
         property var shades: []
         property var highlights: []
+        // Each link's shades, with its topic: { rect, topic }.
+        property var linkShades: []
         readonly property FontMetrics codeMetrics: FontMetrics {
             font.family: help.monoFamily
             font.pixelSize: codeText.font.pixelSize
@@ -897,20 +963,26 @@ ModalBox {
         function place() {
             const pad = help.codePadding;
             const starts = parsed.codes.map(code => code.start);
-            const s = [], h = [];
-            for (const code of parsed.codes)
-                s.push(...rectsOver(code.start, code.start + code.text.length, pad, pad, 0));
+            const s = [], h = [], l = [];
+            for (const code of parsed.codes) {
+                const rects = rectsOver(code.start, code.start + code.text.length, pad, pad, 0);
+                s.push(...rects);
+                if (links && code.link !== null)
+                    l.push(...rects.map(r => ({ rect: r, topic: code.link })));
+            }
             for (const [start, end, current] of markList) {
                 for (const r of rectsOver(start, end, starts.includes(start) ? pad : 0, 0, starts.includes(end) ? pad : 0))
                     h.push({ rect: r, current: current === 1 });
             }
             shades = s;
             highlights = h;
+            linkShades = l;
         }
 
         // Room for a shade at a line's start (so all text has it).
         leftPadding: help.codePadding
-        text: Txt.codeHtml(parsed, markList, plain, help.monoFamily, help.codePadding)
+        text: Txt.codeHtml(parsed, markList, plain, help.monoFamily, help.codePadding,
+            links ? String(help.theme.link) : "")
         textFormat: TextEdit.RichText
         wrapMode: TextEdit.Wrap
         onLayoutChanged: Qt.callLater(place)
@@ -951,6 +1023,20 @@ ModalBox {
                 height: modelData.rect.height
                 radius: 3 * help.zoom
                 color: modelData.current ? help.theme.currentMatch : help.theme.searchMatch
+            }
+        }
+        Repeater {
+            model: codeText.linkShades
+
+            HelpLink {
+                required property var modelData
+
+                theme: help.theme
+                shade: modelData.rect
+                inset: help.codePadding
+                descent: Math.max(codeText.codeMetrics.descent, codeText.textMetrics.descent)
+                topic: modelData.topic
+                onFollowed: help.follow(modelData.topic)
             }
         }
     }
@@ -1000,7 +1086,8 @@ ModalBox {
                 anchors.right: parent.right
                 anchors.baseline: title.baseline
                 visible: !help.output
-                markup: help.folds ? "`j` `k` to move · `Enter` to open · `/` to search · `q` to close"
+                markup: help.folds ? (help.jumps.length ? "`Ctrl-O` to go back · " : "")
+                    + "`j` `k` to move · `Enter` to open · `/` to search · `q` to close"
                     : "`/` to search · `j` `k` to scroll · `Esc` or `q` to close"
                 font.pixelSize: Math.round(12 * help.zoom)
                 color: help.theme.dim
@@ -1114,6 +1201,8 @@ ModalBox {
                     help.clearSearch();
                 else if (help.folds && !ctrl && event.text === "z")
                     help.zPending = true;
+                else if (help.folds && ctrl && event.key === Qt.Key_O)
+                    help.goBack();
                 else if (help.folds && (enter || event.key === Qt.Key_Tab || event.key === Qt.Key_Space))
                     help.toggle(help.current);
                 else if (help.folds && (event.key === Qt.Key_L && !ctrl || event.key === Qt.Key_Right))
@@ -1282,6 +1371,7 @@ ModalBox {
                                         ? Math.ceil(section.modelData.keyColumns * monoMetrics.averageCharacterWidth)
                                         : Math.round(body.width * 0.34)
                                     key: section.index + "/" + row.index + "k"
+                                    links: false
                                     markup: row.modelData[0]
                                     plain: !!section.modelData.plain
                                     font.family: help.monoFamily

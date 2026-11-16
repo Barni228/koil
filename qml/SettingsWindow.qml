@@ -929,10 +929,12 @@ Window {
                     Layout.preferredWidth: 0
                     Layout.topMargin: -4 * win.zoom
                     theme: win.theme
-                    markup: qsTr("`Space q` lists them.")
+                    markup: qsTr("`Space q` lists them: see `:h shortcuts`.")
+                    links: true
                     font.pixelSize: Math.round(12 * win.zoom)
                     color: win.textColor
                     opacity: 0.6
+                    onHelpRequested: topic => win.app.openHelp(topic)
                 }
                 Item {}
 
@@ -1077,12 +1079,29 @@ Window {
             }
         }
 
-        TextButton {
-            theme: win.theme
-            Layout.alignment: Qt.AlignRight
-            text: qsTr("Restore Defaults")
-            enabled: Object.keys(win.defaults()).some(key => win.custom(key))
-            onClicked: win.restoreDefaults()
+        // Where the help says more, in a window of its own (main.qml's
+        // openHelp), as this one has no `:`.
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12 * win.zoom
+
+            CodeLabel {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                theme: win.theme
+                markup: qsTr("`:set` changes most of these until Koil quits: see `:h set`.")
+                links: true
+                font.pixelSize: Math.round(12 * win.zoom)
+                color: win.textColor
+                opacity: 0.6
+                onHelpRequested: topic => win.app.openHelp(topic)
+            }
+            TextButton {
+                theme: win.theme
+                text: qsTr("Restore Defaults")
+                enabled: Object.keys(win.defaults()).some(key => win.custom(key))
+                onClicked: win.restoreDefaults()
+            }
         }
     }
 }

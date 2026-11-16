@@ -808,8 +808,12 @@ ModalBox {
             Layout.fillWidth: true
             theme: dialog.theme
             markup: dialog.text
+            // A `:h topic` in a question is a link to it, in the help's
+            // window, as the ? button's.
+            links: true
             font.pixelSize: Math.round(14 * dialog.zoom)
             color: dialog.theme.text
+            onHelpRequested: topic => dialog.helpRequested(topic)
         }
 
         // The list, on the editor's background, as its text is in the

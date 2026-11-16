@@ -5313,6 +5313,113 @@ TestCase {
         help.close();
     }
 
+    // The links to the help (see HelpLink) that show under `item`.
+    function helpLinks(item) {
+        const found = [];
+        const walk = i => {
+            if (!i.visible)
+                return;
+            if (i.topic !== undefined && i.shade !== undefined)
+                found.push(i);
+            for (const child of i.children)
+                walk(child);
+        };
+        walk(item);
+        return found;
+    }
+
+    // A `:h topic` in a text is a link to it: each one in the help goes
+    // somewhere, a click goes there with the other sections as they are,
+    // and Ctrl-O goes back; in a question, it asks for the topic.
+    function test_helpLinks() {
+        compare(Txt.helpTopic(":h pick"), "pick");
+        compare(Txt.helpTopic(":help set"), "set");
+        compare(Txt.helpTopic(":h"), "");
+        compare(Txt.helpTopic("%:h"), null);
+        compare(Txt.helpTopic(":hidden"), null);
+        compare(Txt.helpTopic(":h a b"), null);
+        let links = 0;
+        for (const s of help.sections) {
+            for (const markup of [s.intro, s.note].concat(s.rows.map(r => r[1]))) {
+                for (const code of Txt.parseCode(markup || "", false).codes) {
+                    if (code.link === null)
+                        continue;
+                    verify(help.topicPlace(code.link), code.text);
+                    links++;
+                }
+            }
+        }
+        verify(links > 25);
+        // Only a link is in the link's color, and only where one is given.
+        const parsed = Txt.parseCode("see `:h pick`, not `x`", false);
+        const html = Txt.codeHtml(parsed, [], false, "Menlo", 4, "#123456");
+        verify(/color:#123456;">:h/.test(html));
+        verify(!/color:#123456;">x</.test(html));
+        verify(!Txt.codeHtml(parsed, [], false, "Menlo", 4, "").includes("color:"));
+
+        const section = title => help.sections.findIndex(s => s.title === title);
+        const unfolded = () => help.sections.map((s, i) => i).filter(i => help.isOpen(i));
+        const ctrl = section("Ctrl keys"), block = section("Visual block and multiple cursors");
+        verify(help.show("ctrl"));
+        tryCompare(help, "opened", true);
+        compare(unfolded(), [ctrl]);
+        // A row's keys aren't links, its text's `:h block` is.
+        let link;
+        tryVerify(() => (link = helpLinks(help.contentItem).find(l => l.topic === "block")) !== undefined);
+        // Once its rows are laid out, which is where the link is.
+        tryVerify(() => help.span(ctrl).bottom - help.span(ctrl).top > 100);
+        verify(helpLinks(help.contentItem).every(l => l.topic === "block"));
+        mouseClick(link);
+        compare(unfolded(), [block, ctrl]);
+        compare(help.current, block);
+        compare(help.shownSection, block);
+        compare(help.jumps.length, 1);
+        // A key's row, in a section that's unfolded already.
+        help.follow("ctrl-o");
+        compare(unfolded(), [block, ctrl]);
+        compare(help.current, ctrl);
+        compare(help.shownRow, help.sections[ctrl].rows.findIndex(r => r[0] === "`Ctrl-O`"));
+        compare(help.jumps.length, 2);
+        keys("<C-o>");
+        compare(help.current, block);
+        compare(unfolded(), [block, ctrl]);
+        keys("<C-o>");
+        compare(help.current, ctrl);
+        compare(unfolded(), [ctrl]);
+        compare(help.jumps.length, 0);
+        keys("<C-o>");
+        compare(unfolded(), [ctrl]);
+        // One to nothing stays.
+        help.follow("no such topic");
+        compare(help.jumps.length, 0);
+        // :h again starts over.
+        help.follow("block");
+        verify(help.show("set"));
+        compare(help.jumps.length, 0);
+        // From a list (About), the help takes its place.
+        help.showPlain("About", { title: "", intro: "`:h` shows the help.", rows: [] });
+        verify(!help.folds);
+        tryVerify(() => (link = helpLinks(help.contentItem).find(l => l.topic === "")) !== undefined);
+        waitForRendering(help.contentItem);
+        mouseClick(link);
+        verify(help.folds);
+        compare(unfolded(), []);
+        help.close();
+        tryCompare(help, "opened", false);
+
+        // In a question, in the help's window.
+        helpRequests.clear();
+        confirm.ask("Apply them (see `:h pick`)?", [{ text: "MOVE a -> b", needs: [] }], () => {});
+        tryCompare(confirm, "opened", true);
+        tryVerify(() => (link = helpLinks(confirm.contentItem).find(l => l.topic === "pick")) !== undefined);
+        waitForRendering(confirm.contentItem);
+        mouseClick(link);
+        compare(helpRequests.count, 1);
+        compare(helpRequests.signalArguments[0][0], "pick");
+        verify(confirm.opened);
+        confirm.answer("cancel");
+    }
+
     // :h goes to a topic's section, and to the row of a key in it, or
     // else to the first row of that key.
     function test_helpTopics() {

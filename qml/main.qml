@@ -2552,6 +2552,13 @@ ApplicationWindow {
         return vim.macroList();
     }
 
+    // The help on `topic` in a window of its own, for a window that has
+    // no `:` to type :h in (Settings, Shortcuts): a `:h topic` in their
+    // texts is a link that asks for it (see CodeLabel's links).
+    function openHelp(topic) {
+        helpWindow.open(topic);
+    }
+
     // The shortcuts' window. After a key (Space q), once it's up (or a
     // moment later, if the keys came from a macro): opened while it's
     // down, its release goes to the window, and macOS's text input, which
@@ -3221,7 +3228,9 @@ ApplicationWindow {
         onHelpRequested: topic => helpWindow.open(topic)
     }
 
-    // The help asked for from a box that keeps the keys (a question's ?).
+    // The help asked for from a box that keeps the keys (a question's ?,
+    // or a `:h topic` in its text, which is a link), or from another
+    // window (openHelp).
     HelpWindow {
         id: helpWindow
 
