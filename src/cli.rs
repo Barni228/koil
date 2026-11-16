@@ -202,14 +202,10 @@ pub fn print_scratchpad(text: &str) {
     let _ = write_scratchpad(&mut io::stdout().lock(), text);
 }
 
-/// Writes `text` to `out`, with a line break after its last line, as the
-/// scratchpad's file for `%` has one (`Document::write_scratchpad`), so a
-/// line typed without one is a line to `wc -l` and `sort`.
+/// Writes `text` to `out` as it is, with no line break added, so `hi`
+/// prints `hi`.
 fn write_scratchpad(out: &mut impl Write, text: &str) -> io::Result<()> {
     out.write_all(text.as_bytes())?;
-    if !text.is_empty() && !text.ends_with('\n') {
-        out.write_all(b"\n")?;
-    }
     out.flush()
 }
 
@@ -298,7 +294,7 @@ mod tests {
             String::from_utf8(out).unwrap()
         };
         assert_eq!(written(""), "");
-        assert_eq!(written("a\nb"), "a\nb\n");
+        assert_eq!(written("a\nb"), "a\nb");
         assert_eq!(written("a\nb\n"), "a\nb\n");
         assert_eq!(written("\n"), "\n");
     }

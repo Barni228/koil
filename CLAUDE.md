@@ -1345,7 +1345,7 @@ the scratchpad (see Scratchpad).
   too, and prints its text to stdout as Koil quits, however it quits
   (`onAboutToQuit` in main.qml: `scratchText`, shown or kept, without a
   `:s` preview; `Document.printScratchpad`, `cli::print_scratchpad`),
-  with a line break after its last line, as `%`'s file has, so Koil can
+  as it is, with no line break added (`hi` prints `hi`), so Koil can
   edit text in a pipe (`ls | koil -p | sort`, as `vipe`). Nothing else
   Koil does writes to stdout, and what it starts that could (Space r,
   Space o's `xdg-open`) gets a null one: an app given Koil's would keep
