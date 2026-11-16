@@ -667,7 +667,9 @@ function sections(help) {
                     + "some until then: the picked ones first, how many more it has, and how many of each "
                     + "kind."],
                 ["`Enter`", "The blue button: apply, or undo."],
-                ["`c`  `Esc`", "Cancel (`Esc` first ends a selection, then a search)."]
+                ["`c`  `Esc`", "Cancel (`Esc` first ends a selection, then a search)."],
+                ["`?`", "Show these keys, as the ? button does, in a window of its own, so the list stays "
+                    + "open: it floats over Koil's windows until `q` or `Esc` closes it."]
             ],
             note: "`Y` and `D` ask first if the line takes others along. Quitting, `n` quits without the "
                 + "changes, and there's no `d` or `u`. Every list to pick from has the keys that move, pick, "

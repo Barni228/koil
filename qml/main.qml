@@ -3218,6 +3218,16 @@ ApplicationWindow {
         theme: theme
         system: system
         onClosed: root.activeView.textArea.forceActiveFocus()
+        onHelpRequested: topic => helpWindow.open(topic)
+    }
+
+    // The help asked for from a box that keeps the keys (a question's ?).
+    HelpWindow {
+        id: helpWindow
+
+        app: root
+        theme: theme
+        defaultFontFamily: root.defaultFontFamily
     }
 
     SettingsWindow {

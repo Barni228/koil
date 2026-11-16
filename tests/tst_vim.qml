@@ -238,6 +238,13 @@ TestCase {
     }
 
     SignalSpy {
+        id: helpRequests
+
+        target: confirm
+        signalName: "helpRequested"
+    }
+
+    SignalSpy {
         id: keyCommands
 
         target: vim
@@ -5669,7 +5676,6 @@ TestCase {
         compare(confirm.rowCount, 14);
         compare([0, 1, 2].map(g => confirm.picks.canClose(g)), [false, false, true]);
         compare(confirm.moreText(2), "… 3 more");
-        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "/", "lhTab", "Y"]);
         compare(confirm.copyText(), "one\n  A\n  B\ntwo\n  C\n  D\n  E\n  F\n  G\nthree\n  MOVE h\n  MOVE i\n"
             + "  TRASH j\n  MOVE k\n  MOVE l\n  TRASH m");
         // After a closed one's heading, how many of its lines are what,
@@ -6259,9 +6265,8 @@ TestCase {
         const extra = { label: "Discard", key: Qt.Key_D, action: picked => chosen = picked };
         confirm.ask("Apply?", lines, () => {}, null, null, { extra: extra });
         tryCompare(confirm, "opened", true);
-        // Its key is on its button, and with Y in the keys listed.
+        // Its key is on its button.
         compare(confirm.extraKeys, "d");
-        compare(confirm.hints.map(hint => hint.keys.join("")), ["jk", "Space", "v", "/", "YD"]);
         keyClick(Qt.Key_D, Qt.ShiftModifier);
         verify(confirm.opened);
         verify(confirm.picks.rowShown);
@@ -6376,6 +6381,50 @@ TestCase {
         confirm.answer("cancel");
     }
 
+    // A list to pick from has a ? button, which asks for the help on its
+    // keys, as ? does once it's let go (the Shift it's typed with can go
+    // first), and the question stays open; a list of text has neither.
+    function test_confirmHelp() {
+        helpRequests.clear();
+        confirm.ask("Apply?", [{ text: "MOVE a -> b", needs: [] }, { text: "TRASH c", needs: [] }], () => {});
+        tryCompare(confirm, "opened", true);
+        compare(confirm.helpTopic, "pick");
+        const button = findChild(confirm.contentItem, "helpButton");
+        verify(button.visible);
+        keyPress(Qt.Key_Question, Qt.ShiftModifier);
+        keyRelease(Qt.Key_Shift);
+        compare(helpRequests.count, 0);
+        keyRelease(Qt.Key_Question);
+        tryCompare(helpRequests, "count", 1);
+        compare(helpRequests.signalArguments[0][0], "pick");
+        // Held, it's asked for a moment later.
+        keyPress(Qt.Key_Question, Qt.ShiftModifier);
+        tryCompare(helpRequests, "count", 2);
+        keyRelease(Qt.Key_Question, Qt.ShiftModifier);
+        wait(0);
+        compare(helpRequests.count, 2);
+        mouseClick(button);
+        compare(helpRequests.count, 3);
+        verify(confirm.opened);
+        compare(confirm.picks.pickedCount, 2);
+        // Not while its search is typed, which takes the key.
+        keyClick(Qt.Key_Slash);
+        keyClick(Qt.Key_Question, Qt.ShiftModifier);
+        wait(350);
+        compare(helpRequests.count, 3);
+        compare(confirm.picks.filter, "?");
+        keyClick(Qt.Key_Escape);
+        confirm.answer("cancel");
+        confirm.ask("Quit?", "MOVE a -> b", () => {});
+        tryCompare(confirm, "opened", true);
+        verify(!button.visible);
+        keyClick(Qt.Key_Question, Qt.ShiftModifier);
+        wait(350);
+        compare(helpRequests.count, 3);
+        verify(confirm.opened);
+        confirm.answer("cancel");
+    }
+
     // The words lines start with get the color of the change they stand
     // for, with the spaces after them, only in the questions that say so;
     // and the line that says why a line can't be done is told apart.
@@ -6385,7 +6434,7 @@ TestCase {
         compare(confirm.rowCount, 3);
         compare(confirm.textLines, 2.5);
         compare(confirm.longest, 13);
-        compare(confirm.hints, []);
+        compare(confirm.helpTopic, "");
         compare(confirm.rowParts(confirm.lines[0]),
             [{ word: "MOVE   ", rest: "a -> b", color: theme.changeColor("rename"), error: false }]);
         compare(confirm.rowParts(confirm.lines[2]), [{ word: "", rest: "other c", color: "", error: false }]);

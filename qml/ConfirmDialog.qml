@@ -37,9 +37,10 @@ import QtQuick.Layouts
 // where Enter pastes the one the cursor is on). A line to pick can take
 // several lines of text, all after its box, and then the rows are a little
 // apart, so they're told apart, or the question has each on one line, cut
-// off (ask's `cut`). Under a list to pick
-// from, the keys that aren't a button's are listed, and by the buttons, how
-// many are picked. The word that starts a line of the list can be colored by what
+// off (ask's `cut`). By a list to pick
+// from's buttons are how many are picked, and a ? button, which, as `?`,
+// asks for the help on the keys that aren't a button's (helpRequested),
+// shown in a window of its own, so this box stays. The word that starts a line of the list can be colored by what
 // it stands for, like CREATE in green, and a question can have one more
 // button, on the left, apart from the choices, which does something with
 // the picked lines, and is off while none are (see ask). Copy copies the
@@ -188,16 +189,36 @@ ModalBox {
     }
     // The key of the button apart, as its button shows it (`d`).
     readonly property string extraKeys: extra ? String.fromCharCode(extra.key).toLowerCase() : ""
-    // The keys of a list to pick from that no button shows, listed under
-    // it: `{ keys, label }` each.
-    readonly property var hints: !picks.items.length ? [] : [
-        { keys: ["j", "k"], label: "move" },
-        { keys: ["Space"], label: "pick" },
-        { keys: ["v"], label: "select" },
-        { keys: ["/"], label: "search" }
-    ].concat(picks.groups.length ? [{ keys: ["l", "h", "Tab"], label: "go in, out" }] : [],
-        [{ keys: ["Y"].concat(extra ? [extraKeys.toUpperCase()] : []), label: "current row only" }],
-        undoAction ? [{ keys: ["u"], label: "undo" }] : [])
+    // The help's topic on the keys of what's listed ("" for none: a list
+    // to pick from has more keys than its buttons show), which its ?
+    // button and `?` ask for (helpRequested). Whoever shows it mustn't
+    // take this box's place (main.qml's HelpWindow, a window of its own).
+    readonly property string helpTopic: picks.items.length ? "pick" : ""
+    signal helpRequested(string topic)
+
+    // Asks for the help: after `?`, once the key is up, or a moment later,
+    // as a window opened while it's down gets its release (see main.qml's
+    // openShortcuts).
+    function askHelp(afterKey) {
+        if (!helpTopic)
+            return;
+        if (afterKey) {
+            helpAfterKey.restart();
+        } else {
+            helpAfterKey.stop();
+            helpRequested(helpTopic);
+        }
+    }
+
+    Timer {
+        id: helpAfterKey
+
+        interval: 300
+        onTriggered: {
+            if (dialog.opened)
+                dialog.askHelp(false);
+        }
+    }
 
     // Asks `question`, with `details` (a list, maybe "") under it. `yes` is
     // what Yes does, and `no` what No does, if anything. `after` runs after
@@ -707,35 +728,6 @@ ModalBox {
         }
     }
 
-    // A key of the list, or two, and what they do.
-    component KeyHint: Row {
-        id: hint
-
-        required property var modelData
-
-        spacing: 4 * dialog.zoom
-
-        Repeater {
-            model: hint.modelData.keys
-
-            KeyCap {
-                required property string modelData
-
-                anchors.verticalCenter: parent?.verticalCenter
-                theme: dialog.theme
-                text: modelData
-                fontSize: Math.round(11 * dialog.zoom)
-            }
-        }
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: hint.modelData.label
-            font.pixelSize: Math.round(12 * dialog.zoom)
-            color: dialog.theme.dim
-            textFormat: Text.PlainText
-        }
-    }
-
     contentItem: ColumnLayout {
         id: content
 
@@ -752,6 +744,8 @@ ModalBox {
             const ctrl = !pick && (event.modifiers & ~Qt.KeypadModifier) === dialog.picks.ctrlKey;
             if (event.matches(StandardKey.Copy))
                 dialog.system?.setClipboardText(dialog.copyText(), "");
+            else if (dialog.helpTopic && (event.text === "?" || event.key === Qt.Key_Question))
+                dialog.askHelp(true);
             else if (dialog.picks.key(event)) {
                 // The list's (see PickList.key).
             } else if (ctrl && event.key === Qt.Key_D)
@@ -800,6 +794,12 @@ ModalBox {
                 return;
             event.accepted = true;
         }
+        // `?` let go (not the Shift it's typed with, which can go first).
+        Keys.onReleased: event => {
+            const modifier = [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Meta, Qt.Key_Alt].includes(event.key);
+            if (helpAfterKey.running && !modifier && !event.isAutoRepeat)
+                Qt.callLater(dialog.askHelp, false);
+        }
 
         // Over the list, so it stays in view as the list scrolls.
         CodeLabel {
@@ -821,7 +821,7 @@ ModalBox {
             readonly property real margin: 4 * dialog.zoom
             // What else the box has, with the room around it.
             readonly property real others: 48 * dialog.zoom + 2 * dialog.padding + questionText.height + buttons.implicitHeight
-                + (hintRow.visible ? hintRow.height + content.spacing : 0) + 2 * content.spacing
+                + 2 * content.spacing
 
             Layout.fillWidth: true
             // Until the rows are laid out, as tall as their lines
@@ -904,21 +904,6 @@ ModalBox {
             }
         }
 
-        // The keys of a list to pick from that no button shows.
-        Flow {
-            id: hintRow
-
-            Layout.fillWidth: true
-            visible: dialog.picks.items.length > 0
-            spacing: 12 * dialog.zoom
-
-            Repeater {
-                model: dialog.hints
-
-                KeyHint {}
-            }
-        }
-
         // The buttons: the list's on the left, and the choices on the
         // right, or under them where the box is too narrow for both.
         GridLayout {
@@ -938,6 +923,28 @@ ModalBox {
                 Layout.fillWidth: true
                 spacing: 8 * dialog.zoom
 
+                // The list's keys, in the help (`?` too).
+                TextButton {
+                    id: helpButton
+
+                    objectName: "helpButton"
+                    visible: dialog.helpTopic !== ""
+                    theme: dialog.theme
+                    focusPolicy: Qt.NoFocus
+                    implicitWidth: implicitHeight
+                    text: "?"
+                    Accessible.name: qsTr("Help")
+                    onClicked: dialog.askHelp(false)
+
+                    Tip {
+                        theme: dialog.theme
+                        visible: helpButton.hovered
+                        text: qsTr("Help")
+                        shortcuts: ["?"]
+                        x: Math.round((helpButton.width - width) / 2)
+                        y: helpButton.height + 6 * dialog.zoom
+                    }
+                }
                 Choice {
                     visible: dialog.picks.items.length > 0
                     modelData: ({ label: dialog.picks.allPicked ? qsTr("Select None") : qsTr("Select All"), keys: "a", answer: "all" })

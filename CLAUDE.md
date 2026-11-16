@@ -138,6 +138,8 @@ the scratchpad (see Scratchpad).
   too (`showList`, which only the tests use now), and `:!` what a command
   wrote (`showText`), also as it runs (`showRunning`; see Output box). `/` and `?` search it (see
   Help).
+- `qml/HelpWindow.qml`: the help in a window of its own, which a
+  question's ? opens beside it (see Help window).
 - `qml/ConfirmDialog.qml`: every question's box, with Yes, No and Cancel
   as buttons, named by what they do (Apply, Don't Save), that show their
   keys, and a list under the question:
@@ -2740,6 +2742,27 @@ the scratchpad (see Scratchpad).
   lists every name a key can have where keys are written (a shortcut's,
   `:norm`), which are those `Vim.keysIn` reads: a new one goes in both,
   as `test_helpKeyNames` checks each name listed is one key to a macro.
+- **Help window** (HelpWindow.qml, main.qml's `helpWindow`): the help
+  asked for while a box has the keys is in a window of its own, as `:h`'s
+  box would take the box's place: a list to pick from's ? button, or `?`
+  there (ConfirmDialog's `helpTopic`, "pick", `askHelp`,
+  `helpRequested`; under the list was a row of the keys no button shows,
+  `hints`, which took a row and still left most out), opens it at
+  `:h pick`, and the question stays as it is under it, with the keys
+  again once it closes (`q`, Esc, Cmd+W). It's a tool window (`Qt.Tool`),
+  which floats over Koil's other windows, so a click back on the
+  question doesn't put it behind the main window, placed once (`place`:
+  beside the main window where the screen has room, else over its right
+  side), then where the user left it. All it has is a second `HelpPanel`
+  that fills it (its size, no dimming, a plain background, set on the
+  instance), which closes with it either way: the cheap way, until the
+  help's text is a view both a box and a window show. Its Cmd+W is a
+  `Shortcut` in the panel, as a modal popup keeps its window's own from
+  running. After `?` it opens once the key is up, as the Shortcuts
+  window after `Space q` (the Shift can go first, so a modifier's
+  release doesn't count). Whatever else should point to the help from a
+  box or a window of its own (the Shortcuts window's key names, its
+  export page) emits a topic for `helpWindow.open` the same way.
 - **Help folds** (Folds in HelpPanel.qml): the help's sections are
   folded, each to its title (an arrow before it, as a group's heading in
   a question's list), so `:h` alone is a list of what there's help for,
@@ -2902,9 +2925,9 @@ the scratchpad (see Scratchpad).
   wrapped (`listWidth`, from its longest line, counted in `ask`), and the
   list as tall as its rows (the `ListView`'s `contentHeight`, or until
   they're laid out `listHeight`, counted too, without which it would
-  have no height to make rows in). Under a list to pick from are the keys
-  no button shows (`hints`), and by the buttons Select All (`a`) and how
-  many are picked; where the box is too narrow for the list's buttons
+  have no height to make rows in). By a list to pick from's buttons are
+  a ? button (the keys no button shows, see Help window), Select All
+  (`a`) and how many are picked; where the box is too narrow for the list's buttons
   and the choices side by side, the choices go under them (`buttons`, a
   grid of one column then, by `sideBySide`, their width in one row, so
   the box's width doesn't depend on which it is). The layout doesn't
