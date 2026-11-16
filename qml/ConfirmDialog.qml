@@ -32,9 +32,12 @@ import QtQuick.Layouts
 // that can't be undone), with a crossed out box, dimmed, which can't be
 // picked, unless the question has a button for the picked lines (see
 // below): then Yes is off while one is picked (and a leaves them out). Yes
-// is off while none are picked, as that button is. A line to pick can take
+// is off while none are picked, as that button is, unless the question
+// has Yes take the current row then (see ask's `current`: the registers,
+// where Enter pastes the one the cursor is on). A line to pick can take
 // several lines of text, all after its box, and then the rows are a little
-// apart, so they're told apart. Under a list to pick
+// apart, so they're told apart, or the question has each on one line, cut
+// off (ask's `cut`). Under a list to pick
 // from, the keys that aren't a button's are listed, and by the buttons, how
 // many are picked. The word that starts a line of the list can be colored by what
 // it stands for, like CREATE in green, and a question can have one more
@@ -169,6 +172,11 @@ ModalBox {
     // Without anything for No to do, No is the same as Cancel, so it's
     // offered alone, named Cancel if the question says so (see ask).
     property bool cancelOnly: false
+    // With none picked, Yes takes the current row, or the rows v selected,
+    // as Y does, so it isn't off then; and a line too long for the box is
+    // cut off, not wrapped (see ask's `current` and `cut`).
+    property bool takesCurrent: false
+    property bool cutLines: false
     // What Yes and No are named, if not that (see ask).
     property string yesLabel
     property string noLabel
@@ -239,8 +247,12 @@ ModalBox {
     // as they were, with what was searched for, if a line still has it
     // (with `row`, the current line is the one at that index
     // instead); `again` can also be what `place` gave, to ask a question
-    // as it was before another one; and `undo`, what u does, as an
-    // answer's action does, with the picked lines.
+    // as it was before another one; `undo`, what u does, as an
+    // answer's action does, with the picked lines; `current`, to have Yes
+    // (its button, y and Enter) take the current line, or the lines v
+    // selected, while none is picked, as Y does, so Enter on a line does
+    // it (pasting a register); and `cut`, to show each line to pick from
+    // on one line, cut off where the box ends, not wrapped.
     function ask(question, details, yes, no, after, options) {
         options = options || {};
         // Before they're replaced.
@@ -249,6 +261,8 @@ ModalBox {
         extra = options.extra || null;
         undoAction = options.undo || null;
         cancelOnly = !!options.cancel;
+        takesCurrent = !!options.current;
+        cutLines = !!options.cut;
         yesLabel = options.yes || "";
         noLabel = options.no || "";
         const pick = Array.isArray(details);
@@ -399,7 +413,7 @@ ModalBox {
     function canAnswer(choice) {
         const none = picks.items.length > 0 && picks.pickedCount === 0;
         return choice === "all" ? picks.items.some((item, i) => !item.blocked && picks.isShown(i))
-            : choice === "yes" ? !picks.blockedPicked && !none
+            : choice === "yes" ? !picks.blockedPicked && (!none || takesCurrent)
             : choice === "extra" ? extra !== null && !none
             : choice === "undo" ? undoAction !== null : true;
     }
@@ -412,6 +426,11 @@ ModalBox {
         if (choice === "all") {
             if (canAnswer(choice))
                 picks.clickAll();
+            return;
+        }
+        // Yes with none picked, where it takes the cursor's lines.
+        if (choice === "yes" && !lines && takesCurrent && picks.items.length && !picks.pickedCount) {
+            answerHighlighted(choice);
             return;
         }
         const can = !lines ? canAnswer(choice) : choice === "extra" ? extra !== null
@@ -680,7 +699,8 @@ ModalBox {
                         font: dialog.theme.font
                         color: line.modelData.error ? dialog.theme.error : dialog.theme.text
                         textFormat: marks ? Text.StyledText : Text.PlainText
-                        wrapMode: Text.Wrap
+                        wrapMode: dialog.cutLines ? Text.NoWrap : Text.Wrap
+                        elide: dialog.cutLines ? Text.ElideRight : Text.ElideNone
                     }
                 }
             }

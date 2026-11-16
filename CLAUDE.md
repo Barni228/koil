@@ -133,9 +133,9 @@ the scratchpad (see Scratchpad).
   highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`, `:h key`), a box listing what
-  isn't obvious (`qml/help.js`'s `sections`); `:reg` shows the registers
-  in it (`showList`), and `:!` what a command wrote (`showText`), also
-  as it runs (`showRunning`; see Output box). `/` and `?` search it (see
+  isn't obvious (`qml/help.js`'s `sections`); it can show a list of rows
+  too (`showList`, which only the tests use now), and `:!` what a command
+  wrote (`showText`), also as it runs (`showRunning`; see Output box). `/` and `?` search it (see
   Help).
 - `qml/ConfirmDialog.qml`: every question's box, with Yes, No and Cancel
   as buttons, named by what they do (Apply, Don't Save), that show their
@@ -1968,7 +1968,7 @@ the scratchpad (see Scratchpad).
   are read from vim's state and can't be written. `p` says how many
   lines it added, if more than two ("3 more lines"), as `y` and `d` do
   theirs (vim's `report`). `:reg` (`:di`) lists
-  them (`registerList`) in the help box, one line each, cut off. A yank
+  them to pick from (see Registers' list). A yank
   shows what it took for 200 ms, as Neovim's `vim.hl.on_yank` does
   (`yanked`, `flashYank`: yy its line, a block its part of each line,
   the marked lines each, every cursor's at once), drawn under the text
@@ -2800,11 +2800,40 @@ the scratchpad (see Scratchpad).
   editor. A list tells what draws it that its rows were made again
   (`replacing` before, to keep how far it's scrolled, and `replaced`
   after, to scroll back there or to the top), and the cursor moving is
-  `rowChanged`. So a new list to pick from (`:reg`, say) is a `PickList`,
-  a view of its `rows`, a `ListSearch`, and `key` in its key handler; a
+  `rowChanged`. So a new list to pick from is a `PickList`,
+  a view of its `rows`, a `ListSearch`, and `key` in its key handler (or
+  a question, as `:reg`'s: see Registers' list); a
   new key for all of them goes in `key`. The names below (`rows`,
   `groupPicks`, `linesOf`, `inside`, `shown`, `place`) are the
   `PickList`'s, a question's being `confirmDialog.picks`.
+- **Registers' list** (`:reg`, `showRegisters` in main.qml, vim's
+  `registersRequested`): the registers that hold something (those named,
+  or all: `Vim.registerList`, `{ name, type, lines, more }` each; the
+  clipboard once, as `"+`, which `:reg *` lists too, as `"*` is the
+  same), a question with a list to pick from, as the undo history's, so
+  with its keys: a row a register, its type and name in
+  `theme.specialKey` (its `lead`), then what it holds, its lines under
+  each other, after the name: the first `registerLines` (5; one more, if
+  that's all), then `… 4 more lines`, as a register can hold a file. A
+  line is cut off at 300 characters, and where the box ends (`ask`'s
+  `cut`), a tab is spaces to its tab stop, as the editor shows it, and
+  other control characters are written as `^M`; lines don't show the
+  line break they end with, so characters that end with one show it
+  (`^J`, which every line break was at first, each register on one
+  line). None is picked, and the cursor is shown. Yes is Paste (`y` the picked ones, `Y` the current row's
+  or those `v` selected, and so does Enter while none is picked: `ask`'s
+  `current`, as going to a register and pressing Enter is what's wanted
+  most): `Vim.putRegisters` pastes them after the cursor as `p` does,
+  from normal mode, one by its name (`"ap`, so `.` reads it again),
+  several as one, each after the one before, joined as `"A` appends
+  (lines if any is; `getRegister` takes what a register holds in place
+  of a name for it). The button apart is Clear (`d`, `D`):
+  `Vim.clearRegisters` empties them at once (set to null, not deleted,
+  see QML's JavaScript; the clipboard for `"+`), but those vim
+  fills itself (`readOnlyRegisters`), which the status line says can't
+  be cleared, and the list is asked again (`again`) with those left, if
+  any. It was the help's box at first (`showList`), which only listed
+  them.
 - **Questions** (ConfirmDialog.qml): one box asks them all
   (`confirmDialog.ask`), so a new one needs nothing of its own: the
   question in the window's font, with `code` in backquotes as the help
@@ -2820,7 +2849,10 @@ the scratchpad (see Scratchpad).
   do. Yes is in the accent's color, and Enter answers it, always: h, l
   and Tab moved a highlight through the buttons at first, which was
   little use, and they're the undo history's keys now (see below), so
-  nothing moves it, and in a list without groups they do nothing. A
+  nothing moves it, and in a list without groups they do nothing. With
+  lines to pick from and none picked, Yes is off, unless the question
+  has it take the current row then, as `Y` does (`ask`'s `current`,
+  `takesCurrent`: the registers). A
   list of text (not one to pick from) scrolls with `j`, `k`, `g`, `G`
   and Ctrl-D, Ctrl-U, Ctrl-F, Ctrl-B, Ctrl-E, Ctrl-Y, PageDown and
   PageUp, as the help does.

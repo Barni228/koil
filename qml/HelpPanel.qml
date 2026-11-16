@@ -10,8 +10,8 @@ import "text.js" as Txt
 // :set and its forms, the commands, shell commands, search, registers and
 // macros, visual block and multiple cursors, marked lines, hidden text, the
 // keys starting with g, z and Space, Ctrl keys and other keys.
-// :help topic scrolls to a section, or a key's row (see show). :reg shows
-// the registers in it too (showList), and :! what a command wrote
+// :help topic scrolls to a section, or a key's row (see show). It can
+// show a list of rows too (showList), and :! what a command wrote
 // (showText), also while it runs (see Output).
 // Keys scroll it as in a vim help buffer, / and ? search it (see Search);
 // Esc, q or Enter (as after vim's :!) closes it. Its text can be selected
@@ -85,7 +85,7 @@ ModalBox {
 
     // Opens the box with `title` over `rows` of [keys, text], both shown
     // as they are in the editor's font, the keys taking `keyColumns`
-    // characters (:reg).
+    // characters.
     function showList(title, rows, keyColumns) {
         showPlain(title, { title: "", rows: rows, plain: true, keyColumns: keyColumns });
     }
@@ -601,7 +601,7 @@ ModalBox {
 
     // Text with `code` (see Txt.parseCode), each code on a shade of its own,
     // drawn behind the text so it still selects and copies, and its search
-    // matches highlighted. `plain` shows the text as it is (a :reg list).
+    // matches highlighted. `plain` shows the text as it is (showList's).
     component CodeText: HelpText {
         id: codeText
 

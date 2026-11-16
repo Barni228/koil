@@ -212,7 +212,10 @@ function sections(help) {
                 ["`:!cmd`", "Run a shell command (see `:h !`)."],
                 ["`:s/old/new/`  `:%s/old/new/g`", "Replace on the line, or every match in the file (see `:h s`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
-                ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
+                ["`:reg`  `:reg [names]`", "List the registers to pick from, e.g. `:reg a0`, each with its first "
+                    + "lines: `Enter` pastes the "
+                    + "one the cursor is on after the cursor, as `p` does (`y` the picked ones, as one), and `D` "
+                    + "clears it (`d` the picked ones). Its other keys are any list's: see `:h pick`."],
                 ["`:apply`  `:open` …", "Each key starting with `Space` is a command too, for a shortcut or "
                     + "`koil -c` to say what it does: `:apply`, `:confirm apply`, `:undolist`, `:reveal`, `:open` "
                     + "and `:shortcuts` (see `:h space`)."],
@@ -655,7 +658,9 @@ function sections(help) {
             ],
             note: "`Y` and `D` ask first if the line takes others along. Quitting, `n` quits without the "
                 + "changes, and there's no `d` or `u`. Every list to pick from has the keys that move, pick, "
-                + "select and search, and `Y`: the shortcuts to export too (see `:h shortcuts`)."
+                + "select and search, and `Y`: the shortcuts to export too (see `:h shortcuts`), and `:reg`'s "
+                + "registers, where `y` and `Y` paste, `d` and `D` clear, and `Enter` with none picked "
+                + "pastes the one the cursor is on."
         }
     ];
 }

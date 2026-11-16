@@ -2078,6 +2078,60 @@ ApplicationWindow {
         }, null, null, { keywords: changeKeywords, yes: "Delete", cancel: true });
     }
 
+    // :reg: lists the registers `names` (all of them if blank) that hold
+    // something to pick from, as the undo history's list, each with the
+    // lines it holds under each other (its first ones, then how many more
+    // it has: see Vim.registerList), with
+    // its keys: Yes pastes the picked ones after the cursor (y; Y the
+    // current row's, or those of the rows v selected, as Enter does while
+    // none is picked), several as one (see Vim.putRegisters), and Clear (d,
+    // or D) empties them, after which it's asked again about the others,
+    // `again` as it was.
+    function showRegisters(names, again) {
+        const rows = vim.registerList(names);
+        if (!rows.length)
+            return;
+        // Its type and name, which is what's colored, then what it holds,
+        // its other lines under its first.
+        const lines = rows.map(row => {
+            const head = row.type + "  \"" + row.name + "  ";
+            const more = row.more ? ["… " + row.more + (row.more === 1 ? " more line" : " more lines")] : [];
+            return {
+                text: head + row.lines.concat(more).join("\n" + " ".repeat(head.length)),
+                picked: false,
+                lead: { length: 5, color: theme.specialKey }
+            };
+        });
+        const named = picked => picked.map(i => rows[i].name);
+        const question = count => !count ? "Paste a register after the cursor, or clear it"
+            : count === 1 ? "Paste the picked register after the cursor?"
+            : "Paste the " + count + " picked registers after the cursor, as one?";
+        confirmDialog.ask(question, lines, picked => vim.putRegisters(named(picked)), null, null, {
+            yes: "Paste",
+            cancel: true,
+            showRow: true,
+            current: true,
+            cut: true,
+            again: again,
+            extra: { label: "Clear", key: Qt.Key_D, action: picked => clearRegisters(names, named(picked)) }
+        });
+    }
+
+    // Clear in showRegisters: empties the registers `cleared` (d the
+    // picked ones, D the current row's, or those of the rows v selected),
+    // but those vim fills itself, and lists `names` again, if any still
+    // holds something.
+    function clearRegisters(names, cleared) {
+        const kept = vim.clearRegisters(cleared), count = cleared.length - kept.length;
+        const shown = list => list.map(name => "\"" + name).join(" ");
+        if (kept.length)
+            vim.showError((kept.length === 1 ? shown(kept) + " is" : shown(kept) + " are")
+                + " filled by Koil, and can't be cleared");
+        else
+            vim.showMessage(count === 1 ? shown(cleared) + " cleared" : count + " registers cleared");
+        showRegisters(names, true);
+    }
+
     // u with no change left to undo: undoes the last apply alone (the
     // newest of every session), all of it, once the user confirms it,
     // listing what undoing it does. With nothing to undo it says nothing
@@ -2857,7 +2911,7 @@ ApplicationWindow {
             if (!help.show(topic))
                 vim.showError("E149: Sorry, no help for " + topic);
         }
-        onRegistersRequested: rows => help.showList("Registers", rows, 6)
+        onRegistersRequested: names => root.showRegisters(names)
     }
 
     // Behind the path field and the space under it, as behind the text.

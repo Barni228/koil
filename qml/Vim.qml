@@ -193,8 +193,9 @@ QtObject {
     // (as written, quotes and all). :e alone (`path` ""): what's shown, read
     // again. `force` (:e!): unsaved changes are dropped, not asked about.
     signal editRequested(string path, bool force)
-    // :reg, with what registerList gives.
-    signal registersRequested(var rows)
+    // :reg, with the registers it names (all of them if blank), of which
+    // some hold something (see registerList).
+    signal registersRequested(string names)
     // One of commandKeys was typed, with its count (0 if none), or run as
     // an Ex command (see commandKey).
     signal keyCommand(string name, int count)
@@ -4212,7 +4213,11 @@ QtObject {
         registers["\""] = entry;
     }
 
+    // What register `name` holds, or null. `name` can also be what one
+    // holds itself, which is then what's pasted (see putRegisters).
     function getRegister(name) {
+        if (name && typeof name === "object")
+            return name;
         if (name === "+" || name === "*") {
             if (!clipboard)
                 return null;
@@ -4237,13 +4242,24 @@ QtObject {
     }
 
     // :reg lists the registers that hold something (those in `names`, if
-    // it isn't blank), in vim's order, as rows of [type and name, text]:
-    // ["l  \"0", "one^J"]. The type is c (characters), l (lines) or b (a
-    // block), and control characters are written like ^J, so each is one
-    // line (cut off, as a register can hold all of a long file).
+    // it isn't blank), in vim's order, as `{ name, type, lines, more }`
+    // each: { name: "0", type: "l", lines: ["one", "two"], more: 0 }. The
+    // type is c (characters), l (lines) or b (a block). `lines` are its
+    // text's lines as shown, the first `registerLines` of them (one more,
+    // if that's all of them), and `more` how many it has after those, as
+    // a register can hold all of a long file: each cut off if it's long,
+    // with a tab as spaces to its tab stop, as the editor shows it (every
+    // `registerTab` columns, native.cpp's tabColumns), and its other
+    // control characters written like ^M. Lines don't show the line break
+    // they end with, so characters that end with one show it (^J). The
+    // clipboard is listed once, as "+, which "* names too: they're the
+    // same here.
+    readonly property int registerLines: 5
+    readonly property int registerTab: 4
     function registerList(names) {
-        const all = "\"0123456789abcdefghijklmnopqrstuvwxyz-*+.:%/";
-        const wanted = names.replace(/\s/g, "").toLowerCase();
+        const all = "\"0123456789abcdefghijklmnopqrstuvwxyz-+.:%/";
+        const wanted = names.replace(/\s/g, "").toLowerCase().replace(/\*/g, "+");
+        const max = 300;
         const rows = [];
         for (const name of all) {
             if (wanted && !wanted.includes(name))
@@ -4251,20 +4267,91 @@ QtObject {
             const r = getRegister(name);
             if (!r || !r.text)
                 continue;
-            const max = 300, cut = r.text.length > max;
-            const text = (cut ? r.text.slice(0, Txt.charStart(r.text, max)) : r.text).replace(/[\x00-\x1f\x7f]/g,
-                ch => "^" + (ch === "\x7f" ? "?" : String.fromCharCode(ch.charCodeAt(0) + 64)));
-            rows.push([(r.blockwise ? "b" : r.linewise ? "l" : "c") + "  \"" + name, cut ? text + "…" : text]);
+            const text = r.text, ends = text.endsWith("\n"), end = ends ? text.length - 1 : text.length;
+            const shown = line => line.split("\t").map(part => part.replace(/[\x00-\x1f\x7f]/g,
+                ch => "^" + (ch === "\x7f" ? "?" : String.fromCharCode(ch.charCodeAt(0) + 64))))
+                .reduce((before, part) => before + " ".repeat(registerTab - before.length % registerTab) + part);
+            const lines = [];
+            let count = 0;
+            for (let at = 0; ; count++) {
+                let stop = text.indexOf("\n", at);
+                if (stop < 0 || stop > end)
+                    stop = end;
+                if (lines.length <= registerLines) {
+                    const cut = stop - at > max;
+                    const line = shown(text.slice(at, cut ? Txt.charStart(text, at + max) : stop));
+                    lines.push(cut ? line + "…" : line);
+                }
+                if (stop >= end)
+                    break;
+                at = stop + 1;
+            }
+            count += 1;
+            if (count > registerLines + 1)
+                lines.length = registerLines;
+            else if (ends && !r.linewise)
+                lines[lines.length - 1] += "^J";
+            rows.push({ name: name, type: r.blockwise ? "b" : r.linewise ? "l" : "c", lines: lines,
+                more: count - lines.length });
         }
         return rows;
     }
 
+    // :reg: Koil lists the registers `names` (see registerList) to pick
+    // from, if any holds something.
     function showRegisters(names) {
-        const rows = registerList(names);
-        if (rows.length)
-            registersRequested(rows);
+        if (registerList(names).length)
+            registersRequested(names);
         else
             showMessage(names.trim() ? "Nothing in those registers" : "Nothing in the registers");
+    }
+
+    // Pastes the registers `names` after the cursor, as p does, from
+    // normal mode, which it goes to first (the pick of :reg's list).
+    // Several are pasted as one, each after the one before, joined as
+    // appending to a register joins them ("Ayy): as lines if any of them
+    // is, with one that isn't on a line of its own.
+    function putRegisters(names) {
+        let joined = null;
+        for (const name of names) {
+            const r = getRegister(name);
+            if (!r || !r.text)
+                continue;
+            if (!joined) {
+                joined = { text: r.text, linewise: !!r.linewise, hidden: r.hidden, blockwise: !!r.blockwise };
+                continue;
+            }
+            const sep = r.linewise && !joined.linewise ? "\n" : "";
+            joined = { text: own(joined.text + sep + r.text), linewise: joined.linewise || !!r.linewise,
+                hidden: joined.hidden.concat(shifted(r.hidden, joined.text.length + sep.length)), blockwise: false };
+        }
+        if (!joined)
+            return;
+        // Lines end with a line break, also after characters put last.
+        if (joined.linewise && !joined.text.endsWith("\n"))
+            joined.text = own(joined.text + "\n");
+        // One alone by its name, so . reads it again, as after "ap.
+        batched(() => {
+            toNormal();
+            execute({ reg: names.length === 1 ? names[0] : joined, count: 0, action: "p" });
+        });
+    }
+
+    // Empties the registers `names`, so they hold nothing (the clipboard
+    // too, for "+ or "*), and gives those it can't, which vim fills itself
+    // (see readOnlyRegisters). Set to null, not deleted (see CLAUDE.md on
+    // a var property's keys).
+    function clearRegisters(names) {
+        const kept = [];
+        for (const name of names) {
+            if (readOnlyRegisters.includes(name))
+                kept.push(name);
+            else if (name === "+" || name === "*")
+                clipboard?.setClipboardText("", "");
+            else
+                registers[name] = null;
+        }
+        return kept;
     }
 
     // `deleting` for the text a change deletes.

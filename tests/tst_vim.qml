@@ -3845,23 +3845,93 @@ TestCase {
     function test_registerList() {
         load("one\ntwo\tx");
         let shown = null;
-        const show = rows => shown = rows;
+        const show = names => shown = names;
         vim.registersRequested.connect(show);
         vim.lastInsert = "";
         vim.lastSearch = null;
         vim.history = { ":": [], "/": [], "<": [] };
         keys("yyjdw\"ayy");
-        compare(vim.registerList(""), [["l  \"\"", "x^J"], ["l  \"0", "one^J"], ["l  \"a", "x^J"],
-            ["c  \"-", "two^I"]]);
+        const row = (name, type, lines, more) => ({ name: name, type: type, lines: lines, more: more || 0 });
+        compare(vim.registerList(""), [row("\"", "l", ["x"]), row("0", "l", ["one"]), row("a", "l", ["x"]),
+            row("-", "c", ["two "])]);
+        // Koil lists those it names, if any holds something.
         keys(":reg 0 -<CR>");
-        compare(shown, [["l  \"0", "one^J"], ["c  \"-", "two^I"]]);
+        compare(shown, "0 -");
+        compare(vim.registerList(shown).map(row => row.name), ["0", "-"]);
         shown = null;
         keys(":di z<CR>");
         compare(shown, null);
         compare(vim.message, "Nothing in those registers");
         vim.registersRequested.disconnect(show);
+        // The clipboard is listed once, as "+, also asked for as "*.
+        const clipboard = vim.clipboard;
+        vim.clipboard = { clipboardData: () => "", clipboardText: () => "clip" };
+        compare(vim.registerList("").filter(row => row.lines[0] === "clip").map(row => row.name), ["+"]);
+        compare(vim.registerList("*").map(row => row.name), ["+"]);
+        vim.clipboard = clipboard;
         vim.registers = { "a": { text: "x".repeat(400), linewise: false, hidden: [] } };
-        compare(vim.registerList("a")[0][1], "x".repeat(300) + "…");
+        compare(vim.registerList("a")[0].lines, ["x".repeat(300) + "…"]);
+        // Its lines, each a line: the first ones, and how many more it
+        // has. Characters that end with a line break show it.
+        const entry = (text, linewise) => ({ text: text, linewise: linewise, hidden: [] });
+        const letters = "abcdefghij".split("");
+        vim.registers = { "a": entry("one\n\ntwo\n", true), "b": entry("one\ntwo", false), "c": entry("one\n", false),
+            "d": entry(letters.slice(0, 6).join("\n") + "\n", true), "e": entry(letters.slice(0, 7).join("\n"), false),
+            "f": entry("\n", true), "g": entry("x".repeat(400) + "\ty\n" + letters.join("\n") + "\n", false),
+            "h": entry("\ta\tbcde\tf\r\n", true) };
+        compare(vim.registerList("abcdefg"), [row("a", "l", ["one", "", "two"]), row("b", "c", ["one", "two"]),
+            row("c", "c", ["one^J"]), row("d", "l", letters.slice(0, 6)), row("e", "c", letters.slice(0, 5), 2),
+            row("f", "l", [""]), row("g", "c", ["x".repeat(300) + "…"].concat(letters.slice(0, 4)), 6)]);
+        // A tab goes to its tab stop, as in the editor.
+        compare(vim.registerList("h"), [row("h", "l", ["    a   bcde    f^M"])]);
+    }
+
+    // What :reg's list does with the registers picked: pastes them after
+    // the cursor, several as one, or empties them.
+    function test_registerListActions() {
+        load("one\ntwo");
+        const entry = (text, linewise) => ({ text: text, linewise: linewise, hidden: [] });
+        vim.registers = { "a": entry("A\n", true), "b": entry("b", false), "c": entry("c", false) };
+        // One, as "ap, from any mode, and . pastes it again.
+        keys("v");
+        vim.putRegisters(["b"]);
+        compare(vim.mode, "normal");
+        compare(editor.text, "obne\ntwo");
+        keys(".");
+        compare(editor.text, "obbne\ntwo");
+        keys("u");
+        compare(editor.text, "obne\ntwo");
+        keys("u");
+        compare(editor.text, "one\ntwo");
+        // Characters one after another, in one change.
+        vim.putRegisters(["b", "c"]);
+        compare(editor.text, "obcne\ntwo");
+        keys("u");
+        compare(editor.text, "one\ntwo");
+        // Lines, if one of them is, each after the one before.
+        vim.putRegisters(["b", "a", "c"]);
+        compare(editor.text, "one\nb\nA\nc\ntwo");
+        keys("u");
+        // One that holds nothing is left out.
+        vim.putRegisters(["z"]);
+        vim.putRegisters(["z", "a"]);
+        compare(editor.text, "one\nA\ntwo");
+        keys("u");
+        compare(editor.text, "one\ntwo");
+
+        // Cleared, they hold nothing; not those vim fills itself.
+        keys(":noh<CR>");
+        compare(vim.clearRegisters(["a", "c", ":"]), [":"]);
+        compare(vim.registerList("abc:").map(row => row.name), ["b", ":"]);
+        compare(vim.getRegister("a"), null);
+        keys("\"ap");
+        compare(editor.text, "one\ntwo");
+        // A cleared one is written again as any other.
+        keys("\"ayy\"Ayy");
+        compare(vim.getRegister("a").text, "one\none\n");
+        compare(vim.macroList().map(macro => macro.name), ["a", "b", "\""]);
+        compare(vim.clearRegisters(["\"", "b"]), []);
+        compare(vim.registerList("\"b"), []);
     }
 
     // Other apps get the icons; Koil gets the hidden text back.
@@ -5411,6 +5481,55 @@ TestCase {
         keyClick(Qt.Key_Tab);
         keyClick(Qt.Key_Return);
         verify(saved);
+    }
+
+    // A question that has Yes take the current row while none is picked
+    // (the registers): Enter and y do what Y does, and with some picked,
+    // those. Its lines are cut off, not wrapped.
+    function test_confirmCurrent() {
+        let chosen = null;
+        const lines = () => ["A", "B", "C"].map(text => ({ text: text, needs: [], picked: false }));
+        const ask = options => {
+            chosen = null;
+            confirm.ask("Paste?", lines(), picked => chosen = picked, null, null,
+                Object.assign({ cancel: true, showRow: true, current: true, cut: true }, options));
+            tryCompare(confirm, "opened", true);
+        };
+        ask();
+        verify(confirm.cutLines);
+        verify(confirm.canAnswer("yes"));
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Return);
+        compare(chosen, [1]);
+        verify(!confirm.opened);
+        // The rows v selected.
+        ask();
+        keyClick(Qt.Key_V);
+        keyClick(Qt.Key_J);
+        keyClick(Qt.Key_Y);
+        compare(chosen, [0, 1]);
+        // The picked ones, wherever the cursor is.
+        ask();
+        keyClick(Qt.Key_G, Qt.ShiftModifier);
+        keyClick(Qt.Key_Space);
+        keyClick(Qt.Key_G);
+        confirm.answer("yes");
+        compare(chosen, [2]);
+        // With the cursor not shown yet, the first Enter only shows it.
+        ask({ showRow: false });
+        keyClick(Qt.Key_Return);
+        verify(confirm.opened);
+        verify(confirm.picks.rowShown);
+        keyClick(Qt.Key_Return);
+        compare(chosen, [0]);
+        // The next question is as before: Yes is off with none picked.
+        confirm.ask("Apply?", lines(), picked => chosen = picked, null, null, { cancel: true, showRow: true });
+        tryCompare(confirm, "opened", true);
+        verify(!confirm.cutLines);
+        verify(!confirm.canAnswer("yes"));
+        keyClick(Qt.Key_Return);
+        verify(confirm.opened);
+        keyClick(Qt.Key_Escape);
     }
 
     // Lines in groups: a heading over each one's lines, whose box is all
