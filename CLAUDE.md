@@ -2920,8 +2920,12 @@ the scratchpad (see Scratchpad).
   or all: `Vim.registerList`, `{ name, type, lines, more }` each; the
   clipboard once, as `"+`, which `:reg *` lists too, as `"*` is the
   same), a question with a list to pick from, as the undo history's, so
-  with its keys: a row a register, its type and name in
-  `theme.specialKey` (its `lead`), then what it holds, its lines under
+  with its keys: a row a register, its type (`c` characters, `l` lines,
+  `b` a block, as vim's `:reg`), dimmed, and its name in
+  `theme.registerName` (a bright amber: `theme.specialKey`'s purple,
+  which both were in at first, didn't stand out), so the name is what's
+  seen first (its `lead`, of two parts,
+  which `leadText` makes styled text of), then what it holds, its lines under
   each other, after the name: the first `registerLines` (5; one more, if
   that's all), then `… 4 more lines`, as a register can hold a file. A
   line is cut off at 300 characters, and where the box ends (`ask`'s

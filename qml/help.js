@@ -222,7 +222,8 @@ function sections(help) {
                 ["`:s/old/new/`  `:%s/old/new/g`", "Replace on the line, or every match in the file (see `:h s`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "List the registers to pick from, e.g. `:reg a0`, each with its first "
-                    + "lines: `Enter` pastes the "
+                    + "lines, after its name (`\"a`) and, dimmed before that, what it holds: `c` characters, "
+                    + "`l` lines or `b` a block. `Enter` pastes the "
                     + "one the cursor is on after the cursor, as `p` does (`y` the picked ones, as one), and `D` "
                     + "clears it (`d` the picked ones). Its other keys are any list's: see `:h pick`."],
                 ["`:apply`  `:open` …", "Each key starting with `Space` is a command too, for a shortcut or "

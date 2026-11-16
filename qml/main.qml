@@ -2092,15 +2092,16 @@ ApplicationWindow {
         const rows = vim.registerList(names);
         if (!rows.length)
             return;
-        // Its type and name, which is what's colored, then what it holds,
-        // its other lines under its first.
+        // Its type, dimmed, and its name, which is what's colored
+        // (theme.registerName), so it stands out, then what it holds, its
+        // other lines under its first.
         const lines = rows.map(row => {
             const head = row.type + "  \"" + row.name + "  ";
             const more = row.more ? ["… " + row.more + (row.more === 1 ? " more line" : " more lines")] : [];
             return {
                 text: head + row.lines.concat(more).join("\n" + " ".repeat(head.length)),
                 picked: false,
-                lead: { length: 5, color: theme.specialKey }
+                lead: [{ length: 3, color: theme.dim }, { length: 2, color: theme.registerName }]
             };
         });
         const named = picked => picked.map(i => rows[i].name);

@@ -6671,6 +6671,14 @@ TestCase {
         compare(led[1].word, "");
         compare(confirm.rowParts({ text: "just now", needs: [], lead: { length: 8, color: "red" } })[0],
             { word: "just now", rest: "", color: "red", error: false });
+        // A lead of several parts, each in its color (a register's type
+        // and name), the last with the spaces after it.
+        const two = confirm.rowParts({ text: "c  \"a  x <y\n       z", needs: [],
+            lead: [{ length: 3, color: "gray" }, { length: 2, color: "red" }] });
+        compare([two[0].word, two[0].rest, two[0].color, two[1].word], ["c  \"a  ", "x <y", "red", ""]);
+        compare(two[0].leads, [{ text: "c  ", color: "gray" }, { text: "\"a  ", color: "red" }]);
+        compare(confirm.leadText(two[0]), "<font color=\"gray\">c&nbsp; </font><font color=\"red\">\"a&nbsp; </font>");
+        compare(confirm.leadText(led[0]), "");
         // Each age has its color, the oldest the palest.
         const ages = ["today", "days", "weeks", "months", "years"].map(age => String(theme.ageColor(age)));
         compare(ages.filter((color, i) => ages.indexOf(color) === i).length, 5);

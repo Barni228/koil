@@ -81,6 +81,9 @@ QtObject {
     readonly property color yanked: dark ? "#007ad4" : "#4d007ad4"
     // The name of a key in keys written out, like <CR> (a shortcut's).
     readonly property color specialKey: dark ? "#c586c0" : "#af00db"
+    // A register's name in :reg's list: a bright amber, which nothing
+    // else there has, so the names are what the eye finds first.
+    readonly property color registerName: dark ? "#ffcc33" : "#b45309"
     // A dir's name in Koil's listing, and the path it lists.
     readonly property color directory: dark ? "#6cb6ff" : "#0b62c4"
     // A link to the help (`:h topic` in a text, see HelpLink): the color

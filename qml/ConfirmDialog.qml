@@ -231,7 +231,9 @@ ModalBox {
     // for `extra`, see below, and starts left out; if it's why, as text, the
     // line of its text that ends with that is in the error's color), and
     // `lead`, `{ length, color }`: that many characters at its text's start
-    // are in that color (when an apply was made, by how old it is), and
+    // are in that color (when an apply was made, by how old it is), or a
+    // list of those, each after the one before (a register's type, then
+    // its name), and
     // `group`, the index of the group it's in (see `groups`): then
     // `question` can be a function of how many are picked (and the list of
     // whether each is), and `yes` gets the indexes of the picked ones.
@@ -378,16 +380,30 @@ ModalBox {
     // keyword it starts with, with the spaces after it, and its color (or
     // none of both), what's after it, and whether it says why the line
     // can't be done (see ask's `blocked`). A line to pick from with a
-    // `lead` starts with that, as its first line's word, in its color.
+    // `lead` starts with that, as its first line's word, in its color;
+    // with a lead of several, in the last one's, and `leads` has each
+    // part's `{ text, color }` (see leadText).
     function rowParts(row) {
         const pick = typeof row !== "string";
         const why = pick && typeof row.blocked === "string" ? row.blocked : "";
         const lead = pick && row.lead ? row.lead : null;
         return (pick ? row.text : row).split("\n").map((line, i) => {
             if (lead && i === 0) {
+                const several = Array.isArray(lead), parts = several ? lead : [lead];
+                const length = parts.reduce((sum, part) => sum + part.length, 0);
                 // With the spaces after it, as a keyword.
-                const end = lead.length + /^\s*/.exec(line.slice(lead.length))[0].length;
-                return { word: line.slice(0, end), rest: line.slice(end), color: lead.color, error: false };
+                const end = length + /^\s*/.exec(line.slice(length))[0].length;
+                const first = { word: line.slice(0, end), rest: line.slice(end),
+                    color: parts[parts.length - 1].color, error: false };
+                if (several) {
+                    let at = 0;
+                    first.leads = parts.map((part, n) => {
+                        const from = at;
+                        at = n === parts.length - 1 ? end : at + part.length;
+                        return { text: line.slice(from, at), color: String(part.color) };
+                    });
+                }
+                return first;
             }
             const m = /^(\S+)(\s+)(.*)$/.exec(line);
             const kind = m ? keywords[m[1]] : undefined;
@@ -399,6 +415,19 @@ ModalBox {
                 error: why !== "" && line.endsWith(why)
             };
         });
+    }
+
+    // The word of a line of a row (see rowParts) as styled text, if its
+    // parts are in colors of their own (`leads`), each with what the search
+    // matched in it underlined; else "". Styled text runs spaces together,
+    // so one before another is a no-break one.
+    function leadText(part) {
+        if (!part.leads)
+            return "";
+        const escaped = text => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/ (?= )/g, "&nbsp;");
+        return part.leads.map(lead => "<font color=\"" + lead.color + "\">"
+            + (withMarks(lead.text) || escaped(lead.text)) + "</font>").join("");
     }
 
     // What Copy copies: the rows v selected, or all of the list (of what
@@ -697,11 +726,13 @@ ModalBox {
                     // As wide as its characters: a Text leaves the spaces
                     // it ends with out of its width.
                     // Styled only where the search matched in it (see
-                    // withMarks).
+                    // withMarks), or with parts in colors of their own
+                    // (see leadText).
                     Text {
                         id: word
 
-                        readonly property string marks: listRow.isMore ? "" : dialog.withMarks(line.modelData.word)
+                        readonly property string marks: listRow.isMore ? "" : dialog.leadText(line.modelData)
+                            || dialog.withMarks(line.modelData.word)
 
                         width: line.modelData.word.length * dialog.charWidth
                         text: marks || line.modelData.word
