@@ -10,12 +10,13 @@ import "text.js" as Txt
 // :set and its forms, the commands, shell commands, search, registers and
 // macros, visual block and multiple cursors, marked lines, hidden text, the
 // keys starting with g, z and Space, Ctrl keys and other keys.
-// :help topic scrolls to a section, or a key's row (see show). It can
-// show a list of rows too (showList), and :! what a command wrote
-// (showText), also while it runs (see Output).
+// Its sections are folded, each to its title (see Folds): :help topic
+// opens only the topic's section, at a key's row if it's one (see show).
+// It can show a list of rows too (showList), and :! what a command wrote
+// (showText), also while it runs (see Output), neither with folds.
 // Keys scroll it as in a vim help buffer, / and ? search it (see Search);
-// Esc, q or Enter (as after vim's :!) closes it. Its text can be selected
-// with the mouse and copied.
+// Esc or q closes it, and so does Enter (as after vim's :!) where there
+// are no folds. Its text can be selected with the mouse and copied.
 ModalBox {
     id: help
 
@@ -47,11 +48,11 @@ ModalBox {
     // What it says, section by section (see help.js).
     readonly property var sections: Help.sections(help)
 
-    // Opens the help at the section for `topic` (all of it if ""), at its
-    // row of that key if it has one (`:h gs`), or else at the first row of
-    // that key (`:h zs`). Tags and keys match as typed first, so `gI` isn't
-    // `gi`, then in any case. `<C-a>`, `^A` and `CTRL-A` are `Ctrl-A`. False
-    // if there's no help for it.
+    // Opens the help with only the section for `topic` unfolded (none if
+    // ""), at its row of that key if it has one (`:h gs`), or else at the
+    // first row of that key (`:h zs`). Tags and keys match as typed first,
+    // so `gI` isn't `gi`, then in any case. `<C-a>`, `^A` and `CTRL-A` are
+    // `Ctrl-A`. False if there's no help for it.
     function show(topic) {
         const t = topic.trim().replace(/^:/, "").replace(/^'(.*)'$/, "$1")
             .replace(/^(?:<c-(.)>|\^(.)|ctrl[-+](.))$/i, (m, a, b, c) => "Ctrl-" + (a || b || c).toUpperCase());
@@ -72,7 +73,14 @@ ModalBox {
         }
         if (i < 0)
             return false;
-        showSections("Koil Help", sections, i, row);
+        output = false;
+        running = false;
+        live = false;
+        let fold = i;
+        while (fold > 0 && sections[fold].part)
+            fold--;
+        showBox("Koil Help", sections, i, row, sections.map((s, k) => t !== "" && k === fold));
+        current = fold;
         return true;
     }
 
@@ -103,34 +111,205 @@ ModalBox {
         showBox(title, list, section, row);
     }
 
-    function showBox(title, list, section, row) {
+    // `unfold`, if given, is which of `list` are unfolded (see Folds);
+    // without it there are no folds. A folded section has no rows, so the
+    // list is given while they're all folded: unfolded, each would make
+    // all its rows first.
+    function showBox(title, list, section, row, unfold) {
         heading = title;
-        shownSections = list;
+        if (unfold) {
+            folds = true;
+            unfolded = [];
+            shownSections = list;
+            unfolded = unfold;
+        } else {
+            shownSections = list;
+            folds = false;
+            unfolded = [];
+        }
+        current = 0;
+        zPending = false;
         clearSearch();
         open();
+        unsettle();
         shownSection = section;
         shownRow = row;
-        showSection();
+        settle();
     }
 
     // The section :help went to, and its row (-1 for its top). Its text is
     // laid out over the first frames, so it's scrolled to again as the
-    // layout changes, until the user scrolls.
+    // layout changes (settle), until the user scrolls (unsettle). So are
+    // the match a search went to in a section it unfolded (shownMatch),
+    // and the section a key or a click folded or unfolded (keptSection),
+    // whose rows are made and laid out only then.
     property int shownSection: -1
     property int shownRow: -1
+    property var shownMatch: null
+    property int keptSection: -1
 
-    function showSection() {
-        const item = shownSection >= 0 ? sectionRepeater.itemAt(shownSection) : null;
-        if (!item)
-            return;
-        const row = shownRow >= 0 ? textItems.get(shownSection + "/" + shownRow + "k") : null;
-        scroller.contentY = Math.min(row ? row.mapToItem(body, 0, 0).y : item.y, scroller.maxY);
+    function settle() {
+        if (shownSection >= 0) {
+            const item = sectionRepeater.itemAt(shownSection);
+            if (!item)
+                return;
+            const row = shownRow >= 0 ? textItems.get(shownSection + "/" + shownRow + "k") : null;
+            scroller.contentY = Math.min(row ? row.mapToItem(body, 0, 0).y : item.y, scroller.maxY);
+        } else if (shownMatch) {
+            showMatch(shownMatch);
+        } else if (keptSection >= 0) {
+            // As much of it as fits, from its title.
+            const s = span(keptSection);
+            if (s)
+                scroller.scrollTo(Math.min(s.top, Math.max(scroller.contentY, s.bottom - scroller.height)));
+        } else if (folds && scroller.contentY > scroller.maxY) {
+            scroller.contentY = scroller.maxY;
+        }
+    }
+
+    function unsettle() {
+        shownSection = -1;
+        shownMatch = null;
+        keptSection = -1;
     }
 
     function scrollBy(dy) {
-        shownSection = -1;
+        unsettle();
         scroller.scrollBy(dy);
         scrolled();
+    }
+
+    // ---- Folds -------------------------------------------------------------
+    // The help's sections are folded, each to its title, which says what
+    // there is help for; one unfolded shows its text under it. A section
+    // that's a `part` of the one before (how to set an option, after the
+    // options) has no fold of its own: it shows while that one is
+    // unfolded. One section is the cursor's (`current`, its title
+    // highlighted): j and k move it, going through the text of an unfolded
+    // one first (by scrolling, as there's no cursor in the text), as vim's
+    // do over folds; Enter, Space, Tab or za folds or unfolds it, as a
+    // click on its title does, l or zo unfolds it, h or zc folds it, and
+    // zR and zM do them all (Space pages down only where there are no
+    // folds). A search unfolds the section of the match it goes to,
+    // as vim's does. Scrolled out of view any other way, the cursor's is
+    // the first section in view.
+
+    // Whether the sections shown fold (the help's, not a list's), which
+    // are unfolded (by index; a part's doesn't count), and the cursor's.
+    property bool folds: true
+    property var unfolded: []
+    property int current: 0
+    // Whether z was typed, and the next key is its fold command.
+    property bool zPending: false
+
+    // The section whose fold section i is in: itself, or the one it's a
+    // part of.
+    function foldOf(i) {
+        while (i > 0 && shownSections[i].part)
+            i--;
+        return i;
+    }
+
+    function isOpen(i) {
+        return !folds || unfolded[foldOf(i)] === true;
+    }
+
+    // The fold after i (`step` 1) or before it (-1), or -1.
+    function nextFold(i, step) {
+        for (let k = i + step; k >= 0 && k < shownSections.length; k += step) {
+            if (!shownSections[k].part)
+                return k;
+        }
+        return -1;
+    }
+
+    // Where fold i is in the body: its title's top and height, and its
+    // bottom, with its parts if it's unfolded. Null before it's laid out.
+    function span(i) {
+        const first = sectionRepeater.itemAt(i);
+        if (!first)
+            return null;
+        let last = i;
+        while (isOpen(i) && last + 1 < shownSections.length && shownSections[last + 1].part)
+            last++;
+        const end = sectionRepeater.itemAt(last) || first;
+        return { top: first.y, head: first.headHeight, bottom: end.y + end.height };
+    }
+
+    // Folds or unfolds fold i, which the cursor goes to, and keeps it in
+    // view.
+    function setOpen(i, open) {
+        if (!folds || i < 0)
+            return;
+        if (isOpen(i) !== open) {
+            const next = shownSections.map((s, k) => unfolded[k] === true);
+            next[i] = open;
+            unfolded = next;
+        }
+        current = i;
+        unsettle();
+        keptSection = i;
+        settle();
+    }
+
+    function toggle(i) {
+        setOpen(i, !isOpen(i));
+    }
+
+    // zR and zM.
+    function setAllOpen(open) {
+        if (!folds)
+            return;
+        unfolded = shownSections.map(s => open && !s.part);
+        unsettle();
+        keptSection = current;
+        settle();
+    }
+
+    // j (`down`) and k: through the cursor's section while it's unfolded
+    // and goes on past the view's edge, then to the next one's title; up
+    // into an unfolded one, to its end.
+    function moveCursor(down) {
+        const top = scroller.contentY, bottom = top + scroller.height;
+        const s = span(current);
+        const more = s !== null && isOpen(current)
+            && (down ? s.bottom > bottom + 0.5 && top < scroller.maxY : s.top < top - 0.5 && top > 0);
+        const to = more ? -1 : nextFold(current, down ? 1 : -1);
+        if (to < 0) {
+            scrollBy(down ? lineStep : -lineStep);
+            return;
+        }
+        unsettle();
+        current = to;
+        const t = span(to);
+        if (!t)
+            return;
+        if (!down && isOpen(to) && t.bottom - t.top > t.head) {
+            if (t.bottom < top + 2 * lineStep)
+                scroller.scrollTo(Math.max(t.top, t.bottom - 2 * lineStep));
+        } else if (t.top < top) {
+            scroller.scrollTo(t.top);
+        } else if (t.top + t.head > bottom) {
+            scroller.scrollTo(t.top + t.head - scroller.height);
+        }
+    }
+
+    // After a scroll: the cursor's section is the first in view, if its
+    // own isn't any more.
+    function followView() {
+        if (!folds)
+            return;
+        const top = scroller.contentY, bottom = top + scroller.height;
+        const s = span(current);
+        if (s && s.bottom > top && s.top < bottom)
+            return;
+        for (let i = nextFold(-1, 1); i >= 0; i = nextFold(i, 1)) {
+            const t = span(i);
+            if (t && (t.bottom > top + lineStep || nextFold(i, 1) < 0)) {
+                current = i;
+                return;
+            }
+        }
     }
 
     // ---- Output ------------------------------------------------------------
@@ -297,6 +476,7 @@ ModalBox {
     // grows.
     function scrolled() {
         following = live && scroller.contentY >= scroller.maxY - 1;
+        followView();
     }
 
     // The text with a selection. Each text selects on its own, so selecting
@@ -401,28 +581,73 @@ ModalBox {
         return marks;
     }
 
-    // Where match m's line is in the body.
-    function matchY(m) {
+    // The text match m is in, or null if it isn't shown: its section is
+    // folded.
+    function matchItem(m) {
         const item = textItems.get(m.key);
-        return item ? item.mapToItem(body, 0, item.positionToRectangle(m.start).y).y : 0;
+        return item && item.visible ? item : null;
+    }
+
+    // Where match m's line is in the body (its section's title, if it's
+    // folded).
+    function matchY(m) {
+        const item = matchItem(m);
+        if (item)
+            return item.mapToItem(body, 0, item.positionToRectangle(m.start).y).y;
+        const section = folds ? sectionRepeater.itemAt(foldOf(parseInt(m.key))) : null;
+        return section ? section.y : 0;
     }
 
     function inView(m) {
+        if (!matchItem(m))
+            return false;
         const y = matchY(m);
         return y >= scroller.contentY && y < scroller.contentY + scroller.height;
     }
 
-    // Scrolls match i to the middle, if it's out of view.
+    // Scrolls match i to the middle, if it's out of view, unfolding its
+    // section first, which the cursor goes to.
     function reveal(i) {
-        shownSection = -1;
-        const item = textItems.get(matches[i].key);
+        const m = matches[i];
+        unsettle();
+        if (folds) {
+            const fold = foldOf(parseInt(m.key));
+            if (matchItem(m))
+                current = fold;
+            else
+                setOpen(fold, true);
+            unsettle();
+            shownMatch = m;
+        }
+        showMatch(m);
+        scrolled();
+    }
+
+    function showMatch(m) {
+        const item = matchItem(m);
         if (!item)
             return;
-        const height = item.positionToRectangle(matches[i].start).height;
-        const y = matchY(matches[i]);
+        const height = item.positionToRectangle(m.start).height;
+        const y = matchY(m);
         if (y < scroller.contentY || y + height > scroller.contentY + scroller.height)
             scroller.contentY = Math.max(0, Math.min(scroller.maxY, y - (scroller.height - height) / 2));
-        scrolled();
+    }
+
+    // The view's top as a place a search goes from (see nextMatch): in the
+    // first text shown that reaches past it, before the character there.
+    // Told by the texts' order, not by where they are, which changes as a
+    // search being typed unfolds sections. Null if no text is there.
+    function viewTop() {
+        const top = scroller.contentY;
+        for (const t of searchTexts.list) {
+            const item = textItems.get(t.key);
+            if (!item || !item.visible)
+                continue;
+            const y = item.mapToItem(body, 0, 0).y;
+            if (y + item.height > top)
+                return { key: t.key, start: (y >= top ? 0 : item.positionAt(0, top - y)) - 0.5 };
+        }
+        return null;
     }
 
     // The match a search goes to, from `from` (a match, maybe of another
@@ -463,7 +688,7 @@ ModalBox {
             searchMessage = "E35: No previous regular expression";
             return;
         }
-        const from = matchIndex >= 0 && inView(matches[matchIndex]) ? matches[matchIndex] : null;
+        const from = matchIndex >= 0 && inView(matches[matchIndex]) ? matches[matchIndex] : viewTop();
         goToMatch(forward, from);
     }
 
@@ -473,9 +698,10 @@ ModalBox {
             searchField.selectAll();
             return;
         }
-        const from = matchIndex >= 0 && inView(matches[matchIndex]) ? matches[matchIndex] : null;
-        searchStart = { pattern: searchPattern, index: matchIndex, from: from, contentY: scroller.contentY };
-        shownSection = -1;
+        const from = matchIndex >= 0 && inView(matches[matchIndex]) ? matches[matchIndex] : viewTop();
+        searchStart = { pattern: searchPattern, index: matchIndex, from: from, contentY: scroller.contentY,
+            unfolded: unfolded, current: current };
+        unsettle();
         searchMessage = "";
         historyAt = -1;
         searchField.text = "";
@@ -486,13 +712,26 @@ ModalBox {
     // Shows the matches of the search being typed, and the one Enter would
     // go to (vim's 'incsearch').
     function previewSearch(pattern) {
-        scroller.contentY = searchStart.contentY;
-        scrolled();
+        leaveSearch();
         searchPattern = pattern || searchStart.pattern;
         const target = pattern ? nextMatch(searchKind === "/", searchStart.from) : null;
         matchIndex = pattern ? (target ? target.index : -1) : searchStart.index;
         if (target)
             reveal(target.index);
+    }
+
+    // The view, the folds and the cursor's section as they were before the
+    // search was typed.
+    function leaveSearch() {
+        unsettle();
+        if (folds) {
+            unfolded = searchStart.unfolded;
+            current = searchStart.current;
+        }
+        scroller.contentY = searchStart.contentY;
+        scrolled();
+        if (folds)
+            current = searchStart.current;
     }
 
     // Enter (`accept`), or Esc. An empty search searches for the last
@@ -501,8 +740,7 @@ ModalBox {
         const typed = searchField.text, forward = searchKind === "/";
         searchKind = "";
         scroller.forceActiveFocus();
-        scroller.contentY = searchStart.contentY;
-        scrolled();
+        leaveSearch();
         searchPattern = searchStart.pattern;
         matchIndex = searchStart.index;
         if (!accept || !typed && !lastPattern)
@@ -762,7 +1000,8 @@ ModalBox {
                 anchors.right: parent.right
                 anchors.baseline: title.baseline
                 visible: !help.output
-                markup: "`/` to search · `j` `k` to scroll · `Esc` or `q` to close"
+                markup: help.folds ? "`j` `k` to move · `Enter` to open · `/` to search · `q` to close"
+                    : "`/` to search · `j` `k` to scroll · `Esc` or `q` to close"
                 font.pixelSize: Math.round(12 * help.zoom)
                 color: help.theme.dim
             }
@@ -808,6 +1047,7 @@ ModalBox {
         WheelFlickable {
             id: scroller
 
+            objectName: "helpScroller"
             anchors.top: header.bottom
             anchors.bottom: footer.top
             anchors.topMargin: help.framePad
@@ -820,11 +1060,11 @@ ModalBox {
             focus: true
             wheelStep: 3 * help.lineStep
             onScrolled: {
-                help.shownSection = -1;
+                help.unsettle();
                 help.scrolled();
             }
             onMaxYChanged: {
-                help.showSection();
+                help.settle();
                 if (help.following)
                     scrollTo(maxY);
             }
@@ -833,7 +1073,7 @@ ModalBox {
                 target: scroller.scrollBar
 
                 function onPressedChanged() {
-                    help.shownSection = -1;
+                    help.unsettle();
                     if (scroller.scrollBar.pressed)
                         help.following = false;
                     else
@@ -849,6 +1089,22 @@ ModalBox {
                 // copies a selection first, where it's Copy), and nothing
                 // closes the box.
                 const selection = help.selected !== null && help.selected.selectedText !== "";
+                const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
+                // z and a fold's key (see Folds); Shift alone, before R or
+                // M, isn't one yet.
+                if (help.zPending) {
+                    if ([Qt.Key_Shift, Qt.Key_Control, Qt.Key_Meta, Qt.Key_Alt].includes(event.key))
+                        return;
+                    help.zPending = false;
+                    if (event.text === "a")
+                        help.toggle(help.current);
+                    else if (event.text === "o" || event.text === "c")
+                        help.setOpen(help.current, event.text === "o");
+                    else if (event.text === "R" || event.text === "M")
+                        help.setAllOpen(event.text === "R");
+                    event.accepted = true;
+                    return;
+                }
                 if (help.running && (event.key === Qt.Key_Escape && !help.searchShown
                         || ctrl && event.key === Qt.Key_C && !selection))
                     help.stopRequested();
@@ -856,8 +1112,19 @@ ModalBox {
                     help.copySelection();
                 else if (event.key === Qt.Key_Escape && help.searchShown)
                     help.clearSearch();
-                else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q && !event.modifiers
-                        || event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                else if (help.folds && !ctrl && event.text === "z")
+                    help.zPending = true;
+                else if (help.folds && (enter || event.key === Qt.Key_Tab || event.key === Qt.Key_Space))
+                    help.toggle(help.current);
+                else if (help.folds && (event.key === Qt.Key_L && !ctrl || event.key === Qt.Key_Right))
+                    help.setOpen(help.current, true);
+                else if (help.folds && (event.key === Qt.Key_H && !ctrl || event.key === Qt.Key_Left))
+                    help.setOpen(help.current, false);
+                else if (help.folds && (event.key === Qt.Key_J && !ctrl || event.key === Qt.Key_Down))
+                    help.moveCursor(true);
+                else if (help.folds && (event.key === Qt.Key_K && !ctrl || event.key === Qt.Key_Up))
+                    help.moveCursor(false);
+                else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Q && !event.modifiers || enter) {
                     if (!help.running)
                         help.close();
                 }
@@ -877,10 +1144,16 @@ ModalBox {
                     help.scrollBy(page);
                 else if (ctrl && event.key === Qt.Key_B || event.key === Qt.Key_PageUp)
                     help.scrollBy(-page);
-                else if (event.key === Qt.Key_G && event.modifiers & Qt.ShiftModifier || event.key === Qt.Key_End)
+                else if (event.text === "G" || event.key === Qt.Key_G && event.modifiers & Qt.ShiftModifier
+                        || event.key === Qt.Key_End) {
                     help.scrollBy(maxY);
-                else if (event.key === Qt.Key_G || event.key === Qt.Key_Home)
+                    if (help.folds)
+                        help.current = help.nextFold(help.shownSections.length, -1);
+                } else if (event.key === Qt.Key_G || event.key === Qt.Key_Home) {
                     help.scrollBy(-contentY);
+                    if (help.folds)
+                        help.current = help.nextFold(-1, 1);
+                }
                 else
                     return;
                 event.accepted = true;
@@ -890,8 +1163,8 @@ ModalBox {
                 id: body
 
                 width: scroller.width - 12 * help.zoom // clear of the scroll bar
-                spacing: (help.output ? 6 : 18) * help.zoom
-                onHeightChanged: help.showSection()
+                spacing: (help.output ? 6 : help.folds ? 2 : 18) * help.zoom
+                onHeightChanged: help.settle()
 
                 // Over a command's output, if its first lines aren't kept.
                 CodeText {
@@ -908,26 +1181,79 @@ ModalBox {
 
                     model: help.shownSections
 
+                    // A section: its title, and under it, while it's
+                    // unfolded, its text, further in than the title's
+                    // arrow. One that's a part of the one before shows
+                    // only then too, title and all.
                     Column {
                         id: section
 
                         required property var modelData
                         required property int index
+                        readonly property bool part: help.folds && !!modelData.part
+                        // Whether its title is a fold's: with an arrow, and
+                        // highlighted if it's the cursor's.
+                        readonly property bool folding: help.folds && !part
+                        readonly property bool open: help.isOpen(index)
+                        readonly property real indent: help.folds ? 20 * help.zoom : 0
+                        readonly property real headHeight: head.height
 
                         width: body.width
+                        visible: open || !part
                         spacing: 6 * help.zoom
+                        bottomPadding: help.folds && open ? 12 * help.zoom : 0
 
-                        CodeText {
+                        Item {
+                            id: head
+
+                            width: parent.width
+                            height: sectionTitle.height + (section.folding ? 8 * help.zoom : 0)
                             visible: !!section.modelData.title
-                            key: section.index + "/title"
-                            markup: section.modelData.title
-                            font.pixelSize: Math.round(15 * help.zoom)
-                            font.bold: true
-                            color: help.theme.accent
+
+                            Rectangle {
+                                anchors.fill: parent
+                                visible: section.folding
+                                radius: 4 * help.zoom
+                                color: help.current === section.index ? help.theme.checked
+                                    : headArea.containsMouse ? help.theme.hover : "transparent"
+                            }
+                            Icon {
+                                x: 2 * help.zoom
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: section.folding
+                                theme: help.theme
+                                path: "M6 4.5 L9.5 8 L6 11.5"
+                                rotation: section.open ? 90 : 0
+                                color: help.theme.dim
+                            }
+                            CodeText {
+                                id: sectionTitle
+
+                                x: section.indent
+                                anchors.verticalCenter: parent.verticalCenter
+                                key: section.index + "/title"
+                                markup: section.modelData.title
+                                font.pixelSize: Math.round((section.part ? 13 : 15) * help.zoom)
+                                font.bold: true
+                                color: section.part ? help.theme.text : help.theme.accent
+                            }
+                            // Over the title, which isn't selected then: a
+                            // click folds or unfolds.
+                            MouseArea {
+                                id: headArea
+
+                                anchors.fill: parent
+                                enabled: section.folding
+                                visible: section.folding
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: help.toggle(section.index)
+                            }
                         }
                         CodeText {
-                            width: parent.width
-                            visible: !!section.modelData.intro
+                            x: section.indent
+                            width: parent.width - x
+                            visible: section.open && !!section.modelData.intro
                             key: section.index + "/intro"
                             markup: section.modelData.intro || ""
                             plain: !!section.modelData.plain
@@ -936,7 +1262,9 @@ ModalBox {
                             color: help.theme.text
                         }
                         Repeater {
-                            model: section.modelData.rows
+                            // A folded section has no rows, so the help
+                            // opens without making every one.
+                            model: section.open ? section.modelData.rows : []
 
                             Row {
                                 id: row
@@ -944,6 +1272,7 @@ ModalBox {
                                 required property var modelData
                                 required property int index
 
+                                x: section.indent
                                 spacing: 12 * help.zoom
 
                                 CodeText {
@@ -960,7 +1289,7 @@ ModalBox {
                                     color: help.theme.text
                                 }
                                 CodeText {
-                                    width: body.width - keysText.width - row.spacing
+                                    width: body.width - section.indent - keysText.width - row.spacing
                                     key: section.index + "/" + row.index + "t"
                                     markup: row.modelData[1]
                                     plain: !!section.modelData.plain
@@ -972,8 +1301,9 @@ ModalBox {
                             }
                         }
                         CodeText {
-                            width: parent.width
-                            visible: !!section.modelData.note
+                            x: section.indent
+                            width: parent.width - x
+                            visible: section.open && !!section.modelData.note
                             key: section.index + "/note"
                             markup: section.modelData.note || ""
                             font.pixelSize: Math.round(12 * help.zoom)

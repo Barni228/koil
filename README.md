@@ -38,7 +38,8 @@ until you apply, and your edits stay while you go through other dirs.
 - Vim-surround keys work, like `dsb` or `ysiw)`.
 - `Cmd+click` a path or URL to open it.
 - `!` runs a shell command on the entry on the line (`g!` is vim's `!`).
-- `:h` and a key or a word shows its help, like `:h g` or `:h gJ`.
+- `:h` lists what there's help for (`Enter` unfolds a section), and with
+  a key or a word shows its help, like `:h g` or `:h gJ`.
 - The `koil` command opens Koil from a terminal, which is useful for
   automation (especially `-c`: see Command line).
 

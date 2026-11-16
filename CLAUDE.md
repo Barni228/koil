@@ -133,7 +133,8 @@ the scratchpad (see Scratchpad).
   highlights) don't go through the text each time.
 - `qml/FindBar.qml`: the find and replace bar (Cmd+F, Cmd+Option+F).
 - `qml/HelpPanel.qml`: `:help` (`:h topic`, `:h key`), a box listing what
-  isn't obvious (`qml/help.js`'s `sections`); it can show a list of rows
+  isn't obvious (`qml/help.js`'s `sections`), each section folded to its
+  title (see Help folds); it can show a list of rows
   too (`showList`, which only the tests use now), and `:!` what a command
   wrote (`showText`), also as it runs (`showRunning`; see Output box). `/` and `?` search it (see
   Help).
@@ -2711,7 +2712,10 @@ the scratchpad (see Scratchpad).
   search is vim's (`Txt.searchRegExp`, so smart case), over each text as
   shown (`searchTexts`, keyed by section and part), from the match it went
   to last if that's in view, else from the top of the view; Esc clears the
-  highlights before it closes the help. A text's matches (`matchMarks`, a
+  highlights before it closes the help. The top of the view is a place
+  among the texts (`viewTop`: the first text shown that reaches past it,
+  and the character there), not a height, as a search being typed
+  unfolds sections, which moves everything under them. A text's matches (`matchMarks`, a
   string per key, so only texts whose matches change are made again) are
   drawn behind it in the editor's colors (`theme.searchMatch`), and made
   black in its rich text. The Repeater deletes old texts some time after
@@ -2723,7 +2727,7 @@ the scratchpad (see Scratchpad).
   are off while it or a question is open (`boxOpen`), syncing waits (it
   can switch vim's buffer), and if anything else still takes the keys it
   closes (`keepHelpKeys`, leaving them there: `hadKeys`). `:h topic`
-  (`show`) goes to the section whose `tags` have it, as typed first (so
+  (`show`) unfolds only the section whose `tags` have it, as typed first (so
   `gI` isn't `gi`), then in any case, and scrolls to its row of that key
   if it has one (`shownRow`, `keyRow`: a code in the row's keys, `:h gs`);
   a topic no section has goes to the first row with that key (`:h J`),
@@ -2736,6 +2740,34 @@ the scratchpad (see Scratchpad).
   lists every name a key can have where keys are written (a shortcut's,
   `:norm`), which are those `Vim.keysIn` reads: a new one goes in both,
   as `test_helpKeyNames` checks each name listed is one key to a macro.
+- **Help folds** (Folds in HelpPanel.qml): the help's sections are
+  folded, each to its title (an arrow before it, as a group's heading in
+  a question's list), so `:h` alone is a list of what there's help for,
+  and `:h topic` unfolds only its topic's (`showBox`'s `unfold`;
+  `unfolded`, by index, replaced, never changed in place). A list
+  (`showList`, About) and a command's output have none (`folds`). A
+  section that's a `part` of the one before (help.js: how to set an
+  option, after the options) has no fold of its own, and shows while that
+  one is unfolded (`foldOf`), its title smaller, in the text's color. A
+  folded section has no rows (its `Repeater`'s model is empty), so Koil
+  starts and the help opens without making every row, which it did
+  before. One section is the cursor's (`current`, its title on
+  `theme.checked`): `j` and `k` move it (`moveCursor`), but through an
+  unfolded one's text first, by scrolling a line while that goes on past
+  the view's edge (there's no cursor in the text), as vim's go over
+  folds; Enter, Space, Tab or `za` folds or unfolds it (`toggle`; without
+  folds, Enter closes the box and Space pages down), as a click on its title does (a `MouseArea`
+  over it, so a title isn't selected), `l`, Right or `zo` unfolds it,
+  `h`, Left or `zc` folds it (`setOpen`), and `zR` and `zM` do them all
+  (`zPending`, which a Shift alone doesn't end). Scrolled out of view any
+  other way, the cursor's is the first in view (`followView`). A search
+  goes through every text, folded or not, and unfolds the section of the
+  match it goes to (`reveal`), as vim's does; cancelled, the folds and
+  the cursor are as they were (`leaveSearch`). A section's rows are made
+  and laid out only as it unfolds, so what the view should show is kept
+  until the user scrolls (`settle`, as the layout changes; `unsettle`):
+  `:h`'s section and row, the match a search went to, or the section
+  just folded or unfolded, as much of it as fits from its title.
 - **Output box** (Output in HelpPanel.qml): what a shell command wrote
   is the help's box in another look (`output`), as a terminal's: the
   command in the editor's font over it (not the help's big title), how

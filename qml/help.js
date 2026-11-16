@@ -4,7 +4,8 @@
 // isWindows, cmdKey and altKey (modifier keys as the OS writes them),
 // fileManager, systemShell and defaultFontFamily. Each section: a title,
 // the :help topics that go to it, an optional intro and note, and rows of
-// [keys, what they do]. `code` in any of them (a key, in keys) is shown in
+// [keys, what they do]. The help folds each to its title; one that's a
+// `part` of the section before shows with it, with no fold of its own. `code` in any of them (a key, in keys) is shown in
 // the editor's font, on a shade of its own as in a Tip (see CodeText).
 function sections(help) {
     const isMac = help.isMac, isWindows = help.isWindows, cmdKey = help.cmdKey, altKey = help.altKey;
@@ -158,6 +159,7 @@ function sections(help) {
         },
         {
             title: "Setting an on/off option",
+            part: true,
             tags: [],
             rows: [
                 ["`:set nu`", "Turn it on."],
@@ -169,6 +171,7 @@ function sections(help) {
         },
         {
             title: "Setting a number option",
+            part: true,
             tags: [],
             rows: [
                 ["`:set fs=16`  `:set fs:16`", "Set it."],
@@ -179,6 +182,7 @@ function sections(help) {
         },
         {
             title: "Setting the font",
+            part: true,
             tags: [],
             rows: [
                 ["`:set gfn=Monaco`", "Set it."],
@@ -224,8 +228,14 @@ function sections(help) {
                     + "`:norm!` leaves your shortcuts out."],
                 ["`koil -c 'cmd'`", "Run a command once Koil has opened, like `koil ~/src -c 'set sort=size'`. "
                     + "Several `-c`s run in turn."],
-                ["`:h`  `:help [topic]`", "This help, e.g. `:h set`, `:h macros`, `:h g` (the keys starting "
-                    + "with `g`), or a key, like `:h gJ`."],
+                ["`:h`  `:help [topic]`", "This help, its sections folded to their titles, with the topic's "
+                    + "unfolded, e.g. `:h set`, `:h macros`, `:h g` (the keys starting with `g`), or a key, "
+                    + "like `:h gJ`."],
+                ["`Enter`  `Space`  `Tab`", "In the help: unfold or fold the section the cursor is on, as a click on "
+                    + "its title does (`l` unfolds it and `h` folds it; so do `za`, `zo` and `zc`). `j` and "
+                    + "`k` move the cursor over the titles, through an unfolded section's text first. A "
+                    + "search (`/`) unfolds the section it goes to."],
+                ["`zR`  `zM`", "In the help: unfold every section, or fold them all."],
                 ["`↑`  `↓`", "In the command line: earlier and later commands (or searches)."],
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
                 [isMac ? "`⌥←`  `⌥→`  `⌘←`  `⌘→`" : "`Ctrl+←`  `Ctrl+→`  `Home`  `End`",
@@ -551,7 +561,10 @@ function sections(help) {
                 ["`zL`  `zH`", "Scroll sideways half the view."],
                 ["`zs`  `ze`", "Scroll sideways to put the cursor at the left or right edge."],
                 ["`ZZ`", "Save and quit (in the listing: `:confirm q`)."],
-                ["`ZQ`", "Quit without saving."]
+                ["`ZQ`", "Quit without saving."],
+                ["`za`  `zo`  `zc`", "In the help: fold or unfold the section the cursor is on (`za`), "
+                    + "unfold it, or fold it (see `:h help`)."],
+                ["`zR`  `zM`", "In the help: unfold every section, or fold them all."]
             ],
             note: "Nothing scrolls sideways while lines wrap (`:set wrap`)."
         },

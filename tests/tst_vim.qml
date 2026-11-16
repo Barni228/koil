@@ -5342,9 +5342,114 @@ TestCase {
         shows("u", "The listing", "`u`");
         shows("d", "Marked lines", "`d`  `y`");
         shows("Y", "Other keys", "`Y`");
+        // The help's own fold keys, with the help's other keys.
+        shows("zR", "Commands", "`zR`  `zM`");
+        shows("za", "Keys starting with z", "`za`  `zo`  `zc`");
         verify(!help.show("nothing"));
         help.close();
         tryCompare(help, "opened", false);
+    }
+
+    // The help's sections are folded: :h unfolds only its topic's, keys
+    // and a search the cursor's.
+    function test_helpFolds() {
+        const section = title => help.sections.findIndex(s => s.title === title);
+        const unfolded = () => help.sections.map((s, i) => i).filter(i => help.isOpen(i));
+        verify(help.show(""));
+        tryCompare(help, "opened", true);
+        verify(help.folds);
+        compare(unfolded(), []);
+        compare(help.current, 0);
+        // A topic's section, with the parts after it, and a part's key.
+        const set = section("Options (:set)");
+        verify(help.show("set"));
+        compare(unfolded(), [set, set + 1, set + 2, set + 3]);
+        compare(help.current, set);
+        verify(help.show("fs-=2"));
+        compare(help.shownSection, set + 2);
+        compare(unfolded(), [set, set + 1, set + 2, set + 3]);
+        compare(help.current, set);
+        const surround = section("Surround");
+        verify(help.show("ys"));
+        compare(unfolded(), [surround]);
+
+        // j and k move over the titles, past the parts.
+        help.show("");
+        keys("j");
+        compare(help.current, 1);
+        keys("kk");
+        compare(help.current, 0);
+        help.current = set;
+        keys("j");
+        compare(help.current, set + 4);
+        keys("k");
+        compare(help.current, set);
+        // The keys that fold and unfold the cursor's.
+        for (const [key, open] of [["<CR>", true], ["<CR>", false], ["<Tab>", true], ["<Tab>", false],
+                [" ", true], [" ", false], ["l", true],
+                ["l", true], ["h", false], ["h", false], ["za", true], ["za", false], ["zo", true], ["zc", false],
+                ["<Right>", true], ["<Left>", false]]) {
+            keys(key);
+            compare(help.isOpen(set), open, key);
+            compare(unfolded().length, open ? 4 : 0, key);
+        }
+        keys("zR");
+        compare(unfolded().length, help.sections.length);
+        keys("zM");
+        compare(unfolded(), []);
+        verify(help.opened);
+        // Through an unfolded one's text first, by scrolling.
+        help.show("");
+        keys("l");
+        compare(unfolded(), [0]);
+        tryVerify(() => help.span(0).bottom > 1000);
+        const scrollY = () => findChild(help.contentItem, "helpScroller").contentY;
+        compare(scrollY(), 0);
+        keys("jj");
+        compare(help.current, 0);
+        verify(scrollY() > 0);
+        keys("kk");
+        compare(scrollY(), 0);
+        compare(help.current, 0);
+        // G and g go to the last and the first.
+        keys("G");
+        compare(help.current, help.sections.length - 1);
+        keys("g");
+        compare(help.current, 0);
+        keys("h");
+
+        // A search unfolds the section it goes to, as it's typed, and Esc
+        // folds it again.
+        keys("/vim-surround");
+        compare(unfolded(), [surround]);
+        compare(help.current, surround);
+        keys("<Esc>");
+        compare(unfolded(), []);
+        compare(help.current, 0);
+        keys("/vim-surround<CR>");
+        compare(unfolded(), [surround]);
+        compare(help.current, surround);
+        compare(help.matchIndex, 0);
+        keys("n");
+        compare(help.matchIndex, 1);
+        // A click on a title folds or unfolds its section.
+        keys("<Esc>");
+        help.toggle(set);
+        compare(unfolded(), [set, set + 1, set + 2, set + 3, surround]);
+        compare(help.current, set);
+        keys("q");
+        tryCompare(help, "opened", false);
+
+        // A list has no folds, and Enter closes it.
+        help.showList("Test", [["a", "one"]], 4);
+        tryCompare(help, "opened", true);
+        verify(!help.folds);
+        verify(help.isOpen(0));
+        keys("<CR>");
+        tryCompare(help, "opened", false);
+        // as it was, for the other tests
+        help.lastPattern = "";
+        help.searchHistory = [];
     }
 
     // ---- Confirmations -------------------------------------------------------
