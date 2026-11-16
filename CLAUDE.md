@@ -481,7 +481,17 @@ the scratchpad (see Scratchpad).
   pasted on the cursor's line, or else the path under the cursor, as gf
   takes it, `linkTargetAt`, see Scratchpad). `Space q` lists the user's shortcuts
   (see Shortcuts) everywhere, in visual mode too (`visualCommandKeys`), so
-  the list can run one on the selection.
+  the list can run one on the selection. Each Space key is an Ex command
+  too (in `exCommands`, `Vim.commandKey`), so a shortcut or `-c` can say
+  what it does: `:apply` (`:ap`, Space Space), `:confirm apply` (Space a),
+  `:undolist` (`:undol`, Space u), `:reveal` (`:rev`), `:open` (`:o`) and
+  `:shortcuts` (`:sho`). It looks its keys up in `commandKeys` and emits
+  `keyCommand` as if they were typed, with no count, so it does what they
+  do where vim is (`:apply` in a file saves, and so does `:confirm apply`,
+  as Space a isn't a key there), and where they aren't keys it's an error
+  ("`:undolist` does nothing here"), which stops a macro or `-c`. They
+  take no argument and no range, so not from visual mode, where `:` types
+  one. A new Space key gets a command with it.
   They're only matched at the start of a normal-mode command (so `d-` and
   visual `-` are vim's), with a count; keys that start one and go on
   differently are a bad command (Space l), unless they go on as a name of

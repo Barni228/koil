@@ -189,6 +189,10 @@ koil ~/src -c 'set sort=size wrap' -c 'set gfn=Menlo fs=16'
 koil ~/src -c 'norm G'
 ```
 
+The keys starting with `Space` are commands too, for `-c` or a shortcut:
+`:apply` (`Space Space`), `:confirm apply` (`Space a`), `:undolist`
+(`Space u`), `:reveal`, `:open` and `:shortcuts`.
+
 To have `koil` in your terminal:
 
 **macOS**: choose _Koil → Settings… → Command line → Install “koil”

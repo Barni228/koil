@@ -27,12 +27,13 @@ function sections(help) {
             rows: [
                 ["`" + cmdKey + "S`  `:w`", "Update: read the edits and show the listing again. Only "
                     + "`Space Space` and `Space a` apply them."],
-                ["`Space Space`", "Apply the changes, listing them first (Settings can skip that). In a file: "
-                    + "save."],
-                ["`Space a`", "Apply, always listing the changes first (so does File > Apply Changes…)."],
+                ["`Space Space`  `:apply`", "Apply the changes, listing them first (Settings can skip that). "
+                    + "In a file: save."],
+                ["`Space a`  `:conf apply`", "Apply, always listing the changes first (so does File > Apply "
+                    + "Changes…)."],
                 ["󰄲", "In that list, pick what to apply now (the rest stays, to apply later), or to discard: "
                     + "see `:h pick`."],
-                ["`Space u`", "Undo applies, or single changes of them, picked from all of them, also "
+                ["`Space u`  `:undolist`", "Undo applies, or single changes of them, picked from all of them, also "
                     + "those of earlier sessions, newest first (`/` searches them, by a file's name say). "
                     + "Picking a change picks the newer ones on the same paths. "
                     + "Deleted files come back from the trash. `d` there deletes them from the history "
@@ -43,10 +44,10 @@ function sections(help) {
                     + "is created first, after asking, and so is a copy, so what you change in it isn't "
                     + "in the file it copies. Opening a file that applying copies (or `Space o`, or a "
                     + "shell command) makes the copies first, so they don't get your changes."],
-                ["`Space r`", "Show the entry on the line in " + fileManager + " (from the path field, the "
+                ["`Space r`  `:reveal`", "Show the entry on the line in " + fileManager + " (from the path field, the "
                     + "open dir; in a file, the file; in the scratchpad, the entry pasted on the line, or "
                     + "the path under the cursor)."],
-                ["`Space o`", "Open the entry on the line in its default app, as a double-click in "
+                ["`Space o`  `:open`", "Open the entry on the line in its default app, as a double-click in "
                     + fileManager + " does (from the path field, the open dir; in a file, the file; in the "
                     + "scratchpad, as `Space r`)."],
                 ["`K`", "Show all about the entry on the line: its path, what it is (a symlink's target), "
@@ -212,6 +213,9 @@ function sections(help) {
                 ["`:s/old/new/`  `:%s/old/new/g`", "Replace on the line, or every match in the file (see `:h s`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "Show the registers, e.g. `:reg a0`."],
+                ["`:apply`  `:open` …", "Each key starting with `Space` is a command too, for a shortcut or "
+                    + "`koil -c` to say what it does: `:apply`, `:confirm apply`, `:undolist`, `:reveal`, `:open` "
+                    + "and `:shortcuts` (see `:h space`)."],
                 ["`:norm keys`", "Press keys, as a macro does, like `:norm gss` (keys such as `<CR>` and `<Esc>` "
                     + "written as in a shortcut: see `:h keynames`). With a range, on each line, from its start (`:%norm A;`). "
                     + "`:norm!` leaves your shortcuts out."],
@@ -402,7 +406,7 @@ function sections(help) {
                     + ", are keys too (`<F12>`, `<S-Tab>`, " + (isMac ? "`<D-Esc>` for `⌘Esc`" : "`<C-Esc>`")
                     + "); in the form, `Tab`, `Esc` and `Enter` alone go through it. `:h keynames` lists "
                     + "every name."],
-                ["`Space q`", "List your shortcuts (so do " + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
+                ["`Space q`  `:shortcuts`", "List your shortcuts (so do " + (isMac ? "Koil > Shortcuts…" : "File > Shortcuts…")
                     + " and Settings), and under them the built-in ones, with the lock button on. Typing searches "
                     + "them, `↑` and `↓` pick one, and `Enter` or a click runs it, also one with no keys, on the "
                     + "selection if it's for visual mode. The pencil edits one, and `" + cmdKey + "N` adds one. "
@@ -550,19 +554,23 @@ function sections(help) {
         },
         {
             title: "Keys starting with Space",
-            tags: ["space", "<space>", "leader"],
+            tags: ["space", "<space>", "leader", "undolist", "undol"],
             intro: "Koil's own, in the listing and the path field. In a file, `Space Space` saves, `Space r` "
-                + "and `Space o` take the file, and `Space q` works everywhere, in visual mode too.",
+                + "and `Space o` take the file, and `Space q` works everywhere, in visual mode too. Each is "
+                + "a command too, which does the same wherever the keys do something (`:apply` in a file "
+                + "saves), so a shortcut or `koil -c` can say what it does: `koil ~/src -c undolist`.",
             rows: [
-                ["`Space Space`", "Apply the changes, listing them first (Settings can skip that). In a "
-                    + "file: save."],
-                ["`Space a`", "Apply, always listing the changes first."],
-                ["`Space u`", "Undo applies, or single changes of them, picked from all of them, newest first."],
-                ["`Space r`", "Show the entry on the line (in a file, the file) in " + fileManager + "."],
-                ["`Space o`", "Open the entry on the line (in a file, the file) in its default app."],
-                ["`Space q`", "List your shortcuts, and the built-in ones (see `:h shortcuts`)."]
+                ["`Space Space`  `:apply`", "Apply the changes, listing them first (Settings can skip that). "
+                    + "In a file: save."],
+                ["`Space a`  `:conf apply`", "Apply, always listing the changes first (`:confirm apply`)."],
+                ["`Space u`  `:undolist`", "Undo applies, or single changes of them, picked from all of them, "
+                    + "newest first."],
+                ["`Space r`  `:reveal`", "Show the entry on the line (in a file, the file) in " + fileManager + "."],
+                ["`Space o`  `:open`", "Open the entry on the line (in a file, the file) in its default app."],
+                ["`Space q`  `:shortcuts`", "List your shortcuts, and the built-in ones (see `:h shortcuts`)."]
             ],
-            note: "Shortcuts of yours can start with `Space` too, like `Space c`."
+            note: "Shortcuts of yours can start with `Space` too, like `Space c`. The commands can be cut "
+                + "short, as vim's: `:ap`, `:undol`, `:rev`, `:o`, `:sho`."
         },
         {
             title: "Ctrl keys",

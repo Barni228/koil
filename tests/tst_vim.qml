@@ -2228,6 +2228,9 @@ TestCase {
         compare(parts(":conf q"), ["conf:command", "q:command"]);
         compare(parts(":e! ~/my dir "), ["e!:command", "~/my dir:file"]);
         compare(parts(":wq"), ["wq:command"]);
+        compare(parts(":conf apply"), ["conf:command", "apply:command"]);
+        compare(parts(":undolist"), ["undolist:command"]);
+        compare(parts(":undo"), []);
         compare(parts(":5"), ["5:range"]);
         compare(parts(":bogus %"), []);
         compare(parts("/a %"), []);
@@ -2686,6 +2689,57 @@ TestCase {
         vim.commandKeys = {};
         keys("<CR>");
         compare(keyCommands.count, 5);
+    }
+
+    // The Space keys are Ex commands too, which run what the keys do where
+    // vim is, and fail where they aren't keys.
+    function test_commandKeysAsEx() {
+        load("one\ntwo");
+        vim.commandKeys = {
+            "  ": "apply",
+            " a": "applyAsking",
+            " u": "undoApply",
+            " r": "reveal",
+            " o": "openInApp",
+            " q": "shortcuts"
+        };
+        keyCommands.clear();
+        const ran = () => keyCommands.signalArguments.map(a => [a[0], a[1]]);
+        keys(":apply<CR>:ap<CR>");
+        keys(":confirm apply<CR>:conf ap<CR>");
+        keys(":undolist<CR>:undol<CR>");
+        keys(":reveal<CR>:rev<CR>");
+        keys(":open<CR>:o<CR>");
+        keys(":shortcuts<CR>:sho<CR>");
+        compare(ran(), [["apply", 0], ["apply", 0], ["applyAsking", 0], ["applyAsking", 0], ["undoApply", 0],
+            ["undoApply", 0], ["reveal", 0], ["reveal", 0], ["openInApp", 0], ["openInApp", 0],
+            ["shortcuts", 0], ["shortcuts", 0]]);
+        compare(vim.message, "");
+        // They take no range, nor an argument.
+        keys(":2reveal<CR>");
+        compare(vim.message, "E481: No range allowed");
+        keys(":open x<CR>");
+        compare(vim.message, "E492: Not an editor command: open x");
+        keys(":a<CR>");
+        compare(vim.message, "E492: Not an editor command: a");
+        compare(keyCommands.count, 12);
+        // In a file, Space Space saves, so :apply does, also after
+        // :confirm, as Space a isn't a key there, nor is Space u.
+        vim.commandKeys = { "  ": "save", " q": "shortcuts" };
+        keyCommands.clear();
+        keys(":apply<CR>:confirm apply<CR>:shortcuts<CR>");
+        compare(ran(), [["save", 0], ["save", 0], ["shortcuts", 0]]);
+        keys(":undol<CR>");
+        compare(vim.message, ":undol does nothing here");
+        verify(vim.messageIsError);
+        compare(keyCommands.count, 3);
+        // -c's commands stop there, and go on after one that runs.
+        vim.runCommands(["open", "norm x"], "-c");
+        compare(vim.message, ":open does nothing here");
+        compare(editor.text, "one\ntwo");
+        vim.runCommands(["apply", "norm x"], "-c");
+        compare(ran(), [["save", 0], ["save", 0], ["shortcuts", 0], ["save", 0]]);
+        compare(editor.text, "ne\ntwo");
     }
 
     // Koil's g. and the like leave vim's own g commands alone.

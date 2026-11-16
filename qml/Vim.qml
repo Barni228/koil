@@ -195,7 +195,8 @@ QtObject {
     signal editRequested(string path, bool force)
     // :reg, with what registerList gives.
     signal registersRequested(var rows)
-    // One of commandKeys was typed, with its count (0 if none).
+    // One of commandKeys was typed, with its count (0 if none), or run as
+    // an Ex command (see commandKey).
     signal keyCommand(string name, int count)
     // :!command, with the lines of the range before it ({ first, last },
     // from 1), or null: Koil runs it in the shell, while vim waits (see
@@ -5627,8 +5628,29 @@ QtObject {
             { names: /^(?:reg(?:i|is|ist|iste|ister|isters)?|di(?:s|sp|spl|spla|splay)?)$/, takesArg: true,
                 run: arg => showRegisters(arg) },
             { names: /^norm(?:a|al)?!?$/, takesArg: true, takesRange: true,
-                run: (arg, name, confirm, r) => normalCommand(arg, name.endsWith("!"), r) }
+                run: (arg, name, confirm, r) => normalCommand(arg, name.endsWith("!"), r) },
+            // Koil's Space keys (see commandKey): :confirm apply is Space a,
+            // which always asks first, where that's a key.
+            { names: /^ap(?:p|pl|ply)?$/,
+                run: (arg, name, confirm) => commandKey(confirm && commandKeys[" a"] ? " a" : "  ", name) },
+            { names: /^undol(?:i|is|ist)?$/, run: (arg, name) => commandKey(" u", name) },
+            { names: /^rev(?:e|ea|eal)?$/, run: (arg, name) => commandKey(" r", name) },
+            { names: /^o(?:p|pe|pen)?$/, run: (arg, name) => commandKey(" o", name) },
+            { names: /^sho(?:r|rt|rtc|rtcu|rtcut|rtcuts)?$/, run: (arg, name) => commandKey(" q", name) }
         ];
+    }
+
+    // One of Koil's keys as the Ex command `name` (:apply is Space Space,
+    // so a shortcut or -c can say what it does): what `keys` of commandKeys
+    // run where vim is, as if they were typed with no count, so it does the
+    // same as they do there (:apply in a file saves), and fails where they
+    // aren't keys (:undolist in a file).
+    function commandKey(keys, name) {
+        const command = commandKeys[keys];
+        if (command)
+            outside(() => keyCommand(command, 0));
+        else
+            showError(":" + name + " does nothing here");
     }
 
     // :normal (:norm), as vim's: `keys` run as a macro's, written as a
