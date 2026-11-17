@@ -27,10 +27,8 @@ fn matches_in(
 
 /// The 32-bit numbers `bytes` are.
 fn numbers(bytes: &cxx_qt_lib::QByteArray) -> Vec<i32> {
-    let bytes = bytes.as_slice().chunks_exact(4);
-    bytes
-        .map(|n| i32::from_ne_bytes(n.try_into().unwrap()))
-        .collect()
+    let (numbers, _) = bytes.as_slice().as_chunks::<4>();
+    numbers.iter().map(|n| i32::from_ne_bytes(*n)).collect()
 }
 
 fn before(text: &str, pattern: &str, at: i32) -> Vec<i32> {
