@@ -445,6 +445,28 @@ fn executable(_meta: &fs::Metadata) -> bool {
     false
 }
 
+/// Whether the listing leaves out what's at `path` unless hidden entries
+/// are shown: a name that starts with a `.`, or on Windows, one its
+/// attributes hide, as koil-core's walk (the `ignore` crate's) hides them.
+pub fn hidden(path: &Path) -> bool {
+    let name = path.file_name().unwrap_or_default();
+    name.as_encoded_bytes().starts_with(b".") || hidden_attribute(path)
+}
+
+/// Whether Windows hides what's at `path` by its attributes (a link's
+/// own, as the walk reads them).
+#[cfg(windows)]
+fn hidden_attribute(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
+}
+
+#[cfg(not(windows))]
+fn hidden_attribute(_path: &Path) -> bool {
+    false
+}
+
 /// The dirs whose sizes the listing of what `koil` has open shows (see
 /// [`notes`]), to count before it's rendered: none unless it's sorted by
 /// size or size on disk.

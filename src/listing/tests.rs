@@ -96,6 +96,38 @@ fn own_key(path: &Path) {
     let _ = path;
 }
 
+/// `hidden` is what koil-core's listing leaves out without hidden entries.
+#[test]
+fn test_hidden() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path();
+    let names = ["plain", ".dot", "attribute", ".dir"];
+    for name in &names[..3] {
+        fs::write(path.join(name), "").unwrap();
+    }
+    fs::create_dir(path.join(".dir")).unwrap();
+    #[cfg(windows)]
+    {
+        let attrib = std::process::Command::new("attrib")
+            .arg("+h")
+            .arg(path.join("attribute"))
+            .status()
+            .unwrap();
+        assert!(attrib.success());
+    }
+    let mut koil = Koil::default();
+    koil.open(path).unwrap();
+    let listed: Vec<PathBuf> = koil.listing().into_iter().map(|e| e.name).collect();
+    for name in names {
+        let shown = listed.contains(&PathBuf::from(name));
+        assert_eq!(hidden(&path.join(name)), !shown, "{name}");
+    }
+    assert_eq!(hidden(&path.join("attribute")), cfg!(windows));
+    // a dir's, written with a `/` after it
+    assert!(hidden(&path.join(".dir/")));
+    assert!(!hidden(&path.join("gone")));
+}
+
 /// Updates the listing as it's rendered, with `path` in the path field,
 /// opening `open`.
 fn navigate(koil: &mut Koil, path: &str, settings: &Settings, open: Option<&str>) -> Updated {

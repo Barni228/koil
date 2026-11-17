@@ -32,8 +32,12 @@
   shortcut there). Only a path on disk: another opens as without it (a
   pattern is listed, and one that isn't there says so), and with no path
   it's an error of `parse`'s (not clap's `requires`, which `+N` fills,
-  and a path after `--` doesn't). A hidden one is only on its line with
-  hidden entries shown, as Open in Koil's. `+N` puts the cursor on line N of what's
+  and a path after `--` doesn't). A hidden one turns hidden entries on
+  (`:set hidden`, which isn't saved), as nothing would list it otherwise:
+  `listing::hidden`, which is koil-core's walk's rule (the `ignore`
+  crate's: a name that starts with a `.`, or on Windows one its attributes
+  hide), as koil-core doesn't give it, and `test_hidden` checks against
+  what koil-core lists. `+N` puts the cursor on line N of what's
   shown (`+` the last one), in the middle of the view, as vim's
   (`goToLine` types `NGzz`). Then each `-c` (`--command`, `Args::commands`,
   `Document.startupCommands`) runs, in order, as typed after a `:`
@@ -113,7 +117,7 @@
   one (`openDropped`), anything else (a file, or an app or another
   package, which Finder shows as a file: `file`) as the dir it's in, on
   its entry (`showFileDir`, through `openFolder`, so the listing's edits
-  stay). Its provider is set from the Document's `onCompleted`, before
+  stay; a hidden one turns hidden entries on, as `-r` does). Its provider is set from the Document's `onCompleted`, before
   the app runs, so the request that launched Koil comes. The user changes
   the shortcut in System Settings (Keyboard Shortcuts > Services > Files
   and Folders), which keeps it in `pbs`'s preferences (`NSServicesStatus`,

@@ -3494,10 +3494,13 @@ ApplicationWindow {
     // Lists the dir the file `path` is in, on its entry, as `-` from it
     // would: at startup (one that can't be read, or -r, which may be a
     // dir's, given with a `/` after it), and "Open in Koil" on a file (or an
-    // app, which Finder shows as one, so it's a dir's). False if it can't
-    // be opened (see openFolder).
+    // app, which Finder shows as one, so it's a dir's). A hidden one turns
+    // hidden entries on (`:set hidden`, until Koil quits), or it wouldn't be
+    // listed. False if it can't be opened (see openFolder).
     function showFileDir(path) {
         const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+        if (doc.isHidden(path))
+            vim.showHidden = true;
         return openFolder(doc.dirOf(path), doc.isDir(path) ? name + "/" : name);
     }
 

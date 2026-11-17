@@ -204,6 +204,11 @@ pub mod qobject {
         #[qinvokable]
         fn is_dir(self: &Document, path: &QString) -> bool;
 
+        /// Whether the listing leaves out what's at `path` unless hidden
+        /// entries are shown (see `listing::hidden`).
+        #[qinvokable]
+        fn is_hidden(self: &Document, path: &QString) -> bool;
+
         /// The dir `path` is in, as an absolute path.
         #[qinvokable]
         fn dir_of(self: &Document, path: &QString) -> QString;
@@ -552,6 +557,10 @@ impl qobject::Document {
 
     fn is_dir(&self, path: &QString) -> bool {
         std::path::Path::new(&path.to_string()).is_dir()
+    }
+
+    fn is_hidden(&self, path: &QString) -> bool {
+        listing::hidden(std::path::Path::new(&path.to_string()))
     }
 
     fn dir_of(&self, path: &QString) -> QString {
