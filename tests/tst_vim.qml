@@ -2963,7 +2963,8 @@ TestCase {
 
     // Shortcuts and macros that run only each other fail, as vim's
     // recursive mappings do, but one that runs a command and then itself
-    // goes on until a command fails.
+    // goes on until a command fails. Each runs a thousand times first, in
+    // chunks (see Batches and runs), more than one if the machine is busy.
     function test_recursiveShortcuts() {
         load("1\n1\n1");
         vim.shortcuts = [
@@ -2971,6 +2972,7 @@ TestCase {
             { keys: "ys", macro: "s", label: "ys", normal: true, visual: false }
         ];
         keys("s");
+        tryCompare(vim, "running", null);
         compare(vim.message, "E223: recursive mapping");
         compare(vim.running, null);
         compare(vim.typeahead.length, 0);
@@ -2983,12 +2985,12 @@ TestCase {
         // a macro that only runs itself, and one a shortcut runs that runs
         // the shortcut
         keys("qaqqa@aq@a");
+        tryCompare(vim, "running", null);
         compare(vim.message, "E223: recursive mapping");
-        compare(vim.running, null);
         vim.shortcuts = [{ keys: "s", macro: "@b", label: "s", normal: true, visual: false }];
         keys("qbqqbsqs");
+        tryCompare(vim, "running", null);
         compare(vim.message, "E223: recursive mapping");
-        compare(vim.running, null);
         compare(editor.text, "2\n2\n2");
     }
 
