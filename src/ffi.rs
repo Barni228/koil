@@ -95,6 +95,12 @@ mod bridge {
         #[cxx_name = "useLineDeleteKey"]
         fn use_line_delete_key();
 
+        /// Keeps a click on a popup window (a `Popup.Window`, like Settings'
+        /// shell list) from the items under it in its window, which Qt 6.10
+        /// gives it to on Windows too (see native.h).
+        #[cxx_name = "keepPopupClicks"]
+        fn keep_popup_clicks();
+
         /// Has `document`, a Document, emit `fileOpened(path)` for each file
         /// the system asks the app to open (macOS's Open With; see native.h).
         #[cxx_name = "watchFileOpens"]

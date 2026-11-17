@@ -28,6 +28,17 @@ void useWindowIcon(const QByteArray& png);
 // and a TextInput's Ctrl+Backspace deletes a word. Nothing elsewhere.
 void useLineDeleteKey();
 
+// Keeps a click on a popup window (a Popup.Window: Settings' font and
+// shell lists, the Shortcuts window's macros) from the items of the window
+// it's in, under it. While one is open, Qt has its window grab the mouse,
+// so on Windows that window gets the clicks, and Qt hands each to the
+// popup, then to the window if the popup didn't take it. In Qt 6.10
+// (Windows'), a popup window never takes a press (QTBUG-141362, fixed in
+// 6.11), so an item under a row took the press from it: a click on a
+// shell opened the `:h shortcuts` link under the list, and picked nothing.
+// Qt 6.11 still passes on a press on a popup's padding.
+void keepPopupClicks();
+
 // Has `document` (a Document) emit fileOpened(path) for each file the
 // system asks the app to open: what Finder's Open With does on macOS, rather
 // than giving the path on the command line (also to an app already running).

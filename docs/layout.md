@@ -73,7 +73,8 @@
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, Cmd+Backspace in
-  text fields, Koil's text layout (`TextLayout`: `setLineFormat`, see
+  text fields, clicks on a popup window kept from the window under it
+  (`keepPopupClicks`, see Windows), Koil's text layout (`TextLayout`: `setLineFormat`, see
   Text layout, Long lines and Wrapping),
   `setText`, the listing's and path field's `QSyntaxHighlighter`, a
   file's colors (`TextColors`: `setTextColors`, with syntax.rs) and

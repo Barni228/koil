@@ -27,6 +27,7 @@
 #include <QtGui/QIcon>
 #include <QtGui/QImage>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPixmap>
 #include <QtGui/QSyntaxHighlighter>
@@ -36,6 +37,7 @@
 #include <QtGui/QTextDocument>
 #include <QtGui/QTextFrame>
 #include <QtGui/QTextLayout>
+#include <QtGui/QWindow>
 #include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickTextDocument>
 #include <QtQuick/QQuickWindow>
@@ -94,6 +96,48 @@ public:
 
 private:
   QPointer<QObject> document;
+};
+
+// Keeps the mouse presses a window gets where a popup window of its own is
+// (a Popup.Window) from its items, with the moves and release that follow
+// (see keepPopupClicks). An application's filter, as Qt hands such a press
+// to the popup first, then to the window: this sees it reach the window.
+class PopupClickFilter : public QObject
+{
+public:
+  using QObject::QObject;
+
+  bool eventFilter(QObject* watched, QEvent* event) override
+  {
+    const QEvent::Type type = event->type();
+    if (type != QEvent::MouseButtonPress && type != QEvent::MouseButtonDblClick &&
+        type != QEvent::MouseMove && type != QEvent::MouseButtonRelease)
+      return false;
+    const auto* window = qobject_cast<QWindow*>(watched);
+    if (!window || window->type() == Qt::Popup)
+      return false;
+    const auto* mouse = static_cast<QMouseEvent*>(event);
+    // A press decides for what follows it, till its release: a drag from
+    // a popup's row goes on to the window without its press.
+    if (type == QEvent::MouseButtonPress || type == QEvent::MouseButtonDblClick)
+      dropping = overPopup(window, mouse->globalPosition().toPoint());
+    // A move without buttons is a hover, which the window may have.
+    return dropping && (type != QEvent::MouseMove || mouse->buttons() != Qt::NoButton);
+  }
+
+private:
+  // Whether `global` (on the screen) is on a popup window `window` shows.
+  static bool overPopup(const QWindow* window, const QPoint& global)
+  {
+    const QWindowList windows = QGuiApplication::topLevelWindows();
+    return std::any_of(windows.cbegin(), windows.cend(), [&](const QWindow* popup) {
+      return popup->type() == Qt::Popup && popup->isVisible() &&
+             popup->transientParent() == window && popup->geometry().contains(global);
+    });
+  }
+
+  // Whether the window's last press was dropped.
+  bool dropping = false;
 };
 
 #ifdef Q_OS_MACOS
@@ -1386,6 +1430,13 @@ useLineDeleteKey()
   auto* app = QCoreApplication::instance();
   app->installEventFilter(new LineDeleteFilter(app));
 #endif
+}
+
+void
+keepPopupClicks()
+{
+  auto* app = QCoreApplication::instance();
+  app->installEventFilter(new PopupClickFilter(app));
 }
 
 void

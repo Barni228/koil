@@ -53,3 +53,18 @@
   copied app-locally, so no VC++ Redistributable is needed.
   `package-windows.ps1` loads the VS dev shell itself; `ilammy/msvc-dev-cmd`
   was removed because it's stuck on Node 20.
+  While a `Popup.Window` is open (a `DropList`), Qt has the window it's in
+  grab the mouse, so Windows sends that window the clicks, and Qt hands
+  each to the popup first, then to the window if the popup didn't take
+  it. Qt 6.10's popup windows never take a press (QTBUG-141362, fixed in
+  6.11), so an item under a row took it from the row: a click on a shell
+  in Settings opened the `:h shortcuts` link under the list. So
+  `main.rs` installs native.cpp's `PopupClickFilter` (`keepPopupClicks`),
+  which drops a press a window gets where a popup window of its own
+  is, with its moves and release (also a press on a popup's padding,
+  which 6.11 still passes on). macOS sends the clicks to the popup's own
+  window. QtQuickTest's `mouseClick` sends an event to a window
+  directly, past that routing, so it can't show the bug: a C++
+  `QTest::mouseClick` on the window under the list goes through it, as
+  Windows' clicks do, and with Windows' Qt for macOS (CLAUDE.md's Build
+  and test) shows the click reach the item under the row.

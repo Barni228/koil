@@ -187,7 +187,10 @@ A line a file; `docs/layout.md` says what each has, by function.
 - The Qt version is pinned per OS. macOS uses 6.11, because 6.8's headers fail
   with newer Apple clang. Windows uses 6.10, because Qt 6.11 for Windows uses a
   repository layout that aqtinstall 3.3 can't read. Move Windows up once
-  aqtinstall supports it.
+  aqtinstall supports it. Then keep `keepPopupClicks` (docs/platform.md,
+  Windows), though 6.11 has Qt's fix: it still passes a click on a
+  popup's padding to the window under it. Reword the filter's comments
+  and that note to say so.
 - Keep actions on Node 24 releases (checkout v7, upload-artifact v7,
   download-artifact v8, action-gh-release v3).
 - Releases: `cargo release <level> --execute`. `Cargo.toml` makes it skip
