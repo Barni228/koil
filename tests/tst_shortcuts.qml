@@ -169,7 +169,7 @@ TestCase {
         app.showOwnShortcuts = false;
         doc.files = {};
         win.open();
-        tryVerify(() => win.active);
+        tryVerify(hasKeys);
         tryVerify(() => focused() !== "none");
     }
 
@@ -192,13 +192,25 @@ TestCase {
     // gives it the keys (the app stays inactive, but the keys sent are
     // Qt's own), and keeps what it shows.
     function keepKeys() {
-        if (win.visible && !win.active) {
-            win.hide();
-            win.show();
-            win.raise();
-            win.requestActivate();
-            tryVerify(() => win.active);
+        if (win.visible && !hasKeys()) {
+            if (!win.active) {
+                win.hide();
+                win.show();
+                win.raise();
+                win.requestActivate();
+            }
+            tryVerify(hasKeys);
         }
+    }
+
+    // Whether the window has the keys. Not only whether it's active: a
+    // window is active while the one it's transient for (this TestCase's)
+    // is, as it was on Windows from when it opened until the system gave
+    // it the keys, a moment after, and the keys sent meanwhile went to
+    // this TestCase's window. That one's active focus is gone once it has
+    // them.
+    function hasKeys() {
+        return win.active && !tc.Window.window.contentItem.activeFocus;
     }
 
     // A key, to the window (see keepKeys).

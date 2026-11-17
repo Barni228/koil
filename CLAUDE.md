@@ -86,7 +86,11 @@ A line a file; `docs/layout.md` says what each has, by function.
   for what it needs (`tryVerify`, `waitForRendering` before a key that
   goes by what's in view, `wait(0)` after closing a popup with a window of
   its own, which gives the keys to the window it was in) and scroll to
-  what it clicks, as a click reaches only what shows.
+  what it clicks, as a click reaches only what shows. Windows' offscreen
+  has no fonts at all (`Qt.fontFamilies()` is empty: every character is
+  a box as wide as the font's size), so a test that measures text in a
+  view too narrow for that skips there (tst_vim.qml's `needFonts`), and
+  runs with windows.
   They load `qml/` by path, so
   anything they instantiate must not `import Koil` (only `main.qml` does, for
   `Document` and `System`; `Editor` takes `System` as a `var`). With
@@ -95,7 +99,11 @@ A line a file; `docs/layout.md` says what each has, by function.
   (where the tests were started from), macOS takes qmltestrunner's
   activation away about half a second in and refuses to give it back: so
   tst_shortcuts.qml, whose keys go to a window of their own, sends them
-  through `press`, which shows that window again first (`keepKeys`).
+  through `press`, which shows that window again first (`keepKeys`). On
+  Windows, a window is `active` as soon as it opens (as the TestCase's,
+  which it's transient for, still is), a moment before the system gives
+  it the keys, so `keepKeys` also waits for the TestCase's window to lose
+  its active focus (`hasKeys`): the first key went there.
 - `qmllint -I target/cxxqt/qml_modules qml/*.qml` should print nothing.
   cxx-qt-build writes `.qmlls.ini` (ignored by git) for qmlls.
 - Windows' Qt (6.10, see CI) can be tried on macOS, for a bug only
@@ -148,7 +156,11 @@ A line a file; `docs/layout.md` says what each has, by function.
   as a bare statement (`editor.revision;`): the app's QML is compiled ahead of
   time, which can drop it, though `qmltestrunner` keeps it. Use the value. The
   engine has no `Array.prototype.flatMap` nor `String.prototype.trimEnd`;
-  `?.` and `??` work. A `Set` takes time in proportion to its size for
+  `?.` and `??` work. Qt 6.10 (Windows') takes the words ES3 reserved
+  as keywords, so they can't be names (`long`, `int`, `char`, `byte`,
+  `float`, `double`, `boolean`, `enum`, `goto`, `native`, `final`,
+  `public`, `private`…): a `const long` kept all of tst_vim.qml from
+  compiling there, though 6.11 has it. A `Set` takes time in proportion to its size for
   each add and lookup (40,000 adds took 2 s, 340,000 lookups 31 s), so
   use a sorted array or an object of keys. A `var`
   property bound to objects of constants (`dark ? { create: "#73c991" } :

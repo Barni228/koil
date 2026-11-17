@@ -77,7 +77,8 @@ TestCase {
             "Home": Qt.Key_Home,
             "End": Qt.Key_End,
             "PageUp": Qt.Key_PageUp,
-            "PageDown": Qt.Key_PageDown
+            "PageDown": Qt.Key_PageDown,
+            "Ins": Qt.Key_Insert
         };
         const ctrl = isMac ? Qt.MetaModifier : Qt.ControlModifier;
         for (const m of s.match(/<[^<>]+>|[\s\S]/g)) {
@@ -786,7 +787,9 @@ TestCase {
     }
 
     // A macro that runs itself last (until j fails) doesn't stack up, and
-    // one that runs itself more than that fails.
+    // one that runs itself more than that fails, once it ran a thousand
+    // times, in chunks (see Batches and runs), more than one if the
+    // machine is slow.
     function test_recursiveMacro() {
         load("1\n1\n1");
         keys("qa<C-a>j@aq@a");
@@ -794,8 +797,8 @@ TestCase {
         compare(vim.running, null);
         load("1");
         keys("qa@a<C-a>q@a");
+        tryCompare(vim, "running", null);
         compare(vim.message, "E223: recursive mapping");
-        compare(vim.running, null);
         compare(vim.typeahead.length, 0);
     }
 
@@ -3491,12 +3494,23 @@ TestCase {
         keys("<Esc>");
     }
 
+    // Skips a test that needs text measured in a real font: Windows'
+    // offscreen platform has none (no font families at all), and draws
+    // every character as a box as wide as the font's size, which leaves
+    // the views here too few columns for what the test does. With
+    // windows, it runs.
+    function needFonts() {
+        if (Qt.fontFamilies().length === 0)
+            skip("no fonts here (Windows' offscreen platform): run with windows");
+    }
+
     // zl and zh scroll sideways, as far as the room right of the text
     // (Editor.qml's sideScrollRoom), and move the cursor as far as keeps
     // it sidescrolloff columns in view, unless its line ends before the
     // view, which then stays. zL and zH scroll half the view, zs and ze
     // put the cursor at its edges.
     function test_scrollSideways() {
+        needFonts();
         load("one");
         narrowText.text = "x".repeat(60) + "\nab";
         waitForRendering(narrow);
@@ -3583,6 +3597,7 @@ TestCase {
     // it, and zH took the line as ending before the view, which left the
     // cursor out of it.
     function test_scrollSidewaysTabs() {
+        needFonts();
         load("one");
         narrowText.text = "\t".repeat(30) + "end";
         waitForRendering(narrow);
@@ -3689,8 +3704,9 @@ TestCase {
     // and end in view, zt puts the cursor's row at the top, the page keys
     // count rows, and nothing scrolls sideways.
     function test_wrapView() {
-        const long = "one two three four five six seven eight nine ten eleven twelve";
-        const t = loadWrapped(["x", long, long, long, long, long, long], 1);
+        needFonts();
+        const wide = "one two three four five six seven eight nine ten eleven twelve";
+        const t = loadWrapped(["x", wide, wide, wide, wide, wide, wide], 1);
         const f = wrapView.contentItem as Flickable;
         const rect = p => wrapText.positionToRectangle(p);
         const lh = vim.lineHeight, top = wrapText.topPadding;
@@ -4202,7 +4218,9 @@ TestCase {
         keys("\"+p");
         compare(render(), "<M:h1>  a\n<M:h1>  a");
         // p left the cursor on the name, after the icon (see firstNonBlank).
-        keys("0v<D-c>$<D-v>");
+        // Off macOS, Ctrl+V starts visual block mode, and Shift+Insert is
+        // Paste.
+        keys("0v<D-c>$" + (isMac ? "<D-v>" : "<S-Ins>"));
         compare(render(), "<M:h1>  a\n<M:h1>  <M:h1>a");
     }
 
@@ -5443,10 +5461,10 @@ TestCase {
         const names = [];
         for (let i = 0; i < 300; i++)
             names.push("file" + i + ".rs");
-        const long = ":!wc -l " + names.join(" ");
-        help.showText(long, "output", "");
+        const title = ":!wc -l " + names.join(" ");
+        help.showText(title, "output", "");
         tryCompare(help, "opened", true);
-        verify(help.shownHeading.length < long.length);
+        verify(help.shownHeading.length < title.length);
         verify(help.shownHeading.startsWith(":!wc -l file0.rs"));
         verify(help.shownHeading.endsWith("file299.rs"));
         verify(help.shownHeading.includes("…"));
