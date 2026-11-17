@@ -152,7 +152,8 @@ function sections(help) {
                     + "`:set sh=bash`. Default: the one in Settings, else `" + systemShell + "`."],
                 ["`hidden`  `hid`", "Show entries starting with `.`."],
                 ["`gitignore`  `ignore`", "Hide what git ignores, and `.git`."],
-                ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`."],
+                ["`regex`  `re`", "Read the path as a regex, not a glob. `,` is any character but `/`. It "
+                    + "can look around, as a search's (see `:h search`): `,*(?<!\\.min)\\.js`."],
                 ["`sort`", "What the listing is sorted by (see `:h gs`), like `:set sort=size`: `name`, "
                     + "`natural`, `extension`, `size`, `disk`, `modified`, `created` or `accessed`. Default "
                     + "`name`."],
@@ -315,10 +316,16 @@ function sections(help) {
         },
         {
             title: "Search",
-            tags: ["search", "/", "?", "regex", "regexp", "pattern", "find", "replace", "n", "*"],
+            tags: ["search", "/", "?", "regex", "regexp", "pattern", "lookbehind", "lookahead", "find", "replace", "n", "*"],
             rows: [
-                ["`/pattern`  `?pattern`", "Search forward or backward, with JavaScript regexes (`\\bword\\b`, "
+                ["`/pattern`  `?pattern`", "Search forward or backward, with regexes as Perl's (`\\bword\\b`, "
                     + "`\\d{3}`), not vim's. Case counts only if there's an uppercase letter."],
+                ["`(?<!a)b`  `(?<=a)b`", "A `b` that isn't after an `a`, or one that is. What it looks "
+                    + "behind for can be `ab|c`, but not `a+` (in the path it can). `b(?!a)` and `b(?=a)` "
+                    + "look ahead."],
+                ["`(?i)`  `\\p{L}`  `\\1`  `a++`", "Ignore case from there on, any letter (`\\x{1F600}` "
+                    + "is a character by its number), what the first group took, and an `a+` that gives "
+                    + "nothing back."],
                 ["`n`  `N`", "Next or previous match."],
                 ["`*`  `#`", "Search for the word under the cursor, or in visual mode for what's selected, "
                     + "as it is (not as a regex), as Neovim's do."],
@@ -349,7 +356,7 @@ function sections(help) {
             rows: [
                 ["`:%s`  `:2,5s`  `:'<,'>s`", "Every line, lines 2 to 5, or (`:` in visual mode) only what's "
                     + "selected: its characters, its block or its lines."],
-                ["`old`", "A JavaScript regex, as `/` takes (`(\\d+)`, not vim's `\\(\\d\\+\\)`). Case counts "
+                ["`old`", "A regex, as `/` takes (`(\\d+)`, not vim's `\\(\\d\\+\\)`). Case counts "
                     + "only if it has an uppercase letter. Empty, it's the last search."],
                 ["`&`  `\\0`  `\\1`", "In the replacement: the match, or its first group."],
                 ["`\\u`  `\\l`  `\\U`  `\\L`  `\\E`", "Uppercase or lowercase the next character, or all of "

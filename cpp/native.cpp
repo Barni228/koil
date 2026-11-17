@@ -6,12 +6,16 @@
 #include <optional>
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QMimeData>
+#include <QtCore/QCache>
 #include <QtCore/QPointer>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
+#include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtCore/QTranslator>
 #include <QtGui/QAbstractTextDocumentLayout>
@@ -1882,4 +1886,176 @@ monospaceFamilies()
     if (!QFontDatabase::isPrivateFamily(family) && hasFixedWidthText(family))
       families.append(family);
   return families;
+}
+
+// ---- Regular expressions --------------------------------------------------
+
+namespace {
+
+// `pattern` compiled, kept for the next time it's asked for: a search asks
+// at every key and every scroll. A copy shares what's compiled. Kept per
+// thread, though only the GUI's asks (and the tests', each from its own).
+QRegularExpression
+compiledRegex(const QString& pattern, const QString& flags)
+{
+  thread_local QCache<QString, QRegularExpression> kept(64);
+  const bool ignoreCase = flags.contains(QLatin1Char('i'));
+  const QString key = QLatin1Char(ignoreCase ? 'i' : ' ') + pattern;
+  if (const auto* found = kept.object(key))
+    return *found;
+  QRegularExpression::PatternOptions options =
+    QRegularExpression::MultilineOption | QRegularExpression::UseUnicodePropertiesOption;
+  if (ignoreCase)
+    options |= QRegularExpression::CaseInsensitiveOption;
+  const QRegularExpression regex(pattern, options);
+  // Compiled to machine code now, not after a few matches.
+  regex.optimize();
+  kept.insert(key, new QRegularExpression(regex));
+  return regex;
+}
+
+// Whether `text` is UTF-16 all through, which PCRE2 needs (half a surrogate
+// pair could have it read past the end): a text that isn't has no matches.
+// PCRE2 would check it itself, at every match it's asked for, from where
+// it starts looking to the text's end: 5,000 matches in 10 MB took 32 s,
+// and one right at the cursor 7 ms. So matches are asked for without that
+// check (`unchecked`), and the text is checked here, once: the last one
+// found right is kept (it shares the text, so it's the same one for as
+// long as it has the same characters at the same place), and let go half
+// a minute after it was last asked about, as it would keep a text that was
+// edited since in memory. Only the GUI thread keeps one (the tests ask
+// from theirs, without an app to time it).
+bool
+isUtf16(const QString& text)
+{
+  static QString checked;
+  static QElapsedTimer asked;
+  static QTimer* forget = nullptr;
+  const QCoreApplication* app = QCoreApplication::instance();
+  const bool keeps = app && QThread::currentThread() == app->thread();
+  if (keeps && checked.size() == text.size() && checked.constData() == text.constData()) {
+    asked.start();
+    return true;
+  }
+  if (!text.isValidUtf16())
+    return false;
+  if (!keeps)
+    return true;
+  checked = text;
+  asked.start();
+  if (!forget) {
+    forget = new QTimer(QCoreApplication::instance());
+    forget->setInterval(30000);
+    QObject::connect(forget, &QTimer::timeout, forget, [] {
+      if (asked.elapsed() < forget->interval())
+        return;
+      checked = QString();
+      forget->stop();
+    });
+  }
+  if (!forget->isActive())
+    forget->start();
+  return true;
+}
+
+const QRegularExpression::MatchOptions unchecked = QRegularExpression::DontCheckSubjectStringMatchOption;
+
+// `at`, or the next place if it's inside a surrogate pair: a match can't
+// start there, and PCRE2 mustn't be asked to look from there.
+qsizetype
+characterStart(const QString& text, qsizetype at)
+{
+  const bool inside = at > 0 && at < text.size() && text.at(at).isLowSurrogate() && text.at(at - 1).isHighSurrogate();
+  return inside ? at + 1 : at;
+}
+
+// Where to look for the next match after `match`: after it, or a
+// character on if it's of nothing (a whole one, not half a surrogate pair).
+qsizetype
+afterMatch(const QString& text, const QRegularExpressionMatch& match)
+{
+  const qsizetype end = match.capturedEnd();
+  if (match.capturedLength() > 0)
+    return end;
+  return end + (end + 1 < text.size() && text.at(end + 1).isLowSurrogate() ? 2 : 1);
+}
+
+} // namespace
+
+QString
+regexError(const QString& pattern, const QString& flags)
+{
+  const QRegularExpression regex = compiledRegex(pattern, flags);
+  return regex.isValid() ? QString() : regex.errorString();
+}
+
+QByteArray
+regexMatches(const QString& text,
+             const QString& pattern,
+             const QString& flags,
+             int from,
+             int to,
+             int limit)
+{
+  QList<qint32> found;
+  // The numbers as they are in memory, for QML's Int32Array.
+  const auto bytes = [&found] {
+    return QByteArray(reinterpret_cast<const char*>(found.constData()), found.size() * qsizetype(sizeof(qint32)));
+  };
+  const bool perLine = flags.contains(QLatin1Char('l'));
+  const QRegularExpression regex = compiledRegex(pattern, flags);
+  if (!regex.isValid())
+    return bytes();
+  const int groups = regex.captureCount() + 1;
+  found.append(2 * groups);
+  if (!isUtf16(text))
+    return bytes();
+  qsizetype at = characterStart(text, qMax(0, from));
+  for (int n = 0; n < limit && at <= text.size(); n++) {
+    const QRegularExpressionMatch match = regex.matchView(text, at, QRegularExpression::NormalMatch, unchecked);
+    if (!match.hasMatch() || match.capturedStart() > to)
+      break;
+    for (int group = 0; group < groups; group++) {
+      found.append(qint32(match.capturedStart(group)));
+      found.append(qint32(match.capturedEnd(group)));
+    }
+    at = afterMatch(text, match);
+    if (perLine) {
+      const qsizetype lineEnd = text.indexOf(QLatin1Char('\n'), match.capturedStart());
+      if (lineEnd < 0)
+        break;
+      at = qMax(at, lineEnd + 1);
+    }
+  }
+  return bytes();
+}
+
+QList<int>
+regexBefore(const QString& text, const QString& pattern, const QString& flags, int at)
+{
+  const QRegularExpression regex = compiledRegex(pattern, flags);
+  int before = -1;
+  int last = -1;
+  if (!regex.isValid() || !isUtf16(text))
+    return { before, last };
+  for (qsizetype from = 0; from <= text.size();) {
+    const QRegularExpressionMatch match = regex.matchView(text, from, QRegularExpression::NormalMatch, unchecked);
+    if (!match.hasMatch())
+      break;
+    const int start = int(match.capturedStart());
+    if (start >= at && before >= 0)
+      break;
+    last = start;
+    if (start < at)
+      before = start;
+    from = afterMatch(text, match);
+  }
+  return { before, last };
+}
+
+QStringList
+regexGroupNames(const QString& pattern, const QString& flags)
+{
+  const QRegularExpression regex = compiledRegex(pattern, flags);
+  return regex.isValid() ? regex.namedCaptureGroups() : QStringList();
 }

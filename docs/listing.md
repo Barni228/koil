@@ -345,7 +345,11 @@
   pattern starts, after the longest existing dir, at the first part with a
   special character that isn't quoted; a regex's, `regex_parts`, with
   `:set regex`, which the next update reads it with, else a glob's,
-  `glob_parts`), in `theme.patternColors`.
+  `glob_parts`), in `theme.patternColors`. A regex is koil-core's, which
+  can look around and back (`,*(?<!\.min)\.js`, `(,+)/\1\.rs`, see its
+  CLAUDE.md), so `(?<!`, `(?<=`, `(?=`, `(?!` and `(?>` are a `group` each
+  (what they look for is colored as the rest), `a++` one `quantifier` and
+  `\k<name>` one `escape`.
 - **Clipboard**: the `"+` data carries `session`, random per run; another
   Koil's hidden texts (IDs, which mean other paths there) are dropped on
   paste, so its lines become new entries rather than copies of whatever has

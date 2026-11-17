@@ -22,6 +22,9 @@ ModalBox {
 
     // The font Koil ships, for :set guifont.
     property string defaultFontFamily
+    // What its search looks for regular expressions with (System, see
+    // Vim's regexEngine).
+    property var regexEngine: null
 
     readonly property bool isMac: Qt.platform.os === "osx"
     readonly property bool isWindows: Qt.platform.os === "windows"
@@ -616,15 +619,11 @@ ModalBox {
     readonly property var matches: {
         if (searchPattern === "")
             return [];
-        const re = Txt.searchRegExp(searchPattern), found = [];
+        const re = Txt.searchRegExp(searchPattern, undefined, regexEngine), found = [];
         for (const t of searchTexts.list) {
-            re.lastIndex = 0;
-            let m;
-            while ((m = re.exec(t.text)) !== null) {
-                if (m[0] === "")
-                    re.lastIndex++;
-                else
-                    found.push({ key: t.key, start: m.index, end: m.index + m[0].length });
+            for (const m of re.all(t.text)) {
+                if (m.end > m.index)
+                    found.push({ key: t.key, start: m.index, end: m.end });
             }
         }
         return found;

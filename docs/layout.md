@@ -66,8 +66,9 @@
   installed monospaced fonts and the Nerd Font's family, the editor's
   text, line format and colors, showing a path in Finder or Explorer
   (`reveal`) or opening it in its default app (`openInApp`), links
-  (`linkAt`, `linkTarget`), and running shell commands (`runShell`,
-  `stopShell`, `shellDone`). Its methods that only hand a QML item to
+  (`linkAt`, `linkTarget`), the search's regular expressions
+  (`regexMatches`, see Regular expressions), and running shell commands
+  (`runShell`, `stopShell`, `shellDone`). Its methods that only hand a QML item to
   native.cpp are made by `forward!`.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
   `main.rs` (menu title translator, Controls style, clipboard, fonts, the
@@ -76,8 +77,9 @@
   Text layout, Long lines and Wrapping),
   `setText`, the listing's and path field's `QSyntaxHighlighter`, a
   file's colors (`TextColors`: `setTextColors`, with syntax.rs) and
-  `K`'s (`setSpanColors`), `redrawText`, and what changed in
-  a text (`TextChanges`, see Long texts)).
+  `K`'s (`setSpanColors`), `redrawText`, what changed in
+  a text (`TextChanges`, see Long texts), and PCRE2's regular expressions
+  (`regexMatches`, see Regular expressions)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
   Koil), and what Finder says is available on a volume
   (`importantCapacity`, see Info), Objective-C++, which `build.rs` adds
@@ -118,7 +120,8 @@
   buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects
   and the tags `it` and `at` find, `tagPair`, `=`'s indents, `reindent`,
-  `:s`'s arguments and replacement, `code` in the help and tips), imported
+  `:s`'s arguments and replacement, the regular expressions a search
+  looks for (`regExp`), `code` in the help and tips), imported
   as `Txt` by Vim.qml and the views. The only state it keeps is
   where the lines of the last two long texts start (`lineIndex`), so
   `lineOf`, `lineToPos` and `countLines` (the status line, line numbers,

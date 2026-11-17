@@ -25,7 +25,7 @@ the only record of why things are as they are. A section named elsewhere
 | `docs/shell.md` | Shell commands, Output box |
 | `docs/launch.md` | Command line, The koil command, Open in Koil, Open With |
 | `docs/vim.md` | Buffers, Vim, Macros, Batches and runs, Edits from outside, Hidden text |
-| `docs/vim-commands.md` | Visual block, Multiple cursors, Marked lines, Surround, Reindent, Substitute, Command line colors, Find bar |
+| `docs/vim-commands.md` | Visual block, Multiple cursors, Marked lines, Surround, Reindent, Regular expressions, Substitute, Command line colors, Find bar |
 | `docs/shortcuts.md` | Shortcuts (both), Menus |
 | `docs/editor.md` | Overlays, Text layout, Long texts, Long lines, Wrapping, Line numbers, Whitespace in the selection, Warnings and errors, Notes after lines, Icon font, Fonts |
 | `docs/help.md` | Help, Help window, Help links, Help folds, Scrolling boxes |
@@ -126,6 +126,9 @@ A line a file; `docs/layout.md` says what each has, by function.
 - A question is `confirmDialog.ask`, its Yes and No named by what they do;
   a list to pick from is a `PickList` (docs/questions.md).
 - A "see" in help.js names a `:h` topic; the tests check it.
+- A regex the user writes is `Txt.regExp` or `Txt.searchRegExp` with the
+  `regexEngine` (PCRE2's), never `new RegExp`, which has no look behind
+  (docs/vim-commands.md, Regular expressions).
 - Paths shown to the user have `/`, also on Windows
   (`koil_core::with_slashes`).
 - **QML's JavaScript**: don't make a binding depend on something by reading it

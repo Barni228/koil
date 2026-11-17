@@ -104,6 +104,74 @@ TestCase {
         }
     }
 
+    // What System gives for regular expressions (see Vim's regexEngine),
+    // made with QML's RegExp: the tests have no System, so its PCRE is
+    // tested in ffi/tests.rs, and this the reading of its numbers.
+    QtObject {
+        id: regexEngine
+
+        function compiled(pattern, flags) {
+            return new RegExp(pattern, "gmu" + flags.replace("l", ""));
+        }
+        function regexError(pattern, flags) {
+            try {
+                compiled(pattern, flags);
+                return "";
+            } catch (e) {
+                return e.message;
+            }
+        }
+        function next(re, text, from) {
+            if (from > text.length)
+                return null;
+            re.lastIndex = from;
+            return re.exec(text);
+        }
+        function after(m) {
+            return m.index + Math.max(1, m[0].length);
+        }
+        function regexMatches(text, pattern, flags, from, to, limit) {
+            const re = compiled(pattern, flags), found = [], perLine = flags.includes("l");
+            for (let at = from, n = 0, m; n < limit && (m = next(re, text, at)) !== null && m.index <= to; n++) {
+                if (found.length === 0)
+                    found.push(2 * m.length);
+                // A group's text is where it is, in these tests.
+                m.forEach((group, i) => {
+                    const start = group === undefined ? -1 : i === 0 ? m.index : text.indexOf(group, m.index);
+                    found.push(start, start < 0 ? -1 : start + group.length);
+                });
+                at = after(m);
+                if (perLine) {
+                    const nl = text.indexOf("\n", m.index);
+                    if (nl < 0)
+                        break;
+                    at = Math.max(at, nl + 1);
+                }
+            }
+            return new Int32Array(found).buffer;
+        }
+        function regexBefore(text, pattern, flags, at) {
+            const re = compiled(pattern, flags);
+            let before = -1, last = -1;
+            for (let from = 0, m; (m = next(re, text, from)) !== null; from = after(m)) {
+                if (m.index >= at && before >= 0)
+                    break;
+                last = m.index;
+                if (m.index < at)
+                    before = m.index;
+            }
+            return [before, last];
+        }
+        function regexGroupNames(pattern, flags) {
+            const names = [""];
+            for (const m of pattern.match(/\\.|\((?!\?)|\(\?<\w+>/g) || []) {
+                if (m[0] === "(")
+                    names.push(m.slice(3, -1));
+            }
+            return names;
+        }
+    }
+
     QtObject {
         id: clipboard
 
@@ -369,6 +437,7 @@ TestCase {
         narrow.height = 30;
         (narrow.contentItem as Flickable).bottomMargin = 0;
         (narrow.contentItem as Flickable).rightMargin = 0;
+        vim.regexEngine = null;
         vim.singleLine = false;
         vim.linePrefixes = false;
         vim.bangEntries = "";
@@ -428,6 +497,63 @@ TestCase {
         loadListing("M  ab\nC  ab");
         keys("V*");
         compare(vim.cursor, editor.text.lastIndexOf("ab"));
+    }
+
+    // With System's regular expressions (see Vim's regexEngine), the
+    // search, :s and the find bar read the matches from its numbers.
+    function test_regexEngine() {
+        vim.regexEngine = regexEngine;
+        load("foo bar\nbar foo\nfoo");
+        keys("/bar<CR>");
+        compare(vim.cursor, 4);
+        keys("n");
+        compare(vim.cursor, 8);
+        keys("n");
+        compare(vim.cursor, 4);
+        keys("N");
+        compare(vim.cursor, 8);
+        keys("N");
+        compare(vim.cursor, 4);
+        keys("?fo+<CR>");
+        compare(vim.cursor, 0);
+        compare(vim.searchHighlights().map(s => [s.start, s.end]), [[0, 3], [12, 15], [16, 19]]);
+        // One that isn't a regular expression is searched for as it is.
+        load("a(b a(b");
+        keys("/a(<CR>");
+        compare(vim.cursor, 4);
+        // :s: the groups, one that took no part, the first on each line.
+        load("foo bar\nbar foo\nfoo");
+        keys(":%s/(\\w+) (\\w+)/\\2 \\1/<CR>");
+        compare(editor.text, "bar foo\nfoo bar\nfoo");
+        keys(":%s/o/0/<CR>");
+        compare(editor.text, "bar f0o\nf0o bar\nf0o");
+        keys(":%s/(x)|o/[\\1]/g<CR>");
+        compare(editor.text, "bar f0[]\nf0[] bar\nf0[]");
+        keys(":2s/^/> /<CR>");
+        compare(editor.text, "bar f0[]\n> f0[] bar\nf0[]");
+        // In a selection, a line's first match in it.
+        load("a a a\na a a");
+        keys("l<C-v>j3l:s/a/b/<CR>");
+        compare(editor.text, "a b a\na b a");
+        // The find bar: a group by its name, whole words, its error.
+        load("ab-cd abcd");
+        findBar.open(true);
+        findBar.useRegex = true;
+        findBar.query = "(?<one>\\w+)-(?<two>\\w+)";
+        findBar.replacement = "$<two>-$<one>-$1";
+        findBar.replaceAll();
+        compare(editor.text, "cd-ab-ab abcd");
+        findBar.query = "ab";
+        findBar.wholeWord = true;
+        compare(findBar.matches.map(m => m.start), [3, 6]);
+        findBar.wholeWord = false;
+        compare(findBar.matches.map(m => m.start), [3, 6, 9]);
+        findBar.query = "(ab";
+        compare(findBar.matches.length, 0);
+        verify(findBar.error !== "");
+        findBar.query = "";
+        findBar.replacement = "";
+        findBar.close();
     }
 
     // Y yanks to the line's end, as Neovim's (y$), but lines in visual

@@ -2296,6 +2296,18 @@ fn regex_parts(regex: &str) -> Vec<(usize, usize, &'static str)> {
         let kind = match chars[i].1 {
             '\\' => {
                 i += 2;
+                // A group again or a kind of character, with its name:
+                // `\k<name>`, `\p{L}`, `\x{1F600}`.
+                let close = match (chars.get(i - 1), chars.get(i)) {
+                    (Some((_, 'k' | 'g')), Some((_, '<'))) => Some('>'),
+                    (Some((_, 'k' | 'g' | 'p' | 'P' | 'x')), Some((_, '{'))) => Some('}'),
+                    _ => None,
+                };
+                if let Some(close) = close
+                    && let Some(length) = chars[i..].iter().position(|&(_, c)| c == close)
+                {
+                    i += length + 1;
+                }
                 "escape"
             }
             '[' => {
@@ -2304,12 +2316,22 @@ fn regex_parts(regex: &str) -> Vec<(usize, usize, &'static str)> {
             }
             '(' => {
                 i += 1;
-                // Flags or a name, like `(?:`, `(?i)` or `(?P<name>`.
                 if is(i, '?') {
-                    while i < chars.len() && !matches!(chars[i].1, ':' | ')' | '>') {
+                    // A look around or an atomic group, which starts what
+                    // it looks for at once: `(?=`, `(?!`, `(?<=`, `(?<!`,
+                    // `(?>`.
+                    let behind = is(i + 1, '<') && (is(i + 2, '=') || is(i + 2, '!'));
+                    if behind {
+                        i += 3;
+                    } else if is(i + 1, '=') || is(i + 1, '!') || is(i + 1, '>') {
+                        i += 2;
+                    } else {
+                        // Flags or a name, like `(?:`, `(?i)` or `(?P<name>`.
+                        while i < chars.len() && !matches!(chars[i].1, ':' | ')' | '>') {
+                            i += 1;
+                        }
                         i += 1;
                     }
-                    i += 1;
                 }
                 "group"
             }
@@ -2317,13 +2339,23 @@ fn regex_parts(regex: &str) -> Vec<(usize, usize, &'static str)> {
                 i += 1;
                 "group"
             }
+            // With a `?` after it it takes as little as it can, with a `+`
+            // it gives nothing back.
             '*' | '+' | '?' => {
-                i += if is(i + 1, '?') { 2 } else { 1 };
+                i += if is(i + 1, '?') || is(i + 1, '+') {
+                    2
+                } else {
+                    1
+                };
                 "quantifier"
             }
             '{' => match repetition_end(&chars, i) {
                 Some(end) => {
-                    i = if is(end, '?') { end + 1 } else { end };
+                    i = if is(end, '?') || is(end, '+') {
+                        end + 1
+                    } else {
+                        end
+                    };
                     "quantifier"
                 }
                 None => {

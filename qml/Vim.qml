@@ -17,6 +17,11 @@ QtObject {
     // data): backs the "+ and "* registers. No other register touches the
     // system clipboard. data is Koil's own (the hidden texts).
     property var clipboard: null
+    // Object with regexError(), regexMatches(), regexBefore() and
+    // regexGroupNames() (System's): the regular expressions the search, :s
+    // and the find bar look for, PCRE2's. Without one (the tests), they're
+    // QML's RegExp (see Txt.regExp).
+    property var regexEngine: null
     property real lineHeight: 16
     // How wide a column is (a character of the editor's font).
     property real charWidth: 8
@@ -6248,32 +6253,38 @@ QtObject {
     // (the last one).
     function substituteRegExp(pattern, flags) {
         const i = flags.lastIndexOf("i"), I = flags.lastIndexOf("I");
-        return Txt.searchRegExp(pattern, i < 0 && I < 0 ? undefined : i > I);
+        return Txt.searchRegExp(pattern, i < 0 && I < 0 ? undefined : i > I, regexEngine);
     }
 
-    // The matches of `re` that :s replaces in t, as { start, end, match }
-    // (the RegExp result): those that start on the lines first to last
+    // The matches of `re` (see Txt.regExp) that :s replaces in t, as
+    // { start, end, match }: those that start on the lines first to last
     // (from 1), only the first on each line unless `all` (g), and only
-    // those in `region`, if it's given.
+    // those in `region`, if it's given (so the first in it on each line).
     function substituteMatches(t, first, last, region, re, all) {
         const u = withoutPrefixes(t), s = u.text;
+        const from = unprefixedAt(u, Txt.lineToPos(t, first));
         const to = unprefixedAt(u, Txt.lineEnd(t, Txt.lineToPos(t, last)));
         const found = [];
-        re.lastIndex = unprefixedAt(u, Txt.lineToPos(t, first));
-        let m;
-        while ((m = re.exec(s)) !== null && m.index <= to) {
-            if (m[0] === "") // step over a whole code point
-                re.lastIndex = m.index + (Txt.isLowSurrogate(s, m.index + 1) ? 2 : 1);
-            const r = prefixedSpan(u, m.index, m.index + m[0].length);
+        const take = m => {
+            const r = prefixedSpan(u, m.index, m.end);
             if (region && !inRegion(region, r))
-                continue;
+                return false;
             found.push({ start: r.start, end: r.end, match: m });
-            if (!all) { // on to the next line
-                const nl = s.indexOf("\n", m.index);
-                if (nl < 0)
-                    break;
-                re.lastIndex = Math.max(re.lastIndex, nl + 1);
-            }
+            return true;
+        };
+        if (all || !region) {
+            re.all(s, from, to, undefined, !all).forEach(take);
+            return found;
+        }
+        // A line's first in the region may come after others on it.
+        for (let at = from, m; (m = re.first(s, at)) !== null && m.index <= to;) {
+            at = Txt.afterMatch(s, m);
+            if (!take(m))
+                continue;
+            const nl = s.indexOf("\n", m.index); // on to the next line
+            if (nl < 0)
+                break;
+            at = Math.max(at, nl + 1);
         }
         return found;
     }
@@ -6958,7 +6969,7 @@ QtObject {
     // (wrapping at the end), and would go round again and again: the rounds
     // left are skipped (999999n).
     function search(t, pattern, forward, count, from) {
-        const re = Txt.searchRegExp(pattern);
+        const re = Txt.searchRegExp(pattern, undefined, regexEngine);
         let p = from, first = -1;
         for (let i = 0; i < count; i++) {
             const q = forward ? searchForward(re, t, p, false) : searchBackward(re, t, p, false);
@@ -6979,37 +6990,21 @@ QtObject {
     // a line starts at its name.
     function searchForward(re, t, p, quiet) {
         const u = withoutPrefixes(t);
-        let m = matchFrom(re, u.text, unprefixedAt(u, p) + 1);
+        let m = re.first(u.text, unprefixedAt(u, p) + 1);
         if (!m) {
-            m = matchFrom(re, u.text, 0);
+            m = re.first(u.text, 0);
             if (m && !quiet)
                 showMessage("search hit BOTTOM, continuing at TOP");
         }
         return m ? prefixedAt(u, m.index) : -1;
     }
 
-    // The first match of `re` in t from `from` on, or null.
-    function matchFrom(re, t, from) {
-        if (from > t.length)
-            return null;
-        re.lastIndex = from;
-        return re.exec(t);
-    }
-
     function searchBackward(re, t, p, quiet) {
-        const u = withoutPrefixes(t), at = unprefixedAt(u, p);
-        let before = -1, last = -1, m;
-        re.lastIndex = 0;
-        while ((m = re.exec(u.text)) !== null) {
-            if (m.index < at)
-                before = m.index;
-            last = m.index;
-            if (m[0] === "")
-                re.lastIndex++;
-        }
-        if (before < 0 && last >= 0 && !quiet)
+        const u = withoutPrefixes(t);
+        const found = re.before(u.text, unprefixedAt(u, p));
+        if (found.before < 0 && found.last >= 0 && !quiet)
             showMessage("search hit TOP, continuing at BOTTOM");
-        return before >= 0 ? prefixedAt(u, before) : last >= 0 ? prefixedAt(u, last) : -1;
+        return found.before >= 0 ? prefixedAt(u, found.before) : found.last >= 0 ? prefixedAt(u, found.last) : -1;
     }
 
     // ---- Search preview ----------------------------------------------------
@@ -7043,7 +7038,7 @@ QtObject {
             searchTarget = substitution.spans[substitution.target].start;
         } else {
             const t = bufferText();
-            const re = Txt.searchRegExp(pattern);
+            const re = Txt.searchRegExp(pattern, undefined, regexEngine);
             searchTarget = pattern === "" ? -1
                 : commandLine[0] === "/" ? searchForward(re, t, cursor, true) : searchBackward(re, t, cursor, true);
         }
@@ -7078,16 +7073,12 @@ QtObject {
             return [];
         const t = bufferText(), u = withoutPrefixes(t);
         const v = visibleRange(t), to = unprefixedAt(u, v.to);
-        const re = Txt.searchRegExp(pattern);
+        const re = Txt.searchRegExp(pattern, undefined, regexEngine);
         const spans = [];
-        re.lastIndex = unprefixedAt(u, v.from);
-        let m;
-        while ((m = re.exec(u.text)) !== null && m.index <= to && spans.length < 5000) {
-            if (m[0] === "") {
-                re.lastIndex++;
+        for (const m of re.all(u.text, unprefixedAt(u, v.from), to, 5000)) {
+            if (m.end === m.index)
                 continue;
-            }
-            const r = prefixedSpan(u, m.index, m.index + m[0].length);
+            const r = prefixedSpan(u, m.index, m.end);
             addHighlight(t, spans, r.start, r.end, r.start === highlightTarget);
         }
         return spans;

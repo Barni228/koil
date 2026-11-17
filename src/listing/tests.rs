@@ -1348,8 +1348,45 @@ fn test_regex_parts() {
             ("$", "anchor")
         ]
     );
+    // what looks around starts at once, a name is the group's
+    assert_eq!(
+        parts(r",*(?<!\.min)(?=x)(?<n>a)(?>b)(?!c)(?<=d)"),
+        [
+            (",", "anchor"),
+            ("*", "quantifier"),
+            ("(?<!", "group"),
+            (r"\.", "escape"),
+            (")", "group"),
+            ("(?=", "group"),
+            (")", "group"),
+            ("(?<n>", "group"),
+            (")", "group"),
+            ("(?>", "group"),
+            (")", "group"),
+            ("(?!", "group"),
+            (")", "group"),
+            ("(?<=", "group"),
+            (")", "group"),
+        ]
+    );
+    assert_eq!(
+        parts(r"a++b*+c?+d{2}+\k<n>\1\p{Lu}\x{1F600}\d"),
+        [
+            ("++", "quantifier"),
+            ("*+", "quantifier"),
+            ("?+", "quantifier"),
+            ("{2}+", "quantifier"),
+            (r"\k<n>", "escape"),
+            (r"\1", "escape"),
+            (r"\p{Lu}", "escape"),
+            (r"\x{1F600}", "escape"),
+            (r"\d", "escape"),
+        ]
+    );
     // unfinished, as it is while it's typed
     assert_eq!(parts(r"(?P<n[a\"), [("(?P<n[a\\", "group")]);
+    assert_eq!(parts(r"(?<"), [("(?<", "group")]);
+    assert_eq!(parts(r"\k<n"), [(r"\k", "escape")]);
 }
 
 /// The parts of `glob` as (text, kind).

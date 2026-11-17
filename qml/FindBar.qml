@@ -146,25 +146,17 @@ FocusScope {
         });
     }
 
-    // The query as a regular expression, or null (with `error` set if the
-    // query is an invalid regular expression).
+    // The query as a regular expression (see Txt.regExp), or null (with
+    // `error` set if the query is an invalid regular expression).
     function regExp() {
         error = "";
         if (query === "")
             return null;
-        const source = useRegex ? query : Txt.escapeRegExp(query);
-        const flags = "gm" + (matchCase ? "" : "i");
-        try {
-            return new RegExp(source, flags + "u");
-        } catch (e) {
-            // e.g. "\-", which is fine without the u flag
-        }
-        try {
-            return new RegExp(source, flags);
-        } catch (e) {
-            error = e.message;
-            return null;
-        }
+        const re = Txt.regExp(useRegex ? query : Txt.escapeRegExp(query), !matchCase, vim.regexEngine);
+        if (!re.error)
+            return re;
+        error = re.error;
+        return null;
     }
 
     // Separators end a word, as in VS Code; everything else is part of one.
@@ -188,21 +180,21 @@ FocusScope {
         if (!re)
             return found;
         const u = vim.withoutPrefixes(t), s = u.text, scope = vim.findScope;
-        let to = s.length;
-        if (scope) {
-            re.lastIndex = vim.unprefixedAt(u, scope[0].start);
-            to = vim.unprefixedAt(u, scope[scope.length - 1].end);
-        }
-        let m;
-        while (found.length < maxMatches && (m = re.exec(s)) !== null && m.index <= to) {
-            const e = m.index + m[0].length;
-            if (m[0] === "") // step over a whole code point
-                re.lastIndex = m.index + (Txt.isLowSurrogate(s, m.index + 1) ? 2 : 1);
-            if (!wholeWord || isWholeWord(s, m.index, e)) {
-                const r = vim.prefixedSpan(u, m.index, e);
-                if (!scope || vim.inRegion(scope, r))
-                    found.push({ start: r.start, end: r.end, match: m });
+        const to = scope ? vim.unprefixedAt(u, scope[scope.length - 1].end) : s.length;
+        // As many at a time as it shows, then more if some weren't whole
+        // words or in the selection.
+        for (let at = scope ? vim.unprefixedAt(u, scope[0].start) : 0; found.length < maxMatches;) {
+            const some = re.all(s, at, to, maxMatches);
+            for (const m of some) {
+                if (found.length < maxMatches && (!wholeWord || isWholeWord(s, m.index, m.end))) {
+                    const r = vim.prefixedSpan(u, m.index, m.end);
+                    if (!scope || vim.inRegion(scope, r))
+                        found.push({ start: r.start, end: r.end, match: m });
+                }
             }
+            if (some.length < maxMatches)
+                break;
+            at = Txt.afterMatch(s, some[some.length - 1]);
         }
         return found;
     }

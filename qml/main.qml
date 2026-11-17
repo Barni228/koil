@@ -2798,6 +2798,7 @@ ApplicationWindow {
         linePrefixes: root.listing && root.activeView === editorView
         bangEntries: root.listing ? "%" : root.scratchpad ? "<cfile>" : ""
         clipboard: system
+        regexEngine: system
         fileName: root.listing ? root.location : root.filePath
         lineHeight: editorView.lineHeight
         charWidth: editorView.charWidth
@@ -3205,6 +3206,7 @@ ApplicationWindow {
 
         theme: theme
         defaultFontFamily: root.defaultFontFamily
+        regexEngine: system
         onAboutToHide: hadKeys = !root.activeFocusItem || holds(root.activeFocusItem)
         onClosed: {
             // Closed while the command it shows runs (something took the

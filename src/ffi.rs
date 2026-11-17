@@ -71,6 +71,8 @@ mod bridge {
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qstringlist.h");
         type QStringList = cxx_qt_lib::QStringList;
+        include!("cxx-qt-lib/qlist.h");
+        type QList_i32 = cxx_qt_lib::QList<i32>;
 
         include!("native.h");
 
@@ -265,6 +267,32 @@ mod bridge {
         /// native.h).
         #[cxx_name = "scrollToCursorInQml"]
         unsafe fn scroll_to_cursor_in_qml(text_area: *mut QObject);
+
+        /// Why `pattern` isn't a regular expression (PCRE2's), or empty
+        /// (see native.h).
+        #[cxx_name = "regexError"]
+        fn regex_error(pattern: &QString, flags: &QString) -> QString;
+
+        /// The matches of `pattern` in `text`, as 32-bit numbers (see
+        /// native.h).
+        #[cxx_name = "regexMatches"]
+        fn regex_matches(
+            text: &QString,
+            pattern: &QString,
+            flags: &QString,
+            from: i32,
+            to: i32,
+            limit: i32,
+        ) -> QByteArray;
+
+        /// Where the last match of `pattern` before `at` starts, and the
+        /// last of all (see native.h).
+        #[cxx_name = "regexBefore"]
+        fn regex_before(text: &QString, pattern: &QString, flags: &QString, at: i32) -> QList_i32;
+
+        /// The names of `pattern`'s groups (see native.h).
+        #[cxx_name = "regexGroupNames"]
+        fn regex_group_names(pattern: &QString, flags: &QString) -> QStringList;
     }
 }
 
@@ -302,3 +330,6 @@ fn syntax_spans(
     }));
     state.number()
 }
+
+#[cfg(test)]
+mod tests;

@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 use cxx_qt::Threading;
-use cxx_qt_lib::{QString, QStringList};
+use cxx_qt_lib::{QByteArray, QList, QString, QStringList};
 use serde_json::json;
 
 use crate::convert::{paths, to_json};
@@ -27,6 +27,10 @@ pub mod qobject {
         type QString = cxx_qt_lib::QString;
         include!("cxx-qt-lib/qstringlist.h");
         type QStringList = cxx_qt_lib::QStringList;
+        include!("cxx-qt-lib/qlist.h");
+        type QList_i32 = cxx_qt_lib::QList<i32>;
+        include!("cxx-qt-lib/qbytearray.h");
+        type QByteArray = cxx_qt_lib::QByteArray;
     }
 
     #[auto_cxx_name]
@@ -177,6 +181,48 @@ pub mod qobject {
         /// `===` does.
         #[qinvokable]
         fn same_text(self: &System, a: &QString, b: &QString) -> bool;
+
+        /// Why `pattern` isn't a regular expression, or empty if it is
+        /// one: PCRE2's, which the search, :s, the find bar and the help's
+        /// search look for (see text.js's `regExp`). `flags` has an `i` to
+        /// ignore case.
+        #[qinvokable]
+        fn regex_error(self: &System, pattern: &QString, flags: &QString) -> QString;
+
+        /// The matches of `pattern` in `text` that start from `from` up to
+        /// `to` (UTF-16 indexes), at most `limit`, and with an `l` in
+        /// `flags` only the first that starts on each line: how many
+        /// numbers a match takes, then for each where it and each of its
+        /// groups start and end (-1 for a group that took no part), as
+        /// the bytes of an `Int32Array` (QML's `ArrayBuffer`). Empty if
+        /// `pattern` isn't valid.
+        #[qinvokable]
+        fn regex_matches(
+            self: &System,
+            text: &QString,
+            pattern: &QString,
+            flags: &QString,
+            from: i32,
+            to: i32,
+            limit: i32,
+        ) -> QByteArray;
+
+        /// Where the last match of `pattern` in `text` that starts before
+        /// `at` starts, then where the last of all does (looked for only
+        /// without the first), -1 for none.
+        #[qinvokable]
+        fn regex_before(
+            self: &System,
+            text: &QString,
+            pattern: &QString,
+            flags: &QString,
+            at: i32,
+        ) -> QList_i32;
+
+        /// The name of each group of `pattern`, the whole match (empty)
+        /// first; empty for one without a name.
+        #[qinvokable]
+        fn regex_group_names(self: &System, pattern: &QString, flags: &QString) -> QStringList;
 
         /// The length of the longest hidden line, or 0 for none.
         #[qinvokable]
@@ -448,6 +494,36 @@ impl qobject::System {
 
     fn same_text(&self, a: &QString, b: &QString) -> bool {
         self.same_string(a, b) || a.as_slice() == b.as_slice()
+    }
+
+    fn regex_error(&self, pattern: &QString, flags: &QString) -> QString {
+        ffi::regex_error(pattern, flags)
+    }
+
+    fn regex_matches(
+        &self,
+        text: &QString,
+        pattern: &QString,
+        flags: &QString,
+        from: i32,
+        to: i32,
+        limit: i32,
+    ) -> QByteArray {
+        ffi::regex_matches(text, pattern, flags, from, to, limit)
+    }
+
+    fn regex_before(
+        &self,
+        text: &QString,
+        pattern: &QString,
+        flags: &QString,
+        at: i32,
+    ) -> QList<i32> {
+        ffi::regex_before(text, pattern, flags, at)
+    }
+
+    fn regex_group_names(&self, pattern: &QString, flags: &QString) -> QStringList {
+        ffi::regex_group_names(pattern, flags)
     }
 
     fn kept_as_is(&self, text: &QString) -> bool {

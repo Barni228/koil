@@ -123,8 +123,49 @@
   lines start with one, else 2, 4 or 8 spaces, the step lines most often
   go in by, if twice or more (a text to reindent can have one stray), else
   4; surround's levels use it too, `>` doesn't.
+- **Regular expressions** (`Txt.regExp`, `regexMatches` in native.cpp): the
+  search, `:s`, the find bar and the help's search look for PCRE2's,
+  through Qt's `QRegularExpression`, not QML's `RegExp`: Qt's JavaScript
+  has no look behind (`(?<!a)b` is "Invalid regular expression"), no
+  `(?i)`, `a++`, `(?>a)` nor `\p{L}`, and nothing stops a pattern that
+  takes forever (PCRE2 gives up after its match limit, as no match). It
+  reads the text as it is (UTF-16, so the positions are the editor's, and
+  nothing is copied), compiled to machine code, and the compiled ones are
+  kept (`compiledRegex`), as a search asks for the same one at every key
+  and scroll. `^` and `$` are a line's (`MultilineOption`), `.` is a whole
+  character but no line break, and `\w`, `\d` and `\b` know every script
+  (`UseUnicodePropertiesOption`). `Txt.regExp(source, ignoreCase, engine)`
+  gives `first`, `all` and `before` (a search backwards), each one call
+  into C++ however many matches (`regexMatches` gives numbers: where each
+  match and its groups start and end, as the bytes of an `Int32Array`,
+  which QML reads three times faster than a list's), and matches as
+  `RegExp`'s, with `end`. PCRE2 would check that the text is UTF-16 at
+  every match it's asked for, from there to the text's end (32 s for the
+  5,000 matches the highlights ask for at most in 10 MB, 7 ms for the one
+  at the cursor), so `isUtf16` checks it once and keeps the text it found
+  right (which shares it, so it can tell it's the same one), for half a
+  minute after it was last asked about, and the matches are asked for
+  without the check; a text that isn't UTF-16 (half a surrogate pair) has
+  no matches, and a search never starts inside a pair (`characterStart`).
+  In 10 MB (200,000 lines), against QML's `RegExp`: the first match, at
+  the end, 3 ms (117), none at all 2 ms (115), a search backwards from the
+  end 34 ms (196), 19,999 for the find bar 11 ms (31), a match at the
+  cursor or the view's highlights under 1 ms (the same), and the first on
+  each line with a group, as a `:%s` asks at every key of its preview,
+  181 ms (123): 200,000 calls into PCRE2 take 88 of them. After a match of nothing the next is looked for a whole character
+  on (`afterMatch`), and `:s` without `g` asks for the first on each line
+  (`perLine`, an `l` in the flags). `engine` is `System`, which `Vim` and `HelpPanel` take as
+  `regexEngine`; the tests have none, so there it's QML's `RegExp` behind
+  the same three functions (`scriptRegExp`), PCRE itself is tested in
+  ffi/tests.rs (a test can call native.cpp's functions that need no app),
+  and `test_regexEngine` has a stand-in, for the reading of the numbers.
+  A look behind can be of a few lengths (`(?<=ab|c)`), but not of any
+  (`(?<=a+)`), unlike the path field's (koil-core's `fancy-regex`, see The
+  path field), whose regexes are otherwise written the same. Smart case
+  (`Txt.ignoresCase`) doesn't count the letters of an escape (`\S`,
+  `\p{Lu}`, `\k<Name>`), a group's name or a verb.
 - **Substitute** (`:s`, Substitute in Vim.qml): vim's, with `/`'s patterns
-  (JavaScript regexes, smart case unless the `i` or `I` flag says) through
+  (see Regular expressions; smart case unless the `i` or `I` flag says) through
   the text without its prefixes, as a search (a line starts at its name,
   and a line a replacement starts gets one: `prefixLines`), and vim's
   replacement (`Txt.substitution`: `&`, `\1`, `\u`, `\r`; but `~` is only
@@ -170,7 +211,9 @@
 - **Find bar**: moving to a match moves vim's cursor to its start
   (`vim.jumpTo`, which leaves visual mode and breaks an insert); it doesn't
   select it. Its regex option (`useRegex`) is on at first, so Find's seed
-  goes in escaped. The current match is the one starting at the cursor
+  goes in escaped; a query that isn't one shows PCRE2's reason (`error`).
+  It asks for as many matches as it shows (`maxMatches`) at a time, and
+  for more while whole word or the selection left some out. The current match is the one starting at the cursor
   (`currentStart`), however the cursor got there. Its matches take over the
   search highlights while it's open; Esc in normal mode (`highlightsCleared`)
   closes it. Replace All is one `replaceRange` over the first to last match,

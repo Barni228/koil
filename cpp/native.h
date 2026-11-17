@@ -215,3 +215,44 @@ void setTextEntryLines(QObject* textDocument, const QStringList& entryLines, con
 // in alphabetical order: the fonts the editor offers. It loads every font,
 // which takes a moment (a few hundred ms for a few hundred families).
 QStringList monospaceFamilies();
+
+// ---- Regular expressions --------------------------------------------------
+// What the search, :s, the find bar and the help's search look for: PCRE2's,
+// through QRegularExpression, which has what QML's RegExp lacks (a look
+// behind, `(?i)`, `a++`, `(?>a)`, `\p{L}`), compiled to machine code, and
+// reads the text as it is, UTF-16, so positions are the editor's. `flags`
+// has an `i` to ignore case; `^` and `$` are a line's, and `\w`, `\d` and
+// `\b` know every script's letters and digits. The compiled
+// regular expressions are kept, so the same one can be asked for at every
+// key.
+
+// Why `pattern` isn't a regular expression, or empty if it is one.
+QString regexError(const QString& pattern, const QString& flags);
+
+// The matches of `pattern` in `text` that start from `from` up to `to`, at
+// most `limit`, in order, none overlapping: how many numbers a match takes
+// (two for it and two for each group), then for each match where it and
+// each of its groups start and end (-1 for a group that took no part).
+// The numbers are 32 bits each, as bytes, which QML reads as an Int32Array:
+// from a list, reading 800,000 (a :%s over 200,000 lines, with a group)
+// took 65 ms, from the array 23.
+// Empty if `pattern` isn't valid, and no matches in a text that isn't
+// UTF-16 (half a surrogate pair). After a match of nothing, the next is
+// looked for a character on. With an `l` in `flags`, only the first that
+// starts on each line (:s without g).
+QByteArray regexMatches(const QString& text,
+                        const QString& pattern,
+                        const QString& flags,
+                        int from,
+                        int to,
+                        int limit);
+
+// Where the last match of `pattern` in `text` that starts before `at`
+// starts, and where the last one of all does (only looked for if none
+// starts before `at`), -1 for none: what a search backwards from `at`
+// finds, and where it goes once it wraps.
+QList<int> regexBefore(const QString& text, const QString& pattern, const QString& flags, int at);
+
+// The name of each group of `pattern`, in order, the whole match (empty)
+// first; empty for one without a name.
+QStringList regexGroupNames(const QString& pattern, const QString& flags);

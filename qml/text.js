@@ -971,30 +971,150 @@ function escapeRegExp(s) {
 
 // Whether a search for pattern ignores case, as vim's 'smartcase' does: it
 // does unless the pattern has an uppercase letter. In a regular expression
-// (regex), the letters of an escape don't count (`\S`, `\x4A`, `\cM`).
+// (regex), the letters of an escape don't count (`\S`, `\x4A`, `\p{Lu}`,
+// `\k<Name>`), nor a group's name (`(?<Name>`) or a verb (`(*UCP)`).
 function ignoresCase(pattern, regex) {
-    const s = regex ? pattern.replace(/\\(?:u\{?[0-9a-fA-F]*\}?|x[0-9a-fA-F]{0,2}|c[a-zA-Z]?|[^])/g, "") : pattern;
+    const s = regex ? pattern.replace(/\\(?:x\{[0-9a-fA-F]*\}?|x[0-9a-fA-F]{0,2}|u\{?[0-9a-fA-F]*\}?|[pP]\{[^}]*\}?|[pPc][^]?|[kgNo]\{[^}]*\}?|[kg]<[^>]*>?|[kg]'[^']*'?|[^])|\(\?P?[<'][A-Za-z_]\w*[>']|\(\?P[=>]\w*|\(\*[A-Z_]+/g, "") : pattern;
     return s === s.toLowerCase();
 }
 
-// What a search for pattern (vim's, the help's) looks for: with the u flag
-// if it can be (so . is an emoji, not half of one, and \u{1F600} works), as
-// the find bar's. A pattern that isn't a valid regular expression (e.g.
-// while it's still being typed) is searched for literally. Either way, one
-// without an uppercase letter ignores case (smart case), unless
-// `ignoreCase` says (:s's i and I).
-function searchRegExp(pattern, ignoreCase) {
-    const flags = regex => (ignoreCase === undefined ? ignoresCase(pattern, regex) : ignoreCase) ? "gmi" : "gm";
+// A regular expression to look for in texts: `source`, ignoring case with
+// `ignoreCase`, where ^ and $ are a line's. With `engine` (System), it's
+// PCRE2's (see native.h), which has a look behind (`(?<!a)b`), `(?i)`,
+// `a++`, `(?>a)` and `\p{L}`; without one (the tests have no System), QML's
+// RegExp, which has none of those. Either way, it has
+//   error: why `source` isn't a regular expression (then nothing else), or ""
+//   first(t, from): the first match that starts at `from` or after, or null
+//   all(t, from, to, limit, perLine): the matches that start from `from` up
+//     to `to` (the whole of t without them), at most `limit`, in order, none
+//     overlapping; after a match of nothing, the next is looked for a
+//     character on. With `perLine`, only the first that starts on each line.
+//   before(t, at): where the last match that starts before `at` starts
+//     (`before`), and where the last of all does (`last`, only looked for
+//     without a `before`), -1 for none
+// A match is as RegExp's: the text it took, then each group's (undefined
+// for one that took no part), with `index`, `end` and, if a group has a
+// name, `groups`, by name.
+function regExp(source, ignoreCase, engine) {
+    return engine ? nativeRegExp(source, ignoreCase ? "i" : "", engine) : scriptRegExp(source, ignoreCase ? "gmi" : "gm");
+}
+
+const noLimit = 0x7fffffff;
+
+// Where the match after m (see regExp) is looked for in t: after it, or a
+// whole character on if it's of nothing.
+function afterMatch(t, m) {
+    return m.end > m.index ? m.end : m.end + (isLowSurrogate(t, m.end + 1) ? 2 : 1);
+}
+
+function nativeRegExp(source, flags, engine) {
+    const error = engine.regexError(source, flags);
+    if (error)
+        return { error: error };
+    // Only asked for if a group can have a name: (?<a>, (?P<a> or (?'a'.
+    const names = /\(\?(?:P?<[^=!]|')/.test(source) ? engine.regexGroupNames(source, flags) : null;
+    // bytes is System's regexMatches: a match's size, then each match's
+    // numbers.
+    const read = (t, bytes) => {
+        const found = new Int32Array(bytes);
+        const matches = [], size = found.length > 0 ? found[0] : 0;
+        for (let i = 1; i + size <= found.length; i += size) {
+            const m = [];
+            for (let g = 0; g < size; g += 2)
+                m.push(found[i + g] < 0 ? undefined : t.slice(found[i + g], found[i + g + 1]));
+            m.index = found[i];
+            m.end = found[i + 1];
+            if (names) {
+                m.groups = {};
+                for (let g = 1; g < names.length; g++) {
+                    if (names[g])
+                        m.groups[names[g]] = m[g];
+                }
+            }
+            matches.push(m);
+        }
+        return matches;
+    };
+    // An l in the flags asks for the first on each line.
+    const all = (t, from, to, limit, perLine) => read(t, engine.regexMatches(t, source, perLine ? flags + "l" : flags,
+        from || 0, to === undefined ? t.length : to, limit === undefined ? noLimit : limit));
+    return {
+        error: "",
+        first: (t, from) => all(t, from, t.length, 1, false)[0] || null,
+        all: all,
+        before: (t, at) => {
+            const found = engine.regexBefore(t, source, flags, at);
+            return { before: found[0], last: found[1] };
+        }
+    };
+}
+
+function scriptRegExp(source, flags) {
+    let re;
     try {
-        return new RegExp(pattern, flags(true) + "u");
+        // with the u flag if it can be, so . is an emoji, not half of one
+        re = new RegExp(source, flags + "u");
     } catch (e) {
-        // e.g. "\-" or vim's "\<", which are fine without the u flag
+        try {
+            // e.g. "\-" or vim's "\<", which are fine without the u flag
+            re = new RegExp(source, flags);
+        } catch (e2) {
+            return { error: e2.message };
+        }
     }
-    try {
-        return new RegExp(pattern, flags(true));
-    } catch (e) {
-        return new RegExp(escapeRegExp(pattern), flags(false));
-    }
+    const next = (t, from) => {
+        if (from > t.length)
+            return null;
+        re.lastIndex = from;
+        const m = re.exec(t);
+        if (m)
+            m.end = m.index + m[0].length;
+        return m;
+    };
+    return {
+        error: "",
+        first: next,
+        all: (t, from, to, limit, perLine) => {
+            const found = [];
+            if (to === undefined)
+                to = t.length;
+            if (limit === undefined)
+                limit = noLimit;
+            for (let at = from || 0, m; found.length < limit && (m = next(t, at)) !== null && m.index <= to;) {
+                found.push(m);
+                at = afterMatch(t, m);
+                if (perLine) {
+                    const nl = t.indexOf("\n", m.index);
+                    if (nl < 0)
+                        break;
+                    at = Math.max(at, nl + 1);
+                }
+            }
+            return found;
+        },
+        before: (t, at) => {
+            let before = -1, last = -1;
+            for (let from = 0, m; (m = next(t, from)) !== null; from = afterMatch(t, m)) {
+                if (m.index >= at && before >= 0)
+                    break;
+                last = m.index;
+                if (m.index < at)
+                    before = m.index;
+            }
+            return { before: before, last: last };
+        }
+    };
+}
+
+// What a search for pattern (vim's, the help's) looks for (see regExp). A
+// pattern that isn't a valid regular expression (e.g. while it's still
+// being typed) is searched for literally. Either way, one without an
+// uppercase letter ignores case (smart case), unless `ignoreCase` says
+// (:s's i and I).
+function searchRegExp(pattern, ignoreCase, engine) {
+    const ignores = regex => ignoreCase === undefined ? ignoresCase(pattern, regex) : ignoreCase;
+    const re = regExp(pattern, ignores(true), engine);
+    return re.error ? regExp(escapeRegExp(pattern), ignores(false), engine) : re;
 }
 
 // ---- Code ------------------------------------------------------------------

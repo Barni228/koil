@@ -6,7 +6,8 @@
   text has no inline padding, so letter spacing on the character before a
   code and on its last one makes room for the shade (and copies as
   nothing), and a code's spaces are no-break ones (copied as spaces). Its
-  search is vim's (`Txt.searchRegExp`, so smart case), over each text as
+  search is vim's (`Txt.searchRegExp`, so smart case, and PCRE2's with its
+  `regexEngine`, see Regular expressions), over each text as
   shown (`searchTexts`, keyed by section and part), from the match it went
   to last if that's in view, else from the top of the view; Esc clears the
   highlights before it closes the help. The top of the view is a place
