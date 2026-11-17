@@ -6,7 +6,7 @@ import "../qml"
 import "../qml/text.js" as Txt
 
 // Vim.qml (and the find bar's replace) without the Rust app:
-//   qmltestrunner -input tests
+//   QT_QPA_PLATFORM=offscreen qmltestrunner -input tests
 TestCase {
     id: tc
 
@@ -5333,6 +5333,10 @@ TestCase {
     function test_helpSearch() {
         help.showList("Test", [["a", "one two"], ["b", "two three two"], ["c", "x"]], 4);
         tryCompare(help, "opened", true);
+        // Once it's as tall as its rows: before that only its first row is
+        // in view, and `n` goes on from the match it's on only if that
+        // shows (a key came that soon offscreen, about every other run).
+        waitForRendering(help.contentItem);
         keys("n");
         compare(help.searchMessage, "E35: No previous regular expression");
         keys("<Esc>");
@@ -5605,6 +5609,12 @@ TestCase {
         // Once its rows are laid out, which is where the link is.
         tryVerify(() => help.span(ctrl).bottom - help.span(ctrl).top > 100);
         verify(helpLinks(help.contentItem).every(l => l.topic === "block"));
+        // Scrolled to, if it's below what the help shows: a click only
+        // reaches what does, and how far down the link is goes by the
+        // font (offscreen's put it under the window's edge).
+        const below = link.mapToItem(help.contentItem, 0, link.height).y - help.contentItem.height;
+        if (below > 0)
+            help.scrollBy(below + link.height);
         mouseClick(link);
         compare(unfolded(), [block, ctrl]);
         compare(help.current, block);

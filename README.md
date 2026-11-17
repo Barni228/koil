@@ -212,7 +212,7 @@ Needs Rust and Qt 6 with `qmake` on `PATH` (macOS: `brew install qtbase qtdeclar
 cargo run                    # lists your home directory
 cargo run -- path            # a directory, a pattern, or a file to edit
 cargo test                   # the listing's tests
-qmltestrunner -input tests   # the editor's tests
+QT_QPA_PLATFORM=offscreen qmltestrunner -input tests   # the editor's tests, without windows
 ```
 
 ## License

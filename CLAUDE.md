@@ -75,9 +75,22 @@ A line a file; `docs/layout.md` says what each has, by function.
 - `build.rs` adds every `.qml` and `.js` in `qml/` to the QML module. A file
   whose name starts with an uppercase letter becomes a type (and must end in
   `.qml`, or cxx-qt-build panics); `main.qml` and `text.js` stay lowercase.
-- `qmltestrunner -input tests` runs the tests. They load `qml/` by path, so
+- `QT_QPA_PLATFORM=offscreen qmltestrunner -input tests` runs the QML
+  tests without windows: run them this way while working. Nothing opens
+  over the user's work, and what the user types meanwhile doesn't reach
+  the tests (with windows it does, and fails them). Only at the very end,
+  once everything else is done, run them once with their windows too
+  (`qmltestrunner -input tests`), for what offscreen doesn't have: the
+  system's fonts and its windows. Offscreen is fast and has other fonts,
+  so a test that passes only with windows waited for nothing: have it wait
+  for what it needs (`tryVerify`, `waitForRendering` before a key that
+  goes by what's in view, `wait(0)` after closing a popup with a window of
+  its own, which gives the keys to the window it was in) and scroll to
+  what it clicks, as a click reaches only what shows.
+  They load `qml/` by path, so
   anything they instantiate must not `import Koil` (only `main.qml` does, for
-  `Document` and `System`; `Editor` takes `System` as a `var`). A test's
+  `Document` and `System`; `Editor` takes `System` as a `var`). With
+  windows, a test's
   keys go to the window that has them, and while another app is in front
   (where the tests were started from), macOS takes qmltestrunner's
   activation away about half a second in and refuses to give it back: so

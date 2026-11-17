@@ -6,7 +6,7 @@ import "../qml"
 
 // The Shortcuts window with the keys alone: Tab goes through all of it
 // (which Qt's own Tab doesn't on macOS, unless Keyboard navigation is on).
-//   qmltestrunner -input tests
+//   QT_QPA_PLATFORM=offscreen qmltestrunner -input tests
 TestCase {
     id: tc
 
@@ -628,6 +628,12 @@ TestCase {
         const row = drop.view.itemAtIndex(1) as DropOption;
         compare(row.text, "b");
         drop.close();
+        // Its window is done closing only once the events are gone
+        // through, and it gives the keys to the window it was in (this
+        // TestCase's) then: after the next test opened `win`, without this,
+        // whose keys went nowhere (offscreen, where nothing else is slow
+        // enough to hide it).
+        wait(0);
     }
 
     // Export asks which to export, all picked at first: Space picks the
