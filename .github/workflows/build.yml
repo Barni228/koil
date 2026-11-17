@@ -93,9 +93,12 @@ jobs:
           aqtversion: ">=3.1"
 
       - name: Rust tests
+        id: rust
         run: cargo test --locked
 
+      # Also if the Rust tests failed, which they don't depend on.
       - name: QML tests
+        if: success() || steps.rust.outcome == 'failure'
         shell: bash
         run: scripts/qml-tests.sh
 
