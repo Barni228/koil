@@ -206,7 +206,9 @@ option. Terminals opened after that have `koil`.
 
 ## Build
 
-Needs Rust and Qt 6 with `qmake` on `PATH` (macOS: `brew install qtbase qtdeclarative`).
+Needs Rust and Qt 6 with `qmake` on `PATH` (macOS: `brew install qtbase qtdeclarative`;
+Windows: Visual Studio's Build Tools with the C++ workload, and Qt for MSVC, like
+`aqt install-qt windows desktop 6.10.3 win64_msvc2022_64`, with its `bin` on `PATH`).
 
 ```sh
 cargo run                    # lists your home directory

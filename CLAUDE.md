@@ -59,7 +59,10 @@ A line a file; `docs/layout.md` says what each has, by function.
 ## Build and test
 
 - Local Qt comes from Homebrew (`qtbase`, `qtdeclarative`); `qmake` must be on
-  `PATH`. `cargo build`, `cargo run` (lists the home dir, or the
+  `PATH`. On Windows: Visual Studio's Build Tools (C++ workload, which
+  `cargo` finds itself), rustup, and CI's Qt from aqtinstall (`aqt
+  install-qt windows desktop 6.10.3 win64_msvc2022_64 -O <dir>`, its
+  `bin` on `PATH`). `cargo build`, `cargo run` (lists the home dir, or the
   Start in setting's), `cargo run -- dir`
   (or a pattern), `cargo run -- file` to open a file, `cargo run -- -s`
   (or `ls | cargo run`) for the scratchpad, `cargo run -- --help` for the
