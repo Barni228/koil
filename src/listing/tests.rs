@@ -43,7 +43,8 @@ fn koil() -> (TempDir, Koil) {
 }
 
 /// A temp dir with `dirs` (and the dirs they're in) and the empty files
-/// `files`, and a Koil that has it open.
+/// `files`, each with a key of its own (see `own_key`), and a Koil that has
+/// it open.
 fn koil_with(dirs: &[&str], files: &[&str]) -> (TempDir, Koil) {
     let temp = tempfile::tempdir().unwrap();
     for dir in dirs {
@@ -52,9 +53,47 @@ fn koil_with(dirs: &[&str], files: &[&str]) -> (TempDir, Koil) {
     for file in files {
         fs::write(temp.path().join(file), "").unwrap();
     }
+    let made: HashSet<&Path> = (dirs.iter().chain(files))
+        .flat_map(|path| Path::new(path).ancestors())
+        .filter(|path| !path.as_os_str().is_empty())
+        .collect();
+    for path in made {
+        own_key(&temp.path().join(path));
+    }
     let mut koil = Koil::default();
     koil.open(temp.path()).unwrap();
     (temp, koil)
+}
+
+/// Gives what was made at `path` a creation time of its own on Windows,
+/// which is how koil-core's sync knows a file there (its `FileKey`): files
+/// made in the same tick of the clock get the same one, and a key two
+/// files share is never followed, so a test that renames one on disk had
+/// it taken for gone and new, most of the time (`test_sync_asks`).
+fn own_key(path: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{FileTimesExt, OpenOptionsExt};
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::time::SystemTime;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_WRITE_ATTRIBUTES,
+        };
+        static MADE: AtomicU64 = AtomicU64::new(0);
+        // A millisecond apart, in 2020, so nothing else made by then has it.
+        let made = MADE.fetch_add(1, Ordering::Relaxed);
+        let created = SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        let times = fs::FileTimes::new().set_created(created + Duration::from_millis(made));
+        // Opening a dir takes FILE_FLAG_BACKUP_SEMANTICS.
+        let file = fs::OpenOptions::new()
+            .access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+            .unwrap();
+        file.set_times(times).unwrap();
+    }
+    #[cfg(not(windows))]
+    let _ = path;
 }
 
 /// Updates the listing as it's rendered, with `path` in the path field,
