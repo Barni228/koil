@@ -3135,8 +3135,12 @@ TestCase {
                 ["<C-D-k>", "<C-D-K>", "<M-D-k>", "<C-M-D-K>", "<M-D-1>", "<C-D-/>", "<C-D-Left>",
                     "<C-M-D-S-Left>", "<D-BS>", null, "<C-M-k>"]);
         } else {
-            // AltGr comes as Ctrl+Alt, and types
-            compare(name(Qt.Key_Q, ctrl | alt, "@"), "@");
+            // AltGr comes as Ctrl+Alt, and types; Ctrl+Alt and a key it
+            // types nothing with comes with the key's own letter or digit
+            // (as Windows sends them), and is the key
+            compare([name(Qt.Key_Q, ctrl | alt, "@"), name(Qt.Key_K, ctrl | alt, "K"),
+                name(Qt.Key_K, ctrl | alt | shift, "K"), name(Qt.Key_1, ctrl | alt, "1")],
+                ["@", "<C-M-k>", "<C-M-K>", "<C-M-1>"]);
         }
         compare(vim.macroKeys("<C-K><C-M-k><C-M-K><C-D-K><M-D-k><C-M-D-1><C-M-D-S-F5><M-D-Left><C-1><C-?><C-M-[>"),
             ["<C-K>", "<C-M-k>", "<C-M-K>", "<C-D-K>", "<M-D-k>", "<C-M-D-1>", "<C-M-D-S-F5>", "<M-D-Left>", "<C-1>",

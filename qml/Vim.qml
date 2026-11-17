@@ -914,8 +914,13 @@ QtObject {
         const typed = text.length > 0 && text.charCodeAt(0) >= 32 && text !== "\x7f";
         if (cmd && !ctrl && event.key === Qt.Key_Backspace)
             return "<D-BS>";
-        // Off macOS, Ctrl+Alt is AltGr too, which types a character.
-        if ((ctrl || cmd) && (isMac || !alt || !typed)) {
+        // Off macOS, Ctrl+Alt is AltGr too, which types a character. But
+        // not the key's own letter or digit, which is what Windows gives
+        // when it types none (Ctrl+Alt+K comes with "K", Ctrl+Alt+1 with
+        // "1"): then it's the key, with Ctrl and Alt.
+        const altGr = !isMac && alt && typed && !(/^[A-Za-z0-9]$/.test(text)
+            && text.toUpperCase().charCodeAt(0) === event.key);
+        if ((ctrl || cmd) && !altGr) {
             const prefix = (ctrl ? "C-" : "") + (alt ? "M-" : "") + (cmd ? "D-" : "");
             if (event.key === Qt.Key_BracketLeft && prefix === "C-")
                 return "<Esc>";

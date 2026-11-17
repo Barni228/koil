@@ -128,11 +128,18 @@
   (`C-`, `M-`, `D-`, `S-`: `<C-M-k>`, `<C-D-K>`, `<C-M-D-S-Left>`),
   which `keysIn` reads only so. Alt is one only with Ctrl or Cmd, as
   alone it types characters or opens a menu, and off macOS not where
-  Ctrl+Alt types one (AltGr, by the event's text). On macOS, Qt gives
+  Ctrl+Alt types one (AltGr, by the event's text). But a letter or digit
+  that is the key's own isn't AltGr's: where Ctrl+Alt types nothing,
+  Windows gives the key's character, a letter uppercase (Ctrl+Alt+K and
+  Ctrl+Alt+Shift+K come with "K", Ctrl+Alt+1 with "1"), which ran `K`
+  and started a count, and AltGr never types those. A sign it gives as
+  well (Ctrl+Alt+/ with "/") can't be told from one AltGr types, so it
+  types it. On macOS, Qt gives
   the letter as the key whatever is held (Option too, though the text is
   `˚`), and a digit or sign with Ctrl as it is, or as Shift has it,
   tried with System Events' `key code` on a window that logs its key
-  events; untried elsewhere. F-keys, Shift+Tab, the Ctrl and Cmd ones
+  events, and on Windows with `SendKeys` on one; untried elsewhere.
+  F-keys, Shift+Tab, the Ctrl and Cmd ones
   with a name, a digit or sign with Ctrl, and a character with Ctrl or
   Cmd and another of the two or Alt, are keys only a shortcut takes
   (`shortcutOnly`): without one they do nothing, not even end a command,
