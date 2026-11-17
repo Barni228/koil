@@ -371,7 +371,9 @@ fn kind_of(info: &Info, text: &str) -> Option<Kind> {
 #[test]
 fn colors() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().canonicalize().unwrap();
+    // Not `\\?\C:\…` on Windows, which Koil never shows (with_slashes
+    // leaves its `\`).
+    let path = dunce::canonicalize(dir.path()).unwrap();
     let file = path.join("a.txt");
     fs::write(&file, "x".repeat(1234)).unwrap();
     let info = shown(&file, None, None);

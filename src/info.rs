@@ -38,7 +38,9 @@ pub struct Span {
     pub kind: Kind,
 }
 
-/// What a part of what `K` shows is, which says its color.
+/// What a part of what `K` shows is, which says its color. Permissions and
+/// owners are Unix's alone.
+#[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {

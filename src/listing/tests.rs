@@ -23,9 +23,12 @@ fn pending(koil: &Koil, text: &str, hidden: &[Hidden]) -> Vec<usize> {
     pending_lines(koil, text, hidden, &HashSet::new()).pending
 }
 
-/// `name` in the dir `koil` has open, as QML takes a path.
+/// `name` (with `/` between its parts) in the dir `koil` has open, as QML
+/// takes a path: with `\` on Windows.
 fn path_in(koil: &Koil, name: &str) -> String {
-    unicode(&koil.current_dir().join(name)).unwrap()
+    let mut path = koil.current_dir().to_path_buf();
+    path.extend(name.split('/'));
+    unicode(&path).unwrap()
 }
 
 /// The lines of what applying would do.
@@ -775,17 +778,19 @@ fn test_links_on_lines() {
         text: id_text(&koil, "notes"),
     }];
     let dirs = [root.join("dir"), root.clone()];
-    let links =
-        |lines: &[(usize, usize)], at| links_on_lines(&koil, text, &hidden, lines, at, &dirs);
+    // With `/`: a link's path has them (see link::target), and an entry's
+    // is as QML takes it, with `\` on Windows; `<cfile>` takes either.
+    let slashed = |path: String| path.replace('\\', "/");
+    let links = |lines: &[(usize, usize)], at| {
+        links_on_lines(&koil, text, &hidden, lines, at, &dirs)
+            .map(|paths| paths.into_iter().map(slashed).collect::<Vec<_>>())
+    };
     let paths = |lines: &[(usize, usize)]| links(lines, None);
+    let path = |name| slashed(path_in(&koil, name));
     // each line's first, a relative one in the first of the dirs it's in
     assert_eq!(
         paths(&[(0, 3)]),
-        Ok(vec![
-            path_in(&koil, "file.rs"),
-            path_in(&koil, "dir/inner.txt"),
-            path_in(&koil, "notes")
-        ])
+        Ok(vec![path("file.rs"), path("dir/inner.txt"), path("notes")])
     );
     assert_eq!(paths(&[(1, 1)]), Err("No file name on this line".into()));
     assert_eq!(
@@ -798,18 +803,12 @@ fn test_links_on_lines() {
     );
     assert_eq!(paths(&[(5, 5)]), Ok(vec!["https://a.b".to_string()]));
     let home = std::env::home_dir().unwrap();
-    assert_eq!(paths(&[(6, 6)]), Ok(vec![unicode(&home).unwrap()]));
+    assert_eq!(paths(&[(6, 6)]), Ok(vec![slashed(unicode(&home).unwrap())]));
     // a path before a name: not ` M`
-    assert_eq!(paths(&[(7, 7)]), Ok(vec![path_in(&koil, "dir/inner.txt")]));
+    assert_eq!(paths(&[(7, 7)]), Ok(vec![path("dir/inner.txt")]));
     // at the cursor, as gf takes it: there or after it
-    assert_eq!(
-        links(&[(8, 8)], Some(5)),
-        Ok(vec![path_in(&koil, "file.rs")])
-    );
-    assert_eq!(
-        links(&[(8, 8)], Some(3)),
-        Ok(vec![path_in(&koil, "file.rs")])
-    );
+    assert_eq!(links(&[(8, 8)], Some(5)), Ok(vec![path("file.rs")]));
+    assert_eq!(links(&[(8, 8)], Some(3)), Ok(vec![path("file.rs")]));
     assert_eq!(
         links(&[(8, 8)], Some(0)),
         Err("E447: Can't find file \"see\" in path".into())
@@ -818,7 +817,7 @@ fn test_links_on_lines() {
     assert_eq!(links(&[(2, 2)], Some(11)), none);
     assert_eq!(links(&[(1, 1)], Some(0)), none);
     // the entry, wherever the cursor is on its line
-    assert_eq!(links(&[(3, 3)], Some(5)), Ok(vec![path_in(&koil, "notes")]));
+    assert_eq!(links(&[(3, 3)], Some(5)), Ok(vec![path("notes")]));
 }
 
 #[test]
@@ -1786,8 +1785,9 @@ fn test_complete_at_cursor() {
     // only what's before the cursor
     let c = complete(&koil, "di/x", 2, &Settings::default());
     assert_eq!((c.start, c.fill.as_str()), (0, "dir/"));
-    // and past the line's end, all of it
-    let c = complete(&koil, "d", 5, &Settings::default());
+    // and past the line's end, all of it (not a letter alone, which on
+    // Windows is also a drive's)
+    let c = complete(&koil, "di", 5, &Settings::default());
     assert_eq!(c.fill, "dir/");
 }
 

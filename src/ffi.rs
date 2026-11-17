@@ -112,8 +112,9 @@ mod bridge {
 
         /// What's available on the volume `path` is on as Finder counts
         /// it, with what macOS deletes when it needs the room; -1 if it
-        /// can't say, or not on macOS (see native.h).
+        /// can't say (see native.h). Only macOS calls it.
         #[cxx_name = "importantCapacity"]
+        #[cfg(target_os = "macos")]
         fn important_capacity(path: &QString) -> i64;
 
         /// The family of the font `use_nerd_font` added.

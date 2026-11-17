@@ -121,9 +121,14 @@ fn test_expand_cfile() {
         expand("ls %", Kind::Sh, cwd, Ok(&file), none()),
         Ok("ls 'a b.rs'".into())
     );
-    // after cmd's escape, as %
+    // after cmd's escape, as %, with cmd's `\` on Windows
     let cmd = expand("type ^<cfile>", Kind::Cmd, cwd, Ok(&file), Ok(&cfile));
-    assert_eq!(cmd, Ok("type ^src/x.rs y".into()));
+    let x = if cfg!(windows) {
+        r"src\x.rs"
+    } else {
+        "src/x.rs"
+    };
+    assert_eq!(cmd, Ok(format!("type ^{x} y")));
 }
 
 #[test]

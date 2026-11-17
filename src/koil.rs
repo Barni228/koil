@@ -1140,7 +1140,8 @@ fn report_message(report: Report, done: &str) -> String {
     }
 }
 
-#[cfg(test)]
+// Unix's alone: Windows has no execute permission.
+#[cfg(all(test, unix))]
 mod tests {
     use std::fs;
 
@@ -1152,7 +1153,6 @@ mod tests {
     /// can't any more, matters, though it comes as a change of metadata, as
     /// a write's new time does; a write, a chmod that leaves it as it was,
     /// and a file that isn't listed don't.
-    #[cfg(unix)]
     #[test]
     fn permissions_matter() {
         use std::os::unix::fs::PermissionsExt;
