@@ -11,6 +11,10 @@
 set -o pipefail
 
 cd "$(dirname "$0")/.." || exit 1
+# On Windows, Qt writes the results and its messages where a debugger
+# reads them (OutputDebugString), not to stdout, unless stderr has a
+# console window, which CI's doesn't: it printed nothing.
+export QT_FORCE_STDERR_LOGGING=1
 tries=3
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
@@ -30,7 +34,8 @@ for ((try = 1; try <= tries; try++)); do
         echo "Try $try of $tries: ${run[*]:-all the tests}"
     fi
     qmltestrunner -input tests "${run[@]}" 2>&1 | tee "$log"
-    if [ "${PIPESTATUS[0]}" = 0 ]; then
+    status=${PIPESTATUS[0]}
+    if [ "$status" = 0 ]; then
         for name in $flaky; do
             echo "$name failed, then passed when run again."
             annotate warning "Flaky test" "$name failed, then passed when run again."
@@ -41,6 +46,9 @@ for ((try = 1; try <= tries; try++)); do
     # a time). The \r is Windows'.
     failed="$(sed -n 's/^FAIL!  : qmltestrunner::\([^(]*\)(.*/\1/p' "$log" | tr -d '\r' | sort -u)"
     flaky="$(printf '%s\n' $flaky $failed | sort -u)"
+    if ! grep -q '^Totals:' "$log"; then
+        echo "qmltestrunner stopped before the end (exit status $status)."
+    fi
     # A crash, or a failed initTestCase, keeps the tests after it from
     # running: all of them again, then.
     if ! grep -q '^Totals:' "$log" || [ -z "$failed" ] || echo "$failed" | grep -qE '::(init|cleanup)TestCase$'; then
