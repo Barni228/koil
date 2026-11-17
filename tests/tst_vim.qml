@@ -3531,6 +3531,10 @@ TestCase {
         keys("zH");
         fuzzyCompare(f.contentX + left, x(4), 0.5);
         compare(vim.cursor, 4 + half + 2, "still in view");
+        // Back where it was each time, though the view scrolls by whole
+        // pixels and a column needn't be (it went a pixel further each).
+        keys("zLzHzLzHzLzH");
+        fuzzyCompare(f.contentX + left, x(4), 0.5);
         keys("zs");
         fuzzyCompare(f.contentX + left, x(vim.cursor - 2), 0.5);
         keys("ze");

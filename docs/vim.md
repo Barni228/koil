@@ -50,7 +50,12 @@
   (`scrollSideways`), which move the cursor as far as keeps it in view, as
   vim's do, but unlike vim's go on past the end of its line (which vim
   stops at), leaving the cursor, so a long line's note or message can be
-  read; `zs` and `ze` put the cursor at an edge. Vim keeps its own undo stack (diffs per change), so native
+  read; `zs` and `ze` put the cursor at an edge. They go on from where
+  the last of them meant to scroll to (`sideScrolledTo`), if the view is
+  within half a pixel of it: the view scrolls by whole pixels (its
+  Flickable is `pixelAligned`), and a column rarely is a whole number of
+  them (5.5 in Windows' Segoe UI), so from where the view was, each `zL`
+  and `zH` went a pixel further. Vim keeps its own undo stack (diffs per change), so native
   undo (Cmd+Z) is routed to it. Where Neovim's defaults differ from
   Vim's, Koil's are Neovim's: `Y` is `y$` (but lines in visual mode and
   on marked lines), `&` is `:&&`, `Q` runs the macro recorded last

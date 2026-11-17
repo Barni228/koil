@@ -89,6 +89,9 @@ QtObject {
     // cursor when the view scrolls sideways (see showColumn). Vim's
     // default is 0.
     property int sideScrollOff: 4
+    // Where zh, zl, zH, zL, zs or ze last scrolled sideways to, as they
+    // meant it, before the view rounded it (see scrollSideways).
+    property real sideScrolledTo: -1
     // :set shell, the shell :! runs commands in (empty for the system's,
     // `systemShell`), with its default.
     property string shell: ""
@@ -7261,8 +7264,14 @@ QtObject {
         const f = flickable, span = cursorSpan();
         const half = Math.max(1, Math.floor((f.width - editor.leftPadding - editor.rightPadding) / charWidth / 2));
         const by = { zh: -count, zl: count, zH: -half, zL: half }[how];
-        const x = how === "zs" ? span.left : how === "ze" ? span.right : f.contentX + by * charWidth;
-        f.contentX = Math.max(0, Math.min(x, maxScrollX()));
+        // From where the last of these meant to scroll to, if the view is
+        // still there: it scrolls by whole pixels (see below), and a column
+        // is rarely a whole number of them (5.5 in Segoe UI), so going on
+        // from where it is went a pixel further each zL and zH.
+        const from = Math.abs(f.contentX - sideScrolledTo) <= 0.5 ? sideScrolledTo : f.contentX;
+        const x = how === "zs" ? span.left : how === "ze" ? span.right : from + by * charWidth;
+        sideScrolledTo = Math.max(0, Math.min(x, maxScrollX()));
+        f.contentX = sideScrolledTo;
         // Half a pixel either way, as the view scrolls by whole ones (a
         // ScrollView's Flickable is pixelAligned).
         if (how === "zs" || how === "ze" || span.left >= f.contentX - 0.5 && span.right <= f.contentX + 0.5)
