@@ -169,7 +169,8 @@
   keys alone.
 - `scripts/`: `bundle-macos.sh` (makes the `.app`), `package-macos.sh` (the
   `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup
-  installer), `make-icons.sh` (the icons, from `packaging/icon.png`).
+  installer), `make-icons.sh` (the icons, from `packaging/icon.png`),
+  `qml-tests.sh` (the QML tests as CI runs them, a failed one again).
 - `packaging/`: `icon.png` (the app's icon, as macOS draws it) and the
   icons made from it (committed, so building needs no ImageMagick):
   `macos/Koil.icns`, `windows/koil.ico` (in the exe through `koil.rc`,

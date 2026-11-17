@@ -162,8 +162,13 @@ A line a file; `docs/layout.md` says what each has, by function.
 ## CI and releases
 
 - `.github/workflows/build.yml` builds a `.dmg` (macos-latest, arm64 only) and
-  a setup `.exe` (windows-latest) on every push. `v*` tags also publish a
-  GitHub release. It doesn't run the tests.
+  a setup `.exe` (windows-latest) on every push. Its `test` job runs
+  `cargo test` and the QML tests, with windows, on both, through
+  `scripts/qml-tests.sh`: some tests fail now and then for timing alone,
+  so it runs a failed test again, alone, up to twice, and fails only if
+  the test fails every time (a test that passed when run again is a
+  warning on the run's page: make it wait for what it needs). `v*` tags
+  also publish a GitHub release, once the tests pass.
 - The Qt version is pinned per OS. macOS uses 6.11, because 6.8's headers fail
   with newer Apple clang. Windows uses 6.10, because Qt 6.11 for Windows uses a
   repository layout that aqtinstall 3.3 can't read. Move Windows up once

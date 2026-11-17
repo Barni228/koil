@@ -63,10 +63,47 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
 
-  # Pushing a tag like v0.1.0 publishes both installers as a GitHub release.
+  # The Rust tests and the QML tests, with the same Qt as the installers.
+  # The QML tests open windows, as the app does, with the system's fonts;
+  # some fail now and then for timing alone, so qml-tests.sh runs a test
+  # that failed again, and fails only if it fails every time.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            qt: "6.11.*"
+            arch: clang_64
+          - os: windows-latest
+            qt: "6.10.*"
+            arch: win64_msvc2022_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ matrix.qt }}
+          arch: ${{ matrix.arch }}
+          cache: true
+          aqtversion: ">=3.1"
+
+      - name: Rust tests
+        run: cargo test --locked
+
+      - name: QML tests
+        shell: bash
+        run: scripts/qml-tests.sh
+
+  # Pushing a tag like v0.1.0 publishes both installers as a GitHub release,
+  # if the tests pass.
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, macos]
+    needs: [windows, macos, test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
