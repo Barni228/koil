@@ -78,7 +78,9 @@ function sections(help) {
                     + (isMac ? "`Cmd+[` and `Cmd+]`, and the mouse's buttons"
                         : "`Alt+Left` and `Alt+Right`, the mouse's buttons, and a keyboard's Back and Forward keys")
                     + "), with the cursor where it was "
-                    + "there. Going to another dir drops those `]` would go forward to. In a file or the "
+                    + "there. As vim's `Ctrl-O`, going to another dir keeps those `]` would go forward "
+                    + "to: the dir you leave and the new one go after them, so `[` still reaches each "
+                    + "dir, once. In a file or the "
                     + "scratchpad, `[` goes back as `-` does."],
                 ["`_`", "The scratchpad (from a file too): text of your own, never saved, kept as you left "
                     + "it until Koil quits. `_` or `-` there goes back to where you were, a file with its "

@@ -103,17 +103,26 @@
   change undo takes back, and a field edited since starts over
   (`lineBrowse.shown`).
 - **Back and forward** (`visits` in main.qml, `stepVisits`): apart from
-  the path history, the locations the user stopped at, in the order they
-  were gone to, as a browser's history: `[` (`3[`) goes back through
-  them, `]` forward again, and going to another location
-  (`onLocationChanged`) drops those after the one shown (`visitAt`),
-  keeping the newest 100. Not the ones only walked through, so `[` goes
+  the path history, the locations the user stopped at, each once, as
+  vim's jumplist: `[` (`3[`) goes back through them, `]` forward again.
+  Going to another location (`onLocationChanged`) puts the one left
+  (`visitAt`) last and then the one gone to, keeping the newest 100, so
+  those `]` went forward to stay, before them. They were dropped, as a
+  browser's history does (and Neovim's `jumpoptions=stack`), but then
+  `[` to the home dir from a dir typed in the path field, and Enter on a
+  dir there, lost the typed one, which only the path history had. A
+  location that's there already moves last, the same visit, so `[`
+  goes back through the stops by when they were last left, each once.
+  Not the ones only walked through, so `[` goes
   back to where something was done, not through every dir on the way
   there: a location gone to by Enter on a dir or `-` (`walkTo`, which
   sets `walking`; the visit's `walked`), left the same way, with nothing
   done in it (`used`), is dropped as it's left, and walking back to the
   stop before it (into a dir and out again) is that visit again, not
-  another. Something done (`usedHere`) is the listing edited (checked as
+  another. A visit that's there, other than the one shown, was kept as
+  it was left, so it's a stop: going to it again, even by a walk, turns
+  its `walked` off, and walking on from it keeps it (else, the only
+  visit of its location, it would be lost). Something done (`usedHere`) is the listing edited (checked as
   `showListing` replaces or leaves it, `isEdited`), a file opened from
   it, an entry yanked or marked (vim's `yanked` and `marked`), K, Space
   r, Space o, a shell command, an apply, an undo or a create. Anything
@@ -128,9 +137,11 @@
   (`Updated::from`). It's an update (`tryUpdate`) of the location as
   shown, as Enter in the path field reads it; while it runs (`stepping`)
   the location changing adds no visit, nor does the open dir renamed on
-  disk, which renames the one shown. One that can't be opened any more
-  (no problems in the listing or the field, so `open` failed) is dropped
-  (`dropVisit`), so the next `[` goes past it. In a file or the
+  disk, which renames the one shown (`setShownVisit`, which drops another
+  visit of the new name, as it does for the one `[` goes to, if it reads
+  as another location now: each is there once). One that can't be opened
+  any more (no problems in the listing or the field, so `open` failed) is
+  dropped (`dropVisit`), so the next `[` goes past it. In a file or the
   scratchpad, `[` is `-` without a count (`leave`), and `]` isn't a key.
   The mouse's back and forward buttons type them (`stepButton`, a
   `TapHandler` in the overlay, as `vim.startCommand` does for the sort

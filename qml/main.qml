@@ -109,17 +109,19 @@ ApplicationWindow {
     // Every location listed since Koil started, oldest first, each once,
     // which k and j in the path field put back (see Vim.lineHistory).
     property var pathHistory: []
-    // The locations the user stopped at, in the order they were gone to,
-    // as a browser's history, which `[` goes back through and `]` forward
-    // again (see stepVisits): { path, spot, walked, used }, the location as
-    // shown and where the cursor was in its listing when it was left (see
-    // listingSpot). Not those only walked through: one gone to by Enter on
-    // a dir or `-` (`walked`; `walking` is set while those open one), left
-    // the same way, with nothing done in it (`used`, see usedHere), is
-    // dropped as it's left, so [ goes back to where something was done, or
-    // a path was typed, not through every dir on the way. `visitAt` is the
-    // one shown, and `stepping` is set while [ or ] goes to one, which the
-    // location changing then doesn't add.
+    // The locations the user stopped at, each once, as vim's jumplist,
+    // which `[` goes back through and `]` forward again (see stepVisits):
+    // { path, spot, walked, used }, the location as shown and where the
+    // cursor was in its listing when it was left (see listingSpot). Going
+    // to another location puts the one left and then it last, so those `]`
+    // went forward to stay, before them (see onLocationChanged). Not those
+    // only walked through: one gone to by Enter on a dir or `-` (`walked`;
+    // `walking` is set while those open one), left the same way, with
+    // nothing done in it (`used`, see usedHere), is dropped as it's left,
+    // so [ goes back to where something was done, or a path was typed, not
+    // through every dir on the way. `visitAt` is the one shown, and
+    // `stepping` is set while [ or ] goes to one, which the location
+    // changing then doesn't add.
     property var visits: []
     property int visitAt: -1
     property bool stepping: false
@@ -288,16 +290,20 @@ ApplicationWindow {
         pathHistory = pathHistory.filter(p => p !== location).concat([location]).slice(-100);
         if (stepping)
             return;
-        // A visit after the one shown, as a browser's, so those `]` went
-        // forward to are dropped, and so is the one left, if it was only
-        // walked through (see `visits`).
+        // As vim's jumplist, not a browser's history: those `]` went forward
+        // to stay, and the one left goes after them, unless it was only
+        // walked through (see `visits`), and then the one gone to, so `[`
+        // still reaches them all. A location that's there already (back
+        // where a walk started, into a dir and out again) is that visit
+        // again, moved last, and a stop, as any visit left is.
         const left = visits[visitAt];
         const passed = left && left.walked && walking && !left.used;
-        let v = visits.slice(0, visitAt + (passed ? 0 : 1));
-        // Back where the walk started (into a dir and out again): the same
-        // visit.
-        if (!v.length || v[v.length - 1].path !== location)
-            v = v.concat([{ path: location, spot: null, walked: walking, used: false }]);
+        const again = visits.find(x => x.path === location);
+        const v = visits.filter((x, i) => i !== visitAt && x.path !== location);
+        if (left && !passed && left.path !== location)
+            v.push(left);
+        v.push(again ? Object.assign({}, again, { walked: false })
+                     : { path: location, spot: null, walked: walking, used: false });
         visits = v.slice(-100);
         visitAt = visits.length - 1;
     }
@@ -703,7 +709,7 @@ ApplicationWindow {
         stepping = false;
         if (r.ok) {
             visitAt = to;
-            setVisit(to, { path: location, walked: false });
+            setShownVisit({ path: location, walked: false });
         } else if (!r.problems.length && !r.pathProblems.length) {
             dropVisit(to);
         }
@@ -713,6 +719,25 @@ ApplicationWindow {
     // compiled, a `var` property's array may be a copy.
     function setVisit(i, change) {
         visits = visits.map((v, j) => j === i ? Object.assign({}, v, change) : v);
+    }
+
+    // Changes the visit shown by `change` (with its `path`), as setVisit,
+    // dropping any other visit of that location: each location is in
+    // `visits` once, though the one shown can become another's, renamed on
+    // disk or read again by [ or ].
+    function setShownVisit(change) {
+        let at = visitAt;
+        const v = [];
+        visits.forEach((x, i) => {
+            if (i === visitAt)
+                v.push(Object.assign({}, x, change));
+            else if (x.path !== change.path)
+                v.push(x);
+            else if (i < visitAt)
+                at--;
+        });
+        visits = v;
+        visitAt = at;
     }
 
     // Something was done in the location shown, so [ and ] stop at it (see
@@ -734,20 +759,11 @@ ApplicationWindow {
         return ok;
     }
 
-    // Forgets the visit `i`, which can't be opened. The two on either side
-    // of it are then one if they're the same location, the one shown if
-    // either is.
+    // Forgets the visit `i`, which can't be opened.
     function dropVisit(i) {
-        const v = visits.slice(0, i).concat(visits.slice(i + 1));
-        let at = visitAt > i ? visitAt - 1 : visitAt;
-        if (i > 0 && i < v.length && v[i - 1].path === v[i].path) {
-            const twin = at === i ? i - 1 : i;
-            v.splice(twin, 1);
-            if (at > twin)
-                at--;
-        }
-        visits = v;
-        visitAt = at;
+        visits = visits.filter((v, j) => j !== i);
+        if (visitAt > i)
+            visitAt--;
     }
 
     // Shows what changed on disk in the listing (see Koil.sync), keeping the
@@ -777,7 +793,7 @@ ApplicationWindow {
             // The open dir was renamed: the same visit, by its new name.
             if (r.path !== location) {
                 if (visitAt >= 0)
-                    setVisit(visitAt, { path: r.path });
+                    setShownVisit({ path: r.path });
                 stepping = true;
                 location = r.path;
                 stepping = false;
