@@ -159,6 +159,11 @@ pub mod qobject {
         #[qinvokable]
         fn startup_scratchpad(self: &Document) -> bool;
 
+        /// Whether Koil lists the dir the path on the command line is in, on
+        /// its entry, rather than the path itself (`-r`).
+        #[qinvokable]
+        fn startup_reveal(self: &Document) -> bool;
+
         /// The scratchpad's text from stdin, given once (empty after).
         #[qinvokable]
         fn take_startup_text(self: &Document) -> QString;
@@ -507,6 +512,10 @@ impl qobject::Document {
 
     fn startup_scratchpad(&self) -> bool {
         cli::ARGS.lock().unwrap().scratchpad
+    }
+
+    fn startup_reveal(&self) -> bool {
+        cli::ARGS.lock().unwrap().reveal
     }
 
     fn take_startup_text(&self) -> QString {

@@ -175,6 +175,7 @@ options_). The installer adds it unless you untick that option.
 koil                  # lists the Start in setting's directory, or your home
 koil ~/src            # a directory, a glob ('src/**/*.rs'), or a file
 koil +42 notes.txt    # the file, with the cursor on line 42
+koil -r notes.txt     # the directory it's in, with the cursor on notes.txt
 koil -s               # the scratchpad
 git diff | koil       # what's piped in opens in the scratchpad
 ls | koil -p | sort   # prints the scratchpad's text when Koil quits

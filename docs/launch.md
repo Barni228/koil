@@ -23,7 +23,17 @@
   edit text in a pipe (`ls | koil -p | sort`, as `vipe`). Nothing else
   Koil does writes to stdout, and what it starts that could (Space r,
   Space o's `xdg-open`) gets a null one: an app given Koil's would keep
-  the pipe open after Koil quits. `+N` puts the cursor on line N of what's
+  the pipe open after Koil quits. `-r` (`--reveal`, `Document.startupReveal`)
+  lists the dir the path is in, on its entry (`showFileDir`, as Open in
+  Koil does a file; a dir's too, as Space r shows one in the file
+  manager, and the letter is Space r's), so a shortcut of the system's
+  can show a file where it is, without opening it (on Windows, an
+  AutoHotkey script on Explorer's selection, as Open in Koil has no
+  shortcut there). Only a path on disk: another opens as without it (a
+  pattern is listed, and one that isn't there says so), and with no path
+  it's an error of `parse`'s (not clap's `requires`, which `+N` fills,
+  and a path after `--` doesn't). A hidden one is only on its line with
+  hidden entries shown, as Open in Koil's. `+N` puts the cursor on line N of what's
   shown (`+` the last one), in the middle of the view, as vim's
   (`goToLine` types `NGzz`). Then each `-c` (`--command`, `Args::commands`,
   `Document.startupCommands`) runs, in order, as typed after a `:`

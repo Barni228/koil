@@ -20,6 +20,9 @@ pub struct Args {
     pub print: bool,
     /// Whether to read stdin even if it's a terminal (`-`).
     pub stdin: bool,
+    /// Whether to list the dir the path is in, on its entry, rather than
+    /// the path itself (`-r`).
+    pub reveal: bool,
     /// The line to put the cursor on (`+N`), 0 for the last one (`+`).
     pub line: Option<u32>,
     /// The Ex commands to run once what's shown is (`-c`), in order.
@@ -35,6 +38,7 @@ pub static ARGS: Mutex<Args> = Mutex::new(Args {
     scratchpad: false,
     print: false,
     stdin: false,
+    reveal: false,
     line: None,
     commands: Vec::new(),
     text: None,
@@ -53,6 +57,7 @@ pub fn command() -> Command {
                 .visible_alias("temp"),
         )
         .arg(arg!(-p --print "Print the scratchpad's text when Koil quits (starts in it)"))
+        .arg(arg!(-r --reveal "List the directory PATH is in, with the cursor on PATH"))
         .arg(
             arg!(-c --command <COMMAND> "Run an Ex command once PATH is shown, like 'set sort=size'")
                 .action(ArgAction::Append),
@@ -67,6 +72,8 @@ pub fn command() -> Command {
              Piped text also goes to the scratchpad, `git diff | koil`.\n\
              `-p` prints the scratchpad after exiting, so text can be edited in a pipe:\n\
              \x20 ls | koil -p | sort\n\
+             `-r` shows a file or directory where it is, as Space r shows one in the file manager:\n\
+             \x20 koil -r ~/src/main.rs\n\
              \n\
              Each `-c` runs a command as if typed after `:` (after `+N`), for example:\n\
              \x20 koil ~/src -c 'set sort=size wrap' -c 'norm G'\n\
@@ -93,6 +100,7 @@ pub fn parse(args: impl IntoIterator<Item = impl Into<OsString>>) -> Result<Args
     let mut parsed = Args {
         scratchpad: matches.get_flag("scratchpad") || print,
         print,
+        reveal: matches.get_flag("reveal"),
         commands: values(&matches, "command"),
         ..Args::default()
     };
@@ -123,6 +131,12 @@ pub fn parse(args: impl IntoIterator<Item = impl Into<OsString>>) -> Result<Args
         return Err(command.error(ErrorKind::TooManyValues, message));
     }
     parsed.path = paths.pop();
+    // Not clap's `requires`: `+N` fills PATH there, and a path after `--`
+    // doesn't.
+    if parsed.reveal && parsed.path.is_none() {
+        let message = "-r shows a PATH where it is, but none was given";
+        return Err(command.error(ErrorKind::MissingRequiredArgument, message));
+    }
     Ok(parsed)
 }
 
@@ -333,6 +347,22 @@ mod tests {
         assert_eq!(run(&["+1", "+7"]).line, Some(7));
         assert_eq!(error(&["+x"]), ErrorKind::ValueValidation);
         assert_eq!(error(&["+-1"]), ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn test_parse_reveal() {
+        for flag in ["-r", "--reveal"] {
+            let args = run(&[flag, "src/main.rs"]);
+            assert!(args.reveal);
+            assert_eq!(args.path.as_deref(), Some("src/main.rs"));
+        }
+        assert!(!run(&["src"]).reveal);
+        assert!(run(&["src", "-r", "+3"]).reveal);
+        assert_eq!(run(&["-r", "--", "-s"]).path.as_deref(), Some("-s"));
+        // `+N` and `-` aren't paths
+        for args in [&["-r"][..], &["-r", "+3"], &["-r", "-"]] {
+            assert_eq!(error(args), ErrorKind::MissingRequiredArgument, "{args:?}");
+        }
     }
 
     #[test]

@@ -3419,7 +3419,11 @@ ApplicationWindow {
         const start = arg || doc.startDir(settings.startDir);
         const scratch = doc.startupScratchpad();
         const line = doc.startupLine();
-        const file = arg && doc.isFile(arg);
+        // -r: the dir it's in, on its entry (see showFileDir), if it's on
+        // disk; else it's opened as without it (one that isn't there says
+        // so, and a pattern is listed).
+        const reveal = arg && doc.startupReveal() && (doc.isFile(arg) || doc.isDir(arg));
+        const file = arg && !reveal && doc.isFile(arg);
         if (file) {
             // Once the editor is done: before its own onCompleted, it doesn't
             // have the line numbers' padding, and adding it then had Qt lay
@@ -3441,7 +3445,8 @@ ApplicationWindow {
             return;
         }
         let error = "";
-        if (!openFolder(start || doc.homeDir()) && start) {
+        const opened = reveal ? showFileDir(arg) : openFolder(start || doc.homeDir());
+        if (!opened && start) {
             error = vim.message; // why, which openFolder showed
             if (openFolder(doc.homeDir()) && !scratch) {
                 // One that isn't there: the home dir, with it in the path
@@ -3487,11 +3492,13 @@ ApplicationWindow {
     }
 
     // Lists the dir the file `path` is in, on its entry, as `-` from it
-    // would: at startup, and "Open in Koil" on a file (or an app, which
-    // Finder shows as one, so it's a dir's).
+    // would: at startup (one that can't be read, or -r, which may be a
+    // dir's, given with a `/` after it), and "Open in Koil" on a file (or an
+    // app, which Finder shows as one, so it's a dir's). False if it can't
+    // be opened (see openFolder).
     function showFileDir(path) {
-        const name = path.split(/[\\/]/).pop();
-        openFolder(doc.dirOf(path), doc.isDir(path) ? name + "/" : name);
+        const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+        return openFolder(doc.dirOf(path), doc.isDir(path) ? name + "/" : name);
     }
 
     // +N on the command line: the cursor on line `line` (the last for 0,
