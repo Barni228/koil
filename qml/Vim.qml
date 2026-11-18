@@ -230,7 +230,7 @@ QtObject {
     signal nothingToUndo()
 
     readonly property bool isMac: Qt.platform.os === "osx"
-    readonly property var operators: ["d", "c", "y", ">", "<", "=", "g~", "gu", "gU", "g?", "!", "g!"]
+    readonly property var operators: ["d", "c", "y", ">", "<", "=", "g=", "g~", "gu", "gU", "g?", "!", "g!"]
     readonly property var motions: ["h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ",
         "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G", "gj", "gk",
         ";", ",", "%", "{", "}", "+", "-", "_", "<CR>", "<S-CR>", "|", "n", "N", "*", "#", "H", "M", "L",
@@ -247,8 +247,8 @@ QtObject {
     // once, S and gS surround (as "surround"), U, and @ and Q on each one.
     // The others are normal mode's, so u still undoes, and i and o type at
     // the cursor.
-    readonly property var markedActions: ["d", "c", "y", ">", "<", "=", "g~", "gu", "gU", "g?", "!", "g!", "x", "<Del>",
-        "X", "D", "s", "C", "R", "Y", "~", "U", "r", "J", "gJ", "p", "P", "I", "A", "gI", ":", "@", "Q", "surround"]
+    readonly property var markedActions: ["d", "c", "y", ">", "<", "=", "g=", "g~", "gu", "gU", "g?", "!", "g!", "x",
+        "<Del>", "X", "D", "s", "C", "R", "Y", "~", "U", "r", "J", "gJ", "p", "P", "I", "A", "gI", ":", "@", "Q", "surround"]
     // Scroll the view sideways (see scrollSideways).
     readonly property var sideScrolls: ["zh", "zl", "zH", "zL", "zs", "ze"]
     // Normal-mode commands that run at every cursor (as do operators and
@@ -1959,7 +1959,8 @@ QtObject {
             shiftLines(range, op === ">" ? 1 : -1, 1);
             break;
         case "=":
-            reindentLines([range]);
+        case "g=":
+            reindentLines([range], op === "g=");
             break;
         case "!":
         case "g!": {
@@ -2287,7 +2288,8 @@ QtObject {
             shiftLines(range, a === ">" ? 1 : -1, count);
             break;
         case "=":
-            reindentLines([range]);
+        case "g=":
+            reindentLines([range], a === "g=");
             break;
         case "~":
         case "g~":
@@ -3281,7 +3283,8 @@ QtObject {
             }), true);
             break;
         case "=":
-            reindentLines(blocks);
+        case "g=":
+            reindentLines(blocks, a === "g=");
             break;
         case "surround":
             surroundMarked(t, starts, cmd.surround);
@@ -5259,14 +5262,17 @@ QtObject {
         setCursor(start + text.length - 1);
     }
 
-    // =: the lines of `ranges` ({ start, end }, in order and apart, as an
-    // operator's) reindented by their brackets and tags (see Txt.reindent),
-    // as one edit, with the cursor on the first one (see toLine).
-    function reindentLines(ranges) {
+    // = and g=: the lines of `ranges` ({ start, end }, in order and apart,
+    // as an operator's) reindented by their brackets and tags (see
+    // Txt.reindent), or with `guess` by the lines around them (see
+    // Txt.guessIndents), as one edit, with the cursor on the first one
+    // (see toLine).
+    function reindentLines(ranges, guess) {
         const t = bufferText();
         const spans = ranges.map(r => ({ from: Txt.lineStart(t, r.start),
             to: Txt.lineStart(t, Math.max(r.start, r.end - (r.end > r.start && t[r.end - 1] === "\n" ? 1 : 0))) }));
-        const edits = Txt.reindent(t, spans, Txt.indentUnit(t), !/\.py[iw]?$/i.test(fileName), ls => prefixEnd(t, ls));
+        const unit = Txt.indentUnit(t), textStart = ls => prefixEnd(t, ls);
+        const edits = guess ? Txt.guessIndents(t, spans, unit, textStart) : Txt.reindent(t, spans, unit, textStart);
         replaceAll(edits);
         const u = bufferText(), lines = spans.reduce((n, s) => n + Txt.lineOf(t, s.to) - Txt.lineOf(t, s.from) + 1, 0);
         toLine(u, spans[0].from);
@@ -5533,7 +5539,7 @@ QtObject {
                 inside.push({ from: from, to: to });
         }
         if (inside.length)
-            replaceAll(Txt.reindent(u, inside, Txt.indentUnit(u), !/\.py[iw]?$/i.test(fileName), ls => prefixEnd(u, ls)));
+            replaceAll(Txt.reindent(u, inside, Txt.indentUnit(u), ls => prefixEnd(u, ls)));
     }
 
     // Whether t has only blanks in [from, to) (a part of a line).

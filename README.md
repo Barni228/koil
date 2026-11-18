@@ -76,6 +76,9 @@ until you apply, and your edits stay while you go through other dirs.
 - **Reindent** with `=`: `==` the line, `gg=G` the file. A line in
   brackets (or HTML tags) goes a level deeper than the line they open on;
   lines in none keep their indent, so Python and YAML don't break.
+- **Guessed indent** with `g=`, for Python and YAML: a line goes where
+  the lines around it say (a level deeper after a `:`), and a pasted
+  block moves to fit, keeping its own levels.
 - **Neovim's defaults**: `Y` yanks to the line's end, `&` keeps `:s`'s
   flags, `G`, `gg` and `dd` keep the cursor's column, `*` in visual mode
   searches for the selection, `@q` in visual mode runs the macro on each
@@ -102,9 +105,8 @@ until you apply, and your edits stay while you go through other dirs.
   shows it, or stays in it, where `_` would leave it.
 - **Colors in a file** (and the scratchpad) suit any file rather than its
   language: strings, numbers, comments, paths and URLs, and the bracket
-  that matches the one at the cursor. In Markdown, `#` starts a heading,
-  not a comment, and in Python `//` divides. `:syntax off` (or Settings)
-  turns them off.
+  that matches the one at the cursor. `:syntax off` (or Settings) turns
+  them off.
 - **Links**: in a file, `gf` opens the file or dir under the cursor in Koil
   (a relative path is looked for next to the file, then in the open dir),
   or a URL in the browser, and `gx` opens it in its default app. Hold

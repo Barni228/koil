@@ -1744,6 +1744,86 @@ TestCase {
         loadListing("M  a(\nC  b\n   )");
         keys("gg=G");
         compare(render(), "<M:h1>  a(\n<C:h2>      b\n   )");
+        // Nor in a """ string's lines, which stay, nor after a Python
+        // string's prefix.
+        load("f(\n\"\"\"\n(\n\"\"\",\nf')',\n1)\n");
+        keys("gg=G");
+        compare(render(), "f(\n    \"\"\"\n(\n\"\"\",\n    f')',\n    1)\n");
+        // A // whose line goes on to close a bracket opened before it
+        // divides, as syntax.rs has it, rather than hiding the bracket.
+        load("f(n // 2)\nb\ng(a, // (\nc)\n");
+        keys("gg=G");
+        compare(render(), "f(n // 2)\nb\ng(a, // (\n    c)\n");
+    }
+
+    // g= reindents by the lines around, not by brackets (see Guessed
+    // indent): a line alone or a block's first goes where the line above
+    // lets it, and a block keeps its own levels, moved with it.
+    function test_guessIndent() {
+        // A level deeper after a :, as deep as the line above, and deep
+        // enough for the line below.
+        load("def f():\n    if x:\n    a()\n            b()\n    c()\n");
+        keys("jjg==");
+        compare(render(), "def f():\n    if x:\n        a()\n            b()\n    c()\n");
+        keys("jg==");
+        compare(render(), "def f():\n    if x:\n        a()\n        b()\n    c()\n");
+        load("def f():\n    if x:\n        a()\nb()\n    c()\n");
+        keys("4Gg==");
+        compare(render(), "def f():\n    if x:\n        a()\n    b()\n    c()\n");
+        // A block put where it doesn't fit, flat or too deep.
+        load("def f():\n    if x:\nif y:\n    a()\nb()\n");
+        keys("jjVjjg=");
+        compare(render(), "def f():\n    if x:\n        if y:\n            a()\n        b()\n");
+        compare(vim.message, "3 lines indented");
+        load("def f():\n    a()\n            if y:\n                b()\n            c()\n");
+        keys("jjg=2j");
+        compare(render(), "def f():\n    a()\n    if y:\n        b()\n    c()\n");
+        // What's right stays: a dedent, brackets' lines under what follows
+        // the bracket, a closing one as deep as its opener's line.
+        const py = "class a:\n    def f(self):\n        if x:\n            a()\n        else:\n            b()\n"
+            + "        return {\n            \"k\": [1,\n                  2],\n        }\n\n    def g(self):\n"
+            + "        pass\n";
+        load(py);
+        keys("ggg=G");
+        compare(render(), py);
+        // Fixed: a line a column off, a dedent between levels, a bracket's
+        // line not deeper than it, and a closing one shallower than its
+        // opener's line.
+        load("def f():\n    a = 1\n     b = 2\n   y = [\n1,\n  ]\nz = f(a,\nb)\n");
+        keys("ggg=G");
+        compare(render(), "def f():\n    a = 1\n    b = 2\n    y = [\n        1,\n    ]\nz = f(a,\n      b)\n");
+        // A docstring moves with its first line, another string's text
+        // stays, and a comment's brackets don't count.
+        load("def f():\n\"\"\"doc (\n  rest\n\"\"\"\nx = \"\"\"\ntext\n\"\"\"\n# (\nreturn x\n");
+        keys("jVGg=");
+        compare(render(), "def f():\n    \"\"\"doc (\n      rest\n    \"\"\"\n    x = \"\"\"\ntext\n\"\"\"\n    # (\n"
+            + "    return x\n");
+        // A list's item's text.
+        load("- key: a\n      value: b\n");
+        keys("jg==");
+        compare(render(), "- key: a\n  value: b\n");
+        // . repeats it, u undoes it, and marked lines get it each.
+        load("if x:\na()\nif y:\nb()\n");
+        keys("jg==");
+        compare(render(), "if x:\n    a()\nif y:\nb()\n");
+        keys("jj.");
+        compare(render(), "if x:\n    a()\nif y:\n    b()\n");
+        keys("uu");
+        compare(render(), "if x:\na()\nif y:\nb()\n");
+        keys("ggjmjjmg=");
+        compare(render(), "if x:\n    a()\nif y:\n    b()\n");
+        // A line after a : in the block may be as deep as it (YAML's list
+        // as its key), and a # comment's brackets don't count.
+        load("key:\n- a\n#x(\nb: 1\n");
+        keys("ggg=G");
+        compare(render(), "key:\n- a\n#x(\nb: 1\n");
+        load("def f():\n    x = range(n // 2)\n    y = 1\n");
+        keys("ggg=G");
+        compare(render(), "def f():\n    x = range(n // 2)\n    y = 1\n");
+        // After the listing's prefixes.
+        loadListing("M  a:\nC  b");
+        keys("jg==");
+        compare(render(), "<M:h1>  a:\n<C:h2>      b");
     }
 
     // ---- Ranges and shell commands -------------------------------------------

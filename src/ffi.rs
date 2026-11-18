@@ -2,8 +2,6 @@
 
 pub use bridge::*;
 
-use cxx_qt_lib::QString;
-
 use crate::document::{file_opened, folder_requested};
 use crate::syntax;
 
@@ -27,12 +25,6 @@ mod bridge {
         kind: SyntaxKind,
     }
 
-    /// Which comments a file can have (see `syntax::Comments`).
-    struct SyntaxComments {
-        hash: bool,
-        slashes: bool,
-    }
-
     extern "Rust" {
         /// Emits `fileOpened(path)` on `document`, a Document (see
         /// `watch_file_opens`).
@@ -44,22 +36,12 @@ mod bridge {
         #[cxx_name = "folderRequested"]
         unsafe fn folder_requested(document: *mut QObject, path: &QString, file: bool);
 
-        /// The comments the file `file_name` can have (see
-        /// `syntax::Comments::of`).
-        #[cxx_name = "syntaxComments"]
-        fn syntax_comments(file_name: &QString) -> SyntaxComments;
-
         /// Puts the parts of a file's `line` to color in `spans` (see
         /// `syntax::spans`), apart (`syntax::apart`), for a line that
         /// starts in `state`, and gives the state it ends in
         /// (QSyntaxHighlighter's block states).
         #[cxx_name = "syntaxSpans"]
-        fn syntax_spans(
-            line: &[u16],
-            state: i32,
-            comments: SyntaxComments,
-            spans: &mut Vec<SyntaxSpan>,
-        ) -> i32;
+        fn syntax_spans(line: &[u16], state: i32, spans: &mut Vec<SyntaxSpan>) -> i32;
     }
 
     unsafe extern "C++" {
@@ -193,7 +175,6 @@ mod bridge {
         unsafe fn set_text_colors(
             text_document: *mut QObject,
             colors: &QStringList,
-            file_name: &QString,
             icon_colors: &QStringList,
             directory_color: &QString,
             executable_color: &QString,
@@ -315,25 +296,8 @@ mod bridge {
     }
 }
 
-fn syntax_comments(file_name: &QString) -> SyntaxComments {
-    let comments = syntax::Comments::of(&String::from(file_name));
-    SyntaxComments {
-        hash: comments.hash,
-        slashes: comments.slashes,
-    }
-}
-
-fn syntax_spans(
-    line: &[u16],
-    state: i32,
-    comments: SyntaxComments,
-    spans: &mut Vec<SyntaxSpan>,
-) -> i32 {
-    let comments = syntax::Comments {
-        hash: comments.hash,
-        slashes: comments.slashes,
-    };
-    let (found, state) = syntax::spans(line, syntax::State::from_number(state), comments);
+fn syntax_spans(line: &[u16], state: i32, spans: &mut Vec<SyntaxSpan>) -> i32 {
+    let (found, state) = syntax::spans(line, syntax::State::from_number(state));
     spans.extend(syntax::apart(&found).iter().map(|span| SyntaxSpan {
         // A line is at most syntax::MAX_LENGTH long.
         start: span.start as i32,

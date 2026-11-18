@@ -127,6 +127,7 @@
   buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects
   and the tags `it` and `at` find, `tagPair`, `=`'s indents, `reindent`,
+  and `g=`'s, `guessIndents`, the lines they read, `codeScanner`,
   `:s`'s arguments and replacement, the regular expressions a search
   looks for (`regExp`), `code` in the help and tips), imported
   as `Txt` by Vim.qml and the views. The only state it keeps is

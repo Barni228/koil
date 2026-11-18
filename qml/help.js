@@ -580,6 +580,7 @@ function sections(help) {
                 ["`gS`", "In visual mode: put a pair on lines of its own around the selection (see `:h surround`)."],
                 ["`g~`  `gu`  `gU`  `g?`", "Toggle case, lowercase, uppercase or ROT13, over a motion: "
                     + "`gUiw` uppercases a word, `gUU` the line."],
+                ["`g=`", "Reindent by the lines around, for Python and YAML (see `:h g=`)."],
                 ["`g!`", "Put lines through a shell command, like `g!ip` then `sort` (see `:h !`)."],
                 ["`g&`", "Run the last `:s` again on every line (see `:h s`)."],
                 ["`gv`", "Select the last visual selection again, or mark the last marked lines again."],
@@ -654,8 +655,8 @@ function sections(help) {
         },
         {
             title: "Other keys",
-            tags: ["keys", "other", "zoom", "settings", "undo", "word", "=", "==", "indent", "reindent", "Y",
-                "startofline", "sol", "nostartofline", "column"],
+            tags: ["keys", "other", "zoom", "settings", "undo", "word", "=", "==", "g=", "g==", "indent", "reindent",
+                "Y", "startofline", "sol", "nostartofline", "column"],
             rows: [
                 ["`Y`", "Yank to the line's end, as `y$` (and as Neovim's), like `D` and `C`. Vim's yanks "
                     + "the line, which `yy` does. In visual mode it still yanks the lines."],
@@ -666,8 +667,16 @@ function sections(help) {
                 ["`=`  `==`", "Reindent: `==` the line, `=ip` the paragraph, `gg=G` all of it, or in visual mode "
                     + "what's selected. A line in brackets (or HTML tags) goes a level deeper than the line "
                     + "they open on, and one that closes them as deep as that line. A line in none keeps its "
-                    + "indent, so Python and YAML stay as they are. A level is the file's: a tab, or 2, 4 or "
-                    + "8 spaces."],
+                    + "indent, so Python and YAML stay as they are (`g=` reindents those). A level is the "
+                    + "file's: a tab, or 2, 4 or 8 spaces."],
+                ["`g=`  `g==`", "Reindent by the lines around, for Python and YAML, whose blocks only indents "
+                    + "show. A line goes a level deeper than one ending with `:`, `\\` or a bracket it leaves "
+                    + "open (under what follows the bracket, if anything does), else as deep as the line above, "
+                    + "or back at the level of a line it's in, the nearest to where it was. A block (`g=ip`, or "
+                    + "lines just put) moves to where the line above it says, keeping its own levels: only "
+                    + "what can't be meant changes in it, as a line a column off or one not deeper than a "
+                    + "bracket above it. A docstring moves with its first line, and another string's lines "
+                    + "stay."],
                 [isMac ? "`⌘Z`  `⇧⌘Z`" : "`Ctrl+Z`  `Ctrl+Shift+Z`",
                     "Undo and redo, like `u` and `Ctrl-R`."],
                 [isMac ? "`⌘+`  `⌘-`  `⌘0`" : "`Ctrl+=`  `Ctrl+-`  `Ctrl+0`",

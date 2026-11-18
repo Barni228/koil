@@ -216,7 +216,7 @@ Item {
         // The file's colors go before the listing's come, as two
         // highlighters would each take the other's away.
         if (listingColors)
-            system.setTextColors(editor.textDocument, [], "", [], "", "");
+            system.setTextColors(editor.textDocument, [], [], "", "");
         const colors = [];
         for (const icon in iconColors)
             colors.push(icon, iconColors[icon][theme.dark ? 0 : 1]);
@@ -225,7 +225,7 @@ Item {
         // In the scratchpad, the lines of the entries pasted there are
         // colored as the listing's.
         if (!listingColors)
-            system.setTextColors(editor.textDocument, vim.syntax ? theme.syntaxColors() : [], filePath,
+            system.setTextColors(editor.textDocument, vim.syntax ? theme.syntaxColors() : [],
                 filePath ? [] : colors, String(theme.directory), String(theme.infoColor("execute")));
         applyPendingLines();
     }

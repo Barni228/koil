@@ -465,7 +465,6 @@ public:
   // A format for each SyntaxKind, in its order, or none, which colors no
   // syntax.
   QList<QTextCharFormat> formats;
-  SyntaxComments comments{ true, true };
   // The colors of the icons of entries, by icon, as the listing's (see
   // ListingHighlighter): in the scratchpad, where entries are pasted. A
   // line in `entries` (one that starts with an icon hiding an ID) is
@@ -563,7 +562,7 @@ private:
       block.setUserState(-1);
     } else {
       block.setUserState(
-        syntaxSpans(line, before.isValid() ? before.userState() : -1, comments, spans));
+        syntaxSpans(line, before.isValid() ? before.userState() : -1, spans));
       for (const auto& span : spans)
         colors.append({ span.start, span.length, formats.value(static_cast<int>(span.kind)) });
     }
@@ -1876,7 +1875,6 @@ setSpanColors(QObject* textDocument, const QStringList& spans)
 void
 setTextColors(QObject* textDocument,
               const QStringList& colors,
-              const QString& fileName,
               const QStringList& iconColors,
               const QString& directoryColor,
               const QString& executableColor)
@@ -1899,30 +1897,27 @@ setTextColors(QObject* textDocument,
   const auto url = static_cast<int>(SyntaxKind::Url);
   if (url < formats.size())
     formats[url].setFontUnderline(true);
-  const auto comments = syntaxComments(fileName);
   const auto directory = colored(directoryColor), executableName = colored(executableColor);
   if (!textColors) {
     textColors = new TextColors(document);
     textColors->formats = formats;
-    textColors->comments = comments;
     textColors->icons = icons;
     textColors->directory = directory;
     textColors->executableName = executableName;
     textColors->recolor();
     return;
   }
-  if (formats == textColors->formats && comments.hash == textColors->comments.hash &&
-      comments.slashes == textColors->comments.slashes && icons == textColors->icons &&
+  if (formats == textColors->formats && icons == textColors->icons &&
       directory == textColors->directory && executableName == textColors->executableName)
     return;
   textColors->formats = formats;
-  textColors->comments = comments;
   textColors->icons = icons;
   textColors->directory = directory;
   textColors->executableName = executableName;
-  // Once the event loop runs, as another file's name comes right before
-  // its text, which setText colors as it puts it in (and then it isn't
-  // stale): coloring the old text first laid out a long one again.
+  // Once the event loop runs, as going to a file from the scratchpad (or
+  // back, whose icons differ) sets them right before its text, which
+  // setText colors as it puts it in (and then it isn't stale): coloring
+  // the old text first laid out a long one again.
   textColors->stale = true;
   QTimer::singleShot(0, textColors, [textColors] {
     if (textColors->stale) {

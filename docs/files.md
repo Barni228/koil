@@ -206,11 +206,13 @@
   relative one that looks like one (`src/main.rs`, `a/b/c`, `docs/`, but
   not `and/or`, `km/h`, `1/2`). Strings and comments are found as their
   starts come, left to right, so a `#` in a string isn't a comment. A `/*
-  */` or `<!-- -->` goes on to the next line as the block's state. The
-  file's name says which comments it can have (`Comments::of`): no `#`
-  ones in Markdown (headings), no `//` in Python (division), which is all
-  it knows of languages. Only a line's first `MAX_LENGTH` (3000)
-  characters are colored, as with vim's `synmaxcol`. native.cpp's
+  */` or `<!-- -->` goes on to the next line as the block's state. Every
+  file has every comment, whatever its name, as it knows no language: a
+  Markdown heading (`# Title`) is colored as one, and so is what follows
+  a Python division (`a // b`), but for one whose line goes on to close a
+  bracket opened before it (`range(n // 2)`, `closes_before`). Only a
+  line's first `MAX_LENGTH` (3000) characters are colored, as with vim's
+  `synmaxcol`. native.cpp's
   `TextColors` asks Rust for each line's spans (`syntaxSpans`, in UTF-16,
   as Qt has it, of the line's first `coloredLength` characters) and gives
   them to the line's layout, apart (`syntax::apart`: Qt Quick drops the

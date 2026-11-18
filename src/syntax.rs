@@ -3,8 +3,6 @@
 //! escapes, numbers, comments, paths and URLs. A line is UTF-16, as Qt has
 //! it, and positions are indexes into it.
 
-use std::path::Path;
-
 #[cfg(test)]
 mod tests;
 
@@ -69,42 +67,6 @@ impl State {
     }
 }
 
-/// Which comments a file's lines can have, besides `<!-- -->`: `# like
-/// this` and `//` or `/* */`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Comments {
-    pub hash: bool,
-    pub slashes: bool,
-}
-
-impl Comments {
-    pub const ALL: Comments = Comments {
-        hash: true,
-        slashes: true,
-    };
-
-    /// The comments the file `name` can have: all of them, but in
-    /// Markdown, where `#` starts a heading, and in Python, where `//` is
-    /// a division.
-    pub fn of(name: &str) -> Comments {
-        let extension = Path::new(name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase);
-        match extension.as_deref() {
-            Some("md" | "markdown" | "mdx" | "mdown" | "mkd") => Comments {
-                hash: false,
-                slashes: true,
-            },
-            Some("py" | "pyi" | "pyw") => Comments {
-                hash: true,
-                slashes: false,
-            },
-            _ => Comments::ALL,
-        }
-    }
-}
-
 /// How much of a line is colored, as vim's `synmaxcol`: a long line (a
 /// minified file's) takes long to color, and Qt longer to lay out with its
 /// colors.
@@ -113,10 +75,10 @@ pub const MAX_LENGTH: usize = 3000;
 /// The parts of `line` to color, which starts in `state`, in the order
 /// they're colored (a later one over an earlier one: a path in a string),
 /// and the state it ends in.
-pub fn spans(line: &[u16], state: State, comments: Comments) -> (Vec<Span>, State) {
+pub fn spans(line: &[u16], state: State) -> (Vec<Span>, State) {
     let line = &line[..line.len().min(MAX_LENGTH)];
     let mut spans = Vec::new();
-    let state = code(line, state, comments, &mut spans);
+    let state = code(line, state, &mut spans);
     links(line, &mut spans);
     (spans, state)
 }
@@ -221,9 +183,11 @@ fn find_end(line: &[u16], from: usize, text: &str) -> Option<usize> {
 /// The strings, comments and numbers in `line`, which starts in `state`,
 /// each found as its start comes first, so a `#` in a string isn't a
 /// comment, nor a quote in a comment a string. Gives the state it ends in.
-fn code(line: &[u16], state: State, comments: Comments, spans: &mut Vec<Span>) -> State {
+fn code(line: &[u16], state: State, spans: &mut Vec<Span>) -> State {
     let n = line.len();
     let mut i = 0;
+    // The brackets opened before `i` on the line and still open there.
+    let mut open = 0usize;
     if let Some(close) = state.close() {
         match find_end(line, 0, close) {
             Some(end) => {
@@ -240,15 +204,18 @@ fn code(line: &[u16], state: State, comments: Comments, spans: &mut Vec<Span>) -
         let u = line[i];
         let before = if i == 0 { 0 } else { line[i - 1] };
         let blank_before = i == 0 || is_blank(before);
-        let comment = if u == SLASH && comments.slashes && at(line, i + 1) == SLASH {
-            // Not a URL's (`https://`), nor a division (`a//b`).
-            (blank_before || is_any(before, b";{}")).then_some(State::Code)
-        } else if u == SLASH && comments.slashes && at(line, i + 1) == STAR {
+        let comment = if u == SLASH && at(line, i + 1) == SLASH {
+            // Not a URL's (`https://`), nor a division (`a//b`, and
+            // `range(n // 2)`, whose line goes on to close a bracket
+            // opened before it).
+            ((blank_before || is_any(before, b";{}")) && !(open > 0 && closes_before(line, i + 2)))
+                .then_some(State::Code)
+        } else if u == SLASH && at(line, i + 1) == STAR {
             // Not a glob's (`src/*`).
             (blank_before || is_any(before, b"({[,;=")).then_some(State::Slashes)
         } else if starts_with(line, i, "<!--") {
             Some(State::Markup)
-        } else if u == HASH && comments.hash && blank_before && starts_hash_comment(line, i) {
+        } else if u == HASH && blank_before && starts_hash_comment(line, i) {
             Some(State::Code)
         } else {
             None
@@ -281,9 +248,32 @@ fn code(line: &[u16], state: State, comments: Comments, spans: &mut Vec<Span>) -
             i = number_at(line, i, spans);
             continue;
         }
+        if is_any(u, b"([{") {
+            open += 1;
+        } else if is_any(u, b")]}") {
+            open = open.saturating_sub(1);
+        }
         i += 1;
     }
     State::Code
+}
+
+/// Whether `line` from `i` closes a bracket opened before `i`: counting
+/// its brackets as they come (in strings too), it closes one more than
+/// it opens.
+fn closes_before(line: &[u16], i: usize) -> bool {
+    let mut open = 0usize;
+    for &u in &line[i.min(line.len())..] {
+        if is_any(u, b"([{") {
+            open += 1;
+        } else if is_any(u, b")]}") {
+            if open == 0 {
+                return true;
+            }
+            open -= 1;
+        }
+    }
+    false
 }
 
 /// Whether the `#` at `i` (after a blank, or first) starts a comment: one

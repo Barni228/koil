@@ -777,19 +777,24 @@ function pairedTags(t) {
     return paired.sort((a, b) => a - b);
 }
 
-// The indents `=` gives the lines in `spans` ({ from, to }: the starts of
-// a span's first and last lines, in order), by the brackets (( [ {) and
-// the tags around them, as vim's C-indenting does without knowing the
-// language: a line in brackets goes `unit` deeper than the line they
-// open on, one that starts by closing them as deep as that line, a blank
-// line has none, and a line in no brackets keeps its own (a block of
-// Python or YAML stays as it is). Brackets in strings and comments
-// (those syntax.rs colors; `slashes`: // and /* */ ones) don't count. In
-// a /* */ comment, a line starting with * goes a space deeper than the
-// comment's first line, and others stay. A line's indent starts where
-// textStart(its start) says (after the listing's prefix). Gives the
-// edits, as { start, end, text }, for the lines whose indent changes.
-function reindent(t, spans, unit, slashes, textStart) {
+// Reads t's lines for their brackets (( [ {) and tags, as `=` and `g=`
+// go by them: not those in strings and comments (those syntax.rs
+// colors), nor a tag with no closing tag of its name (see pairedTags). A
+// /* */ or <!-- --> comment, and a """ or ''' string (which syntax.rs
+// doesn't know), can go on to the lines after, so every line is read, in
+// order from t's start. With `hashes`, a # first on a line or after a
+// blank always starts a comment, as in Python, YAML and shell, not only
+// before a blank or a sign. Gives a function of a line (from `first`,
+// after its indent, to `le`, its end) that gives
+//   tokens: its brackets and tags, as { kind, close, at, end }
+//   inComment: the comment (or """ string) it starts in, or null
+//   comment: the one it ends in, going on to the next line, or null, as
+//     { close, indent }: the same on each of its lines, with the indent
+//     the caller gives it (null at first)
+//   codeStart: where its code starts: after the comment it starts in, if
+//     that ends on it (else le), or `first`
+//   codeEnd: where the comment or string it ends in starts, else le
+function codeScanner(t, hashes) {
     // Whether a tag that pairs starts at i, which only goes on.
     const paired = t.indexOf("</") >= 0 ? pairedTags(t) : [];
     let next = 0;
@@ -801,6 +806,15 @@ function reindent(t, spans, unit, slashes, textStart) {
     const tagAt = new RegExp(tagSource, "y");
     const isWordAt = i => i >= 0 && charClass(t[i], false) === 2;
     const blankOr = (i, signs) => i < 0 || isBlank(t[i]) || t[i] === "\n" || signs.includes(t[i]);
+    // Whether the ' at i comes after a string's prefix, as in Python's
+    // f'…' or rb'…', rather than in a word, as in it's (as syntax.rs's
+    // after_prefix).
+    const afterPrefix = i => {
+        let start = i;
+        while (start > 0 && /[A-Za-z]/.test(t[start - 1]) && i - start < 3)
+            start--;
+        return !isWordAt(start - 1) && /^(?:[rbfu]|rb|br|fr|rf)$/i.test(t.slice(start, i));
+    };
     // Whether a \ escapes the character at i (an odd number of them before it).
     const escaped = i => {
         let n = 0;
@@ -809,9 +823,109 @@ function reindent(t, spans, unit, slashes, textStart) {
         return n % 2 === 1;
     };
     const signs = /[\/<#"'`()[\]{}]/g;
-    // In a comment going on to the next line: { close, indent }, its end
-    // and the indent of the line it starts on.
+    // Whether a // at i is a division (`range(n // 2)`), as syntax.rs
+    // has it: its line goes on to close a bracket opened before it (on
+    // the line, in `tokens`), counting brackets as they come.
+    const divides = (i, le, tokens) => {
+        let open = 0;
+        for (const k of tokens)
+            if ("([{".includes(k.kind))
+                open = k.close ? Math.max(open - 1, 0) : open + 1;
+        for (let j = i + 2, rest = 0; open > 0 && j < le; j++) {
+            const b = "([{)]}".indexOf(t[j]);
+            if (b >= 3 && rest-- === 0)
+                return true;
+            if (b >= 0 && b < 3)
+                rest++;
+        }
+        return false;
+    };
     let comment = null;
+    return (first, le) => {
+        const tokens = [], inComment = comment;
+        let i = first, codeEnd = le;
+        if (comment) {
+            const end = t.indexOf(comment.close, first);
+            if (end < 0 || end >= le) {
+                i = le;
+                codeEnd = first;
+            } else {
+                i = end + comment.close.length;
+                comment = null;
+            }
+        }
+        const codeStart = Math.min(i, le);
+        while (i < le) {
+            // To the next character that can start something.
+            signs.lastIndex = i;
+            const found = signs.exec(t);
+            if (!found || found.index >= le)
+                break;
+            i = found.index;
+            const c = found[0];
+            if (c === "/" && t[i + 1] === "/" && blankOr(i - 1, ";{}") && !divides(i, le, tokens)) {
+                codeEnd = i;
+                break;
+            }
+            const close = c === "/" && t[i + 1] === "*" && blankOr(i - 1, "({[,;=") ? "*/"
+                : t.startsWith("<!--", i) ? "-->"
+                : (c === "\"" || c === "'") && t.startsWith(c + c + c, i) ? c + c + c : null;
+            if (close) {
+                const end = t.indexOf(close, i + (close === "*/" || close === "-->" ? 2 : 3));
+                if (end < 0 || end >= le) {
+                    comment = { close: close, indent: null };
+                    codeEnd = i;
+                    break;
+                }
+                i = end + close.length;
+                continue;
+            }
+            if (c === "#" && blankOr(i - 1, "") && (hashes || i + 1 >= le || isBlank(t[i + 1])
+                    || t[i + 1] === "!" && t[i + 2] !== "[" || "#-=*/~:+|".includes(t[i + 1]))) {
+                codeEnd = i;
+                break;
+            }
+            if ((c === "\"" || c === "`" || c === "'" && (!isWordAt(i - 1) || afterPrefix(i))) && t[i - 1] !== "\\") {
+                // A string, if it ends on the line (a ' one at a ' no word
+                // goes on from: not it's, nor &'a).
+                let j = t.indexOf(c, i + 1);
+                while (j >= 0 && j < le && c !== "`" && escaped(j))
+                    j = t.indexOf(c, j + 1);
+                if (j >= 0 && j < le && !(c === "'" && isWordAt(j + 1))) {
+                    i = j + 1;
+                    continue;
+                }
+            }
+            const b = "([{)]}".indexOf(c);
+            if (b >= 0) {
+                tokens.push({ kind: "([{"[b % 3], close: b >= 3, at: i, end: i + 1 });
+            } else if (c === "<" && pairedAt(i)) {
+                tagAt.lastIndex = i;
+                const m = tagAt.exec(t);
+                tokens.push({ kind: "<" + m[2], close: m[1] === "/", at: i, end: i + m[0].length });
+                i += m[0].length;
+                continue;
+            }
+            i++;
+        }
+        return { tokens: tokens, inComment: inComment, comment: comment, codeStart: codeStart, codeEnd: codeEnd };
+    };
+}
+
+// The indents `=` gives the lines in `spans` ({ from, to }: the starts of
+// a span's first and last lines, in order), by the brackets (( [ {) and
+// the tags around them, as vim's C-indenting does without knowing the
+// language: a line in brackets goes `unit` deeper than the line they
+// open on, one that starts by closing them as deep as that line, a blank
+// line has none, and a line in no brackets keeps its own (a block of
+// Python or YAML stays as it is). Brackets in strings and comments don't
+// count (see codeScanner). In a /* */ comment, a line starting with *
+// goes a space deeper than the comment's first line, and others stay. A
+// line's indent starts where textStart(its start) says (after the
+// listing's prefix). Gives the edits, as { start, end, text }, for the
+// lines whose indent changes.
+function reindent(t, spans, unit, textStart) {
+    const scan = codeScanner(t, false);
     // The brackets and tags open, as { kind, indent, line, level }: the
     // indent of the line each opens on, and whether it's the first still
     // open of its line, which a level of indent is for.
@@ -840,71 +954,14 @@ function reindent(t, spans, unit, slashes, textStart) {
         while (first < le && isBlank(t[first]))
             first++;
         const old = t.slice(ts, first);
-        // The tokens of the line: brackets and tags, as { kind, close, at, end }.
-        const tokens = [], inComment = comment;
-        let i = first;
-        if (comment) {
-            const end = t.indexOf(comment.close, first);
-            if (end < 0 || end >= le) {
-                i = le;
-            } else {
-                i = end + comment.close.length;
-                comment = null;
-            }
-        }
-        while (i < le) {
-            // To the next character that can start something.
-            signs.lastIndex = i;
-            const found = signs.exec(t);
-            if (!found || found.index >= le)
-                break;
-            i = found.index;
-            const c = found[0];
-            if (slashes && c === "/" && t[i + 1] === "/" && blankOr(i - 1, ";{}"))
-                break;
-            const close = slashes && c === "/" && t[i + 1] === "*" && blankOr(i - 1, "({[,;=") ? "*/"
-                : t.startsWith("<!--", i) ? "-->" : null;
-            if (close) {
-                const end = t.indexOf(close, i + 2);
-                if (end < 0 || end >= le) {
-                    comment = { close: close, indent: null };
-                    break;
-                }
-                i = end + close.length;
-                continue;
-            }
-            if (c === "#" && blankOr(i - 1, "") && (i + 1 >= le || isBlank(t[i + 1])
-                    || t[i + 1] === "!" && t[i + 2] !== "[" || "#-=*/~:+|".includes(t[i + 1])))
-                break;
-            if ((c === "\"" || c === "`" || c === "'" && !isWordAt(i - 1)) && t[i - 1] !== "\\") {
-                // A string, if it ends on the line (a ' one at a ' no word
-                // goes on from: not it's, nor &'a).
-                let j = t.indexOf(c, i + 1);
-                while (j >= 0 && j < le && c !== "`" && escaped(j))
-                    j = t.indexOf(c, j + 1);
-                if (j >= 0 && j < le && !(c === "'" && isWordAt(j + 1))) {
-                    i = j + 1;
-                    continue;
-                }
-            }
-            const b = "([{)]}".indexOf(c);
-            if (b >= 0) {
-                tokens.push({ kind: "([{"[b % 3], close: b >= 3, at: i, end: i + 1 });
-            } else if (c === "<" && pairedAt(i)) {
-                tagAt.lastIndex = i;
-                const m = tagAt.exec(t);
-                tokens.push({ kind: "<" + m[2], close: m[1] === "/", at: i, end: i + m[0].length });
-                i += m[0].length;
-                continue;
-            }
-            i++;
-        }
+        const read = scan(first, le), tokens = read.tokens, inComment = read.inComment;
         // Its indent: as its opener's line, if it starts by closing (the
         // outermost it closes), else a level deeper than the line the
         // innermost level opened on.
         let indent = null, k = 0, popped = null;
         if (inComment) {
-            indent = inComment.indent !== null && t[first] === "*" ? inComment.indent + " " : null;
+            indent = inComment.close === "*/" && inComment.indent !== null && t[first] === "*"
+                ? inComment.indent + " " : null;
         } else {
             for (let at = first; k < tokens.length && tokens[k].close && tokens[k].at === at; k++) {
                 popped = pop(tokens[k].kind) || popped;
@@ -925,8 +982,8 @@ function reindent(t, spans, unit, slashes, textStart) {
         if (inRange && indent !== null && indent !== old)
             edits.push({ start: ts, end: first, text: indent });
         const now = inRange && indent !== null ? indent : old;
-        if (comment && comment.indent === null)
-            comment.indent = now;
+        if (read.comment && read.comment.indent === null)
+            read.comment.indent = now;
         for (; k < tokens.length; k++) {
             if (tokens[k].close)
                 pop(tokens[k].kind);
@@ -938,6 +995,258 @@ function reindent(t, spans, unit, slashes, textStart) {
             lowest = e;
         if (lowest >= 0)
             stack[lowest].level = true;
+        ls = le + 1;
+    }
+    return edits;
+}
+
+// The indents `g=` gives the lines in `spans` (as reindent's), guessed
+// from the lines around them, for Python and YAML, whose blocks only
+// indents show (see Guessed indent). A line opens a level if it leaves a
+// bracket or tag open (as = reads them, see codeScanner, with # always a
+// comment) or ends with : or \ (but a : in brackets, a dict's key's). A
+// span's first line (one alone, or a block put where it doesn't fit)
+// goes where the line above it lets it: a level deeper if that opens one
+// (under what follows a bracket on its line, if anything does), else at
+// its level or at that of a line it's in, whichever it was nearest, or,
+// after a list's item (`- a: 1`), at the item's text if it was that deep;
+// alone, it also goes deep enough for the line below. The span's other
+// lines keep their places among themselves, moved with the first, but
+// for what can't be meant: a line not deeper than a bracket or \ above
+// it goes deeper, as the first would; one a column deeper than a line
+// that opens none goes back to it; and one shallower than the line
+// above, out of brackets, goes at the nearest level. A line starting by closing a
+// bracket goes as deep as the line that opened it (or as much deeper as
+// it was, in the span), and the lines after it go by that line, as after
+// one going on after a \. A line in a /* */ comment or a """ docstring
+// moves with its first line, one in another """ string stays, a line of
+// only a comment moves with the line above, and a blank one has no
+// indent. A tab is 4 columns, as > has it. Gives the edits, as reindent
+// does.
+function guessIndents(t, spans, unit, textStart) {
+    const step = unit === "\t" ? 4 : unit.length;
+    const widthOf = (from, to) => {
+        let w = 0;
+        for (let i = from; i < to; i++)
+            w += t[i] === "\t" ? 4 : 1;
+        return w;
+    };
+    const indentOf = w => unit === "\t" ? "\t".repeat(Math.floor(w / 4)) + " ".repeat(w % 4) : " ".repeat(w);
+    const firstOf = (ls, le) => {
+        let i = textStart(ls);
+        while (i < le && isBlank(t[i]))
+            i++;
+        return i;
+    };
+    // The width of the indent of the first line after le that isn't
+    // blank, if it's after `span` (else -1).
+    const below = (le, span) => {
+        for (let q = le + 1; q < t.length; ) {
+            let qe = t.indexOf("\n", q);
+            if (qe < 0)
+                qe = t.length;
+            const f = firstOf(q, qe);
+            if (f < qe)
+                return q > span.to ? widthOf(textStart(q), f) : -1;
+            q = qe + 1;
+        }
+        return -1;
+    };
+    const quoted = c => c.close === "\"\"\"" || c.close === "'''";
+    const opens = l => l.kinds.length > 0 || l.ends === ":" || l.ends === "\\";
+    const forces = l => l.kinds.length > 0 || l.ends === "\\";
+    const item = /(?:[-*+]|\d{1,9}[.)])[ \t]+(?=[^ \t\n])/y;
+    const scan = codeScanner(t, true);
+    // The lines with code the next line can be in, the one nearest above
+    // it last, after a root at column 0, as { old, now, kinds, align,
+    // ends, item, span }: the width of its indent before and after (the
+    // same outside the spans), the brackets (and tags) it leaves open, as
+    // codeScanner's kinds, the column of what follows the last of them (-1
+    // for nothing), its code's last character, how much deeper its text
+    // after a list's mark is, and the span it's in (-1 for none).
+    const levels = [{ old: 0, now: 0, kinds: [], align: -1, ends: "", item: 0, span: -1 }], edits = [];
+    // The level (an index in levels) of a line `o` deep, by old(level):
+    // the deepest not deeper, or the next if that's nearer.
+    const levelAt = (o, old) => {
+        let k = levels.length - 1;
+        while (k > 0 && old(levels[k]) > o)
+            k--;
+        if (k + 1 < levels.length && old(levels[k + 1]) - o < o - old(levels[k]))
+            k++;
+        return k;
+    };
+    // What closing the brackets `kinds` (in order) of the lines above
+    // closes, as = has it: each the last still open of its kind, and those
+    // after it. Gives { at, left }: the level whose line opened the
+    // outermost, and what it leaves open of that line's; null if none.
+    const openerOf = kinds => {
+        const rest = [];
+        let j = levels.length - 1, at = -1;
+        for (const k of kinds) {
+            for (; j > 0; j--) {
+                const open = rest[j] || (rest[j] = levels[j].kinds.slice());
+                const x = open.lastIndexOf(k);
+                if (x >= 0) {
+                    open.length = x;
+                    at = j;
+                    break;
+                }
+            }
+            if (j === 0)
+                break;
+        }
+        return at > 0 ? { at: at, left: rest[at] } : null;
+    };
+    const last = spans[spans.length - 1].to;
+    // The span whose first line is placed, and how far that moved.
+    let s = 0, placed = -1, moved = 0;
+    // A level's width before, as span s's lines had it.
+    const oldOf = l => l.span === s ? l.old : l.now - moved;
+    // Whether l opens a level for the next line, in brackets left open
+    // above it (`inside`) or not: there, a : ends a dict's key.
+    const opensFor = (l, inside) => forces(l) || !inside && opens(l);
+    for (let ls = 0; ls <= last; ) {
+        let le = t.indexOf("\n", ls);
+        if (le < 0)
+            le = t.length;
+        while (s < spans.length && spans[s].to < ls)
+            s++;
+        const inRange = s < spans.length && spans[s].from <= ls;
+        const ts = textStart(ls), first = firstOf(ls, le);
+        const read = scan(first, le), tokens = read.tokens;
+        if (first >= le) {
+            if (inRange && first > ts && !(read.inComment && read.inComment.keep))
+                edits.push({ start: ts, end: first, text: "" });
+            ls = le + 1;
+            continue;
+        }
+        const o = widthOf(ts, first), p = levels[levels.length - 1];
+        let end = read.codeEnd;
+        while (end > read.codeStart && isBlank(t[end - 1]))
+            end--;
+        // A line that starts a """ string has code, which ends with it.
+        const string = read.comment !== null && read.comment !== read.inComment && quoted(read.comment);
+        const code = end > read.codeStart || string;
+        // The brackets it leaves open, closes of lines above (the kinds),
+        // and starts by closing (as many).
+        const still = [], kinds = [], closes = [];
+        let lead = 0;
+        for (let at = first; lead < tokens.length && tokens[lead].close && tokens[lead].at === at; lead++) {
+            at = tokens[lead].end;
+            while (at < le && isBlank(t[at]))
+                at++;
+        }
+        for (const k of tokens) {
+            let x = still.length - 1;
+            if (k.close) {
+                while (x >= 0 && still[x].kind !== k.kind)
+                    x--;
+                if (x >= 0)
+                    still.length = kinds.length = x;
+                else
+                    closes.push(k.kind);
+            } else {
+                still.push(k);
+                kinds.push(k.kind);
+            }
+        }
+        const line = { old: o, now: o, kinds: kinds, align: -1,
+            ends: string ? "\"" : code ? t[end - 1] : "", item: 0, span: inRange ? s : -1 };
+        let inside = false;
+        for (let k = levels.length - 1; k > 0 && !inside; k--)
+            inside = levels[k].kinds.length > 0;
+        let n = o;
+        if (inRange) {
+            const closing = code && lead && !read.inComment ? openerOf(closes.slice(0, lead)) : null;
+            if (read.inComment) {
+                n = read.inComment.keep ? o : Math.max(0, o + read.inComment.indent);
+            } else if (closing) {
+                // Or as much deeper than it as it was, in the span (under
+                // the last line in them, as Python's style lets it be).
+                const l = levels[closing.at];
+                n = placed === s && l.span === s && o > l.old ? l.now + o - l.old : l.now;
+            } else if (placed !== s) {
+                if (opensFor(p, inside)) {
+                    n = p.align >= 0 ? p.align : p.now + step;
+                } else {
+                    n = levels[levelAt(o, l => l.now)].now;
+                    if (n === p.now && p.item && o >= p.now + p.item)
+                        n = p.now + p.item;
+                    // Deep enough for the line below, if the line is alone:
+                    // a level above it if it opens one, else as deep.
+                    const b = below(le, spans[s]), at = code && opens(line) ? b - step : b;
+                    if (at > n && levels.some(l => l.now === at))
+                        n = at;
+                }
+            } else {
+                // As deep as it was from the line above (always, for a
+                // line of only a comment), but a line not deeper than a
+                // bracket or \ above it, one a column deeper than a line
+                // that opens none, and one shallower out of brackets, which
+                // goes at a level.
+                const d = o - oldOf(p);
+                if (!code)
+                    n = Math.max(0, p.now + d);
+                else if (d <= 0 && forces(p))
+                    n = p.align >= 0 ? p.align : p.now + step;
+                else if (d > 0)
+                    n = p.now + (opens(p) || inside || d > 1 ? d : p.item && d >= p.item ? p.item : 0);
+                else
+                    n = inside ? Math.max(0, p.now + d) : levels[levelAt(o, oldOf)].now;
+            }
+            if (placed !== s) {
+                placed = s;
+                moved = n - o;
+            }
+            const text = indentOf(n);
+            if (text !== t.slice(ts, first))
+                edits.push({ start: ts, end: first, text: text });
+        }
+        if (read.comment && read.comment.indent === null) {
+            read.comment.indent = n - o;
+            // A string's lines are its text: they move with it only if it
+            // starts its line, as a docstring, whose indent goes.
+            read.comment.keep = quoted(read.comment) && !/^[rbfu]{0,2}$/i.test(t.slice(first, read.codeEnd));
+        }
+        if (code) {
+            line.now = n;
+            item.lastIndex = first;
+            const m = "-*+0123456789".includes(t[first]) ? item.exec(t) : null;
+            line.item = m ? m[0].length : 0;
+            const k = still.length ? still[still.length - 1] : null;
+            let after = k ? k.end : end;
+            while (after < end && isBlank(t[after]))
+                after++;
+            if (k && "([{".includes(k.kind) && after < end)
+                line.align = n + widthOf(first, after);
+            // A line that closes what one above opened, goes on after a \,
+            // or after a string or comment from the line above, is at that
+            // one's level, for the lines after it.
+            const opened = closes.length ? openerOf(closes)
+                : (p.ends === "\\" || read.inComment) && levels.length > 1
+                ? { at: levels.length - 1, left: p.kinds.slice() } : null;
+            if (opened && (read.inComment || levels[opened.at].now <= n)) {
+                const l = levels[opened.at];
+                line.old = l.old;
+                line.now = l.now;
+                line.span = l.span;
+                line.kinds = opened.left.concat(line.kinds);
+                line.item = 0;
+                levels.length = opened.at;
+            } else if (read.inComment) {
+                ls = le + 1;
+                continue;
+            }
+            // In place of those it's as shallow as: one at its level that
+            // was shallower before keeps that, as a line a column off
+            // joins it.
+            while (levels.length > 1 && levels[levels.length - 1].now >= line.now) {
+                const l = levels.pop();
+                if (l.now === line.now && l.span === line.span && l.span >= 0)
+                    line.old = Math.min(line.old, l.old);
+            }
+            levels.push(line);
+        }
         ls = le + 1;
     }
     return edits;

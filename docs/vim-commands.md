@@ -114,8 +114,17 @@
   levels brackets don't show, aren't flattened (vim's `gg=G` puts every
   top-level line at column 0). Brackets in strings and comments don't
   count, read as syntax.rs reads them (`'` as an apostrophe or a
-  lifetime's isn't a string; no `//` in Python, by `fileName`), and only
-  tags with a closing tag of their name count (`pairedTags`), so
+  lifetime's isn't a string, but one after Python's prefix is, `f'('`),
+  and across lines, which syntax.rs doesn't read: a `"""` or `'''` string
+  goes on to the lines after, as a `/* */` comment does, and its lines
+  keep their indent (only a `/* */` comment's ` * ` lines go under it),
+  all in `codeScanner`, which `g=` reads lines with too. Every file is
+  read the same, so a `//` is a comment in Python too, but not a
+  division whose line goes on to close a bracket opened before it on the
+  line (`range(n // 2)`, `divides`, as syntax.rs's `closes_before`),
+  which hid the bracket: `g=` over the standard library changed 13,489
+  lines for it. Only tags with a closing tag of their name count
+  (`pairedTags`), so
   `List<String>` and `<br>` don't. It reads from the text's start, as a
   bracket that's open can be anywhere above (0.3 s for 120,000 lines),
   jumping between the characters that can start something with a regex
@@ -123,6 +132,53 @@
   lines start with one, else 2, 4 or 8 spaces, the step lines most often
   go in by, if twice or more (a text to reindent can have one stray), else
   4; surround's levels use it too, `>` doesn't.
+- **Guessed indent** (`g=`, `Txt.guessIndents`): `=` for Python and
+  YAML, whose blocks only indents show: a line's indent is guessed from
+  the lines around it, as autoindent would put it there, not read from
+  brackets. A line opens a level if it ends with `:` or `\`, or leaves a
+  bracket or tag open (read as `=` reads them, with every `#` first or
+  after a blank a comment, as in YAML and shell too); a `:` in brackets
+  ends a dict's key. The first line of what's reindented (one alone, or
+  a block put where it doesn't fit) goes where the line above it lets
+  it: a level deeper if that opens one (under what follows the bracket
+  on its line, if anything does, as PEP 8 lines them up), else at that
+  line's level or that of a line it's in, the nearest to where it was (so
+  a dedent stays one), or at a list item's text (`- a: 1`) if it was that
+  deep. Alone, it also goes deep enough for the line below, if that's at
+  a level above (`b()` before an indented `c()` goes in with it). The
+  lines after keep their places among themselves, moved with the first:
+  putting each at the one above's, as vim's autoindent does, would
+  flatten Python's blocks, whose ends only their old indents show. Only
+  what can't be meant changes in them: a line not deeper than a bracket
+  or `\` above it goes deeper as the first would, but not one after a
+  `:` (YAML's list can be as deep as its key); one a column deeper than
+  a line that opens none goes back to it (not two: a shell `then`
+  doesn't open one); one shallower than the line above, out of brackets,
+  goes at the nearest level (between two, the shallower). A
+  block's own steps stay: 2 spaces pasted into a file of 4 are still 2,
+  which is valid Python, and a file whose `indentUnit` comes out wrong (2,
+  from a long list) isn't rewritten by it. In brackets, a line goes on as
+  deep as it was from the line above, as Python's lines there can line
+  up with anything. A line starting by closing a bracket goes as deep as
+  the line that opened it (matched by kind, as `=` does, so a regex's
+  stray `[` doesn't count), or in the block, as much deeper as it was
+  (PEP 8's other way, under the list's last line); the lines after go by
+  that line, as after a `\`'s next one (an `if (a and` whose `b):` ends
+  it gives `if`'s level to its block). A line in a `/* */` comment or a
+  docstring (a `"""` first on its line) moves with the line it starts
+  on; another `"""` string's lines are its text, and stay, blank ones
+  too. A line of only a comment moves with the line above, and the next
+  doesn't go by it (Python ignores its indent: a comment at column 0 in a
+  class stays). It reads every file the same, whatever its name: in
+  Markdown, a sentence's brackets across lines count as code's. A blank
+  line has no indent, as with `=`, and a tab is 4 columns, as `>` has it.
+  It reads from the text's start too (0.6 s for 120,000 lines, `=` 0.3).
+  Over each of the standard library's modules, `gg=G` changes 203 of
+  305,000 lines, in 12 of 589 files: bracket contents flat with their
+  opener, continuation lines not deeper than their bracket, a `}`
+  shallower than its opener's line. A body taken out of 510 `if`s and
+  `def`s and shifted (flat, by 4 or 8 either way) comes back as it was,
+  but for docstrings' examples, which are text.
 - **Regular expressions** (`Txt.regExp`, `regexMatches` in native.cpp): the
   search, `:s`, the find bar and the help's search look for PCRE2's,
   through Qt's `QRegularExpression`, not QML's `RegExp`: Qt's JavaScript

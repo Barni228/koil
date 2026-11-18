@@ -25,7 +25,7 @@ the only record of why things are as they are. A section named elsewhere
 | `docs/shell.md` | Shell commands, Output box |
 | `docs/launch.md` | Command line, The koil command, Open in Koil, Open With |
 | `docs/vim.md` | Buffers, Vim, Macros, Batches and runs, Edits from outside, Hidden text |
-| `docs/vim-commands.md` | Visual block, Multiple cursors, Marked lines, Surround, Reindent, Regular expressions, Substitute, Command line colors, Find bar |
+| `docs/vim-commands.md` | Visual block, Multiple cursors, Marked lines, Surround, Reindent, Guessed indent, Regular expressions, Substitute, Command line colors, Find bar |
 | `docs/shortcuts.md` | Shortcuts (both), Menus |
 | `docs/editor.md` | Overlays, Text layout, Long texts, Long lines, Wrapping, Line numbers, Whitespace in the selection, Warnings and errors, Notes after lines, Icon font, Fonts |
 | `docs/help.md` | Help, Help window, Help links, Help folds, Scrolling boxes |

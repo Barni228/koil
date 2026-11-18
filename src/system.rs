@@ -360,9 +360,9 @@ pub mod qobject {
         unsafe fn set_span_colors(self: &System, text_document: *mut QObject, spans: &QStringList);
 
         /// Colors a file's `textDocument` (see syntax.rs): `colors` has a
-        /// color for each kind of part, in the order of `SyntaxKind`, and
-        /// `file_name` says which comments it can have. `icon_colors`
-        /// (the scratchpad's), `directory_color` and `executable_color`
+        /// color for each kind of part, in the order of `SyntaxKind`.
+        /// `icon_colors` (the scratchpad's), `directory_color` and
+        /// `executable_color`
         /// are the listing's, as `set_listing_colors` takes them, for the
         /// lines that start with an icon. Neither colors nor icons take
         /// them away.
@@ -371,7 +371,6 @@ pub mod qobject {
             self: &System,
             text_document: *mut QObject,
             colors: &QStringList,
-            file_name: &QString,
             icon_colors: &QStringList,
             directory_color: &QString,
             executable_color: &QString,
@@ -674,7 +673,7 @@ impl qobject::System {
         set_path_colors(text_document, directory_color: &QString, spans: &QStringList);
         set_span_colors(text_document, spans: &QStringList);
         set_text_colors(
-            text_document, colors: &QStringList, file_name: &QString, icon_colors: &QStringList,
+            text_document, colors: &QStringList, icon_colors: &QStringList,
             directory_color: &QString, executable_color: &QString
         );
         set_text_entry_lines(

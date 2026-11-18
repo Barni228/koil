@@ -1,16 +1,16 @@
 use super::*;
 
-/// The colored parts of `line` (in a file with every comment), as their
-/// text and kind, in the order they're colored.
+/// The colored parts of `line`, as their text and kind, in the order
+/// they're colored.
 fn parts(line: &str) -> Vec<(String, Kind)> {
-    parts_in(line, State::Code, Comments::ALL).0
+    parts_in(line, State::Code).0
 }
 
 /// The colored parts of `line`, starting in `state`, and the state it ends
 /// in.
-fn parts_in(line: &str, state: State, comments: Comments) -> (Vec<(String, Kind)>, State) {
+fn parts_in(line: &str, state: State) -> (Vec<(String, Kind)>, State) {
     let units: Vec<u16> = line.encode_utf16().collect();
-    let (spans, state) = spans(&units, state, comments);
+    let (spans, state) = spans(&units, state);
     let parts = spans
         .iter()
         .map(|s| (String::from_utf16(&units[s.start..s.end]).unwrap(), s.kind))
@@ -107,6 +107,13 @@ fn test_line_comments() {
         of(r#"s = "// not" // but this"#, Kind::Comment),
         ["// but this"]
     );
+    // Not a division whose line goes on to close a bracket opened before
+    // it, but one after brackets closed, or that only opens one.
+    assert!(of("range(n // 2)", Kind::Comment).is_empty());
+    assert!(of("x = [a[i // 2], b]", Kind::Comment).is_empty());
+    assert_eq!(of("f(a) // see (b)", Kind::Comment), ["// see (b)"]);
+    assert_eq!(of("f(a, // b", Kind::Comment), ["// b"]);
+    assert_eq!(of("// x)", Kind::Comment), ["// x)"]);
     assert_eq!(of("a = b # c", Kind::Comment), ["# c"]);
     assert_eq!(of("# comment", Kind::Comment), ["# comment"]);
     assert_eq!(of("#", Kind::Comment), ["#"]);
@@ -136,7 +143,7 @@ fn test_block_comments() {
     // Not a glob.
     assert!(of("ls src/*.rs", Kind::Comment).is_empty());
 
-    let (parts, state) = parts_in("x = 1 /* starts", State::Code, Comments::ALL);
+    let (parts, state) = parts_in("x = 1 /* starts", State::Code);
     assert_eq!(
         parts,
         [
@@ -145,10 +152,10 @@ fn test_block_comments() {
         ]
     );
     assert_eq!(state, State::Slashes);
-    let (parts, state) = parts_in("goes on 'x'", State::Slashes, Comments::ALL);
+    let (parts, state) = parts_in("goes on 'x'", State::Slashes);
     assert_eq!(parts, [("goes on 'x'".to_string(), Kind::Comment)]);
     assert_eq!(state, State::Slashes);
-    let (parts, state) = parts_in("ends */ y = 2", State::Slashes, Comments::ALL);
+    let (parts, state) = parts_in("ends */ y = 2", State::Slashes);
     assert_eq!(
         parts,
         [
@@ -158,55 +165,14 @@ fn test_block_comments() {
     );
     assert_eq!(state, State::Code);
     // A `/*` right after it opens one, but `/*/` doesn't close it.
-    assert_eq!(
-        parts_in("/*/", State::Code, Comments::ALL).1,
-        State::Slashes
-    );
-    let (_, state) = parts_in("<!-- a", State::Code, Comments::ALL);
+    assert_eq!(parts_in("/*/", State::Code).1, State::Slashes);
+    let (_, state) = parts_in("<!-- a", State::Code);
     assert_eq!(state, State::Markup);
-    assert_eq!(
-        parts_in("b */ -->", State::Markup, Comments::ALL).1,
-        State::Code
-    );
+    assert_eq!(parts_in("b */ -->", State::Markup).1, State::Code);
 
     for number in [-1, 0, 1, 2] {
         assert_eq!(State::from_number(number).number(), number.max(0));
     }
-}
-
-#[test]
-fn test_comments_of() {
-    assert_eq!(
-        Comments::of("/a/README.md"),
-        Comments {
-            hash: false,
-            slashes: true
-        }
-    );
-    assert_eq!(
-        Comments::of("Notes.MARKDOWN"),
-        Comments {
-            hash: false,
-            slashes: true
-        }
-    );
-    assert_eq!(
-        Comments::of("x.py"),
-        Comments {
-            hash: true,
-            slashes: false
-        }
-    );
-    for name in ["main.rs", "Makefile", ".zshrc", "", "notes.txt"] {
-        assert_eq!(Comments::of(name), Comments::ALL, "{name}");
-    }
-    let markdown = Comments::of("README.md");
-    assert!(parts_in("# Title", State::Code, markdown).0.is_empty());
-    assert_eq!(parts_in("a // b", State::Code, Comments::of("x.py")).0, []);
-    assert_eq!(
-        parts_in("a /* b", State::Code, Comments::of("x.py")).1,
-        State::Code
-    );
 }
 
 #[test]
@@ -303,7 +269,7 @@ fn test_long_line() {
 fn test_apart() {
     let drawn = |line: &str| {
         let units: Vec<u16> = line.encode_utf16().collect();
-        apart(&spans(&units, State::Code, Comments::ALL).0)
+        apart(&spans(&units, State::Code).0)
             .iter()
             .map(|s| (String::from_utf16(&units[s.start..s.end]).unwrap(), s.kind))
             .collect::<Vec<_>>()
