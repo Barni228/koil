@@ -446,6 +446,7 @@ TestCase {
         vim.visualCommandKeys = {};
         vim.shortcuts = [];
         vim.completer = null;
+        vim.wordSources = null;
         vim.lineHistory = null;
     }
 
@@ -4067,6 +4068,169 @@ TestCase {
         keys("<Esc>");
     }
 
+    // Ctrl-N and Ctrl-P while typing complete the word before the cursor
+    // from the words in the text, as vim's keyword completion does.
+    function test_wordCompletion() {
+        const line = n => editor.text.split("\n")[n - 1];
+        const names = () => vim.completion.options.map(o => o.name);
+        const label = "-- Keyword completion (^N^P) ";
+        load("food foo\nfox\n\nfoobar");
+        // Ctrl-N: the nearest word after the cursor first, then on from
+        // the text's start, each once, and past the last, what was written.
+        keys("3Gifo<C-n>");
+        compare(line(3), "foobar");
+        compare(names(), ["foobar", "food", "foo", "fox"]);
+        compare(vim.modeLabel, label + "match 1 of 4");
+        keys("<C-n><C-n>");
+        compare(line(3), "foo");
+        keys("<C-n><C-n>");
+        compare([line(3), vim.modeLabel], ["fo", label + "Back at original"]);
+        keys("<C-n>");
+        compare(line(3), "foobar");
+        keys("<C-p><C-p>");
+        compare(line(3), "fox");
+        // Esc keeps it, and "." types that word again.
+        keys("<Esc>");
+        compare([line(3), vim.completion, vim.modeLabel], ["fox", null, ""]);
+        keys(".");
+        compare(line(3), "fofoxx");
+        // Ctrl-P: the nearest before the cursor first, at the list's
+        // bottom, as vim's, so Ctrl-P, as Shift+Tab, goes up it, and Ctrl-N
+        // down. The status line counts in the order found.
+        keys("ccfo<C-p>");
+        compare([line(3), names(), vim.completion.index], ["fox", ["foobar", "food", "foo", "fox"], 3]);
+        compare(vim.modeLabel, label + "match 1 of 4");
+        keys("<C-p>");
+        compare([line(3), vim.completion.index, vim.modeLabel], ["foo", 2, label + "match 2 of 4"]);
+        keys("<S-Tab>");
+        compare([line(3), vim.completion.index, vim.modeLabel], ["foo", 1, label + "match 3 of 4"]);
+        keys("<C-n>");
+        compare([line(3), vim.completion.index], ["foo", 2]);
+        keys("<C-n><C-n>");
+        compare([line(3), vim.completion.index, vim.modeLabel], ["fo", -1, label + "Back at original"]);
+        keys("<C-p>");
+        compare([line(3), vim.completion.index], ["fox", 3]);
+        keys("<C-n><C-n>");
+        compare([line(3), vim.completion.index], ["foobar", 0]);
+        // Ctrl-E puts back what was written.
+        keys("<C-e>");
+        compare([line(3), vim.completion, vim.mode], ["fo", null, "insert"]);
+        // Down and Up only pick one, which Enter puts in. Otherwise Enter
+        // makes a new line.
+        keys("<C-n><Down><Down><Up><Down>");
+        compare([line(3), vim.completion.index], ["foobar", 2]);
+        keys("<CR>");
+        compare([line(3), vim.completion, vim.mode], ["foo", null, "insert"]);
+        // So do Tab and Shift+Tab, as in the path field.
+        keys("<BS><C-n><Tab><Tab><S-Tab><Tab>");
+        compare([line(3), vim.completion.index, vim.completionListed], ["foobar", 2, true]);
+        keys("<CR>");
+        compare([line(3), vim.completion, vim.mode], ["foo", null, "insert"]);
+        keys("<BS><C-n><CR>");
+        compare(editor.text, "food foo\nfox\nfoobar\n\nfoobar");
+        // Ctrl-Y keeps the one that's in, or puts in the one picked.
+        keys("fo<C-n><C-n><C-y>");
+        compare([line(4), vim.completion], ["food", null]);
+        keys(" fo<C-n><Down><C-y>");
+        compare([line(4), vim.completion], ["food food", null]);
+        // None found: the status line says so, as an error, until the next
+        // key.
+        keys("<C-n>");
+        compare([line(4), vim.modeLabel, vim.wordsFailed], ["food food", label + "Pattern not found", true]);
+        keys("s");
+        compare([line(4), vim.modeLabel, vim.wordsFailed], ["food foods", "-- INSERT --", false]);
+        keys("<Esc>");
+
+        // Backspace finds the words for what's left, keeping the one
+        // picked, to pick from; so does typing then. None ends it.
+        load("food foo\nfox\n\nfoobar");
+        keys("3Gifo<C-n><BS>");
+        compare([line(3), names(), vim.completion.index], ["fooba", ["foobar"], 0]);
+        keys("<BS><BS>");
+        compare([line(3), names(), vim.completion.index], ["foo", ["foobar", "food"], 0]);
+        keys("<Down><CR>");
+        compare([line(3), vim.completion], ["food", null]);
+        keys("<BS><BS><C-n><BS><BS><BS><BS>o");
+        compare([line(3), names(), vim.completion.index], ["foo", ["foobar", "food"], 0]);
+        keys("d");
+        compare([line(3), vim.completion], ["food", null]);
+        // Backspace that would leave no word ends it, and deletes.
+        keys("<BS><BS><C-n><BS><BS><BS><BS><BS>");
+        compare([line(3), names()], ["f", ["foobar", "food", "foo", "fox"]]);
+        keys("<BS>");
+        compare([line(3), vim.completion], ["", null]);
+        // Typing before one is picked ends it, and types.
+        keys("fo<C-n>s");
+        compare([line(3), vim.completion], ["foobars", null]);
+        keys("<Esc>");
+        // The one picked, once typing leaves it out, gives way to the
+        // nearest above it, as vim's.
+        load("food foo\nfox\n\nfoobar");
+        keys("3Gif<C-n><BS><BS><BS><BS><BS><Down><Down><Down>o");
+        compare([line(3), vim.completion.index], ["fo", 3]);
+        keys("o");
+        compare([line(3), names(), vim.completion.index], ["foo", ["foobar", "food"], 1]);
+        // None picked stays so, and Enter then makes a new line, as vim's.
+        keys("<C-e><BS><C-n><C-n><C-n><C-n><C-n><BS>");
+        compare([line(3), names(), vim.completion.index], ["f", ["foobar", "food", "foo", "fox"], -1]);
+        keys("<CR>");
+        compare([line(3), line(4), vim.completion], ["f", "", null]);
+        keys("<Esc>");
+
+        // Case counts only with an uppercase letter, as in a search.
+        load("Foo foo bar");
+        keys("A F<C-n>");
+        compare([editor.text, vim.modeLabel], ["Foo foo bar Foo", label + "The only match"]);
+        // With no list to pick from, Tab types itself.
+        keys("<Tab>");
+        compare([editor.text, vim.completion], ["Foo foo bar Foo\t", null]);
+        keys("<Esc>A f<C-n>");
+        compare(names(), ["Foo", "foo"]);
+        keys("<Esc>");
+        // With no word before the cursor, every word of two characters or
+        // more, which leaves out the listing's icons.
+        load("a bc de");
+        keys("A <C-n>");
+        compare([editor.text, names()], ["a bc de bc", ["bc", "de"]]);
+        keys("<Esc>");
+        load("M  one\nM  two");
+        vim.linePrefixes = true;
+        keys("Go<C-n>");
+        compare([render(), names()], ["<M:h1>  one\n<M:h2>  two\n   one", ["one", "two"]]);
+        keys("<Esc>");
+        vim.linePrefixes = false;
+        // The other buffers' words come after this one's.
+        vim.wordSources = () => ["other foobaz"];
+        load("food");
+        keys("A fo<C-n>");
+        compare(names(), ["food", "foobaz"]);
+        keys("<C-e><C-p>");
+        compare([names(), vim.completion.index, editor.text], [["foobaz", "food"], 1, "food food"]);
+        keys("<Esc>");
+        vim.wordSources = null;
+        // At every cursor.
+        load("fo\nfo\nfoobar");
+        vim.toggleCursor(3);
+        keys("A<C-n><Esc>");
+        compare(editor.text, "foobar\nfoobar\nfoobar");
+        // A macro runs Ctrl-N again, where it's run.
+        load("food");
+        keys("qaofo<C-n><Esc>q@a");
+        compare(editor.text, "food\nfood\nfood");
+
+        // In the path field, Tab ends it, then completes the path.
+        other.text = "";
+        switchTo(other, null);
+        vim.singleLine = true;
+        vim.completer = completerOf(["src/main/", "docs/"]);
+        vim.wordSources = () => ["src"];
+        keys("is<C-n>");
+        compare([other.text, vim.completion.words], ["src", true]);
+        keys("<Tab>");
+        compare([other.text, vim.completion], ["src/", null]);
+        keys("<Esc>");
+    }
+
     function test_nothingToUndo() {
         load("ab");
         nothingToUndo.clear();
@@ -5725,12 +5889,13 @@ TestCase {
         verify(help.show("ctrl"));
         tryCompare(help, "opened", true);
         compare(unfolded(), [ctrl]);
-        // A row's keys aren't links, its text's `:h block` is.
+        // A row's keys aren't links, its text's `:h block` (and `:h
+        // complete`) is.
         let link;
         tryVerify(() => (link = helpLinks(help.contentItem).find(l => l.topic === "block")) !== undefined);
         // Once its rows are laid out, which is where the link is.
         tryVerify(() => help.span(ctrl).bottom - help.span(ctrl).top > 100);
-        verify(helpLinks(help.contentItem).every(l => l.topic === "block"));
+        verify(helpLinks(help.contentItem).every(l => l.topic === "block" || l.topic === "complete"));
         // Scrolled to, if it's below what the help shows: a click only
         // reaches what does, and how far down the link is goes by the
         // font (offscreen's put it under the window's edge).

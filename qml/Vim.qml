@@ -139,8 +139,13 @@ QtObject {
     property var completer: null
     // The options Tab shows once it can't fill in more, as { start,
     // options, index } (the picked one), or null. Moving the cursor (or
-    // leaving insert mode) closes them.
+    // leaving insert mode) closes them. Ctrl-N and Ctrl-P's words too,
+    // with `words` (see Word completion).
     property var completion: null
+    // The texts of the other buffers, whose words Ctrl-N and Ctrl-P
+    // complete from after this one's: a function that gives them, or null
+    // for none (see Word completion).
+    property var wordSources: null
     // The lines a buffer of one line had before (Koil's path field: the
     // locations listed), oldest first: k and j (and Up and Down, also
     // while typing) put the one before or after in (see browseLines). Null
@@ -170,7 +175,23 @@ QtObject {
     readonly property bool inserting: mode === "insert" || mode === "replace"
     readonly property string cursorShape: mode === "insert" ? "bar"
         : mode === "replace" || awaitingReplaceChar ? "underline" : "block"
-    readonly property string modeLabel: [({
+    // While completing words, what the status line says in place of the
+    // mode, as vim's: which match is in, counted in the order found (after
+    // Ctrl-P, up from the list's bottom: "match 2 of 5"), or why none is.
+    readonly property string wordsLabel: completion === null || !completion.words ? ""
+        : "-- Keyword completion (^N^P) " + (completion.failed ? "Pattern not found"
+            : completion.index < 0 ? "Back at original"
+            : completion.options.length === 1 ? "The only match"
+            : "match " + (completion.backward ? completion.options.length - completion.index : completion.index + 1)
+                + " of " + completion.options.length)
+    // Whether that's an error, which the status line shows as one.
+    readonly property bool wordsFailed: completion !== null && completion.words === true && completion.failed
+    // Whether the CompletionList shows the options: Tab's always, and the
+    // words once there's more than one, or one is picked without being put
+    // in (vim's `menu` without `menuone`).
+    readonly property bool completionListed: completion !== null && (!completion.words
+        || completion.options.length > 1 || completion.selects && completion.options.length > 0)
+    readonly property string modeLabel: [wordsLabel || ({
             insert: "-- INSERT --",
             replace: "-- REPLACE --",
             visual: "-- VISUAL --",
@@ -529,9 +550,10 @@ QtObject {
         if (shortcutTakes(tok))
             return typedKey(tok, event);
         // Ctrl+Y is also Redo on Windows and Linux, and Paste (yank) on
-        // macOS, except outside insert mode, where it scrolls as in vim.
-        const scrollKey = mode !== "insert" && tok === "<C-y>";
-        if ((event.matches(StandardKey.Undo) || event.matches(StandardKey.Redo)) && !scrollKey) {
+        // macOS, except outside insert mode, where it scrolls as in vim,
+        // and while completing words, where it keeps the word.
+        const vimCtrlY = tok === "<C-y>" && (mode !== "insert" || completion !== null && completion.words === true);
+        if ((event.matches(StandardKey.Undo) || event.matches(StandardKey.Redo)) && !vimCtrlY) {
             nativeUndo(event.matches(StandardKey.Redo));
             return true;
         }
@@ -552,7 +574,7 @@ QtObject {
                 return true;
             }
             // Ctrl+V pastes too, also on macOS (where Paste is Cmd+V).
-            if (event.matches(StandardKey.Paste) || tok === "<C-v>") {
+            if (event.matches(StandardKey.Paste) && !vimCtrlY || tok === "<C-v>") {
                 const r = getRegister("+");
                 if (r)
                     insertPaste(r);
@@ -574,7 +596,7 @@ QtObject {
                     execute({ reg: "+", count: 0, action: "d" });
                 return true;
             }
-            if (event.matches(StandardKey.Paste) && !blockKey && !scrollKey) {
+            if (event.matches(StandardKey.Paste) && !blockKey && !vimCtrlY) {
                 if (mode !== "replace")
                     execute({ reg: "+", count: 0, action: "P" });
                 return true;
@@ -609,7 +631,13 @@ QtObject {
         tok = unshifted(tok);
         if (commandLine !== "")
             return commandLineKey(tok);
-        if (mode === "insert" && completer && (completion || tok === "<Tab>") && completionKey(tok))
+        // Ctrl-N and Ctrl-P complete words, but pick a dir while Tab's
+        // options show (in the path field).
+        if (mode === "insert" && (completion ? completion.words : tok === "<C-n>" || tok === "<C-p>")
+                && wordKey(tok))
+            return true;
+        if (mode === "insert" && completer && (completion ? !completion.words : tok === "<Tab>")
+                && completionKey(tok))
             return true;
         if (singleLine && inserting && (tok === "<CR>" || tok === "<S-CR>")) {
             leaveInsert();
@@ -2750,20 +2778,164 @@ QtObject {
     }
 
     // Writes `text` in place of what's from `start` to the cursor, as if
-    // typed. A dir's `/` steps over one right after the cursor, rather than
-    // doubling it.
+    // typed: at every cursor, as those keys. A dir's `/` steps over one
+    // right after the cursor, rather than doubling it.
     function completeWith(start, text) {
         const t = bufferText(), s = insertSession, over = text.endsWith("/") && t[cursor] === "/";
         if (over)
             text = text.slice(0, -1);
-        if (s && !s.broken) {
-            for (let p = cursor; p > start; p = Txt.charStart(t, p - 1))
-                s.keys.push("<BS>");
-            for (const ch of text)
-                s.keys.push(ch);
+        const typed = [];
+        for (let p = cursor; p > start; p = Txt.charStart(t, p - 1))
+            typed.push("<BS>");
+        for (const ch of text)
+            typed.push(ch);
+        if (s && !s.broken)
+            s.keys.push(...typed);
+        if (cursors.length) {
+            for (const k of typed)
+                typeKey(k);
+        } else {
+            replaceRange(start, cursor, text);
+            setCursor(start + text.length);
         }
-        replaceRange(start, cursor, text);
-        setCursor(start + text.length + (over ? 1 : 0));
+        if (over)
+            setCursor(cursor + 1);
+    }
+
+    // ---- Word completion ---------------------------------------------------
+    // Ctrl-N and Ctrl-P while typing complete the word before the cursor
+    // from the words in the text, as vim's keyword completion does: they
+    // put in the next or previous word found that starts with it (past
+    // either end, what was written), and show them all (`completion` with
+    // `words`, in the CompletionList) as vim's menu does: in the order
+    // found, the one put in at the top, but after Ctrl-P the other way, the
+    // one put in at the bottom. Ctrl-N goes down the list and Ctrl-P up,
+    // whichever started it. Tab and Shift+Tab (while they show,
+    // as in the path field's), Up and Down only pick one, which Enter then
+    // puts in, and so does typing or Backspace, which find the words again
+    // for what's written then. Ctrl-Y keeps what's in (or the one picked),
+    // Ctrl-E puts back what was written, and any other key ends it, then
+    // does what it does. See Word completion for the rest.
+
+    // A key while typing, for completing words: Ctrl-N or Ctrl-P, or any
+    // key while it goes on. Returns whether it took the key.
+    function wordKey(tok) {
+        const c = completion;
+        if (!c || c.failed && (tok === "<C-n>" || tok === "<C-p>")) {
+            completeWords(tok === "<C-p>");
+            return true;
+        }
+        // Like a lone modifier, which may start Ctrl-N.
+        if (tok === null)
+            return false;
+        // Tab and Shift+Tab as in the path field's, while the words show:
+        // otherwise Tab types itself, as vim's. Down the list or up it,
+        // whichever key started it: after Ctrl-P, which lists the nearest
+        // last, Ctrl-P goes on up to the next one found.
+        const step = { "<C-n>": 1, "<Down>": 1, "<Tab>": 1, "<C-p>": -1, "<Up>": -1, "<S-Tab>": -1 }[tok];
+        if (step && !c.failed && (completionListed || tok !== "<Tab>" && tok !== "<S-Tab>")) {
+            // Round through what was written (-1), between the last and
+            // the first.
+            const n = c.options.length, index = (c.index + 1 + step + n + 1) % (n + 1) - 1;
+            const putIn = tok === "<C-n>" || tok === "<C-p>";
+            if (putIn)
+                completeWith(c.start, index < 0 ? c.leader : c.options[index].name);
+            completion = Object.assign({}, c, { index: index, selects: !putIn });
+            return true;
+        }
+        completion = null;
+        if (c.failed)
+            return false;
+        // Enter puts in the one picked, but with none picked (back at what
+        // was written) makes a new line, as vim's.
+        const picked = c.index >= 0 ? c.options[c.index].name : null;
+        if (tok === "<C-y>" || tok === "<CR>" && c.selects && picked !== null) {
+            if (c.selects && picked !== null)
+                completeWith(c.start, picked);
+            return true;
+        }
+        if (tok === "<C-e>") {
+            completeWith(c.start, c.leader);
+            return true;
+        }
+        // Backspace that leaves some of the word, or a character typed
+        // once one is picked and not in (but a space): vim types it, and
+        // finds the words for what's written then.
+        const t = bufferText();
+        if (tok === "<BS>" ? cursor > c.start && Txt.charStart(t, cursor - 1) > c.start
+                : c.selects && !isSpecial(tok) && tok !== " ") {
+            insertKey(tok, null);
+            narrowWords(c);
+            return true;
+        }
+        return false;
+    }
+
+    // Ctrl-N (Ctrl-P with `backward`): puts in the first word found that
+    // starts with the one before the cursor (see wordsFor: the list's
+    // first, or its last after Ctrl-P), and shows them all, or says
+    // there's none.
+    function completeWords(backward) {
+        const t = bufferText();
+        let start = cursor;
+        while (start > 0 && Txt.charClass(t[start - 1], false) === 2)
+            start--;
+        const leader = t.slice(start, cursor), options = wordsFor(t, start, leader, backward);
+        const index = backward ? options.length - 1 : 0;
+        message = ""; // for the status line's wordsLabel
+        if (options.length)
+            completeWith(start, options[index].name);
+        completion = { words: true, start: start, leader: leader, options: options, index: options.length ? index : -1,
+            backward: backward, selects: false, failed: !options.length };
+    }
+
+    // After a key that narrows them (see wordKey): the words for what's
+    // written from c.start now, none of them put in. The one picked before
+    // stays picked if it's one of them, or else the nearest above it in
+    // the list that is, or else below it, as vim's; none picked stays so.
+    // None ends it.
+    function narrowWords(c) {
+        const t = bufferText(), leader = t.slice(c.start, cursor), options = wordsFor(t, c.start, leader, c.backward);
+        if (!options.length)
+            return;
+        // Each one's place in the new list (an object of keys, see wordsFor).
+        const at = Object.create(null);
+        options.forEach((o, i) => at[o.name] = i);
+        const order = c.index < 0 ? [] : c.options.slice(0, c.index + 1).reverse().concat(c.options.slice(c.index + 1));
+        const kept = order.find(o => o.name in at);
+        completion = Object.assign({}, c, { leader: leader, options: options, selects: true,
+            index: kept ? at[kept.name] : -1 });
+    }
+
+    // The words that start with `leader` (but `leader` itself), each once,
+    // as options ({ name }) top to bottom as vim's menu lists them: in the
+    // order Ctrl-N finds them, t's from `start` on and round to it, but
+    // the one at `start`, being written, then the other buffers' (see
+    // wordSources); with `backward`, as Ctrl-P finds them (back from
+    // `start` and round, then the other buffers' from their ends), but
+    // listed the other way, the nearest last. Case counts only if `leader`
+    // has an uppercase letter, as in a search. Without a leader, the words
+    // of two characters or more, as vim's, which leaves out an icon alone.
+    function wordsFor(t, start, leader, backward) {
+        const ignoreCase = Txt.ignoresCase(leader, false), before = [], after = [];
+        for (const w of Txt.wordsStarting(t, leader, ignoreCase)) {
+            if (w.at !== start)
+                (w.at < start ? before : after).push(w.word);
+        }
+        let words = backward ? before.reverse().concat(after.reverse()) : after.concat(before);
+        for (const other of wordSources ? wordSources() : []) {
+            const found = Txt.wordsStarting(other, leader, ignoreCase).map(w => w.word);
+            words = words.concat(backward ? found.reverse() : found);
+        }
+        // An object of keys, as a Set takes time in proportion to its size.
+        const seen = Object.create(null), options = [];
+        for (const w of words) {
+            if (w !== leader && !seen[w] && (leader || Txt.charEnd(w, 0) < w.length)) {
+                seen[w] = true;
+                options.push({ name: w });
+            }
+        }
+        return backward ? options.reverse() : options;
     }
 
     // ---- Visual block ------------------------------------------------------

@@ -118,7 +118,8 @@
 - `qml/InfoBox.qml`: what `K` shows of an entry, in the middle of the
   window, without the keys (see Info).
 - `qml/CompletionList.qml`: the dirs Tab can complete the path field to, in
-  a box under it, like VS Code's suggestions (see Completion).
+  a box under it, like VS Code's suggestions (see Completion), or the
+  words Ctrl-N and Ctrl-P go through (see Word completion).
 - `qml/SortMenu.qml`: what `gs` and a key sort the listing by, in a box
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,

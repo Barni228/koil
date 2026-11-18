@@ -2862,6 +2862,12 @@ ApplicationWindow {
         // Tab while typing in the path field completes the dir being
         // written (see Koil.complete).
         completer: root.listing && root.activeView === pathView ? (line, cursor) => JSON.parse(koil.complete(line, cursor)) : null
+        // Ctrl-N and Ctrl-P complete words from the other buffers too, after
+        // this one's (see Word completion): the path field or the editor,
+        // whichever vim isn't in, then the scratchpad if it isn't shown, or
+        // the file it was opened over.
+        wordSources: () => [(root.activeView === pathView ? editorView : pathView).textArea.latest?.text ?? "",
+            root.scratchpad ? root.scratchFromFile?.text ?? "" : root.scratchText()]
         lineHistory: root.pathHistory
         linePrefixes: root.listing && root.activeView === editorView
         bangEntries: root.listing ? "%" : root.scratchpad ? "<cfile>" : ""

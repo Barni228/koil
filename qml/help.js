@@ -648,10 +648,43 @@ function sections(help) {
                 ["`Ctrl-O`", "In the help: back to where a link, like `:h block`, was clicked."],
                 ["`Ctrl-C`", "Stop a macro or shell command that's running, or close the command line, "
                     + "as `Esc` does."],
-                ["`Ctrl-N`  `Ctrl-P`", "While completing a path: the next or previous dir."],
+                ["`Ctrl-N`  `Ctrl-P`", "While typing: complete the word from the words in the text (see "
+                    + "`:h complete`). While completing a path: the next or previous dir."],
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],
                 ["`Ctrl-B`  `Ctrl-E`", "In the command line: go to the start or the end."]
             ]
+        },
+        {
+            title: "Completing words",
+            tags: ["complete", "completion", "ins-completion", "compl-keyword", "i_ctrl-n", "i_ctrl-p",
+                "popupmenu-keys", "popup", "words"],
+            intro: "While typing, `Ctrl-N` puts in a word that starts with the one before the cursor, as vim's "
+                + "keyword completion does: the nearest one after the cursor, then the ones before it, then "
+                + "those of the path field (or the listing, from there) and the scratchpad. `Ctrl-P` starts "
+                + "with the nearest one before the cursor. A box under the word lists them all in the order "
+                + "found, the one that's in at the top, or after `Ctrl-P` the other way, the one that's in at "
+                + "the bottom, as vim's. The status line says which one is in. Case counts only if the word "
+                + "has an uppercase letter, as in a search. With no word before the cursor, it goes through "
+                + "every word.",
+            rows: [
+                ["`Ctrl-N`  `Ctrl-P`", "Put in the one below or above it in the list instead, so after "
+                    + "`Ctrl-P`, `Ctrl-P` goes on to the next one found. Past the bottom (or the top), what you "
+                    + "wrote comes back."],
+                ["`Tab`  `Shift+Tab`  `↓`  `↑`", "Pick the one below or above without putting it in, for `Enter` "
+                    + "to put in, as while completing a path."],
+                ["`Ctrl-Y`", "Keep the one that's in (or put in the one picked) and close the box."],
+                ["`Ctrl-E`", "Put back what you wrote, and close the box."],
+                ["`Backspace`", "Delete a character and list the words that start with what's left, to "
+                    + "pick from."],
+                ["typing", "Once one is picked without being put in (`Tab`, `↓`, `Backspace`): narrow the "
+                    + "list to what you type. Otherwise, or with a space, it closes the box and types (so does "
+                    + "`Tab` while there's no box: with only one word)."],
+                ["`Enter`", "Put in the one picked (after `Tab`, `↓` or typing), or else close the box and "
+                    + "start a new line."],
+                ["", "Any other key closes the box and does what it does: `Esc` leaves insert mode with "
+                    + "the word that's in. A click on a word puts it in."]
+            ],
+            note: "`.` types the word again, not the next one found."
         },
         {
             title: "Other keys",

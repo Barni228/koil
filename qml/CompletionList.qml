@@ -7,8 +7,11 @@ import QtQuick.Controls
 // Vim.qml), under the part being written, like VS Code's suggestions: a dir
 // per row, as its line in the listing shows it (its icon, two spaces and
 // its name), with the picked one highlighted and the names lined up with
-// what's written. A click takes one. It lives in the window's overlay so
-// the editor doesn't clip it.
+// what's written. Or the words Ctrl-N and Ctrl-P go through (see Word
+// completion), a word a row, once there's more than one or one is picked
+// without being put in. Above the part if there's no room under it. A
+// click takes one. It lives in the window's overlay so the editor doesn't
+// clip it.
 Item {
     id: list
 
@@ -19,11 +22,15 @@ Item {
     required property Theme theme
     readonly property var completion: editor.active ? editor.vim.completion : null
     readonly property var options: completion ? completion.options : []
+    readonly property bool words: completion !== null && completion.words === true
+    readonly property bool shown: completion !== null && editor.vim.completionListed
     // How many rows show at once; more scroll.
     readonly property int maxRows: 10
     readonly property real inset: 4 * theme.zoom
-    // Where a row's name starts, after its icon and two spaces.
-    readonly property real nameX: 2 * inset + 3 * editor.charWidth
+    readonly property real gap: 2 * theme.zoom
+    // Where a row's name starts, after its icon and two spaces (words have
+    // none).
+    readonly property real nameX: 2 * inset + (words ? 0 : 3 * editor.charWidth)
     // Where the part being written starts, in the overlay's coordinates.
     property rect anchorRect
 
@@ -34,21 +41,26 @@ Item {
             return;
         const r = editor.cellAt(completion.start);
         anchorRect = editor.textArea.mapToItem(parent, r.x, r.y, r.width, r.height);
-        rows.positionViewAtIndex(completion.index, ListView.Contain);
+        if (completion.index >= 0)
+            rows.positionViewAtIndex(completion.index, ListView.Contain);
     }
 
     parent: Overlay.overlay
-    visible: completion !== null && editor.textArea.activeFocus
+    visible: shown && editor.textArea.activeFocus
     width: frame.width
     height: frame.height
     x: Math.max(8, Math.min(anchorRect.x - nameX, (parent ? parent.width : 0) - width - 8))
-    y: anchorRect.y + anchorRect.height + 2 * theme.zoom
+    y: anchorRect.y + anchorRect.height + gap + height > (parent ? parent.height : 0) && anchorRect.y - gap - height >= 0
+        ? anchorRect.y - gap - height : anchorRect.y + anchorRect.height + gap
     onCompletionChanged: Qt.callLater(place)
 
     Connections {
         target: list.editor.flickable
 
         function onContentXChanged() {
+            list.place();
+        }
+        function onContentYChanged() {
             list.place();
         }
     }
@@ -93,11 +105,12 @@ Item {
                     : pointer.containsMouse ? list.theme.hover : "transparent"
 
                 Text {
+                    visible: !list.words
                     x: list.inset
                     y: list.editor.textBaseline - baselineOffset
-                    text: row.modelData.icon
+                    text: row.modelData.icon || ""
                     font: list.theme.font
-                    color: row.modelData.colors[list.theme.dark ? 0 : 1]
+                    color: row.modelData.colors ? row.modelData.colors[list.theme.dark ? 0 : 1] : list.theme.text
                     textFormat: Text.PlainText
                 }
 
@@ -107,7 +120,7 @@ Item {
                     width: row.width - x - list.inset
                     text: row.modelData.name
                     font: list.theme.font
-                    color: list.theme.directory
+                    color: list.words ? list.theme.text : list.theme.directory
                     textFormat: Text.PlainText
                     elide: Text.ElideRight
                 }

@@ -174,7 +174,8 @@
   Otherwise vim shows them (`vim.completion`, drawn by `CompletionList` in
   the window's overlay, a row per dir as its listing line, the names under
   the part): Tab and Shift+Tab (`<S-Tab>`, which elsewhere only a
-  shortcut takes, see Shortcuts; also Down and Up, Ctrl-N and Ctrl-P) pick the next or previous one, Enter
+  shortcut takes, see Shortcuts; also Down and Up, Ctrl-N and Ctrl-P,
+  which otherwise complete words, see Word completion) pick the next or previous one, Enter
   takes it (so Enter opens the path only once they're closed), Esc closes
   them but stays in insert mode, typing and
   Backspace narrow them (vim types those itself, so the options follow at

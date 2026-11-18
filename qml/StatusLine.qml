@@ -62,7 +62,8 @@ Pane {
         font.family: bar.vim.fontFamily
         font.pixelSize: bar.vim.fontSize
         textFormat: bar.vim.commandLine === "" ? Text.PlainText : Text.StyledText
-        color: bar.vim.commandLine === "" && bar.vim.message !== "" && bar.vim.messageIsError ? "#d33" : bar.theme.windowText
+        color: bar.vim.commandLine === "" && (bar.vim.message !== "" ? bar.vim.messageIsError : bar.vim.wordsFailed)
+            ? "#d33" : bar.theme.windowText
         text: bar.vim.commandLine ? bar.commandLineHtml(bar.vim.commandLine) : bar.vim.message || bar.vim.modeLabel || " "
 
         // For what's shown here or not (see fits).

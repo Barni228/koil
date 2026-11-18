@@ -320,6 +320,21 @@ function charClass(ch, big) {
     return 1;
 }
 
+// The words of t (runs of charClass's word characters) that start with
+// `part`, ignoring case with `ignoreCase`, in order, as { at, word }:
+// what Ctrl-N completes (see Word completion in Vim.qml). Without a
+// part, every word. A regular expression finds them, which goes over a
+// long text far faster than a loop of charClass.
+function wordsStarting(t, part, ignoreCase) {
+    const word = "0-9A-Za-z_\\u00C0-\\uFFFF";
+    const re = new RegExp("(^|[^" + word + "])(" + escapeRegExp(part) + "[" + word + "]" + (part ? "*" : "+") + ")",
+        ignoreCase ? "gi" : "g");
+    const found = [];
+    for (let m; (m = re.exec(t)) !== null;)
+        found.push({ at: m.index + m[1].length, word: m[2] });
+    return found;
+}
+
 // charClass of t's code unit at i, but 0 (a blank) where `blank(i)`
 // says, if it's given: an icon that's indentation (see Vim.qml's
 // iconBlanks), to the word motions below.

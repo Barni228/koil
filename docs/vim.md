@@ -201,6 +201,74 @@
   the next chunk usually starts at once, but now and then waits `drawTime`
   for a frame: as often as keeps drawing to about a fifth of the time (a
   frame of 40,000 lines takes over 100 ms), at most 4 times a second.
+- **Word completion** (Word completion in Vim.qml): Ctrl-N and Ctrl-P in
+  insert mode are vim's keyword completion (`:h ins-completion`), with
+  its default `completeopt` (`menu`). The word before the cursor (the
+  `leader`, a run of `Txt.charClass`'s word characters, as `w` reads
+  them; it may be empty) is completed from the words that start with it
+  (`wordsFor`, through `Txt.wordsStarting`, one regex over the text
+  rather than charClass at each character), in vim's order: for Ctrl-N,
+  the text's from the cursor on, then from its start to the cursor; for
+  Ctrl-P, back from the cursor, then back from the end; then the other
+  buffers' (`wordSources`, which main.qml gives: the path field or the
+  editor, whichever vim isn't in, then the scratchpad if it isn't shown,
+  or the file it opened over), as vim's `complete` goes on to other
+  windows and buffers. Each word once, not the leader itself (vim keeps
+  that as the original text), nor the word at the leader's start, the
+  one being written (`fo|o` would get `foo` again). Without a leader,
+  only words of two characters or more, as vim's `\k\k`, which also
+  leaves out the listing's icons (a code point ≥ 0xC0 is a word character
+  to vim and to charClass, and so are the surrogates of one past the
+  BMP). Case counts only if the leader has an uppercase letter, as in
+  Koil's searches and its path completion (vim's default is
+  `noignorecase`, which counts it always). The first one found goes in,
+  and `completion` (with `words`) keeps them as vim's menu lists them
+  (vim's `complete_info()` shows its order): in the order found, the one
+  put in at the top, but after Ctrl-P (`backward`) the other way, the one
+  put in at the bottom, picked, as vim links each match it finds going
+  back before the last. So the keys go the same way whichever started
+  it: Ctrl-N, Down and Tab down the list, Ctrl-P, Up and Shift+Tab up,
+  and Ctrl-P goes on up to the next one found. An earlier version kept
+  Ctrl-P's in the order found too, the one put in at the top, which
+  isn't vim's. The status line counts them in the order found, as vim's
+  (after Ctrl-P, the bottom one is "match 1"). Its states are vim's
+  (`:h popupmenu-keys`): Ctrl-N and Ctrl-P put the one below or above in,
+  going round through the leader (`index` -1, "Back at original", between
+  the bottom and the top); Up and
+  Down only pick one (`selects`), which Enter then puts in, and Enter
+  otherwise (also with none picked, back at the leader) makes a new
+  line, as vim's does. Tab and Shift+Tab pick as
+  Down and Up do, as they do the path field's dirs (see Completion), but
+  only while the words show (`completionListed`, which CompletionList
+  goes by too): with the only match put in and no list, Tab ends it and
+  types itself, as vim's. Backspace (vim types it) and,
+  once `selects`, a typed character but a space, find the words again for
+  what's written then (`narrowWords`, which keeps the one picked if it's
+  still there, else picks the nearest above it in the list that is, else
+  below it, and none picked stays so, as vim's `ins_compl_build_pum`),
+  and Backspace that would leave no word
+  ends it and deletes, as vim's. Ctrl-Y keeps what's in (or puts in the
+  one picked; Qt reads Ctrl+Y as Paste on macOS and Redo elsewhere, which
+  `keyPressed` leaves to vim then, `vimCtrlY`, as outside insert mode:
+  only qmltestrunner's offscreen has neither), Ctrl-E puts back the
+  leader, and any other key ends it and
+  then does what it does (a lone modifier doesn't, as Ctrl starts
+  Ctrl-N), so Esc leaves insert mode with what's in, and a key the
+  editor types closes it by moving the cursor (`onCursorChanged`). The
+  status line says what vim's does in place of `-- INSERT --`
+  (`wordsLabel`: "-- Keyword completion (^N^P) match 2 of 5", "The only
+  match", "Back at original"), and with none found, "Pattern not found",
+  as an error (`wordsFailed`, a completion with `failed` and no options,
+  which the next key ends, and Ctrl-N tries again), without failing a
+  macro (vim only beeps). `CompletionList` shows the words (no icons, in
+  the text's color) once there's more than one, or one is picked without
+  being put in, as vim's `menu` without `menuone`; above the word if
+  there's no room under it. What goes in is typed into the insert as
+  Backspaces and its text (`completeWith`, at every cursor), so `.` and
+  counts type the word again (vim's too), never Ctrl-N. In the path
+  field, Ctrl-N and Ctrl-P pick a dir while Tab's options show (see
+  Completion), and complete words otherwise; Tab picks from the words
+  while they show, and otherwise ends them, then completes the path.
 - **Edits from outside** (`mergeEdits` in Vim.qml): Koil's listing as it
   changed on disk isn't the user's change, so `u` mustn't take it back (it
   would delete a file that appeared, or rename one back). It's made in one
