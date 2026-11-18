@@ -113,7 +113,8 @@
   shortcut's, as a mapping's. The `TextArea` does nothing on Cmd+Backspace, so on macOS
   it's vim's `<D-BS>`: typed by vim in insert mode (`typedEdit`: back to
   the line's start, the name's in the listing, and there Backspace),
-  `Ctrl-U` in the command line, nothing in the other modes. A
+  `Ctrl-U` in the command line, and in normal and visual mode no
+  command (see Unknown keys), nothing in replace mode. A
   `TextInput` (every other text field: the find bar's, the help's
   search, the Settings and Shortcuts windows') deletes a word on it
   (Qt's Ctrl+Backspace, as Qt reads Cmd as Ctrl), so native.cpp's
@@ -159,6 +160,29 @@
   keys with. `:normal!`'s frame is `plain`, whose keys no shortcut takes
   (`plainKey`, in `commandFor`), as no mapping takes vim's; a macro they
   run isn't, as vim's `@` maps its keys.
+- **Unknown keys** (`badKeys` in Vim.qml): keys vim has no command of
+  (`parse`'s `bad`, in `feed`, and in `runKey` a key only a shortcut
+  takes, `shortcutOnly`, and `<D-BS>` outside typing) are an error on
+  the status line. Vim only beeps, and Koil did nothing at all, which
+  left the user expecting something (Space r in visual mode). As any
+  error, it stops a macro (`macroFails`), and it ends the command typed
+  so far, as vim's do. Keys only a shortcut takes did nothing without
+  one, not even end it, as before they had names, which an error
+  can't. Not keys that end with Esc after others, or with Ctrl-C,
+  which cancel what's typed (`d<Esc>`), as in vim: silent, though a
+  macro still stops there, as before. Ctrl-C alone leaves visual mode,
+  as Esc does (vim's `v_CTRL-C`; off macOS, Ctrl+C is Copy there, which
+  yanks), and in normal mode does nothing. The error says why the keys do
+  nothing: that the other mode, normal or visual, has a command of them
+  ("Space r works only in normal mode", "U works only in visual mode",
+  also for a shortcut of only one mode: `startsCommand`, key by key as
+  `feed` reads them, since `parse` in visual mode takes a `d` alone as
+  a command, whatever comes after it); else that they're Koil's own,
+  but not where vim is ("Space u does nothing here" in a file, as
+  `:undolist` says there: `ownKeys`, main.qml's `ownShortcuts`', or
+  their start, as `gs` is the sort keys'); else "Space x isn't a
+  command". It names the keys as `keysName` does a shortcut's, without
+  the register and count before them.
 - **Batches and runs** (Vim.qml): each edit of the `TextArea` has Qt go over
   all the text, so while a key runs (`handleKey` through `batched`) vim edits
   a copy (`batch`; everything reads the text through `bufferText()`), and

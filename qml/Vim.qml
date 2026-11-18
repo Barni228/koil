@@ -120,6 +120,10 @@ QtObject {
     property var commandKeys: ({})
     // Like commandKeys, in visual mode (Space q, the shortcuts' list).
     property var visualCommandKeys: ({})
+    // All of Koil's own keys, wherever they're commandKeys, written as
+    // those are (" u", "K", "gs"): typed where they aren't, they say they
+    // do nothing here (see badKeys), rather than that they're no command.
+    property var ownKeys: []
     // The user's shortcuts (Koil's, see ShortcutsWindow): keys that run
     // keys of theirs, as @ runs a register's, as many times as their
     // count, as { keys, macro, label, normal, visual }: `keys` written as
@@ -260,8 +264,9 @@ QtObject {
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
         "<C-x>", "q", "@", "Q", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m"]
-    readonly property var visualActions: ["<Esc>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D", "s",
-        "C", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "@", "Q", "I", "A", "<C-e>",
+    // Ctrl-C leaves visual mode, as Esc does (vim's v_CTRL-C).
+    readonly property var visualActions: ["<Esc>", "<C-c>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D",
+        "s", "C", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "@", "Q", "I", "A", "<C-e>",
         "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m"]
     // While lines are marked, the keys that act on them, as they act on a
     // linewise selection in visual mode (see Marked lines): an operator at
@@ -650,14 +655,22 @@ QtObject {
         }
         if (mode === "insert")
             return insertKey(tok, event);
+        if (tok === null)
+            return true;
         // Cmd+Backspace deletes only while typing (and in the command line).
         // Shift+Tab only picks from the completion's options, and F-keys,
         // keys with a name with Ctrl or Cmd, and characters with Ctrl that
-        // aren't vim's, do nothing, not even end a command, unless a
-        // shortcut takes them (see shortcutOnly).
-        if (tok === null || tok === "<D-BS>" || shortcutOnly(tok)
-                && parse(keys.concat([tok]), isVisual, !isVisual && marked.length > 0).status === "bad")
+        // aren't vim's, are no command unless a shortcut takes them (see
+        // shortcutOnly). In replace mode they do nothing.
+        if ((tok === "<D-BS>" || shortcutOnly(tok))
+                && parse(keys.concat([tok]), isVisual, !isVisual && marked.length > 0).status === "bad") {
+            if (mode !== "replace") {
+                const ks = keys.concat([tok]);
+                forgetKeys();
+                badKeys(ks);
+            }
             return true;
+        }
         if (mode === "replace") {
             if (tok === "<Esc>") {
                 leaveInsert();
@@ -1466,11 +1479,54 @@ QtObject {
             awaitingReplaceChar = tok === "r" && keys[keys.length - 2] !== "\"";
             return;
         }
+        const ks = keys;
         forgetKeys();
         if (r.status === "ok")
             execute(r.cmd);
         else
+            badKeys(ks);
+    }
+
+    // The keys `ks` are no command (their last one made them so): an
+    // error that says so, as nothing else shows they did nothing, and
+    // which stops a macro. Not if they end with Esc after others, or with
+    // Ctrl-C, which cancel the command typed so far, as in vim. It says if
+    // the other mode (normal or visual) has a command of them (Space r in
+    // visual mode, U in normal mode), or if they're one of Koil's own keys
+    // that aren't keys here (Space u in a file, as ":undolist does nothing
+    // here"). It names them without the register and count before them.
+    function badKeys(ks) {
+        const last = ks[ks.length - 1];
+        if (last === "<C-c>" || last === "<Esc>" && ks.length > 1) {
             macroFails();
+            return;
+        }
+        const start = readCount(ks, ks[0] === "\"" ? 2 : 0).next;
+        const typed = ks.slice(start < ks.length ? start : 0);
+        const name = keysName(typed.join(""));
+        const startsOwn = k => {
+            const own = macroKeys(k);
+            return typed.length <= own.length && typed.every((t, i) => t === own[i]);
+        };
+        if (startsCommand(ks, !isVisual))
+            showError(name + " works only in " + (isVisual ? "normal" : "visual") + " mode");
+        else if (ownKeys.some(startsOwn))
+            showError(name + " does nothing here");
+        else
+            showError(name + " isn't a command");
+    }
+
+    // Whether, in visual mode (`visual`) or else normal mode, the keys
+    // `ks` are a command, or the start of one, as feed takes them key by
+    // key: none of their starts is bad, nor a command (parse reads d in
+    // visual mode as one, whatever comes after it).
+    function startsCommand(ks, visual) {
+        for (let n = 1; n <= ks.length; n++) {
+            const s = parse(ks.slice(0, n), visual, false).status;
+            if (s === "bad" || s === "ok" && n < ks.length)
+                return false;
+        }
+        return true;
     }
 
     // ---- Parsing -----------------------------------------------------------
@@ -1762,8 +1818,8 @@ QtObject {
     function isChange(cmd) {
         if (isVisual)
             return !cmd.motion && !cmd.textObj
-                && !["<Esc>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "@", "Q", "!", "g!", "gf",
-                    "gx"]
+                && !["<Esc>", "<C-c>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "@", "Q", "!",
+                    "g!", "gf", "gx"]
                     .includes(cmd.action);
         // ! only types a command line, whose command may change the text.
         return cmd.op ? !["y", "!", "g!"].includes(cmd.op) : changeActions.includes(cmd.action);
@@ -2221,7 +2277,7 @@ QtObject {
             surroundSelection(lastVisual, cmd.surround);
             return;
         }
-        if (a === "<Esc>" || visualModes[a] === mode) {
+        if (a === "<Esc>" || a === "<C-c>" || visualModes[a] === mode) {
             leaveVisual();
             return;
         }
@@ -5962,6 +6018,8 @@ QtObject {
             // :openwith app is Space O, then that app (see main.qml's
             // openWith).
             { names: /^openw(?:i|it|ith)?$/, takesArg: true, run: (arg, name) => commandKey(" O", name, arg) },
+            // And K, :info.
+            { names: /^inf(?:o)?$/, run: (arg, name) => commandKey("K", name) },
             { names: /^sho(?:r|rt|rtc|rtcu|rtcut|rtcuts)?$/, run: (arg, name) => commandKey(" q", name) }
         ];
     }

@@ -295,20 +295,24 @@
   the list can run one on the selection. Each Space key is an Ex command
   too (in `exCommands`, `Vim.commandKey`), so a shortcut or `-c` can say
   what it does: `:apply` (`:ap`, Space Space), `:confirm apply` (Space a),
-  `:undolist` (`:undol`, Space u), `:reveal` (`:rev`), `:open` (`:o`) and
-  `:shortcuts` (`:sho`). It looks its keys up in `commandKeys` and emits
+  `:undolist` (`:undol`, Space u), `:reveal` (`:rev`), `:open` (`:o`),
+  `:shortcuts` (`:sho`), and `K`'s, `:info` (`:inf`). It looks its keys
+  up in `commandKeys` and emits
   `keyCommand` as if they were typed, with no count, so it does what they
   do where vim is (`:apply` in a file saves, and so does `:confirm apply`,
   as Space a isn't a key there), and where they aren't keys it's an error
   ("`:undolist` does nothing here"), which stops a macro or `-c`. They
   take no argument and no range, so not from visual mode, where `:` types
-  one. A new Space key gets a command with it.
+  one. A new Space key gets a command with it. Where Koil's keys aren't
+  keys (Space u in a file), or are only normal mode's (Space r in visual
+  mode), typing them is an error that says so (see Unknown keys).
   They're only matched at the start of a normal-mode command (so `d-` and
   visual `-` are vim's), with a count; keys that start one and go on
-  differently are a bad command (Space l), unless they go on as a name of
-  vim's (`gg`, `gU`). Shift+Enter is its own token, `<S-CR>`, a motion like
-  `<CR>`, and plain `<CR>` everywhere else (insert mode, the command line),
-  but in the path field's insert mode, which hands it to normal mode.
+  differently are a bad command (Space l, see Unknown keys), unless they
+  go on as a name of vim's (`gg`, `gU`). Shift+Enter is its own token,
+  `<S-CR>`, a motion like `<CR>`, and plain `<CR>` everywhere else
+  (insert mode, the command line), but in the path field's insert mode,
+  which hands it to normal mode.
 - **Update** (`updateListing`): koil reads the entries with the settings they
   were shown with, then takes vim's `:set hidden/gitignore/regex`, then opens
   the Enter/`-` target, else the path field's path if it changed (like

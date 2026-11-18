@@ -24,7 +24,7 @@ function sections(help) {
                 "<cr>", "cr", "path", "pattern", "glob", "folder", "dir", "undo", "tab", "<tab>", "g.", "gi",
                 "gr", "gs", "sorting", "_", ":_", ":_put", ":_pu", "_put", "_pu", "scratch", "scratchpad",
                 "reveal", "finder", "explorer", "openwith", "openw", "open-with",
-                "app", "K", "info", "stat", "permissions", "symlink", "drive", "drives"],
+                "app", "K", "info", "inf", "stat", "permissions", "symlink", "drive", "drives"],
             intro: "Koil shows a dir as text, a line per entry: its icon (which hides its ID), two spaces "
                 + "and its name, with `/` after a dir's. Edit a name to rename, delete lines to delete, "
                 + "copy lines to copy, and write new ones to create (`new.txt`, `new/dir/`). A line cut "
@@ -65,7 +65,7 @@ function sections(help) {
                     + "it isn't listed for: "
                     + (isWindows ? "a program on the PATH, or one Windows knows by name (`:openwith notepad`), "
                         + "or its path" : "any app's whole name (`:openwith Preview`), or its path") + "."],
-                ["`K`", "Show all about the entry on the line: its path, what it is (a symlink's target), "
+                ["`K`  `:info`", "Show all about the entry on the line: its path, what it is (a symlink's target), "
                     + "its size (a dir's is counted, but "
                     + (isWindows ? "a drive's root shows the drive's" : "a volume's top dir, like `/`, shows the volume's")
                     + " capacity and what's available instead), what a dir has, its times, "
@@ -238,9 +238,9 @@ function sections(help) {
                     + "`l` lines or `b` a block. `Enter` pastes the "
                     + "one the cursor is on after the cursor, as `p` does (`y` the picked ones, as one), and `D` "
                     + "clears it (`d` the picked ones). Its other keys are any list's: see `:h pick`."],
-                ["`:apply`  `:open` …", "Each key starting with `Space` is a command too, for a shortcut or "
-                    + "`koil -c` to say what it does: `:apply`, `:confirm apply`, `:undolist`, `:reveal`, `:open`, "
-                    + "`:openwith` and `:shortcuts` (see `:h space`)."],
+                ["`:apply`  `:open` …", "Each key starting with `Space`, and `K`, is a command too, for a "
+                    + "shortcut or `koil -c` to say what it does: `:apply`, `:confirm apply`, `:undolist`, "
+                    + "`:reveal`, `:open`, `:openwith`, `:shortcuts` and `:info` (see `:h space`)."],
                 ["`:norm keys`", "Press keys, as a macro does, like `:norm gss` (keys such as `<CR>` and `<Esc>` "
                     + "written as in a shortcut: see `:h keynames`). With a range, on each line, from its start (`:%norm A;`). "
                     + "`:norm!` leaves your shortcuts out."],
@@ -647,7 +647,7 @@ function sections(help) {
                 ["`Ctrl-V`", "Visual block (see `:h block`)."],
                 ["`Ctrl-O`", "In the help: back to where a link, like `:h block`, was clicked."],
                 ["`Ctrl-C`", "Stop a macro or shell command that's running, or close the command line, "
-                    + "as `Esc` does."],
+                    + (isMac ? "or leave visual mode, " : "") + "as `Esc` does."],
                 ["`Ctrl-N`  `Ctrl-P`", "While typing: complete the word from the words in the text (see "
                     + "`:h complete`). While completing a path: the next or previous dir."],
                 ["`Ctrl-U`  `Ctrl-W`", "In the command line: delete to the start, or a word back."],

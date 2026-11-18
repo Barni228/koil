@@ -142,10 +142,12 @@
   F-keys, Shift+Tab, the Ctrl and Cmd ones
   with a name, a digit or sign with Ctrl, and a character with Ctrl or
   Cmd and another of the two or Alt, are keys only a shortcut takes
-  (`shortcutOnly`): without one they do nothing, not even end a command,
-  as before they had names (`runKey` reads them only if a shortcut takes
-  the keys so far with them), and Enter's make no line break in the path
-  field. Shift and a key vim knows (`<S-Esc>`, `<S-PageDown>`) is that
+  (`shortcutOnly`): without one they're no command, an error which ends
+  the one typed (see Unknown keys; until they had names they did
+  nothing, not even end it, and so until that said so), and in replace
+  mode nothing (`runKey` reads them only if a shortcut takes the keys
+  so far with them), and Enter's make no line break in the path field.
+  Shift and a key vim knows (`<S-Esc>`, `<S-PageDown>`) is that
   key alone, and Ctrl+Shift and a letter is Ctrl and the letter (`<C-K>`
   is `<C-k>`, as vim reads it, also written by hand; `keyPressed` reads
   it so before its own Ctrl+V, and a macro records the `<C-k>`), but for

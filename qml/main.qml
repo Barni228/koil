@@ -2948,6 +2948,8 @@ ApplicationWindow {
         visualCommandKeys: ({
             " q": "shortcuts"
         })
+        // So Space u in a file says it does nothing there.
+        ownKeys: root.ownShortcuts.map(s => s.keys)
         // The user's, which are on and have keys, everywhere.
         shortcuts: root.shortcuts.filter(s => s.enabled && s.keys && s.macro).map(root.vimShortcut)
 

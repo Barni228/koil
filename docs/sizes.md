@@ -1,10 +1,11 @@
 # Info, sorting and dirs' sizes
 
-- **Info** (`K`, info.rs, `showInfo` in main.qml): everything there is to
-  know of the entry on the cursor's line where it is on disk, as Space r
-  takes it, in K's box (`InfoBox`), in the middle of the window, as wide
-  and tall as it allows (so a row doesn't wrap out of its column), which
-  never takes the keys: a plain item in the overlay (under the hover box
+- **Info** (`K` or `:info`, info.rs, `showInfo` in main.qml): everything
+  there is to know of the entry on the cursor's line where it is on
+  disk, as Space r takes it, in K's box (`InfoBox`), in the middle of
+  the window, as wide and tall as it allows (so a row doesn't wrap out
+  of its column), which never takes the keys: a plain item in the
+  overlay (under the hover box
   and the completions, which show what's under the pointer or the
   cursor), whose text a press selects without the keys (Copy goes to it
   through the editors' `copyElsewhere`). So vim goes on, and the box

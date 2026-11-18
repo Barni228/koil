@@ -24,7 +24,7 @@ the only record of why things are as they are. A section named elsewhere
 | `docs/files.md` | Files, `:e`, Files changed on disk, Scratchpad, Syntax, Links, Matching brackets |
 | `docs/shell.md` | Shell commands, Output box |
 | `docs/launch.md` | Command line, The koil command, Open in Koil, Open With |
-| `docs/vim.md` | Buffers, Vim, Macros, Batches and runs, Word completion, Edits from outside, Hidden text |
+| `docs/vim.md` | Buffers, Vim, Macros, Unknown keys, Batches and runs, Word completion, Edits from outside, Hidden text |
 | `docs/vim-commands.md` | Visual block, Multiple cursors, Marked lines, Surround, Reindent, Guessed indent, Regular expressions, Substitute, Command line colors, Find bar |
 | `docs/shortcuts.md` | Shortcuts (both), Menus |
 | `docs/editor.md` | Overlays, Text layout, Long texts, Long lines, Wrapping, Line numbers, Whitespace in the selection, Warnings and errors, Notes after lines, Icon font, Fonts |

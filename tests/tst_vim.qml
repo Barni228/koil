@@ -444,6 +444,7 @@ TestCase {
         vim.bangEntries = "";
         vim.commandKeys = {};
         vim.visualCommandKeys = {};
+        vim.ownKeys = [];
         vim.shortcuts = [];
         vim.completer = null;
         vim.wordSources = null;
@@ -2921,7 +2922,8 @@ TestCase {
             " r": "reveal",
             " o": "openInApp",
             " O": "openWith",
-            " q": "shortcuts"
+            " q": "shortcuts",
+            "K": "info"
         };
         keyCommands.clear();
         const ran = () => keyCommands.signalArguments.map(a => [a[0], a[1]]);
@@ -2931,9 +2933,11 @@ TestCase {
         keys(":reveal<CR>:rev<CR>");
         keys(":open<CR>:o<CR>");
         keys(":shortcuts<CR>:sho<CR>");
+        // K is :info.
+        keys(":info<CR>:inf<CR>");
         compare(ran(), [["apply", 0], ["apply", 0], ["applyAsking", 0], ["applyAsking", 0], ["undoApply", 0],
             ["undoApply", 0], ["reveal", 0], ["reveal", 0], ["openInApp", 0], ["openInApp", 0],
-            ["shortcuts", 0], ["shortcuts", 0]]);
+            ["shortcuts", 0], ["shortcuts", 0], ["info", 0], ["info", 0]]);
         compare(vim.message, "");
         // They take no range, nor an argument.
         keys(":2reveal<CR>");
@@ -2942,7 +2946,9 @@ TestCase {
         compare(vim.message, "E492: Not an editor command: open x");
         keys(":a<CR>");
         compare(vim.message, "E492: Not an editor command: a");
-        compare(keyCommands.count, 12);
+        keys(":i<CR>");
+        compare(vim.message, "E492: Not an editor command: i");
+        compare(keyCommands.count, 14);
         // :openwith takes the app, as the rest of the line, which the keys
         // don't.
         keyCommands.clear();
@@ -2965,6 +2971,8 @@ TestCase {
         keys(":undol<CR>");
         compare(vim.message, ":undol does nothing here");
         verify(vim.messageIsError);
+        keys(":info<CR>");
+        compare(vim.message, ":info does nothing here");
         compare(keyCommands.count, 3);
         // -c's commands stop there, and go on after one that runs.
         vim.runCommands(["open", "norm x"], "-c");
@@ -2973,6 +2981,91 @@ TestCase {
         vim.runCommands(["apply", "norm x"], "-c");
         compare(ran(), [["save", 0], ["save", 0], ["shortcuts", 0], ["save", 0]]);
         compare(editor.text, "ne\ntwo");
+    }
+
+    // Keys that are no command say so, rather than do nothing: that the
+    // other mode has them, that they're Koil's own but not here, or that
+    // they're no command at all. Esc after other keys, and Ctrl-C, cancel
+    // them without a word, as in vim.
+    function test_badKeys() {
+        load("one two\nthree");
+        vim.commandKeys = { " r": "reveal", "K": "info", "gss": "sort:size" };
+        vim.visualCommandKeys = { " q": "shortcuts" };
+        vim.ownKeys = ["  ", " u", " r", "K", "gs"];
+        vim.shortcuts = [{ keys: "gc", macro: "A!<Esc>", label: "gc", normal: true, visual: false },
+            { keys: "gC", macro: "U", label: "gC", normal: false, visual: true }];
+        keyCommands.clear();
+        const error = text => {
+            compare(vim.message, text);
+            verify(vim.messageIsError);
+            compare(vim.pendingKeys, "");
+        };
+        keys(" x");
+        error("Space x isn't a command");
+        keys("dq");
+        error("dq isn't a command");
+        // Named without the register and count.
+        keys("\"a3<C-g>");
+        error("<C-g> isn't a command");
+        // Keys only a shortcut takes too, which end the command.
+        keys("d<F5>");
+        error("d<F5> isn't a command");
+        keys(" u");
+        error("Space u does nothing here");
+        keys("U");
+        error("U works only in visual mode");
+        keys("gC");
+        error("gC works only in visual mode");
+        keys("d<Esc>");
+        compare(vim.message, "");
+        compare(vim.pendingKeys, "");
+        compare(render(), "one two\nthree");
+        // In visual mode, which stays.
+        keys("v");
+        keys("2K");
+        error("K works only in normal mode");
+        keys(" r");
+        error("Space r works only in normal mode");
+        keys("zz");
+        error("zz works only in normal mode");
+        keys("gs");
+        error("gs works only in normal mode");
+        keys("gc");
+        error("gc works only in normal mode");
+        keys(" u");
+        error("Space u does nothing here");
+        keys(" x");
+        error("Space x isn't a command");
+        // d is a command at once in visual mode, so d isn't what zq goes
+        // on from.
+        keys("zq");
+        error("zq isn't a command");
+        compare(vim.mode, "visual");
+        compare(keyCommands.count, 0);
+        keys("<Esc>");
+        compare(render(), "one two\nthree");
+        // They stop a macro, and say why.
+        keys(":norm xzqx<CR>");
+        compare(render(), "ne two\nthree");
+        error("zq isn't a command");
+        // A command cancelled stops it too, but without a word.
+        vim.message = "";
+        vim.runCommands(["norm d<Esc>x"], "-c");
+        vim.runCommands(["norm d<C-c>x"], "-c");
+        compare(render(), "ne two\nthree");
+        compare(vim.message, "");
+    }
+
+    // Ctrl-C leaves visual mode, as Esc does, as vim's (typed, only on
+    // macOS: elsewhere Ctrl+C is Copy, which yanks what's selected).
+    function test_visualCtrlC() {
+        load("one two");
+        vim.runCommands(["norm vl<C-c>x"], "-c");
+        compare(render(), "oe two");
+        if (isMac) {
+            keys("vl<C-c>");
+            compare([vim.mode, vim.message, vim.cursor], ["normal", "", 2]);
+        }
     }
 
     // Koil's g. and the like leave vim's own g commands alone.
@@ -3168,6 +3261,7 @@ TestCase {
         // a bad command, like any key vim doesn't know
         keys("d<D-j>");
         compare(vim.pendingKeys, "");
+        compare(vim.message, "d<D-j> isn't a command");
         compare(editor.text, "2\n1");
         keys("qa<D-k>q");
         compare(editor.text, "3\n1");
@@ -3186,8 +3280,10 @@ TestCase {
         keys("g<D-CR>");
         compare(editor.text, "4\n1");
         vim.shortcuts = [];
-        keys("d<D-Esc><D-CR>w");
-        compare(editor.text, "\n1");
+        keys("d<D-Esc>");
+        compare([vim.pendingKeys, vim.message], ["", "d<D-Esc> isn't a command"]);
+        keys("d<D-CR>w");
+        compare(editor.text, "4\n1");
     }
 
     // Keys with a name, with Shift, Ctrl or Cmd, as vim names them (Alt
@@ -3314,21 +3410,27 @@ TestCase {
             keys("<M-D-k>");
             compare(editor.text, "3\n1");
         }
-        // without a shortcut they do nothing, not even end a command
+        // without a shortcut they're no command, which ends the one typed
         vim.shortcuts = [];
         load("a b\n1");
-        keys("d<C-M-k><C-M-S-Left><C-1><C-?>w");
-        compare(editor.text, "b\n1");
+        keys("d<C-1>");
+        compare([vim.pendingKeys, vim.message], ["", "d<C-1> isn't a command"]);
+        keys("d<C-M-k>w");
+        keys("d<C-M-S-Left>w");
+        keys("d<C-?>w");
+        compare(editor.text, "a b\n1");
     }
 
-    // An F-key does nothing but a shortcut's, and Shift and a key vim
+    // An F-key is no command but a shortcut's, and Shift and a key vim
     // knows is the key, but for a shortcut that takes it.
     function test_namedKeyShortcuts() {
         load("1\n1\n1");
         keys("<S-Down>");
         compare(cursorLine(), 2);
-        keys("d<F12><S-F12>j");
-        compare(editor.text, "1");
+        keys("d<F12>");
+        compare([vim.pendingKeys, vim.message], ["", "d<F12> isn't a command"]);
+        keys("d<S-F12>j");
+        compare([editor.text, cursorLine()], ["1\n1\n1", 3]);
         load("1\n1");
         vim.shortcuts = [{ keys: "<S-F12>", macro: "<C-a>", label: "<S-F12>", normal: true, visual: false },
             { keys: "<S-Down>", macro: "<C-x>", label: "<S-Down>", normal: true, visual: false }];
@@ -3371,8 +3473,8 @@ TestCase {
 
     // Shift+Tab, and Esc, Enter and Tab with Ctrl (or Cmd, see
     // test_cmdKeys), which vim has no use for, are keys a shortcut can
-    // have, with a count; without one they do nothing, not even end a
-    // command (see test_completion).
+    // have, with a count; without one they're no command, which ends the
+    // one typed (see test_completion).
     function test_shortcutOnlyKeys() {
         load("1\n1");
         const shortcut = (k, macro) => ({ keys: k, macro: macro, label: k, normal: true, visual: false });
@@ -3395,8 +3497,12 @@ TestCase {
         compare(vim.macroKeys("<S-Tab><C-Tab><C-Esc><C-CR><D-Esc><D-CR><D-Tab>"), ["<S-Tab>", "<C-Tab>", "<C-Esc>",
             "<C-CR>", "<D-Esc>", "<D-CR>", "<D-Tab>"]);
         vim.shortcuts = [];
-        keys("d<S-Tab><C-Esc><C-CR><C-Tab>w");
-        compare(editor.text, "\n1");
+        keys("d<S-Tab>");
+        compare([vim.pendingKeys, vim.message], ["", "d<S-Tab> isn't a command"]);
+        keys("d<C-Esc>w");
+        keys("d<C-CR>w");
+        keys("d<C-Tab>w");
+        compare(editor.text, "6\n1");
         compare(vim.mode, "normal");
     }
 
@@ -4059,12 +4165,12 @@ TestCase {
         switchTo(other, null);
         keys("Ad<Tab><Esc>.");
         compare(other.text, "docs/docs/");
-        // Shift+Tab does nothing elsewhere, not even end a command.
+        // Shift+Tab is no command elsewhere, which ends the one typed.
         keys("0d<S-Tab>w");
-        compare(other.text, "/docs/");
+        compare(other.text, "docs/docs/");
         // Enter with Ctrl or Cmd makes no line break in one line.
         keys("A<C-CR><D-CR>");
-        compare([other.text, vim.mode], ["/docs/", "insert"]);
+        compare([other.text, vim.mode], ["docs/docs/", "insert"]);
         keys("<Esc>");
     }
 
