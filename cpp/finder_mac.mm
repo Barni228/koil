@@ -3,12 +3,16 @@
 // selected, in its right-click menu and the Services menu, and handles its
 // shortcut, launching Koil if it isn't running; the files come on the
 // pasteboard. And what Finder says is available on a volume
-// (importantCapacity), which only Foundation tells.
+// (importantCapacity), which only Foundation tells, and the apps its Open
+// With lists (appsToOpen), which only AppKit does.
 
 #include "native.h"
 #include "koil/src/ffi.cxx.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QPointer>
 
 #import <AppKit/AppKit.h>
@@ -149,5 +153,37 @@ importantCapacity(const QString& path)
         || ![bytes isKindOfClass:NSNumber.class])
       return -1;
     return bytes.longLongValue;
+  }
+}
+
+QString
+appsToOpen(const QString& path)
+{
+  @autoreleasepool {
+    NSURL* url = [NSURL fileURLWithPath:path.toNSString()];
+    NSWorkspace* workspace = NSWorkspace.sharedWorkspace;
+    // Launch Services' order, the default first.
+    NSArray<NSURL*>* urls = @[];
+    if (@available(macOS 12, *))
+      urls = [workspace URLsForApplicationsToOpenURL:url];
+    NSString* standard = [workspace URLForApplicationToOpenURL:url].path;
+    if (standard && ![[urls valueForKey:@"path"] containsObject:standard])
+      urls = [@[ [NSURL fileURLWithPath:standard] ] arrayByAddingObjectsFromArray:urls];
+    QJsonArray apps;
+    for (NSURL* app in urls) {
+      if (!app.path)
+        continue;
+      // As Finder shows it: localized, and with .app only if Finder shows
+      // every extension, which a list of apps needn't.
+      NSString* name = [NSFileManager.defaultManager displayNameAtPath:app.path];
+      if ([name.pathExtension caseInsensitiveCompare:@"app"] == NSOrderedSame)
+        name = name.stringByDeletingPathExtension;
+      apps.append(QJsonObject{
+        { QStringLiteral("name"), QString::fromNSString(name) },
+        { QStringLiteral("path"), QString::fromNSString(app.path) },
+        { QStringLiteral("default"), bool(standard && [app.path isEqualToString:standard]) },
+      });
+    }
+    return QString::fromUtf8(QJsonDocument(apps).toJson(QJsonDocument::Compact));
   }
 }

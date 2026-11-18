@@ -205,8 +205,9 @@ QtObject {
     // some hold something (see registerList).
     signal registersRequested(string names)
     // One of commandKeys was typed, with its count (0 if none), or run as
-    // an Ex command (see commandKey).
-    signal keyCommand(string name, int count)
+    // an Ex command, with its argument, if it takes one (see commandKey;
+    // else "").
+    signal keyCommand(string name, int count, string arg)
     // :!command, with the lines of the range before it ({ first, last },
     // from 1), or null: Koil runs it in the shell, while vim waits (see
     // waiting). The lines go through it, and its output replaces them (see
@@ -1749,7 +1750,7 @@ QtObject {
         chainedRuns = cmd.shortcut || cmd.action === "@" || cmd.action === "Q" ? chainedRuns + 1 : 0;
         colKept = false;
         if (cmd.command) {
-            outside(() => keyCommand(cmd.command, cmd.count));
+            outside(() => keyCommand(cmd.command, cmd.count, ""));
             return;
         }
         if (cmd.shortcut) {
@@ -5780,6 +5781,9 @@ QtObject {
             { names: /^undol(?:i|is|ist)?$/, run: (arg, name) => commandKey(" u", name) },
             { names: /^rev(?:e|ea|eal)?$/, run: (arg, name) => commandKey(" r", name) },
             { names: /^o(?:p|pe|pen)?$/, run: (arg, name) => commandKey(" o", name) },
+            // :openwith app is Space O, then that app (see main.qml's
+            // openWith).
+            { names: /^openw(?:i|it|ith)?$/, takesArg: true, run: (arg, name) => commandKey(" O", name, arg) },
             { names: /^sho(?:r|rt|rtc|rtcu|rtcut|rtcuts)?$/, run: (arg, name) => commandKey(" q", name) }
         ];
     }
@@ -5788,11 +5792,12 @@ QtObject {
     // so a shortcut or -c can say what it does): what `keys` of commandKeys
     // run where vim is, as if they were typed with no count, so it does the
     // same as they do there (:apply in a file saves), and fails where they
-    // aren't keys (:undolist in a file).
-    function commandKey(keys, name) {
+    // aren't keys (:undolist in a file). `arg` is the command's argument,
+    // for one that takes one (:openwith's app).
+    function commandKey(keys, name, arg) {
         const command = commandKeys[keys];
         if (command)
-            outside(() => keyCommand(command, 0));
+            outside(() => keyCommand(command, 0, arg || ""));
         else
             showError(":" + name + " does nothing here");
     }

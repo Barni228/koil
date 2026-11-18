@@ -65,6 +65,23 @@ QString finderServiceShortcut();
 // or not on macOS. In finder_mac.mm.
 std::int64_t importantCapacity(const QString& path);
 
+// The apps that can open `path`, as the system's Open With lists them
+// (Finder's on macOS, in finder_mac.mm; Explorer's recommended ones for
+// its extension on Windows, in apps_win.cpp), as a JSON array of
+// `{ name, path, default }`: the name it shows, where the app is (what
+// openWithApp takes on Windows), and whether it's the default one, which
+// comes first. Empty (not "[]") where it can't tell: elsewhere.
+QString appsToOpen(const QString& path);
+
+// Opens `path` with the app at `app` (one appsToOpen gave), as Explorer's
+// Open With does: the app's own command, not only its executable with the
+// path; or with another app, which `app` is the name or path of, as the
+// Run dialog finds one (on the PATH, or registered in App Paths: `code`,
+// `notepad`). Why it failed ("there's no app of that name" if none is),
+// or empty. Windows only (macOS has `open -a`); elsewhere it says it
+// can't.
+QString openWithApp(const QString& path, const QString& app);
+
 // Sets the Qt Quick Controls style. Must run before QML is loaded.
 void setControlsStyle(const QString& style);
 

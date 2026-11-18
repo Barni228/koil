@@ -3,7 +3,7 @@
 - **Files**: Enter on a file, File > Open (and a file on the command line)
   leave the listing (updating it first, so its edits stay in koil) for a
   plain editor: no colors or problems, only `-`, `_`, `!`, `Space r`,
-  `Space o` and `Space Space` (a save) of `commandKeys`, and `:w` saves. `-` goes back to what's still open in koil, on `openedFrom` (the
+  `Space o`, `Space O` and `Space Space` (a save) of `commandKeys`, and `:w` saves. `-` goes back to what's still open in koil, on `openedFrom` (the
   entry Enter was on), with the column and view it had (`fileSpot`), or
   for a file opened otherwise, opens its dir. Enter
   on a new file (`createFile`) updates, then asks to create it, listing the
@@ -26,7 +26,8 @@
   it's in, change (koil-core's `Koil::copies_of`: `yyp` of a file to keep
   it as it is, then Enter on the file) makes those copies first
   (`copyFirst`): opening it (`readFile`, so also `:e`, File > Open, gf
-  and a drop), Space o and gx (another app could change it), and Save As
+  and a drop), Space o, Space O and gx (another app could change it),
+  and Save As
   over it; and before any shell command (see Shell commands), every copy
   applying would make (`listing::copies_of` with no path). They're asked
   about as the confirmChanges setting says, as a create is ("Applying
@@ -144,7 +145,7 @@
   a register, so they can be put aside and pasted back into a listing,
   and meanwhile work as in the listing, by the ID of the icon their
   line starts with (`listing::pasted_entry`), wherever the cursor is on
-  it: `gh` shows its path, `K`, `Space r` and `Space o` take it
+  it: `gh` shows its path, `K`, `Space r`, `Space o` and `Space O` take it
   (`entryOnDisk`, and K's box follows the cursor's column too,
   `infoSpot`, as a path written is the one under it), gf opens it, and
   `!` with a count, in visual mode or on marked lines types a `<cfile>`

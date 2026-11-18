@@ -65,7 +65,9 @@
 - `src/system.rs`: `System` (QML element): the system clipboard, the
   installed monospaced fonts and the Nerd Font's family, the editor's
   text, line format and colors, showing a path in Finder or Explorer
-  (`reveal`) or opening it in its default app (`openInApp`), links
+  (`reveal`) or opening it in its default app (`openInApp`) or another
+  that can (`appsToOpen`, `openWith`, with `sorted_apps` and `named`,
+  see Keys; tests in `src/system/tests.rs`), links
   (`linkAt`, `linkTarget`), the search's regular expressions
   (`regexMatches`, see Regular expressions), and running shell commands
   (`runShell`, `stopShell`, `shellDone`). Its methods that only hand a QML item to
@@ -82,9 +84,13 @@
   a text (`TextChanges`, see Long texts), and PCRE2's regular expressions
   (`regexMatches`, see Regular expressions)).
 - `cpp/finder_mac.mm`: the "Open in Koil" service on macOS (see Open in
-  Koil), and what Finder says is available on a volume
-  (`importantCapacity`, see Info), Objective-C++, which `build.rs` adds
-  only there (native.cpp has what the others get).
+  Koil), what Finder says is available on a volume
+  (`importantCapacity`, see Info), and the apps its Open With lists
+  (`appsToOpen`, see Keys), Objective-C++, which `build.rs` adds only
+  there (native.cpp has what the others get).
+- `cpp/apps_win.cpp`: the apps Explorer's Open With lists and opening a
+  file with one (`appsToOpen`, `openWithApp`, see Keys), through the
+  shell's COM interfaces, which `build.rs` adds only on Windows.
 - `qml/main.qml`: the window: settings, menus (`MacMenuBar.qml`, and
   `WindowMenuBar.qml` elsewhere, which run its functions), dialogs, the
   status line (`StatusLine.qml`), the path field and its option buttons, and Koil's listing (`showListing`,

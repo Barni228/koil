@@ -1466,6 +1466,24 @@ importantCapacity(const QString&)
 }
 #endif
 
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+// macOS's is in finder_mac.mm, Windows' in apps_win.cpp.
+QString
+appsToOpen(const QString&)
+{
+  return {};
+}
+#endif
+
+#ifndef Q_OS_WIN
+// Windows' is in apps_win.cpp.
+QString
+openWithApp(const QString&, const QString&)
+{
+  return QStringLiteral("Koil can't open a file with another app here");
+}
+#endif
+
 QString
 nerdFontFamily()
 {

@@ -21,6 +21,7 @@ until you apply, and your edits stay while you go through other dirs.
 | `_`            | The scratchpad                                                                  |
 | `Space r`      | Show the entry (in a file, the file) in Finder or Explorer                      |
 | `Space o`      | Open the entry (in a file, the file) in its default app                         |
+| `Space O`      | Open it with an app picked from those that can (`:openwith app`: with any app)  |
 | `K`            | Show info about the entry: size, times, permissions, symlink's target, and more |
 | `Space q`      | Your shortcuts: run one, edit them or make one                                  |
 | `!`            | Run a shell command on the entry (`!git add`). `:!cmd` runs any command         |
@@ -94,7 +95,7 @@ until you apply, and your edits stay while you go through other dirs.
   to the file, unsaved changes and all. Lines pasted there keep their IDs,
   so you can put entries aside and paste them into a listing later, and
   look and work as in the listing meanwhile, with the dir each is in
-  after its line: `Enter`, `gh`, `K`, `Space r`, `Space o` and `!` take
+  after its line: `Enter`, `gh`, `K`, `Space r`, `Space o`, `Space O` and `!` take
   the one on the line, and `Vj!` runs a command on those selected.
   `:_put` puts what `p` would paste after its last line without showing
   it (a shortcut of `:_pu<CR>` puts lines aside from anywhere), and `:_`
@@ -193,7 +194,8 @@ koil ~/src -c 'norm G'
 
 The keys starting with `Space` are commands too, for `-c` or a shortcut:
 `:apply` (`Space Space`), `:confirm apply` (`Space a`), `:undolist`
-(`Space u`), `:reveal`, `:open` and `:shortcuts`.
+(`Space u`), `:reveal`, `:open`, `:openwith` (`:openwith code` opens the
+entry with VS Code) and `:shortcuts`.
 
 To have `koil` in your terminal:
 

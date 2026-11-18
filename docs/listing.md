@@ -125,7 +125,7 @@
   visit of its location, it would be lost). Something done (`usedHere`) is the listing edited (checked as
   `showListing` replaces or leaves it, `isEdited`), a file opened from
   it, an entry yanked or marked (vim's `yanked` and `marked`), K, Space
-  r, Space o, a shell command, an apply, an undo or a create. Anything
+  r, Space o, Space O, a shell command, an apply, an undo or a create. Anything
   else that goes to a location is a jump (the path field, `:e`, Open
   Folder, a drop, startup), which makes both the one left and the one
   gone to stops; so does `[` or `]` itself (`walked` off for the one it
@@ -201,8 +201,8 @@
   letter (`t` gives `T:/`, with the dirs starting with `t`). As `/` is
   no dir on disk, though Windows reads it as its current drive's root,
   what Koil looks up itself there doesn't go through it
-  (`koil_core::in_drives`): from the path field, K, Space r and Space o
-  say the drives aren't a folder (`path_on_line`), `%` is every drive
+  (`koil_core::in_drives`): from the path field, K, Space r, Space o and
+  Space O say the drives aren't a folder (`path_on_line`), `%` is every drive
   (`paths_in_field`), a shell command runs in the home dir
   (`Request::dir`), `file_at` and `link::target` don't look in it, and
   `looks` reads nothing (a network drive that can't be reached would
@@ -225,7 +225,41 @@
   `open`, `explorer` or `xdg-open`, waited for on a thread, as `open`
   waits while an app launches; on macOS `openFailed` then says why it
   failed, like "No app opens", which Finder would ask about, while
-  Explorer asks itself), `K` shows all about it (see Info), `-` opens `..`
+  Explorer asks itself), `Space O` lists the apps that can open the same
+  path, as Finder's or Explorer's Open With does, and opens it with the
+  one picked, once its copies are asked about, as Space o (`openWith`: a
+  question with a list to pick from, see Questions; `current`, so Enter
+  opens it with the app on the cursor's row, and `y` with each one
+  picked). The system says which apps (native.h's `appsToOpen`): on macOS
+  NSWorkspace's `URLsForApplicationsToOpenURL` (finder_mac.mm), its
+  names as Finder shows them (`displayNameAtPath`, without `.app`), and
+  `open -a` opens it (`System.openWith`, on a thread, as Space o's
+  `open`); on Windows `SHAssocEnumHandlers` for its extension, the
+  recommended ones (as Explorer's Open With submenu), and the handler's
+  `Invoke` opens it, which runs the app's own command (apps_win.cpp, a
+  file of its own, as `windows.h`'s macros would clash with native.cpp's
+  names; untried there: CI compiles it); a folder has none there, as
+  Explorer has no Open With for one. Nothing elsewhere: the status line
+  says Koil can't tell. `sorted_apps` puts the default first (marked
+  `(default)`), then the rest by name, each once, with where it is
+  where two have one name (two versions of an app, or two that Finder
+  calls the same, as Pages and Pages Creator Studio). `:openwith app`
+  (`takesArg`, through `commandKey`, which `keyCommand` gives the
+  argument) opens it with the app `named`: the one of that name or path,
+  or else whose name starts with it, or else has it, case left out, and
+  if there are several, the list has only those, so `:openw code` in a
+  shortcut can pick VS Code. If none of them is, it's the name as typed
+  (as the `path` too), as an app can open a file of a type it doesn't
+  claim: `open -a` looks for it by its name or path (Launch Services:
+  the whole name, `Preview`), and on Windows ShellExecute
+  runs it with the path as its argument, as the Run dialog finds a
+  program (the PATH, or App Paths: `notepad`, `code`). One the system
+  doesn't find is "there's no app of that name" (`open`'s "Unable to
+  find application named", `ERROR_FILE_NOT_FOUND`), and a listed app's
+  path that's gone, that it isn't on disk any more (before `open`, which
+  would say it with the whole NSError). So a name that's part of a listed
+  app's name opens that one: the unlisted app is reached by its path
+  then. `K` shows all about it (see Info), `-` opens `..`
   (`3-`: `../../..`), where a pattern is a level of its own (`Koil.up`,
   `listing::up`): `dir/*` goes to `dir`, on the dir or file there that
   the cursor's entry is in (`src/` of `src/main.rs`), then to the dir
@@ -251,7 +285,8 @@
   `:w`: `save`), `!` is Koil's too, and with a path, so are `-`
   (`leaveFile`): back to the listing, on the file's line, a level up, so
   `3-` goes two up from there (`goUp`), `_`: the scratchpad over the
-  file, and `Space r`, `Space o` and `K`, which take the file, as `%` does
+  file, and `Space r`, `Space o`, `Space O` and `K`, which take the file,
+  as `%` does
   (`entryPath`; in the scratchpad, what `<cfile>` stands for: the entry
   pasted on the cursor's line, or else the path under the cursor, as gf
   takes it, `linkTargetAt`, see Scratchpad). `Space q` lists the user's shortcuts
@@ -372,7 +407,8 @@
   ID's, so an unchanged line isn't a rename (`MOVE a� -> a�`, which applying
   made). QML's strings can't hold one, so Koil's JSON gives QML only
   strings, and where it would act on such a path (Enter, gf, Space r,
-  Space o, a shell command's `%` or `<cfile>` on an entry) it says it can't
+  Space o, Space O, a shell command's `%` or `<cfile>` on an entry) it
+  says it can't
   (`listing::unicode`: `Target::Error`, the `message` of `{ path, message }`
   and `{ paths, message }`), rather than give another path; a dir's name
   is the same (the dir can't be entered). koil-core's types that QML hands

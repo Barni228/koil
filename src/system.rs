@@ -6,6 +6,7 @@ use std::thread;
 
 use cxx_qt::Threading;
 use cxx_qt_lib::{QByteArray, QList, QString, QStringList};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::convert::{paths, to_json};
@@ -14,10 +15,14 @@ use crate::link;
 use crate::listing;
 use crate::shell;
 
+#[cfg(test)]
+mod tests;
+
 /// What the QML needs from the system, mostly through Qt's C++ side: the
 /// clipboard, the installed fonts and the one Koil ships, the editor's line
 /// height and the listing's and path field's colors, showing a path in
-/// Finder (or Explorer) or opening it in its default app, the links gf,
+/// Finder (or Explorer) or opening it in its default app (or another that
+/// can open it, as Open With does), the links gf,
 /// gx and a click with Cmd open (see link.rs), and running shell commands
 /// (see shell.rs).
 #[cxx_qt::bridge]
@@ -69,7 +74,30 @@ pub mod qobject {
         #[qinvokable]
         fn open_in_app(self: Pin<&mut System>, path: &QString) -> QString;
 
-        /// Emitted when `open_in_app` failed after it returned, with why.
+        /// The apps that can open `path`, as Finder's (Explorer's) Open
+        /// With lists them, for Space O: `{ apps, message }`, each app
+        /// `{ name, path, default, place }` (see `sorted_apps`), or with
+        /// `name`, only those it names, or that name alone, for an app
+        /// the system looks for (see `named`); `message` says why there's
+        /// none.
+        #[qinvokable]
+        fn apps_to_open(self: &System, path: &QString, name: &QString) -> QString;
+
+        /// Opens `path` with the app at `app` (one `apps_to_open` gave,
+        /// `name` what it's called; or an app's name or path, which the
+        /// system looks for), for Space O, without waiting for it.
+        /// Returns why it can't, or "", and emits `open_failed` if it fails
+        /// after.
+        #[qinvokable]
+        fn open_with(
+            self: Pin<&mut System>,
+            path: &QString,
+            app: &QString,
+            name: &QString,
+        ) -> QString;
+
+        /// Emitted when `open_in_app` or `open_with` failed after it
+        /// returned, with why.
         #[qsignal]
         fn open_failed(self: Pin<&mut System>, message: QString);
 
@@ -437,6 +465,80 @@ impl qobject::System {
         QString::default()
     }
 
+    fn apps_to_open(&self, path: &QString, name: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        let shown = listing::show_path(&path);
+        let name = name.to_string();
+        let name = name.trim();
+        let found = match gone(&path) {
+            Some(why) => Err(why),
+            None => apps_to_open(&path).and_then(|apps| {
+                if !name.is_empty() {
+                    Ok(named(&apps, name))
+                } else if apps.is_empty() {
+                    Err(format!("No app opens “{shown}”"))
+                } else {
+                    Ok(apps)
+                }
+            }),
+        };
+        let (apps, message) = match found {
+            Ok(apps) => (apps, String::new()),
+            Err(why) => (Vec::new(), why),
+        };
+        to_json(&json!({ "apps": apps, "message": message }))
+    }
+
+    fn open_with(self: Pin<&mut Self>, path: &QString, app: &QString, name: &QString) -> QString {
+        let path = PathBuf::from(path.to_string());
+        if let Some(why) = gone(&path) {
+            return QString::from(why.as_str());
+        }
+        let shown = listing::show_path(&path);
+        let name = name.to_string();
+        let failed = move |why: String| format!("Can't open “{shown}” with {name}: {why}");
+        // `open -a` takes an app's path, as the list gives, or its name,
+        // which Launch Services looks for, whatever it claims.
+        #[cfg(target_os = "macos")]
+        {
+            let app = PathBuf::from(app.to_string());
+            // which `open` would say with the whole NSError
+            if app.is_absolute() && app.symlink_metadata().is_err() {
+                return QString::from(failed("it isn't on disk any more".to_string()).as_str());
+            }
+            let thread = self.qt_thread();
+            thread::spawn(move || {
+                let opened = run_open(Command::new("open").arg("-a").arg(app).arg(&path));
+                if let Err(why) = opened {
+                    let why = failed(if why.starts_with("Unable to find application named") {
+                        NO_APP.to_string()
+                    } else {
+                        why
+                    });
+                    let _ = thread.queue(move |system| system.open_failed(QString::from(&why)));
+                }
+            });
+            QString::default()
+        }
+        // The shell's handler runs the app's own command, and doesn't wait
+        // for it.
+        #[cfg(windows)]
+        {
+            let _ = self;
+            let why = ffi::open_with_app(&QString::from(path.to_string_lossy().as_ref()), app);
+            if why.is_empty() {
+                why
+            } else {
+                QString::from(failed(why.to_string()).as_str())
+            }
+        }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        {
+            let _ = (self, app, failed);
+            QString::from("Koil can't open a file with another app here")
+        }
+    }
+
     fn link_at(&self, line: &QString, column: i32, names: bool) -> QString {
         let found = usize::try_from(column)
             .ok()
@@ -612,25 +714,14 @@ fn open_in_app(path: &Path) -> Result<(), String> {
     let shown = listing::show_path(path);
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("open")
-            .arg(path)
-            .output()
-            .map_err(|e| format!("Can't open “{shown}”: {e}"))?;
-        if output.status.success() {
-            return Ok(());
-        }
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // which `open` says with the URL and the whole NSError
-        if stderr.contains("kLSApplicationNotFoundErr") {
-            return Err(format!("No app opens “{shown}”"));
-        }
-        let why = stderr.lines().next().map(str::trim).unwrap_or_default();
-        let why = if why.is_empty() {
-            output.status.to_string()
-        } else {
-            why.to_string()
-        };
-        Err(format!("Can't open “{shown}”: {why}"))
+        run_open(Command::new("open").arg(path)).map_err(|why| {
+            // which `open` says with the URL and the whole NSError
+            if why.contains("kLSApplicationNotFoundErr") {
+                format!("No app opens “{shown}”")
+            } else {
+                format!("Can't open “{shown}”: {why}")
+            }
+        })
     }
     // Explorer exits with 1 whatever happened (and asks which app itself),
     // and xdg-open's app can keep its output open, so only starting it is
@@ -647,6 +738,116 @@ fn open_in_app(path: &Path) -> Result<(), String> {
         let _ = child.wait();
         Ok(())
     }
+}
+
+/// Runs `command`, macOS's `open`, and waits for it (not for the app it
+/// launches), so it's for a thread. The error is why it failed: the first
+/// line of what it wrote, or else how it exited.
+#[cfg(target_os = "macos")]
+fn run_open(command: &mut Command) -> Result<(), String> {
+    let output = command.output().map_err(|e| e.to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    match stderr.lines().next().map(str::trim) {
+        Some(why) if !why.is_empty() => Err(why.to_string()),
+        _ => Err(output.status.to_string()),
+    }
+}
+
+/// Why an app named but not listed can't open a file: the system found
+/// none of that name (see `named`), as native.h's `openWithApp` says too.
+#[cfg(target_os = "macos")]
+const NO_APP: &str = "there's no app of that name";
+
+/// An app that can open a file, as Finder's (Explorer's) Open With lists
+/// it (see native.h's `appsToOpen`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct App {
+    /// What the system calls it (Finder's name, without `.app`).
+    pub name: String,
+    /// Where it is, which opens the file with it (see `System::open_with`),
+    /// or for one that isn't listed, as typed (see `named`).
+    pub path: String,
+    /// Whether it's the file's default app.
+    #[serde(default)]
+    pub default: bool,
+    /// Where it is, as shown, if another app in the list has its name (two
+    /// versions of one), to tell them apart; else "".
+    #[serde(default)]
+    pub place: String,
+}
+
+/// The apps that can open `path`, as `sorted_apps` puts them, or why Koil
+/// can't tell.
+fn apps_to_open(path: &Path) -> Result<Vec<App>, String> {
+    let json = ffi::apps_to_open(&QString::from(path.to_string_lossy().as_ref())).to_string();
+    if json.is_empty() {
+        return Err("Koil can't tell which apps open a file here".to_string());
+    }
+    let apps = serde_json::from_str::<Vec<App>>(&json).map_err(|e| e.to_string())?;
+    Ok(sorted_apps(apps))
+}
+
+/// `apps` as the list shows them: the default first, then by name (case
+/// left out), each once (by its path), with where it is if another has its
+/// name.
+pub fn sorted_apps(apps: Vec<App>) -> Vec<App> {
+    let mut kept: Vec<App> = Vec::new();
+    for app in apps {
+        match kept.iter_mut().find(|k| k.path == app.path) {
+            Some(same) => same.default |= app.default,
+            None => kept.push(app),
+        }
+    }
+    kept.sort_by_cached_key(|app| (!app.default, app.name.to_lowercase(), app.path.clone()));
+    let names: Vec<String> = kept.iter().map(|app| app.name.to_lowercase()).collect();
+    for (i, app) in kept.iter_mut().enumerate() {
+        let twin = names
+            .iter()
+            .enumerate()
+            .any(|(j, n)| j != i && *n == names[i]);
+        app.place = if twin {
+            listing::show_path(Path::new(&app.path))
+        } else {
+            String::new()
+        };
+    }
+    kept
+}
+
+/// The apps of `apps` that `name` names (case left out): those it's the
+/// name or the path of, or else those whose names start with it, or else
+/// those whose names have it. If none does, an app `name` is the name or
+/// path of, which the system looks for as it opens the file (`open -a`,
+/// ShellExecute; see `System::open_with`), as an app can open a file of a
+/// type it doesn't claim.
+pub fn named(apps: &[App], name: &str) -> Vec<App> {
+    let typed = name;
+    let name = name.to_lowercase();
+    let tests: [&dyn Fn(&App) -> bool; 3] = [
+        &|app| app.name.to_lowercase() == name || app.path.to_lowercase() == name,
+        &|app| app.name.to_lowercase().starts_with(&name),
+        &|app| app.name.to_lowercase().contains(&name),
+    ];
+    tests
+        .iter()
+        .map(|test| {
+            apps.iter()
+                .filter(|app| test(app))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .find(|found| !found.is_empty())
+        .unwrap_or_else(|| {
+            vec![App {
+                name: typed.to_string(),
+                path: typed.to_string(),
+                default: false,
+                place: String::new(),
+            }]
+        })
 }
 
 /// Explorer (or elsewhere xdg-open) opening `path`, or with `select`,

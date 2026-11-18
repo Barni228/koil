@@ -39,12 +39,24 @@ fn main() {
         ])
         .cpp_file("cpp/native.cpp")
         .include_dir("cpp");
-    // The "Open in Koil" service on macOS (Objective-C++, for AppKit).
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        builder.cpp_file("cpp/finder_mac.mm").build();
-        println!("cargo::rustc-link-lib=framework=AppKit");
-    } else {
-        builder.build();
+    match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        // The "Open in Koil" service and the apps of Open With on macOS
+        // (Objective-C++, for AppKit).
+        Ok("macos") => {
+            builder.cpp_file("cpp/finder_mac.mm").build();
+            println!("cargo::rustc-link-lib=framework=AppKit");
+        }
+        // The apps of Explorer's Open With, through the shell's COM
+        // interfaces (uuid has their IDs, as BHID_DataObject).
+        Ok("windows") => {
+            builder.cpp_file("cpp/apps_win.cpp").build();
+            for lib in ["shell32", "shlwapi", "ole32", "uuid"] {
+                println!("cargo::rustc-link-lib={lib}");
+            }
+        }
+        _ => {
+            builder.build();
+        }
     }
 
     // The exe's icon on Windows (nothing elsewhere).

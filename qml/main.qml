@@ -240,6 +240,7 @@ ApplicationWindow {
                 ? qsTr("Show the entry in Explorer") : qsTr("Show the entry in the file manager"))
                 + qsTr(" (in a file, the file)")),
             own(" o", qsTr("Open the entry in its default app (in a file, the file)")),
+            own(" O", qsTr("Open the entry with an app picked from those that can (in a file, the file)")),
             own("K", qsTr("Show all about the entry: size, times, permissions… (in a file, the file)")),
             own(" q", qsTr("List your shortcuts")),
             own("<CR>", qsTr("Open the dir or file on the line"), listing),
@@ -997,8 +998,9 @@ ApplicationWindow {
     }
 
     // Koil's keys in the listing and the path field, and the few in a file
-    // (see Vim.commandKeys).
-    function runKeyCommand(name, count) {
+    // (see Vim.commandKeys), with the argument of the Ex command that ran
+    // it, if any (:openwith's app).
+    function runKeyCommand(name, count, arg) {
         if (name.startsWith("sort")) {
             sortBy(name.split(":")[1], name.startsWith("sortReverse"));
             return;
@@ -1011,6 +1013,7 @@ ApplicationWindow {
             undoApply: () => undoApply(),
             reveal: () => reveal(),
             openInApp: () => openInApp(),
+            openWith: () => openWith(arg),
             info: () => showInfo(),
             parent: () => goUp(count),
             open: () => openLine(count),
@@ -1335,6 +1338,55 @@ ApplicationWindow {
             const why = system.openInApp(path);
             if (why)
                 vim.showError(why);
+        });
+    }
+
+    // Space O and :openwith: lists the apps that can open the entry on the
+    // cursor's line (the file, in one), as Finder's (Explorer's) Open With
+    // does, the default one first, and opens it with the one picked (Enter
+    // on it, or y the picked ones), once its copies are asked about, as
+    // Space o does. With `name` (:openwith app), with the app it names,
+    // or if it could be several, lists only those, and if it names none of
+    // them, with the app of that name, which the system looks for (see
+    // System.appsToOpen).
+    function openWith(name) {
+        const path = entryPath();
+        if (!path)
+            return;
+        const found = JSON.parse(system.appsToOpen(path, name));
+        if (found.message) {
+            vim.showError(found.message);
+            return;
+        }
+        usedHere();
+        const apps = found.apps;
+        const open = picked => copyFirst(path, () => {
+            for (const i of picked) {
+                const why = system.openWith(path, apps[i].path, apps[i].name);
+                if (why) {
+                    vim.showError(why);
+                    return;
+                }
+            }
+        });
+        if (name && apps.length === 1) {
+            open([0]);
+            return;
+        }
+        const file = "“" + (path.split(/[\\/]/).filter(part => part).pop() || path) + "”";
+        const lines = apps.map(app => ({
+            text: app.name + (app.default ? " (default)" : "") + (app.place ? " (" + app.place + ")" : ""),
+            picked: false
+        }));
+        const question = count => !count ? "Open " + file + " with which app?"
+            : count === 1 ? "Open " + file + " with the picked app?"
+            : "Open " + file + " with each of the " + count + " picked apps?";
+        confirmDialog.ask(question, lines, open, null, null, {
+            yes: "Open",
+            cancel: true,
+            showRow: true,
+            current: true,
+            cut: true
         });
     }
 
@@ -2849,6 +2901,7 @@ ApplicationWindow {
             " u": "undoApply",
             " r": "reveal",
             " o": "openInApp",
+            " O": "openWith",
             " q": "shortcuts",
             "K": "info",
             "-": "parent",
@@ -2870,6 +2923,7 @@ ApplicationWindow {
         }, root.filePath ? {
             " r": "reveal",
             " o": "openInApp",
+            " O": "openWith",
             "K": "info",
             "-": "back",
             "[": "leave",
@@ -2877,6 +2931,7 @@ ApplicationWindow {
         } : root.scratchpad ? {
             " r": "reveal",
             " o": "openInApp",
+            " O": "openWith",
             "K": "info",
             "-": "back",
             "[": "leave",
@@ -2893,7 +2948,7 @@ ApplicationWindow {
         onFontFamiliesNeeded: root.loadFontFamilies()
         onWriteRequested: (quit, confirm) => root.save(quit, confirm)
         onQuitRequested: (force, confirm, all) => root.quitCommand(force, confirm, all)
-        onKeyCommand: (name, count) => root.runKeyCommand(name, count)
+        onKeyCommand: (name, count, arg) => root.runKeyCommand(name, count, arg)
         onLinkRequested: (at, text, external) => root.openLink(at, text, external)
         onEditRequested: (path, force) => root.edit(path, force)
         onShellRequested: (command, range, scratchpad) => root.runShell(command, range, scratchpad)

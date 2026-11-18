@@ -123,6 +123,18 @@ mod bridge {
         #[cfg(target_os = "macos")]
         fn important_capacity(path: &QString) -> i64;
 
+        /// The apps the system's Open With lists for `path`, as JSON, or
+        /// empty where it can't tell (see native.h).
+        #[cxx_name = "appsToOpen"]
+        fn apps_to_open(path: &QString) -> QString;
+
+        /// Opens `path` with the app at `app`, as Explorer's Open With
+        /// does; why it failed, or empty (see native.h). Only Windows calls
+        /// it.
+        #[cxx_name = "openWithApp"]
+        #[cfg(windows)]
+        fn open_with_app(path: &QString, app: &QString) -> QString;
+
         /// The family of the font `use_nerd_font` added.
         #[cxx_name = "nerdFontFamily"]
         fn nerd_font_family() -> QString;

@@ -2839,6 +2839,7 @@ TestCase {
             " u": "undoApply",
             " r": "reveal",
             " o": "openInApp",
+            " O": "openWith",
             " q": "shortcuts"
         };
         keyCommands.clear();
@@ -2861,6 +2862,19 @@ TestCase {
         keys(":a<CR>");
         compare(vim.message, "E492: Not an editor command: a");
         compare(keyCommands.count, 12);
+        // :openwith takes the app, as the rest of the line, which the keys
+        // don't.
+        keyCommands.clear();
+        keys(":openwith<CR>:openw Visual Studio Code<CR>:openwi  xcode <CR>");
+        keys(" O");
+        compare(keyCommands.signalArguments.map(a => [a[0], a[1], a[2]]),
+            [["openWith", 0, ""], ["openWith", 0, "Visual Studio Code"], ["openWith", 0, "xcode"],
+                ["openWith", 0, ""]]);
+        keys(":2openwith x<CR>");
+        compare(vim.message, "E481: No range allowed");
+        keys(":openwit! x<CR>");
+        compare(vim.message, "E492: Not an editor command: openwit! x");
+        compare(keyCommands.count, 4);
         // In a file, Space Space saves, so :apply does, also after
         // :confirm, as Space a isn't a key there, nor is Space u.
         vim.commandKeys = { "  ": "save", " q": "shortcuts" };
