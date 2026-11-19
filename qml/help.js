@@ -345,6 +345,7 @@ function sections(help) {
                 ["`gn`  `gN`", "Select the match the cursor is on, or else the next (or previous) one. After an "
                     + "operator, act on it: `cgn` changes it, and `.` then changes the next one (see `:h gn`)."],
                 ["`ga`", "A cursor at every match, to edit them all at once (see `:h ga`)."],
+                ["`gA`", "Select every match, for visual mode's commands on them all (see `:h gA`)."],
                 ["`*`  `#`", "Search for the word under the cursor, or in visual mode for what's selected, "
                     + "as it is (not as a regex), as Neovim's do."],
                 ["`" + cmdKey + "F`", "The find bar. Its matches are highlighted while it's open."],
@@ -548,7 +549,7 @@ function sections(help) {
         {
             title: "Visual block and multiple cursors",
             tags: ["block", "visualblock", "ctrl-v", "<c-v>", "cursors", "cursor", "multiple", "multi",
-                "alt-click", "click", "ga"],
+                "alt-click", "click", "ga", "gA", "selections"],
             rows: [
                 ["`Ctrl-V`", "Visual block, also on Windows (where `Ctrl+V` pastes while typing)."],
                 ["`I`  `A`  `c`", "In a block: type on every line of it at once."],
@@ -557,6 +558,13 @@ function sections(help) {
                 ["`ga`", "A cursor at the start of every match of the last search (in visual mode, or on marked "
                     + "lines, every one in them), the matches highlighted: `/\\w+_\\w+`, `ga`, then `g~gn` toggles "
                     + "the case of each, `cgn` changes each, `~` the first letter of each."],
+                ["`gA`", "A selection on every match, as `ga` then `gn` (in visual mode, or on marked lines, every "
+                    + "one in them): `/\\w+_\\w+`, `gA`, then `U` raises each, `c` changes each, `S)` puts each "
+                    + "in brackets."],
+                ["`v`", "With more than one cursor: select at each. Motions, text objects, `o` and `gn` move "
+                    + "every selection's end, and `d`, `c`, `y`, `p`, `~`, `U`, `r`, `J`, `>`, `I`, `A`, `S` "
+                    + "and the like act on each. `m` and `@` take all their lines. `Esc` goes back to a cursor "
+                    + "at each. `V` and `Ctrl-V` work at one cursor only."],
                 ["", "Motions and edits happen at every cursor, each with its own registers. `Esc` goes "
                     + "back to one."]
             ]
@@ -628,6 +636,7 @@ function sections(help) {
                 ["`gn`  `gN`", "Select the next (or previous) match of the last search, or act on it after an "
                     + "operator, like `dgn` (see `:h gn`)."],
                 ["`ga`", "A cursor at every match of the last search (see `:h ga`)."],
+                ["`gA`", "Select every match of the last search (see `:h gA`)."],
                 ["`gh`", "Show what the line's icon hides, or the message under the cursor."],
                 ["`gf`  `gx`", "Open the link under the cursor in Koil, or in its default app (see `:h gf`)."],
                 ["`g.`  `gi`  `gr`", "In the listing: toggle hidden files, hiding what git ignores, and "

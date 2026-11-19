@@ -98,7 +98,8 @@
   the scratchpad (`openScratch`), and which of the two editors vim edits (`activate`). It wires the pieces
   together; no editing logic lives here.
 - `qml/Editor.qml`: the `TextArea` in a `ScrollView`, and everything drawn
-  with it: cursors, selection, the marked lines (see Marked lines), the
+  with it: cursors, selections (see Multiple selections), the marked
+  lines (see Marked lines), the
   find bar's scope and what was just yanked (each a `SpanShade`), the
   selection's whitespace (`whitespace`, see Whitespace in the
   selection), search highlights, the
@@ -123,10 +124,10 @@
 - `qml/SortMenu.qml`: what `gs` and a key sort the listing by, in a box
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
-  undo, macros, visual block, multiple cursors, `gn` and `ga`, marked
-  lines, hidden text, the listing's prefixes, `:` and its ranges, `/`,
-  `:s`, `:g`, surround, buffers). It drives the `TextArea` through
-  `insert`/`remove`/`select`.
+  undo, macros, visual block, multiple cursors and selections, `gn`,
+  `ga` and `gA`, marked lines, hidden text, the listing's prefixes, `:`
+  and its ranges, `/`, `:s`, `:g`, surround, buffers). It drives the
+  `TextArea` through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects
   and the tags `it` and `at` find, `tagPair`, `=`'s indents, `reindent`,
   and `g=`'s, `guessIndents`, the lines they read, `codeScanner`,

@@ -41,7 +41,9 @@
   (`operatorRange`
   from that cursor, as an operator works out its range before it edits;
   `p` with that cursor's own registers), and `replaceRanges` makes them
-  all; each cursor then goes where the command would have put it, by the
+  all (not moving the cursors as it does, `shifting`, as `editAtOnce`'s
+  doesn't: it took a twentieth of the time at 20,000); each cursor then
+  goes where the command would have put it, by the
   text after (`at`), and gets the registers it would have (each extra
   cursor its own, written last to first, as `atEveryCursor` writes them),
   and the message is the one the first cursor would give. 0.6 s for the
@@ -88,8 +90,74 @@
   from the cursor on, so the view stays; in visual mode and on marked
   lines, only the matches all in them (`selectionScope`, `inRegion`, as
   `:'<,'>s`), leaving them. Cursors are points, not Kakoune's selections,
-  so `gn` then acts on exactly each match (`g~gn`, `cgn`). All three
-  highlight the matches, as `n` does, which shows where each ends.
+  so `gn` then acts on exactly each match (`g~gn`, `cgn`). `gA` (Koil's)
+  selects every match instead (`cursorsAtMatches(true)`, each from its
+  start to its last character, `matchSelection`, as `gn` there would),
+  for visual mode's commands at each (see Multiple selections), with the
+  same main one and scope; it finds them in one pass, where `ga` then
+  `gn` searches again at each cursor (a match over lines, or one at a
+  line's end that `ga`'s cursor steps back from, can differ). At many
+  cursors, `gn` and `gN` select at each, and in visual mode take every
+  selection's end on (`selectMatch`, `extendToMatch`; the others' quiet,
+  as there's one from each if there's one from the main one). All four
+  highlight the matches, as `n` does, which shows where each ends. A
+  search back (`N`, or `n` after `?` or `#`, `gN`, `dgN`) goes through
+  the matches from the text's start to the last before the cursor
+  (`re.before`, each from where the one before ends), so from every
+  cursor it took time in proportion to the text: `N` at 10,000 cursors
+  took 44 s. So while one key searches from many cursors in one text
+  (`searchingFromMany`: `moveCursors`, `selectMatch`, `extendToMatch`
+  and `atOnce`'s planning), they share one regular expression
+  (`searchRe`), and the first that goes back finds the starts of every
+  match once, the same ones in the same order, and each its own by
+  binary search (`manyBefore`): 58 ms, and `gN` 140 ms where it took
+  55 s. Not for one cursor (the main one's search is its own), where it
+  would only add the matches after it, nor one at a time, where each
+  edit changes the text. Searching forward was already from the cursor.
+- **Multiple selections** (Multiple cursors in Vim.qml): with extra
+  cursors (Alt+click, `ga`), `v` selects at each: each extra cursor has an
+  `anchor`, as `vim.anchor` is the main one's, and only in visual mode
+  (`setMode` drops them all as it leaves it, and `leaveVisual` puts each
+  on its end's character, so `Esc` goes back to cursors, and again to
+  one). The editor's selection is the main one's alone, so Editor.qml
+  draws the others (`extraSelectionSpans`: those in view, found by binary
+  search on their ends, as `visibleCursors` finds cursors), and their
+  whitespace. Motions move every one's end (`moveCursors`, to a line's
+  end after `$`, as `moveBy` does; a search typed too, as `n`), and so
+  do text objects, `gn`, `gN`, `o` and `O` (`moveSelections`,
+  `extendToMatch`). `*` and `#` search for what the main one selects,
+  then every cursor goes on to it, as `n` (see `searchSelection`). Ends that meet are one
+  selection, as cursors that meet are one (`setCursors`), with the main
+  one's anchor or the first one's; others stay as they are, also if they
+  overlap. The edits (`visualEdit`: `d`, `c`, `y`, `x`, `s`, `X`, `D`,
+  `C`, `R`, `Y`, `>`, `<`, the case changes, `r`, `J`, `gJ`, `I`, `A`,
+  `p`, `P`) are one edit through `atOnce` (`plannedVisual`, as
+  `plannedEdit` for normal mode: the same ranges `visualEdit` takes, `p`
+  with each cursor's own registers, its unnamed one then holding what was
+  selected, and `I` and `A` that `.` doesn't repeat, `noDot`), leaving
+  what one at a time leaves (`test_selectionsAtOnce` compares them), each
+  a cursor again, going on from its column (unless `>` or `D` kept it, as
+  toLine does). 20,000 selections from `gA` took 0.4 to 0.9 s for `U`,
+  `d`, `>`, `p` and `cZ`, 0.2 s for `y`, and `gA` itself 70 ms. One at a
+  time (`atEveryCursor`, which in visual mode puts each selection back,
+  `mode` and `anchor`, before its step, and whose edits move both ends of
+  the others) are selections that overlap or touch, as cursors' edits,
+  `=` and `g=`, surround (whose tag is asked once: `visualState` keeps
+  the extra ones in lastVisual's `selections`, which `surroundSelection`
+  goes back to), and `c`, `I` and `A` on a listing line without a prefix.
+  `m`, `@` and `Q` take the lines of them all (`selectedLines`), back at
+  one cursor, and `ga` and `gA` the matches in them all, as does Find in
+  Selection (`selectionScope`, with those that overlap as one span). `:`,
+  `!`, `gf` and `gx` are the main one's: `'<,'>` is one range, and while
+  `:` is typed only the main one is drawn. `gv` brings
+  back the extra ones with the main one, in place of the cursors there
+  are, as it brings back what was selected (and none with lines or a
+  block). Selecting all (Cmd+A) is one selection. `V` and `Ctrl-V` say
+  they work only at one cursor (lines and blocks at many can come later),
+  so every selection is of characters. V4's `sort` with a comparator
+  took 3 s for 20,000 cursors with one out of place (`gn` going round the
+  text's end), so `sortedBy` merges the runs in order instead, one pass
+  for a list almost in order.
 - **Marked lines** (Marked lines in Vim.qml): `m` marks the cursor's line
   (`3m` three; in visual mode, the selection's lines, back in normal
   mode), or unmarks them if they're all marked (`toggleMarks`), so lines

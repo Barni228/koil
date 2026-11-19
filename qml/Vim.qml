@@ -263,11 +263,17 @@ QtObject {
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
-        "<C-x>", "q", "@", "Q", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m", "gn", "gN", "ga"]
+        "<C-x>", "q", "@", "Q", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m", "gn", "gN", "ga", "gA"]
     // Ctrl-C leaves visual mode, as Esc does (vim's v_CTRL-C).
     readonly property var visualActions: ["<Esc>", "<C-c>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D",
         "s", "C", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "@", "Q", "I", "A", "<C-e>",
-        "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m", "gn", "gN", "ga"]
+        "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m", "gn", "gN", "ga", "gA"]
+    // The visual-mode commands that end in insert mode (see
+    // atEveryCursor), and those that are an operator on what's selected,
+    // or in capitals on its lines (see visualEdit).
+    readonly property var visualTyping: ["c", "s", "C", "R", "I", "A"]
+    readonly property var visualOperators: ({ d: "d", x: "d", "<Del>": "d", c: "c", s: "c", y: "y", X: "D", D: "D",
+        C: "C", R: "C", Y: "Y" })
     // While lines are marked, the keys that act on them, as they act on a
     // linewise selection in visual mode (see Marked lines): an operator at
     // once, S and gS surround (as "surround"), U, and @ and Q on each one.
@@ -320,13 +326,21 @@ QtObject {
     property var rowWant: null
     property var lastFind: null
     property var lastSearch: null
+    // While searches go from many cursors in one text (see
+    // searchingFromMany): { pattern, re, text, starts }, the pattern they
+    // last searched for and its regular expression (see searchRe), and
+    // once one went back, the text it went through and the starts of
+    // every match in it (see manyBefore). Null otherwise.
+    property var manySearches: null
     property var lastVisual: null
     property var dot: null
     property var insertSession: null
     // Extra cursors (Alt+click, or one per line of a block insert), sorted:
-    // { pos, col, registers, replaceStack }, where col is its wantCol,
-    // registers its own (see atEveryCursor) and replaceStack what it
-    // replaced in replace mode. Commands work at all of them, and leaving
+    // { pos, col, registers, replaceStack, anchor }, where col is its
+    // wantCol, registers its own (see atEveryCursor), replaceStack what it
+    // replaced in replace mode, and in visual mode, anchor its selection's
+    // other end, as `anchor` is the main one's (see Multiple selections;
+    // undefined otherwise). Commands work at all of them, and leaving
     // insert or replace mode removes them. Edits move them (see
     // replaceRange). Replaced, never changed in place, so the view sees
     // every change.
@@ -626,6 +640,8 @@ QtObject {
             }
             if (event.matches(StandardKey.SelectAll) && !addKey) {
                 if (mode !== "replace") {
+                    // All of it, one selection.
+                    clearCursors();
                     setMode("visualLine");
                     anchor = clampNormal(bufferText(), 0);
                     setCursor(bufferText().length);
@@ -808,15 +824,23 @@ QtObject {
     }
 
     // Back to normal mode from visual mode, on the character the cursor is
-    // on.
+    // on, and each extra selection a cursor again, on its end's character
+    // (see Multiple selections).
     function leaveVisual() {
         setMode("normal");
-        setCursor(clampNormal(bufferText(), cursor));
+        const t = bufferText();
+        setCursor(clampNormal(t, cursor));
+        if (cursors.length)
+            setCursors(cursors.map(c => Object.assign({}, c, { pos: clampNormal(t, c.pos) })));
     }
 
-    // The selection, as lastVisual keeps it for gv.
+    // The selection, as lastVisual keeps it for gv, with the extra ones
+    // (`selections`, as `cursors` has them) if there are any.
     function visualState() {
-        return { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+        const v = { mode: mode, anchor: anchor, cursor: cursor, wantCol: wantCol };
+        if (isVisual && cursors.length)
+            v.selections = cursors;
+        return v;
     }
 
     // Runs an edit made outside vim (e.g. from a menu) as its own undo step,
@@ -1847,7 +1871,7 @@ QtObject {
         if (isVisual)
             return !cmd.motion && !cmd.textObj
                 && !["<Esc>", "<C-c>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "@", "Q", "!",
-                    "g!", "gf", "gx", "gn", "gN", "ga"]
+                    "g!", "gf", "gx", "gn", "gN", "ga", "gA"]
                     .includes(cmd.action);
         // ! only types a command line, whose command may change the text.
         return cmd.op ? !["y", "!", "g!"].includes(cmd.op) : changeActions.includes(cmd.action);
@@ -1946,26 +1970,28 @@ QtObject {
         } else {
             macroFails();
         }
-        if (cursors.length && mode === "normal")
+        if (cursors.length && (mode === "normal" || mode === "visual"))
             moveCursors(t, cmd.motion, count, cmd.count > 0);
     }
 
-    // Moves the extra cursors as the main one moved. Each keeps its own
-    // column for j and k (`col`, like wantCol).
+    // Moves the extra cursors as the main one moved (in visual mode, their
+    // selections' ends). Each keeps its own column for j and k (`col`,
+    // like wantCol).
     function moveCursors(t, m, count, explicit) {
         // "*" and "#" search for the main cursor's word, which is now the
         // last search, from every cursor.
         if (m.name === "*" || m.name === "#")
             m = { name: "n" };
-        const mainCol = wantCol;
-        setCursors(cursors.map(c => {
+        const mainCol = wantCol, visual = isVisual;
+        setCursors(searchingFromMany(() => cursors.map(c => {
             wantCol = c.col === undefined ? Txt.column(t, c.pos) : c.col;
             const r = motion(t, c.pos, m, count, explicit, false, true);
             if (!r)
                 return Object.assign({}, c, { col: wantCol });
-            const p = clampNormal(t, r.pos);
+            // As moveBy: a line's end, in visual mode, after $.
+            const p = visual && r.eol ? Math.min(r.pos, t.length) : clampNormal(t, r.pos);
             return Object.assign({}, c, { pos: p, col: r.keepCol ? wantCol : r.eol ? Infinity : Txt.column(t, p) });
-        }));
+        })));
         wantCol = mainCol;
     }
 
@@ -2125,16 +2151,25 @@ QtObject {
         case "v":
         case "V":
         case "<C-v>":
+            // v selects at every cursor (see Multiple selections), but
+            // lines and blocks only at one.
+            if (cursors.length && cmd.action !== "v") {
+                showError(keysName(cmd.action) + " works only at one cursor");
+                break;
+            }
             anchor = p;
             setMode(visualModes[cmd.action]);
             setCursor(p);
+            if (cursors.length)
+                setCursors(cursors.map(c => Object.assign({}, c, { anchor: c.pos })));
             break;
         case "gn":
         case "gN":
             selectMatch(cmd.action === "gN");
             break;
         case "ga":
-            cursorsAtMatches();
+        case "gA":
+            cursorsAtMatches(cmd.action === "gA");
             break;
         case "x":
         case "<Del>":
@@ -2247,9 +2282,16 @@ QtObject {
             if (lastVisual && lastVisual.mode === "marked") {
                 setMarked(validStarts(t, lastVisual.marked));
             } else if (lastVisual) {
-                anchor = Math.min(lastVisual.anchor, t.length);
-                setMode(lastVisual.mode);
-                setCursor(Math.min(lastVisual.cursor, t.length));
+                // With the extra selections it had, in place of the
+                // cursors there are now.
+                const v = lastVisual, n = t.length;
+                anchor = Math.min(v.anchor, n);
+                setMode(v.mode);
+                setCursor(Math.min(v.cursor, n));
+                if (cursors.length || v.selections) {
+                    setCursors((v.selections || []).map(c => Object.assign({}, c,
+                        { pos: Math.min(c.pos, n), anchor: Math.min(c.anchor, n) })));
+                }
             }
             break;
         case "gh":
@@ -2285,10 +2327,14 @@ QtObject {
         }
     }
 
+    // A visual-mode command. With extra selections (see Multiple
+    // selections), motions, text objects, gn, gN, o and O move every one,
+    // m, @ and Q go by the lines of them all, and the edits (see
+    // visualEdit) are made at each, as one edit where atOnce can. What's
+    // left (:, gf, *'s text) is the main one's.
     function executeVisual(cmd) {
         const t = bufferText();
-        const n = t.length;
-        const count = Math.max(cmd.count, 1);
+        const count = Math.max(cmd.count, 1), many = cursors.length > 0;
         // * and # search for what's selected, as Neovim's, leaving visual
         // mode (see searchSelection).
         if (cmd.motion && (cmd.motion.name === "*" || cmd.motion.name === "#")) {
@@ -2300,11 +2346,10 @@ QtObject {
             return;
         }
         if (cmd.textObj) {
-            const r = textObject(t, cursor, cmd.textObj, count);
-            if (r && r.end > r.start) {
-                anchor = r.start;
-                setCursor(Txt.charStart(t, r.end - 1));
-            }
+            moveSelections((from, p) => {
+                const r = textObject(t, p, cmd.textObj, count);
+                return r && r.end > r.start ? { anchor: r.start, pos: Txt.charStart(t, r.end - 1) } : null;
+            });
             return;
         }
         if (cmd.action === "gn" || cmd.action === "gN") {
@@ -2313,12 +2358,13 @@ QtObject {
         }
         const a = cmd.action;
         lastVisual = visualState();
-        if (a === "ga") {
-            cursorsAtMatches();
+        if (a === "ga" || a === "gA") {
+            cursorsAtMatches(a === "gA");
             return;
         }
         if (a === "surround") {
-            setMode("normal");
+            if (!many)
+                setMode("normal");
             surroundSelection(lastVisual, cmd.surround);
             return;
         }
@@ -2326,15 +2372,21 @@ QtObject {
             leaveVisual();
             return;
         }
-        // m marks its lines (see toggleMarks), leaving visual mode.
+        // m marks its lines (see toggleMarks), leaving visual mode, and
+        // the lines of the extra ones, which then go.
         if (a === "m") {
-            const lo = Math.min(anchor, cursor), hi = Math.max(anchor, cursor);
+            const starts = selectedLines(t);
             leaveVisual();
+            clearCursors();
             if (!singleLine)
-                toggleMarks(lineStarts(t, lo, Txt.lineOf(t, hi) - Txt.lineOf(t, lo) + 1));
+                toggleMarks(starts);
             return;
         }
         if (visualModes[a]) {
+            if (many) {
+                showError(keysName(a) + " works only at one cursor");
+                return;
+            }
             setMode(visualModes[a]);
             setCursor(cursor);
             return;
@@ -2348,10 +2400,7 @@ QtObject {
             return;
         }
         if (a === "o" || a === "O") {
-            const c = cursor;
-            cursor = anchor;
-            anchor = c;
-            setCursor(cursor);
+            moveSelections((from, p) => ({ anchor: p, pos: from }));
             return;
         }
         // :, ! and g! leave visual mode, for a command on its lines, as in
@@ -2374,12 +2423,13 @@ QtObject {
             return;
         }
         // @ and Q run a macro on each of its lines, as Neovim's (see
-        // runOnLines), leaving visual mode.
+        // runOnLines), leaving visual mode, and on the extra ones', with
+        // one cursor.
         if (a === "@" || a === "Q") {
-            const lo = Math.min(anchor, cursor), hi = Math.max(anchor, cursor);
+            const starts = selectedLines(t);
             leaveVisual();
-            runOnLines(a === "Q" ? lastRecorded : cmd.ch,
-                lineStarts(t, lo, Txt.lineOf(t, hi) - Txt.lineOf(t, lo) + 1), count);
+            clearCursors();
+            runOnLines(a === "Q" ? lastRecorded : cmd.ch, starts, count);
             return;
         }
         // gf and gx open what's selected (a block's corners, as characters).
@@ -2399,14 +2449,29 @@ QtObject {
         }
         if (mode === "visualBlock" && executeBlock(cmd))
             return;
+        if (many) {
+            if (!atOnce(cmd))
+                atEveryCursor(() => visualEdit(cmd), visualTyping.includes(a));
+            return;
+        }
+        visualEdit(cmd);
+    }
 
+    // A visual-mode edit (d, c, y, >, ~, r, J, I, p and the like) on the
+    // selection from `anchor` to `cursor`, back in normal mode (or insert
+    // mode, to type).
+    function visualEdit(cmd) {
+        const t = bufferText();
+        const n = t.length;
+        const count = Math.max(cmd.count, 1);
+        const a = cmd.action;
         const lo = Math.min(anchor, cursor), hi = Math.max(anchor, cursor);
         const lineRange = { start: Txt.lineStart(t, lo), end: Math.min(Txt.lineEnd(t, hi) + 1, n), linewise: true };
         const range = mode === "visualLine" ? lineRange : { start: lo, end: Txt.charEnd(t, hi), linewise: false };
         setMode("normal");
         setCursor(clampNormal(t, lo));
         // d, c and y on what's selected, or on its lines (in capitals).
-        const op = { d: "d", x: "d", "<Del>": "d", c: "c", s: "c", y: "y", X: "D", D: "D", C: "C", R: "C", Y: "Y" }[a];
+        const op = visualOperators[a];
         if (op) {
             applyOperator(op.toLowerCase(), op === op.toLowerCase() ? range : lineRange, cmd.reg, lo);
             return;
@@ -3276,6 +3341,13 @@ QtObject {
     }
 
     // ---- Multiple cursors --------------------------------------------------
+    // Multiple selections: with extra cursors, v selects at each, as
+    // `cursors`' anchors, the main one's being `anchor`. Motions, text
+    // objects, gn, gN, o and O move every one (moveCursors,
+    // moveSelections), the edits act on each (atOnce, with plannedVisual,
+    // or atEveryCursor), and leaving visual mode makes each a cursor again
+    // (setMode, leaveVisual). Only character ones: V and Ctrl-V take one
+    // cursor.
 
     // Sets the extra cursors, sorted and without doubles or one at `main`
     // (the main cursor, unless given).
@@ -3288,15 +3360,43 @@ QtObject {
             trackedText = bufferText();
     }
 
-    // `list` sorted by key(item), without changing it: itself if it already
-    // is, as cursors almost always are (with a block insert's 100,000,
-    // sorting them took a tenth of a second a key).
+    // `list` sorted by key(item), without changing it, keeping the order
+    // of those with the same key: itself if it already is, as cursors
+    // almost always are (with a block insert's 100,000, sorting them took
+    // a tenth of a second a key). Else by merging the runs of it that are
+    // in order, which for a list almost in order (a cursor that went round
+    // the text's end) is one pass: V4's sort calls its comparator so
+    // slowly that 20,000 cursors with one out of place took 3 s.
     function sortedBy(list, key) {
-        for (let i = 1; i < list.length; i++) {
-            if (key(list[i]) < key(list[i - 1]))
-                return list.slice().sort((a, b) => key(a) - key(b));
+        if (list.length < 2)
+            return list;
+        let runs = [], from = 0;
+        for (let i = 1; i <= list.length; i++) {
+            if (i === list.length || key(list[i]) < key(list[i - 1])) {
+                if (i === list.length && from === 0)
+                    return list;
+                runs.push(list.slice(from, i));
+                from = i;
+            }
         }
-        return list;
+        while (runs.length > 1) {
+            const merged = [];
+            for (let k = 0; k + 1 < runs.length; k += 2) {
+                const a = runs[k], b = runs[k + 1], r = [];
+                let i = 0, j = 0;
+                while (i < a.length && j < b.length)
+                    r.push(key(b[j]) < key(a[i]) ? b[j++] : a[i++]);
+                while (i < a.length)
+                    r.push(a[i++]);
+                while (j < b.length)
+                    r.push(b[j++]);
+                merged.push(r);
+            }
+            if (runs.length % 2)
+                merged.push(runs[runs.length - 1]);
+            runs = merged;
+        }
+        return runs[0];
     }
 
     // Alt+click: adds a cursor at pos, or removes the one there.
@@ -3320,6 +3420,40 @@ QtObject {
         blockHome = null;
     }
 
+    // The extra cursor c without its selection (see Multiple selections).
+    function pointOf(c) {
+        return Object.assign({}, c, { anchor: undefined });
+    }
+
+    // Moves every selection, the main one and the extra ones (see Multiple
+    // selections): fn(anchor, pos) gives one's new { anchor, pos }, or
+    // null to leave it as it is.
+    function moveSelections(fn) {
+        const r = fn(anchor, cursor);
+        const extras = cursors.map(c => {
+            const s = fn(c.anchor, c.pos);
+            return s ? Object.assign({}, c, s) : c;
+        });
+        if (r) {
+            anchor = r.anchor;
+            setCursor(r.pos);
+        }
+        if (extras.length)
+            setCursors(extras);
+    }
+
+    // The starts of the lines of t that the selection is on, and the extra
+    // ones (see Multiple selections), sorted, each once.
+    function selectedLines(t) {
+        const all = [];
+        for (const c of [{ anchor: anchor, pos: cursor }].concat(cursors)) {
+            const lo = Math.min(c.anchor, c.pos), hi = Math.max(c.anchor, c.pos);
+            for (const ls of lineStarts(t, lo, Txt.lineOf(t, hi) - Txt.lineOf(t, lo) + 1))
+                all.push(ls);
+        }
+        return sortedBy(all, ls => ls).filter((ls, i, list) => i === 0 || ls !== list[i - 1]);
+    }
+
     // Runs fn(pos, c) at every cursor, the main one too, from the last to the
     // first, so that each edit moves only cursors that are done (see
     // shiftCursors). fn returns the cursor's new position. Updates the extra
@@ -3328,7 +3462,7 @@ QtObject {
         const main = { pos: cursor, main: true };
         const all = [main].concat(cursors.filter(c => c.pos !== cursor).map(c => Object.assign({}, c)));
         shifting = all;
-        for (const c of all.slice().sort((a, b) => b.pos - a.pos))
+        for (const c of sortedBy(all, c => c.pos).slice().reverse())
             c.pos = fn(c.pos, c);
         shifting = null;
         setCursors(all.filter(c => c !== main), main.pos);
@@ -3336,8 +3470,9 @@ QtObject {
     }
 
     // Runs the normal-mode command cmd at every cursor as one edit, if it's
-    // one atOnce can (see plannedEdit): each cursor's edit is worked out on
-    // the text as it is, and they're made together (replaceRanges), as
+    // one atOnce can (see plannedEdit), or in visual mode, the edit cmd on
+    // every selection (see plannedVisual): each cursor's edit is worked
+    // out on the text as it is, and they're made together (replaceRanges), as
     // typing at them is (editAtOnce). An edit per cursor (atEveryCursor)
     // has vim make the whole text again each time, and Qt go over it:
     // g~iw at 20,000 cursors took 125 s, `:%norm g~iw` 26 s, typing at them
@@ -3354,19 +3489,27 @@ QtObject {
     function atOnce(cmd) {
         if (!cursorsAtOnce)
             return false;
-        const t = bufferText(), main = cursor, plans = [];
+        // In visual mode, on every selection (see plannedVisual).
+        const visual = isVisual, t = bufferText(), main = cursor, plans = [];
         const mainRegisters = registers, initial = Object.assign({}, registers);
         const pasting = cmd.action === "p" || cmd.action === "P";
-        for (const c of [{ pos: main, main: true }].concat(cursors.filter(c => c.pos !== main))) {
-            if (pasting && !c.main)
-                registers = c.registers || initial;
-            const plan = plannedEdit(t, c.pos, cmd);
-            registers = mainRegisters;
-            if (!plan)
-                return false;
-            plan.c = c;
-            plans.push(plan);
-        }
+        const first = visual ? { pos: main, anchor: anchor, main: true } : { pos: main, main: true };
+        // Searches (dgN at each) in one text.
+        const planned = searchingFromMany(() => {
+            for (const c of [first].concat(cursors.filter(c => c.pos !== main))) {
+                if (pasting && !c.main)
+                    registers = c.registers || initial;
+                const plan = visual ? plannedVisual(t, c, cmd) : plannedEdit(t, c.pos, cmd);
+                registers = mainRegisters;
+                if (!plan)
+                    return false;
+                plan.c = c;
+                plans.push(plan);
+            }
+            return true;
+        });
+        if (!planned)
+            return false;
         const sorted = sortedBy(plans, x => x.start);
         // dd on the last line takes the line break before it, so lines
         // going together up to there take the one before them instead,
@@ -3391,7 +3534,8 @@ QtObject {
             const c = x.c.main ? x.c : Object.assign({}, x.c, { registers: x.c.registers || Object.assign({}, initial) });
             if (y) {
                 registers = c.main ? mainRegisters : c.registers;
-                setRegister(cmd.reg, y.text, y.linewise, y.yanking, y.hidden, false, y.regOne);
+                setRegister(y.reg !== undefined ? y.reg : cmd.reg, y.text, y.linewise, y.yanking, y.hidden, false,
+                    y.regOne);
                 registers = mainRegisters;
             }
             x.c = c;
@@ -3404,10 +3548,17 @@ QtObject {
             if (x.edit)
                 Array.prototype.push.apply(edits, x.parts || [x]);
         }
-        if (edits.length)
+        // The cursors are placed below, so the edit needn't move them (as
+        // in editAtOnce): moving them all took a twentieth of the time.
+        if (edits.length) {
+            shifting = [];
             replaceRanges(edits);
-        // Where each starts now: moved by the edits before it.
-        const u = bufferText();
+            shifting = null;
+        }
+        // Where each starts now: moved by the edits before it. Out of visual
+        // mode, a selection is a cursor again, which goes on from its column
+        // there, as the main one does (see execute), unless toLine kept it.
+        const u = bufferText(), kept = sorted.some(x => x.toLine);
         let shift = 0, mainPos = main, failed = false;
         for (const x of sorted) {
             const p = x.at(u, x.start + shift);
@@ -3416,16 +3567,23 @@ QtObject {
             failed = failed || !!x.failed;
             if (x.c.main)
                 mainPos = p;
+            else if (visual)
+                extras.push(Object.assign(pointOf(x.c), { pos: outOfPrefix(u, p) }, kept ? {} : { col: undefined }));
             else
                 extras.push(Object.assign({}, x.c, { pos: outOfPrefix(u, p) }));
         }
+        if (visual)
+            setMode("normal");
         const typing = sorted.find(x => x.inserting);
-        if (typing)
+        if (typing) {
             startInsert(typing.inserting.count, mainPos, typing.inserting.openLine);
-        else
+            if (typing.inserting.noDot)
+                insertSession.dot = null; // as visual mode's I and A
+        } else {
             setCursor(mainPos);
+        }
         setCursors(extras, cursor);
-        if (sorted.some(x => x.toLine))
+        if (kept)
             colKept = true; // as toLine
         const told = sorted.find(x => x.message);
         if (told)
@@ -3542,8 +3700,9 @@ QtObject {
 
     // What operator `op` over `range` (see operatorRange) at p in t would
     // do, as applyOperator would (see plannedEdit, `stay` and `lineAt`, where
-    // toLine puts the cursor).
-    function plannedOperator(t, p, op, range, stay, lineAt) {
+    // toLine puts the cursor), > and < `times` times (once if not given),
+    // as visual mode's count has them.
+    function plannedOperator(t, p, op, range, stay, lineAt, times) {
         const s = range.start, e = range.end, whole = !!range.linewise, slice = t.slice(s, e);
         if (!whole && e <= s && op !== "c")
             return stay;
@@ -3581,7 +3740,7 @@ QtObject {
         case ">":
         case "<": {
             const ls = Txt.lineStart(t, s), le = Txt.lineEnd(t, Math.max(s, e - 1));
-            const text = shiftedLines(t, ls, le, op === ">" ? 1 : -1, 1);
+            const text = shiftedLines(t, ls, le, op === ">" ? 1 : -1, times || 1);
             return { start: ls, end: le, text: text, entries: carriedHidden(ls, le, text), edit: true, toLine: true,
                 at: lineAt };
         }
@@ -3628,6 +3787,90 @@ QtObject {
             at: (u, s) => clampNormal(u, s + Math.max(x.text.length - 1, 0)) };
     }
 
+    // What the visual-mode edit cmd (see visualEdit) would do on the
+    // selection from c.anchor to c.pos (a character one) in t, without
+    // doing it, as plannedEdit has a normal-mode command's: an operator on
+    // what's selected or on its lines (see plannedOperator), with its
+    // count for > and <, a case change, r, J and gJ on its lines (see
+    // joinEdits), I and A (insert mode at its start or after its end,
+    // `noDot`: . doesn't repeat them), and p and P, which put the register
+    // in its place. Null for what one selection at a time does: = and g=,
+    // which go by the lines above, already reindented one at a time, and
+    // c, I and A on a line of the listing without a prefix, which
+    // startInsert gives one.
+    function plannedVisual(t, c, cmd) {
+        const a = cmd.action, n = t.length, count = Math.max(cmd.count, 1);
+        const lo = Math.min(c.anchor, c.pos), hi = Math.max(c.anchor, c.pos);
+        const lines = { start: Txt.lineStart(t, lo), end: Math.min(Txt.lineEnd(t, hi) + 1, n), linewise: true,
+            target: lo };
+        const chars = { start: lo, end: Txt.charEnd(t, hi), linewise: false, target: lo };
+        const at = (u, s) => clampNormal(u, s), stay = { start: lo, end: lo, at: at };
+        const lineAt = (u, s) => clampNormal(u, Txt.atColumn(u, Txt.lineStart(u, Math.min(s, u.length)), wantCol));
+        const op = visualOperators[a];
+        if (op)
+            return plannedOperator(t, lo, op.toLowerCase(), op === op.toLowerCase() ? chars : lines, stay, lineAt);
+        switch (a) {
+        case ">":
+        case "<":
+            return plannedOperator(t, lo, a, chars, stay, lineAt, count);
+        case "~":
+        case "g~":
+        case "u":
+        case "gu":
+        case "U":
+        case "gU":
+        case "g?":
+            return plannedOperator(t, lo, "g" + a[a.length - 1], chars, stay, lineAt);
+        case "r": {
+            if (cmd.ch === "\n")
+                return stay;
+            // Line breaks and prefixes stay as they are.
+            let s = "";
+            for (let q = lo; q < chars.end; q = Txt.charEnd(t, q))
+                s += t[q] === "\n" || inPrefix(t, q) ? t.slice(q, Txt.charEnd(t, q)) : cmd.ch;
+            return { start: lo, end: chars.end, text: s, entries: carriedHidden(lo, chars.end, s), edit: true, at: at };
+        }
+        case "J":
+        case "gJ":
+            return plannedEdit(t, clampNormal(t, lo),
+                { action: a, count: Txt.spannedLines(t.slice(lines.start, lines.end)) });
+        case "I":
+        case "A": {
+            const q = a === "I" ? lo : chars.end, ls = Txt.lineStart(t, q);
+            if (linePrefixes && prefixEnd(t, ls) === ls)
+                return null;
+            return { start: q, end: q, inserting: { count: 1, openLine: null, noDot: true }, at: (u, s) => s };
+        }
+        case "p":
+        case "P":
+            return plannedVisualPaste(t, chars, a === "p", cmd.reg, stay);
+        }
+        return null;
+    }
+
+    // What p (`swap`) or P of register `reg` on the selection `range` (see
+    // plannedVisual) would do, as visualEdit's: the register in its place,
+    // and for p, what was there in the unnamed register.
+    function plannedVisualPaste(t, range, swap, reg, stay) {
+        const r = registerToPaste(reg);
+        if (!r)
+            return stay;
+        let text = r.text, entries = r.hidden;
+        if (r.linewise) {
+            text = "\n" + text;
+            entries = shifted(entries, 1);
+        }
+        const x = prefixLines(range.start, range.end, text, entries);
+        const plan = { start: range.start, end: range.end, text: x.text, entries: x.entries, edit: true,
+            at: (u, s) => clampNormal(u, r.linewise ? firstNonBlank(u, s + 1)
+                : Txt.charStart(u, s + x.text.length - 1)) };
+        if (swap) {
+            plan.yank = { text: t.slice(range.start, range.end), linewise: false,
+                hidden: hiddenIn(hidden, range.start, range.end), yanking: false, reg: null };
+        }
+        return plan;
+    }
+
     // Runs a normal-mode command (fn, which works at `cursor`) at every
     // cursor, one at a time, from the last to the first, so each edit moves
     // only cursors that are done (see shiftCursors). Each extra cursor has
@@ -3641,15 +3884,22 @@ QtObject {
     // that types runs at once: a run would drop the keys typed meanwhile,
     // and . types its insert right after it.
     function atEveryCursor(fn, typing) {
+        // In visual mode, fn runs in it on each selection (see Multiple
+        // selections), which edits move, both ends.
+        const selecting = isVisual;
         const mainRegisters = registers, initial = Object.assign({}, registers);
-        const main = { pos: cursor, main: true };
+        const main = selecting ? { pos: cursor, anchor: anchor, main: true } : { pos: cursor, main: true };
         const all = [main].concat(cursors.filter(c => c.pos !== cursor).map(c => Object.assign({}, c)));
-        const order = all.slice().sort((x, y) => y.pos - x.pos);
+        const order = sortedBy(all, c => c.pos).slice().reverse();
         let i = 0;
         const step = () => {
             const c = order[i++];
             if (!c.main)
                 registers = c.registers || Object.assign({}, initial);
+            if (selecting) {
+                setMode("visual");
+                anchor = c.anchor;
+            }
             setCursor(c.pos);
             fn();
             if (!c.main) {
@@ -3660,10 +3910,20 @@ QtObject {
             return i < order.length;
         };
         // Also when it's stopped: the cursors not done yet stay where they
-        // went.
+        // went (selections, cursors at their ends, as leaveVisual leaves
+        // them). Out of visual mode, each goes on from its column, as the
+        // main one does, unless toLine kept it (see atOnce).
         const finish = () => {
             shifting = null;
-            setCursors(all.filter(c => c !== main), main.pos);
+            let extras = all.filter(c => c !== main);
+            if (selecting) {
+                const u = bufferText(), normal = mode === "normal";
+                extras = extras.map(c => Object.assign(pointOf(c), { pos: normal ? clampNormal(u, c.pos) : c.pos },
+                    colKept ? {} : { col: undefined }));
+                if (normal)
+                    main.pos = clampNormal(u, main.pos);
+            }
+            setCursors(extras, main.pos);
             setCursor(main.pos);
             if (!inserting && !colKept)
                 wantCol = Txt.column(bufferText(), cursor);
@@ -3685,11 +3945,16 @@ QtObject {
     // otherwise to its end.
     function shiftCursors(start, end, length) {
         const move = q => q >= end ? q + length - (end - start) : Math.min(q, start + length);
+        // A selection's anchor too (see Multiple selections).
         if (shifting) {
-            for (const c of shifting)
+            for (const c of shifting) {
                 c.pos = move(c.pos);
+                if (c.anchor !== undefined)
+                    c.anchor = move(c.anchor);
+            }
         } else if (cursors.length) {
-            setCursors(cursors.map(c => Object.assign({}, c, { pos: move(c.pos) })), -1);
+            setCursors(cursors.map(c => Object.assign({}, c, c.anchor === undefined ? { pos: move(c.pos) }
+                : { pos: move(c.pos), anchor: move(c.anchor) })), -1);
         }
     }
 
@@ -3698,23 +3963,27 @@ QtObject {
     // operator, on the one the cursor is on, or else the next one (gN, the
     // one before), so . after cgn changes the next one; in normal mode,
     // they select it, and in visual mode, take the selection on to the end
-    // of the next one (to the start of the one before). ga puts a cursor at
-    // the start of every one (in visual mode or on marked lines, every one
-    // in them), so the keys typed next act at each (see Multiple cursors):
-    // g~gn changes the case of each. After any of them the matches are
+    // of the next one (to the start of the one before). At many cursors,
+    // each does (see Multiple selections). ga puts a cursor at the start of
+    // every one (in visual mode or on marked lines, every one in them), so
+    // the keys typed next act at each (see Multiple cursors): g~gn changes
+    // the case of each. gA selects every one, as ga then gn would, for
+    // visual mode's commands at each. After any of them the matches are
     // highlighted, as after n, so where each ends shows.
 
     // The match of the last search in t that gn (or with `back`, gN) takes
     // from p, as { start, end, linewise }: the one p is on (one that starts
     // on its line, at p or before, and ends after p or is empty at it), or
     // else the next one (the one before), going round the text's end, as n
-    // does. Null, with an error, if there's none.
-    function matchRange(t, p, back) {
+    // does. Null, with an error, if there's none, or with `quiet`, without
+    // one, nor the message that the search went round.
+    function matchRange(t, p, back, quiet) {
         if (!lastSearch) {
-            showError("E35: No previous regular expression");
+            if (!quiet)
+                showError("E35: No previous regular expression");
             return null;
         }
-        const pattern = lastSearch.pattern, re = Txt.searchRegExp(pattern, undefined, regexEngine);
+        const pattern = lastSearch.pattern, re = searchRe(pattern);
         const u = withoutPrefixes(t), q = unprefixedAt(u, p);
         let m = null;
         for (let at = unprefixedAt(u, Txt.lineStart(t, p)), k; (k = re.first(u.text, at)) !== null && k.index <= q;
@@ -3725,9 +3994,10 @@ QtObject {
             }
         }
         if (!m) {
-            const s = back ? searchBackward(re, t, p, false) : searchForward(re, t, p, false);
+            const s = back ? searchBackward(re, t, p, !!quiet) : searchForward(re, t, p, !!quiet);
             if (s < 0) {
-                showError("E486: Pattern not found: " + pattern);
+                if (!quiet)
+                    showError("E486: Pattern not found: " + pattern);
                 return null;
             }
             m = re.first(u.text, unprefixedAt(u, s));
@@ -3737,32 +4007,61 @@ QtObject {
         return { start: r.start, end: r.end, linewise: false };
     }
 
-    // gn and gN in normal mode: visual mode, on the match (see matchRange).
+    // The selection of the match r (see matchRange) in t, as { anchor, pos
+    // }: from its start to its last character, or its start if it's empty.
+    function matchSelection(t, r) {
+        return { anchor: r.start, pos: outOfPrefix(t, r.end > r.start ? Txt.charStart(t, r.end - 1) : r.start) };
+    }
+
+    // gn and gN in normal mode: visual mode, on the match (see matchRange),
+    // at every cursor. There's one from each if there's one from the main
+    // one, as the search goes round.
     function selectMatch(back) {
         const t = bufferText(), r = matchRange(t, cursor, back);
         if (!r)
             return;
-        anchor = r.start;
+        const extras = searchingFromMany(() => cursors.map(c => {
+            const m = matchRange(t, c.pos, back, true);
+            return Object.assign({}, c, m ? matchSelection(t, m) : { anchor: c.pos });
+        }));
+        const s = matchSelection(t, r);
+        anchor = s.anchor;
         setMode("visual");
-        setCursor(r.end > r.start ? Txt.charStart(t, r.end - 1) : r.start);
+        setCursor(s.pos);
+        if (extras.length)
+            setCursors(extras);
     }
 
-    // gn and gN in visual mode: the cursor on to the end of the match the
-    // next character is on, or else the next one, or back to the start of
-    // the one the character before is on, or else the one before.
+    // gn and gN in visual mode: each selection's end on to the end of the
+    // match the next character is on, or else the next one, or back to the
+    // start of the one the character before is on, or else the one before.
     function extendToMatch(back) {
         const t = bufferText();
-        const p = back ? (cursor > 0 ? Txt.charStart(t, cursor - 1) : 0) : Math.min(Txt.charEnd(t, cursor), t.length);
-        const r = matchRange(t, p, back);
-        if (r)
-            setCursor(back || r.end <= r.start ? r.start : Txt.charStart(t, r.end - 1));
+        // Where the end of the selection that ends at p goes, or -1.
+        const to = (p, quiet) => {
+            const q = back ? (p > 0 ? Txt.charStart(t, p - 1) : 0) : Math.min(Txt.charEnd(t, p), t.length);
+            const r = matchRange(t, q, back, quiet);
+            return !r ? -1 : back || r.end <= r.start ? r.start : Txt.charStart(t, r.end - 1);
+        };
+        const p = to(cursor, false);
+        if (p < 0)
+            return;
+        setCursor(p);
+        if (cursors.length) {
+            setCursors(searchingFromMany(() => cursors.map(c => {
+                const q = to(c.pos, true);
+                return q < 0 ? c : Object.assign({}, c, { pos: q });
+            })));
+        }
     }
 
     // ga: a cursor at the start of every match of the last search (in
     // visual mode, or on marked lines, every one all in them, as :'<,'>s
     // takes them, and back to normal mode), the main one at the first from
-    // the cursor on, or else the first. The status line counts them.
-    function cursorsAtMatches() {
+    // the cursor on, or else the first. With `selecting` (gA), a selection
+    // on each one instead (see matchSelection), in visual mode. The status
+    // line counts them.
+    function cursorsAtMatches(selecting) {
         if (!lastSearch) {
             showError("E35: No previous regular expression");
             return;
@@ -3778,20 +4077,25 @@ QtObject {
             const r = prefixedSpan(u, m.index, m.end);
             if (region && !inRegion(region, r))
                 continue;
-            const p = clampNormal(t, r.start);
-            if (!at.length || at[at.length - 1] !== p)
-                at.push(p);
+            const s = selecting ? matchSelection(t, r) : { pos: clampNormal(t, r.start) };
+            if (!at.length || at[at.length - 1].pos !== s.pos)
+                at.push(s);
         }
         if (!at.length) {
             showError("E486: Pattern not found: " + pattern);
             return;
         }
-        const main = at[Math.max(0, at.findIndex(p => p >= cursor))];
-        setCursor(main);
-        wantCol = Txt.column(t, main);
-        setCursors(at.map(p => ({ pos: p })), main);
+        const main = at[Math.max(0, at.findIndex(s => (selecting ? s.anchor : s.pos) >= cursor))];
+        if (selecting) {
+            anchor = main.anchor;
+            setMode("visual");
+        }
+        setCursor(main.pos);
+        wantCol = Txt.column(t, main.pos);
+        setCursors(at, main.pos);
         highlightPattern = pattern;
-        showMessage(counted(at.length, "cursor", "cursors"));
+        showMessage(selecting ? counted(at.length, "selection", "selections")
+            : counted(at.length, "cursor", "cursors"));
     }
 
     // ---- Marked lines ------------------------------------------------------
@@ -3825,7 +4129,7 @@ QtObject {
             const gone = new Set(starts);
             setMarked(marked.filter(ls => !gone.has(ls)));
         } else {
-            setMarked(marked.concat(starts).sort((a, b) => a - b).filter((ls, i, all) => i === 0 || ls !== all[i - 1]));
+            setMarked(sortedBy(marked.concat(starts), ls => ls).filter((ls, i, all) => i === 0 || ls !== all[i - 1]));
         }
     }
 
@@ -4864,6 +5168,12 @@ QtObject {
     function setMode(m) {
         const wasVisual = isVisual;
         mode = m;
+        // Out of visual mode, the extra selections are cursors again, at
+        // their ends (see Multiple selections). They all have anchors or
+        // none do, so after the first edit at each, one at a time (see
+        // atEveryCursor), the others don't go over them again.
+        if (wasVisual && !isVisual && cursors.length && cursors[0].anchor !== undefined)
+            cursors = cursors.map(pointOf);
         if (batch)
             return; // the editor gets it after the chunk (see flush)
         syncing = true;
@@ -5204,8 +5514,7 @@ QtObject {
     function flashYank(reg, spans) {
         if (reg === "_" || macroKey)
             return;
-        const all = yanked && batch && batch.yanked ? yanked.concat(spans) : spans;
-        all.sort((a, b) => a.start - b.start);
+        const all = sortedBy(yanked && batch && batch.yanked ? yanked.concat(spans) : spans, s => s.start);
         const list = [];
         for (const s of all) {
             const last = list[list.length - 1];
@@ -6402,6 +6711,24 @@ QtObject {
     // lines (mode "marked", after their tag was asked for) are marked
     // again for it, so it unmarks them as executeMarked does.
     function surroundSelection(sel, s) {
+        // With extra selections (see Multiple selections), around each, one
+        // at a time, in visual mode again if its tag was asked for.
+        if (sel.selections) {
+            if (!isVisual) {
+                const n = bufferText().length;
+                anchor = Math.min(sel.anchor, n);
+                setMode(sel.mode);
+                setCursor(Math.min(sel.cursor, n));
+                setCursors(sel.selections.map(c => Object.assign({}, c,
+                    { pos: Math.min(c.pos, n), anchor: Math.min(c.anchor, n) })));
+            }
+            atEveryCursor(() => {
+                const one = { mode: mode, anchor: anchor, cursor: cursor };
+                setMode("normal");
+                surroundSelection(one, s);
+            });
+            return;
+        }
         const t = bufferText(), pair = surroundPair(s, "");
         if (sel.mode === "marked") {
             const starts = validStarts(t, sel.marked);
@@ -7173,7 +7500,8 @@ QtObject {
     // What Find in Selection keeps to: the selection, or else the marked
     // lines, or else the last selection (gv's), as spans (see
     // selectionRegion), with lines from the first one's start to the last
-    // one's end. Null if there's none.
+    // one's end, and the extra selections (see Multiple selections), those
+    // that overlap as one. Null if there's none.
     function selectionScope() {
         const t = bufferText();
         const v = isVisual ? visualState()
@@ -7184,7 +7512,19 @@ QtObject {
             const a = Math.min(v.anchor, v.cursor, t.length), b = Math.min(Math.max(v.anchor, v.cursor), t.length);
             return [{ start: Txt.lineStart(t, a), end: Txt.lineEnd(t, b) }];
         }
-        const region = selectionRegion(t, v);
+        let region = selectionRegion(t, v);
+        if (v.selections) {
+            const all = sortedBy(region.concat(v.selections.map(c =>
+                selectionRegion(t, { mode: "visual", anchor: c.anchor, cursor: c.pos })[0])), s => s.start);
+            region = [];
+            for (const s of all) {
+                const last = region[region.length - 1];
+                if (last && s.start < last.end)
+                    last.end = Math.max(last.end, s.end);
+                else
+                    region.push({ start: s.start, end: s.end });
+            }
+        }
         return region.length ? region : null; // a block of empty lines
     }
 
@@ -8061,7 +8401,7 @@ QtObject {
     // (wrapping at the end), and would go round again and again: the rounds
     // left are skipped (999999n).
     function search(t, pattern, forward, count, from) {
-        const re = Txt.searchRegExp(pattern, undefined, regexEngine);
+        const re = searchRe(pattern);
         let p = from, first = -1;
         for (let i = 0; i < count; i++) {
             const q = forward ? searchForward(re, t, p, false) : searchBackward(re, t, p, false);
@@ -8092,11 +8432,58 @@ QtObject {
     }
 
     function searchBackward(re, t, p, quiet) {
-        const u = withoutPrefixes(t);
-        const found = re.before(u.text, unprefixedAt(u, p));
+        const u = withoutPrefixes(t), at = unprefixedAt(u, p);
+        const found = manyBefore(re, u, at) || re.before(u.text, at);
         if (found.before < 0 && found.last >= 0 && !quiet)
             showMessage("search hit TOP, continuing at BOTTOM");
         return found.before >= 0 ? prefixedAt(u, found.before) : found.last >= 0 ? prefixedAt(u, found.last) : -1;
+    }
+
+    // Runs fn, which searches for the last search from many cursors in one
+    // text (n, N, gn or gN at each), with one regular expression for them
+    // all, and if they go back, its matches found once (see manyBefore).
+    function searchingFromMany(fn) {
+        if (manySearches)
+            return fn();
+        manySearches = { pattern: null };
+        try {
+            return fn();
+        } finally {
+            manySearches = null;
+        }
+    }
+
+    // What a search for `pattern` looks for (see Txt.searchRegExp): from
+    // many cursors (see searchingFromMany), the same one each time.
+    function searchRe(pattern) {
+        const s = manySearches;
+        if (!s)
+            return Txt.searchRegExp(pattern, undefined, regexEngine);
+        if (s.pattern !== pattern) {
+            s.pattern = pattern;
+            s.re = Txt.searchRegExp(pattern, undefined, regexEngine);
+            s.text = null;
+        }
+        return s.re;
+    }
+
+    // What re.before(u.text, at) gives (see Txt.searchRegExp), for a
+    // search back from one of many cursors (see searchingFromMany): it goes
+    // through the matches from the text's start, each after the one
+    // before, to the last before `at`, so from each cursor that took time
+    // in proportion to the text, and N at 10,000 cursors took 44 s.
+    // Instead the starts of those matches are found once, and each
+    // cursor's by binary search. Null for a search from one cursor.
+    function manyBefore(re, u, at) {
+        const s = manySearches;
+        if (!s || s.re !== re)
+            return null;
+        if (s.text !== u.text) {
+            s.text = u.text;
+            s.starts = re.all(u.text, 0, u.text.length).map(m => m.index);
+        }
+        const list = s.starts, k = Txt.partition(0, list.length, i => list[i] < at);
+        return { before: k > 0 ? list[k - 1] : -1, last: list.length ? list[list.length - 1] : -1 };
     }
 
     // ---- Search preview ----------------------------------------------------

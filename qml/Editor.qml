@@ -542,6 +542,29 @@ Item {
         return spans;
     }
 
+    // The extra cursors' selections in visual mode (see Vim's `cursors`)
+    // in the visible lines, as selectionSpans gives the main one's. They're
+    // sorted by their ends, so the first that ends in view is found by
+    // binary search (ga, then gA, can make thousands), then those before
+    // it that reach into it from below, then those after it that start in
+    // view.
+    function extraSelectionSpans() {
+        const list = vim.cursors;
+        if (!active || !vim.isVisual || !list.length || list[0].anchor === undefined)
+            return [];
+        const t = editor.latest.text, v = visibleRange(), spans = [];
+        let i = Txt.partition(0, list.length, k => list[k].pos < v.from);
+        while (i > 0 && list[i - 1].anchor >= v.from)
+            i--;
+        for (; i < list.length; i++) {
+            const c = list[i], r = vim.selectedRange(t, "visual", c.anchor, c.pos);
+            if (r.start > v.to)
+                break;
+            lineSpans(t, r.start, r.end, v, spans);
+        }
+        return spans;
+    }
+
     // The spaces, tabs and other space characters in `spans` (as
     // selectionSpans gives them), as far as they're in view, as { x, y,
     // text } for `whitespace`: a run of spaces as `·`s, from its first
@@ -1420,6 +1443,15 @@ Item {
                 color: view.theme.highlight
             }
 
+            // The extra selections (see Vim's Multiple selections), as the
+            // main one is drawn.
+            SpanShade {
+                z: -0.5
+                inputs: [view.active, view.vim.mode, view.vim.cursors, view.layout, view.viewport]
+                spans: () => view.extraSelectionSpans()
+                color: view.theme.highlight
+            }
+
             // What was just yanked, for a moment (see Vim's `yanked`), as
             // Neovim's vim.hl.on_yank shows it, but under the text, which
             // keeps its colors. Over the selection, which Cmd+C in insert
@@ -1440,9 +1472,9 @@ Item {
                 id: whitespace
 
                 z: -0.45
-                inputs: [view.vim.visualWhitespace, view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.wantCol, view.vim.visualShown, view.layout, view.viewport, view.flickable.contentX, view.flickable.width]
+                inputs: [view.vim.visualWhitespace, view.active, editor.selectionStart, editor.selectionEnd, view.vim.mode, view.vim.anchor, view.vim.cursor, view.vim.cursors, view.vim.wantCol, view.vim.visualShown, view.layout, view.viewport, view.flickable.contentX, view.flickable.width]
                 compute: () => view.vim.visualWhitespace && (view.vim.isVisual || view.vim.visualShown)
-                    ? view.whitespaceIn(view.selectionSpans()) : []
+                    ? view.whitespaceIn(view.selectionSpans().concat(view.extraSelectionSpans())) : []
 
                 Repeater {
                     model: whitespace.model

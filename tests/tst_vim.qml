@@ -1322,6 +1322,234 @@ TestCase {
         compare(editor.text, lines.map(l => l + "Z").join("\n"));
     }
 
+    // The selections: the main one's ends, then each extra one's.
+    function selections() {
+        return [[vim.anchor, vim.cursor]].concat(vim.cursors.map(c => [c.anchor, c.pos]));
+    }
+
+    // With extra cursors, v selects at each; motions, text objects, o and
+    // gn move every selection's end, and Esc goes back to cursors at their
+    // ends. V and Ctrl-V take one cursor.
+    function test_multipleSelections() {
+        load("abc def\nghi jkl\npqr");
+        vim.toggleCursor(8);
+        keys("v");
+        compare(vim.mode, "visual");
+        compare(selections(), [[0, 0], [8, 8]]);
+        keys("e");
+        compare(selections(), [[0, 2], [8, 10]]);
+        keys("o");
+        compare(selections(), [[2, 0], [10, 8]]);
+        keys("o$");
+        compare(selections(), [[0, 7], [8, 15]]); // on the line breaks
+        keys("<Esc>");
+        compare(vim.mode, "normal");
+        compare(vim.cursor, 6);
+        compare(vim.cursors.map(c => c.pos), [14]);
+        compare(vim.cursors[0].anchor, undefined);
+        keys("0viw");
+        compare(selections(), [[0, 2], [8, 10]]);
+        keys("aw");
+        compare(selections(), [[0, 3], [8, 11]]);
+        keys("<Esc>gv"); // with the extra ones
+        compare(vim.mode, "visual");
+        compare(selections(), [[0, 3], [8, 11]]);
+        keys("e");
+        compare(selections(), [[0, 6], [8, 14]]);
+        keys("U");
+        compare(editor.text, "ABC DEF\nGHI JKL\npqr");
+        compare(vim.mode, "normal");
+        compare([vim.cursor].concat(vim.cursors.map(c => c.pos)), [0, 8]);
+        compare(vim.cursors[0].anchor, undefined);
+        keys("u");
+        compare(editor.text, "abc def\nghi jkl\npqr");
+        // V and Ctrl-V take one cursor.
+        keys("V");
+        compare(vim.mode, "normal");
+        compare(vim.message, "V works only at one cursor");
+        keys("v<C-v>");
+        compare(vim.mode, "visual");
+        compare(vim.message, "<C-v> works only at one cursor");
+        keys("<C-c>");
+        compare(vim.mode, "normal");
+        compare(vim.cursors.length, 1);
+        // m marks the lines of them all, @ runs on them.
+        keys("vm");
+        compare(vim.marked, [0, 8]);
+        compare(vim.cursors, []);
+        keys("<Esc>");
+        load("a\nb\nc\nd");
+        vim.toggleCursor(4);
+        vim.registers.q = { text: "Ax", linewise: false, hidden: [] };
+        keys("vj@q");
+        compare(editor.text, "ax\nbx\ncx\ndx");
+        compare(vim.cursors, []);
+        // ga in them: the matches in every one.
+        load("ab ab ab ab");
+        keys("/ab<CR>0");
+        vim.toggleCursor(6);
+        keys("vlga");
+        compare(vim.mode, "normal");
+        compare([vim.cursor].concat(vim.cursors.map(c => c.pos)), [6, 0]); // from the cursor on
+        // gn: in normal mode, a match at every cursor, in visual mode, on
+        // to the next at each.
+        keys("gn");
+        compare(vim.mode, "visual");
+        compare(selections(), [[6, 7], [0, 1]]);
+        keys("gn");
+        compare(selections(), [[6, 10], [0, 4]]);
+        keys("gN");
+        compare(selections(), [[6, 9], [0, 3]]);
+        // A search typed takes every one's end on, as n.
+        load("x1 ab x2 ab");
+        vim.toggleCursor(6);
+        keys("v/ab<CR>");
+        compare(selections(), [[0, 3], [6, 9]]);
+        // A tag asked for once, around each.
+        load("ab cd");
+        vim.toggleCursor(3);
+        keys("veS<");
+        keys("b>");
+        compare(editor.text, "<b>ab</b> <b>cd</b>");
+        keys("u");
+        compare(editor.text, "ab cd");
+        load("ab cd");
+        vim.toggleCursor(3);
+        keys("veS)");
+        compare(editor.text, "(ab) (cd)");
+    }
+
+    // gA selects every match of the last search, as ga then gn at each
+    // would, the main one the first from the cursor on; then visual
+    // mode's commands act on each. In visual mode, only the matches in
+    // the selections.
+    function test_gA() {
+        load("a_b x c_d\ne_f");
+        keys("/\\w+_\\w+<CR>gA");
+        compare(vim.mode, "visual");
+        compare(vim.message, "3 selections");
+        compare(selections(), [[6, 8], [0, 2], [10, 12]]);
+        compare(vim.highlightPattern, "\\w+_\\w+");
+        keys("U");
+        compare(editor.text, "A_B x C_D\nE_F");
+        compare([vim.cursor].concat(vim.cursors.map(c => c.pos)), [6, 0, 10]);
+        // As ga, then gn at each.
+        keys("u<Esc>0gA");
+        const all = selections();
+        keys("<Esc><Esc>0gagn");
+        compare(selections(), all);
+        keys("<Esc><Esc>ggvjgA");
+        compare(vim.message, "2 selections");
+        compare(selections(), [[0, 2], [6, 8]]);
+        keys("cZ<Esc>");
+        compare(editor.text, "Z x Z\ne_f");
+        compare(vim.mode, "normal");
+        compare(vim.cursors, []);
+        keys("u/zz<CR>gA");
+        compare(vim.message, "E486: Pattern not found: zz");
+        compare(vim.mode, "normal");
+        // In the listing, from the names.
+        loadListing("M  a_b\nC  c_d");
+        keys("/\\w_\\w<CR>gAd");
+        compare(render(), "<M:h1>  \n<C:h2>  ");
+    }
+
+    // A visual-mode command at many selections is one edit where it can
+    // be (see Vim.atOnce), and does what it did one at a time, as at many
+    // cursors (see test_cursorsAtOnce).
+    function test_selectionsAtOnce() {
+        const run = (spec, at, ks, listing) => {
+            if (listing)
+                loadListing(spec);
+            else
+                load(spec);
+            vim.setCursor(at[0]);
+            for (const p of at.slice(1))
+                vim.toggleCursor(p);
+            keys(ks);
+            const r = { text: render(), cursor: vim.cursor, cursors: vim.cursors.map(c => c.pos), mode: vim.mode,
+                anchors: vim.cursors.filter(c => c.anchor !== undefined).length,
+                registers: JSON.stringify(vim.registers), theirs: JSON.stringify(vim.cursors.map(c => c.registers)),
+                message: vim.message };
+            keys("<Esc>u");
+            r.undone = render();
+            return r;
+        };
+        const same = (spec, at, list, listing) => {
+            for (const ks of list) {
+                vim.cursorsAtOnce = false;
+                const one = run(spec, at, ks, listing);
+                vim.cursorsAtOnce = true;
+                compare(JSON.stringify(run(spec, at, ks, listing)), JSON.stringify(one), ks + " on " + spec);
+            }
+        };
+        const list = ["ve~", "veU", "veu", "veg?", "veg~", "ved", "vex", "ve<Del>", "vecZ<Esc>", "vesZ<Esc>",
+            "vey", "ve\"ay", "veY", "veD", "veX", "veCZ<Esc>", "veRZ<Esc>", "ver*", "ver<CR>", "ve>", "ve3>", "vj>",
+            "vjJ", "vjgJ", "vJ", "veIZ<Esc>", "veAZ<Esc>", "vep", "yiwwvep", "yiwwveP", "yyjvep", "ve=", "veS)",
+            "vjd", "vjy"];
+        // One on an empty line, one at the end; the main one between.
+        same("abc Def\n  ghi\n\nJkl mno", [4, 0, 10, 14, 19], list);
+        // Selections that overlap go one at a time.
+        same("abc def ghi", [0, 1, 8], ["ved", "veU", "vecZ<Esc>"]);
+        // On lines next to each other, and the last one.
+        same("a1\nb2\nc3", [0, 3, 6], ["vD", "vX", "vY", "vCZ<Esc>", "v>", "vJ", "vlp"]);
+        // Icons, with what they hide.
+        same("Mab cd\nCef", [2, 5, 10, 0, 8], ["v~", "veU", "ved", "vey", "vr*", "vecX<Esc>", "yiwvep"]);
+        // What it does at once, and what it doesn't.
+        load("abc def");
+        const t = editor.text, at = ks => vim.plannedVisual(t, { anchor: 0, pos: 2 },
+            vim.parse(Array.from(ks), true, false).cmd);
+        for (const ks of ["d", "c", "y", "x", "s", "X", "D", "C", "R", "Y", "~", "u", "U", "g~", "gu", "gU", "g?", ">",
+            "<", "r*", "J", "gJ", "I", "A", "p", "P"])
+            verify(at(ks) !== null, ks);
+        for (const ks of ["=", "g="])
+            compare(at(ks), null, ks);
+        // The listing, from the names.
+        same("M  ab cd\nC  ef", [4, 7, 14], ["vx", "veU", "vecZ<Esc>", "veIZ<Esc>", "vD", "vep"], true);
+    }
+
+    // A search from many cursors (n, N, gn, gN at each) finds what it
+    // would from each cursor alone, also going back, where the matches are
+    // found once for them all (see Vim.manyBefore), and round the text's
+    // ends; so does dgN at each, as one edit or one at a time.
+    function test_searchFromManyCursors() {
+        const run = (spec, listing, at, search, ks) => {
+            if (listing)
+                loadListing(spec);
+            else
+                load(spec);
+            keys(search + "<CR>");
+            vim.setCursor(at[0]);
+            for (const p of at.slice(1))
+                vim.toggleCursor(p);
+            keys(ks);
+        };
+        const ends = () => [vim.cursor].concat(vim.cursors.map(c => c.pos)).sort((a, b) => a - b);
+        const check = (spec, listing, at, list) => {
+            for (const [search, ks] of list) {
+                const alone = at.map(p => {
+                    run(spec, listing, [p], search, ks);
+                    return vim.cursor;
+                }).sort((a, b) => a - b).filter((p, i, all) => i === 0 || p !== all[i - 1]);
+                run(spec, listing, at, search, ks);
+                compare(ends(), alone, search + " " + ks + " on " + spec);
+            }
+        };
+        const list = [["/ab", "N"], ["/ab", "n"], ["/ab", "3N"], ["?ab", "n"], ["?ab", "N"], ["/ab", "gN"],
+            ["/ab", "gn"], ["/ab", "vgN"], ["/ab", "vgn"], ["/a\\w|x", "N"], ["/\\n", "N"]];
+        check("ab x ab\nzz ab\n\nab", false, [3, 0, 5, 8, 14, 16], list);
+        check("ab x ab\nzz ab\n\nab", false, [8, 16, 3], list); // fewer cursors than matches
+        check("M  ab x\nC  zz ab\n   ab", true, [4, 6, 13, 22], list);
+        for (const [spec, at] of [["ab x ab\nzz ab\n\nab", [3, 0, 8, 14]], ["x ab ab y\nab", [0, 8, 10]]]) {
+            vim.cursorsAtOnce = false;
+            run(spec, false, at, "/ab", "dgN");
+            const one = [render(), vim.cursor, JSON.stringify(vim.cursors.map(c => c.pos))];
+            vim.cursorsAtOnce = true;
+            run(spec, false, at, "/ab", "dgN");
+            compare([render(), vim.cursor, JSON.stringify(vim.cursors.map(c => c.pos))], one, "dgN on " + spec);
+        }
+    }
+
     // Drawing a block gives only the lines asked for.
     function test_blockSpans() {
         load("ab\ncd\nef\ngh");
