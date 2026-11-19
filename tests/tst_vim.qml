@@ -2795,6 +2795,86 @@ TestCase {
         compare(editor.text, "2");
     }
 
+    // gn selects the match of the last search the cursor is on, or else
+    // the next one, and in visual mode goes on to the end of the next one;
+    // after an operator it acts on it, and . on the next one. gN goes back.
+    function test_gn() {
+        load("foo bar foo baz foo");
+        keys("/foo<CR>");
+        compare(vim.cursor, 8);
+        keys("0gn");
+        compare(vim.mode, "visual");
+        compare([vim.anchor, vim.cursor], [0, 2]);
+        compare(vim.highlightPattern, "foo");
+        keys("gn");
+        compare([vim.anchor, vim.cursor], [0, 10]);
+        keys("gN");
+        compare(vim.cursor, 8);
+        keys("<Esc>0cgnX<Esc>");
+        compare(editor.text, "X bar foo baz foo");
+        keys(".");
+        compare(editor.text, "X bar X baz foo");
+        keys("$gN");
+        compare([vim.anchor, vim.cursor], [12, 14]);
+        keys("<Esc>0dgN"); // round from the start to the last one
+        compare(editor.text, "X bar X baz ");
+        keys("u");
+        compare(editor.text, "X bar X baz foo");
+        load("a_b c_d");
+        keys("/\\w+_\\w+<CR>g~gn");
+        compare(editor.text, "a_b C_D");
+        keys("0gUgn");
+        compare(editor.text, "A_B C_D");
+        keys("/zz<CR>dgn");
+        compare(vim.message, "E486: Pattern not found: zz");
+        vim.lastSearch = null;
+        keys("gn");
+        compare(vim.message, "E35: No previous regular expression");
+        compare(vim.mode, "normal");
+        compare(editor.text, "A_B C_D");
+    }
+
+    // ga puts a cursor at every match of the last search, the main one at
+    // the first from the cursor on; then keys act at each. In visual mode
+    // and on marked lines, only the matches in them.
+    function test_ga() {
+        load("a_b x c_d\ne_f");
+        keys("/\\w+_\\w+<CR>");
+        compare(vim.cursor, 6);
+        keys("ga");
+        compare(vim.message, "3 cursors");
+        compare(vim.cursor, 6);
+        compare(vim.cursors.map(c => c.pos), [0, 10]);
+        compare(vim.highlightPattern, "\\w+_\\w+");
+        keys("g~gn");
+        compare(editor.text, "A_B x C_D\nE_F");
+        keys("u");
+        compare(editor.text, "a_b x c_d\ne_f");
+        keys("<Esc>");
+        compare(vim.cursors, []);
+        keys("ggvjga");
+        compare(vim.mode, "normal");
+        compare(vim.message, "2 cursors");
+        compare([vim.cursor].concat(vim.cursors.map(c => c.pos)), [0, 6]);
+        keys("<Esc>Gmga");
+        compare(vim.message, "1 cursor");
+        compare(vim.cursor, 10);
+        compare(vim.cursors, []);
+        compare(vim.marked, []);
+        keys("/zz<CR>ga");
+        compare(vim.message, "E486: Pattern not found: zz");
+        vim.lastSearch = null;
+        keys("ga");
+        compare(vim.message, "E35: No previous regular expression");
+        // In the listing, from the names.
+        loadListing("M  a_b\nC  c_d");
+        keys("/^\\w<CR>ga");
+        compare(vim.cursor, 12);
+        compare(vim.cursors.map(c => c.pos), [4]);
+        keys("~");
+        compare(render(), "<M:h1>  A_b\n<C:h2>  C_d");
+    }
+
     // A count after the flags: that many lines from the range's last, as
     // far as there are.
     function test_substituteCount() {

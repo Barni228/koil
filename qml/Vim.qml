@@ -263,11 +263,11 @@ QtObject {
     readonly property var normalActions: ["i", "a", "I", "A", "gI", "o", "O", "v", "V", "x", "<Del>", "X",
         "s", "S", "C", "D", "Y", "p", "P", "J", "gJ", "u", "<C-r>", ".", "~", "r", "R", ":", "/", "?",
         "ZZ", "ZQ", "zz", "zt", "zb", "<C-e>", "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gv", "gh", "<C-a>",
-        "<C-x>", "q", "@", "Q", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m"]
+        "<C-x>", "q", "@", "Q", "<C-v>", "<Esc>", "&", "g&", "gf", "gx", "m", "gn", "gN", "ga"]
     // Ctrl-C leaves visual mode, as Esc does (vim's v_CTRL-C).
     readonly property var visualActions: ["<Esc>", "<C-c>", "v", "V", "<C-v>", "o", "O", "x", "<Del>", "X", "D",
         "s", "C", "R", "Y", "~", "u", "U", "r", "J", "gJ", "p", "P", ":", "/", "?", "q", "@", "Q", "I", "A", "<C-e>",
-        "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m"]
+        "<C-y>", "zh", "zl", "zH", "zL", "zs", "ze", "gf", "gx", "m", "gn", "gN", "ga"]
     // While lines are marked, the keys that act on them, as they act on a
     // linewise selection in visual mode (see Marked lines): an operator at
     // once, S and gS surround (as "surround"), U, and @ and Q on each one.
@@ -1629,6 +1629,11 @@ QtObject {
                 cmd.textObj = { around: k === "a", ch: keys[j + 1] };
                 return { status: "ok", cmd };
             }
+            // gn and gN: a match of the last search (see matchRange).
+            if (k === "g" && (keys[j + 1] === "n" || keys[j + 1] === "N")) {
+                cmd.textObj = { match: keys[j + 1] };
+                return { status: "ok", cmd };
+            }
             const m = parseMotion(keys, j);
             if (m.status !== "ok")
                 return m;
@@ -1837,7 +1842,7 @@ QtObject {
         if (isVisual)
             return !cmd.motion && !cmd.textObj
                 && !["<Esc>", "<C-c>", "v", "V", "<C-v>", "o", "O", ":", "/", "?", "y", "Y", "q", "@", "Q", "!",
-                    "g!", "gf", "gx"]
+                    "g!", "gf", "gx", "gn", "gN", "ga"]
                     .includes(cmd.action);
         // ! only types a command line, whose command may change the text.
         return cmd.op ? !["y", "!", "g!"].includes(cmd.op) : changeActions.includes(cmd.action);
@@ -2117,6 +2122,13 @@ QtObject {
             setMode(visualModes[cmd.action]);
             setCursor(p);
             break;
+        case "gn":
+        case "gN":
+            selectMatch(cmd.action === "gN");
+            break;
+        case "ga":
+            cursorsAtMatches();
+            break;
         case "x":
         case "<Del>":
         case "X":
@@ -2288,8 +2300,16 @@ QtObject {
             }
             return;
         }
+        if (cmd.action === "gn" || cmd.action === "gN") {
+            extendToMatch(cmd.action === "gN");
+            return;
+        }
         const a = cmd.action;
         lastVisual = visualState();
+        if (a === "ga") {
+            cursorsAtMatches();
+            return;
+        }
         if (a === "surround") {
             setMode("normal");
             surroundSelection(lastVisual, cmd.surround);
@@ -3338,6 +3358,107 @@ QtObject {
         } else if (cursors.length) {
             setCursors(cursors.map(c => Object.assign({}, c, { pos: move(c.pos) })), -1);
         }
+    }
+
+    // ---- Matches -----------------------------------------------------------
+    // gn and gN act on a match of the last search, as vim's: after an
+    // operator, on the one the cursor is on, or else the next one (gN, the
+    // one before), so . after cgn changes the next one; in normal mode,
+    // they select it, and in visual mode, take the selection on to the end
+    // of the next one (to the start of the one before). ga puts a cursor at
+    // the start of every one (in visual mode or on marked lines, every one
+    // in them), so the keys typed next act at each (see Multiple cursors):
+    // g~gn changes the case of each. After any of them the matches are
+    // highlighted, as after n, so where each ends shows.
+
+    // The match of the last search in t that gn (or with `back`, gN) takes
+    // from p, as { start, end, linewise }: the one p is on (one that starts
+    // on its line, at p or before, and ends after p or is empty at it), or
+    // else the next one (the one before), going round the text's end, as n
+    // does. Null, with an error, if there's none.
+    function matchRange(t, p, back) {
+        if (!lastSearch) {
+            showError("E35: No previous regular expression");
+            return null;
+        }
+        const pattern = lastSearch.pattern, re = Txt.searchRegExp(pattern, undefined, regexEngine);
+        const u = withoutPrefixes(t), q = unprefixedAt(u, p);
+        let m = null;
+        for (let at = unprefixedAt(u, Txt.lineStart(t, p)), k; (k = re.first(u.text, at)) !== null && k.index <= q;
+                at = Txt.afterMatch(u.text, k)) {
+            if (k.end > q || k.index === q) {
+                m = k;
+                break;
+            }
+        }
+        if (!m) {
+            const s = back ? searchBackward(re, t, p, false) : searchForward(re, t, p, false);
+            if (s < 0) {
+                showError("E486: Pattern not found: " + pattern);
+                return null;
+            }
+            m = re.first(u.text, unprefixedAt(u, s));
+        }
+        highlightPattern = pattern;
+        const r = prefixedSpan(u, m.index, m.end);
+        return { start: r.start, end: r.end, linewise: false };
+    }
+
+    // gn and gN in normal mode: visual mode, on the match (see matchRange).
+    function selectMatch(back) {
+        const t = bufferText(), r = matchRange(t, cursor, back);
+        if (!r)
+            return;
+        anchor = r.start;
+        setMode("visual");
+        setCursor(r.end > r.start ? Txt.charStart(t, r.end - 1) : r.start);
+    }
+
+    // gn and gN in visual mode: the cursor on to the end of the match the
+    // next character is on, or else the next one, or back to the start of
+    // the one the character before is on, or else the one before.
+    function extendToMatch(back) {
+        const t = bufferText();
+        const p = back ? (cursor > 0 ? Txt.charStart(t, cursor - 1) : 0) : Math.min(Txt.charEnd(t, cursor), t.length);
+        const r = matchRange(t, p, back);
+        if (r)
+            setCursor(back || r.end <= r.start ? r.start : Txt.charStart(t, r.end - 1));
+    }
+
+    // ga: a cursor at the start of every match of the last search (in
+    // visual mode, or on marked lines, every one all in them, as :'<,'>s
+    // takes them, and back to normal mode), the main one at the first from
+    // the cursor on, or else the first. The status line counts them.
+    function cursorsAtMatches() {
+        if (!lastSearch) {
+            showError("E35: No previous regular expression");
+            return;
+        }
+        const pattern = lastSearch.pattern, t = bufferText(), u = withoutPrefixes(t);
+        const scoped = isVisual || marked.length > 0, region = scoped ? selectionScope() : null;
+        if (isVisual)
+            leaveVisual();
+        else if (marked.length)
+            unmark(marked);
+        const re = Txt.searchRegExp(pattern, undefined, regexEngine), at = [];
+        for (const m of scoped && !region ? [] : re.all(u.text, 0, u.text.length)) {
+            const r = prefixedSpan(u, m.index, m.end);
+            if (region && !inRegion(region, r))
+                continue;
+            const p = clampNormal(t, r.start);
+            if (!at.length || at[at.length - 1] !== p)
+                at.push(p);
+        }
+        if (!at.length) {
+            showError("E486: Pattern not found: " + pattern);
+            return;
+        }
+        const main = at[Math.max(0, at.findIndex(p => p >= cursor))];
+        setCursor(main);
+        wantCol = Txt.column(t, main);
+        setCursors(at.map(p => ({ pos: p })), main);
+        highlightPattern = pattern;
+        showMessage(counted(at.length, "cursor", "cursors"));
     }
 
     // ---- Marked lines ------------------------------------------------------
@@ -5491,6 +5612,8 @@ QtObject {
     // A text object (see Txt.textObject), which doesn't start in a prefix:
     // `aw` takes the blanks before a name's first word, say.
     function textObject(t, p, obj, count) {
+        if (obj.match)
+            return matchRange(t, p, obj.match === "N");
         const r = Txt.textObject(t, p, obj, count);
         if (r && !r.linewise)
             r.start = Math.min(outOfPrefix(t, r.start), r.end);

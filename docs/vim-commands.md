@@ -28,6 +28,29 @@
   extra cursor's own `registers`. They're drawn like the main one (no cursor
   blinks), but only those in view
   (`visibleCursors`): drawing a block insert's 100,000 took minutes a key.
+  A normal-mode command at every cursor (`atEveryCursor`) is still an
+  edit per cursor, each going over all the text and moving every cursor:
+  `g~iw` at 20,000 cursors (one a line) took 125 s, where `:%norm g~iw`
+  took 26 s and typing at them (one edit) 0.36 s. Operators work out
+  their range first (`operatorRange`), so their edits at every cursor
+  could be one `replaceRanges` too.
+- **Matches** (Matches in Vim.qml): `gn` and `gN` are vim's, on the last
+  search (`matchRange`): the match the cursor is on (one starting on its
+  line, at it or before, that ends after it or is empty at it, so one
+  over lines from a line before isn't), or else the next one (the one
+  before), going round as `n` does. After an operator it's a text object
+  (`cmd.textObj.match`, through `textObject`, worked out when the
+  operator runs), so `.` after `cgn` changes the next match; in normal
+  mode it selects the match, and in visual mode it takes the cursor on
+  to the end of the match after the cursor's character, or back to the
+  start of the one before it (`extendToMatch`). `ga` (`cursorsAtMatches`;
+  vim's shows the character's code, which Koil hasn't) puts a cursor at
+  the start of every match of the last search, the main one at the first
+  from the cursor on, so the view stays; in visual mode and on marked
+  lines, only the matches all in them (`selectionScope`, `inRegion`, as
+  `:'<,'>s`), leaving them. Cursors are points, not Kakoune's selections,
+  so `gn` then acts on exactly each match (`g~gn`, `cgn`). All three
+  highlight the matches, as `n` does, which shows where each ends.
 - **Marked lines** (Marked lines in Vim.qml): `m` marks the cursor's line
   (`3m` three; in visual mode, the selection's lines, back in normal
   mode), or unmarks them if they're all marked (`toggleMarks`), so lines

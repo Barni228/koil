@@ -123,9 +123,10 @@
 - `qml/SortMenu.qml`: what `gs` and a key sort the listing by, in a box
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
-  undo, macros, visual block, multiple cursors, marked lines, hidden text,
-  the listing's prefixes, `:` and its ranges, `/`, `:s`, `:g`, surround,
-  buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
+  undo, macros, visual block, multiple cursors, `gn` and `ga`, marked
+  lines, hidden text, the listing's prefixes, `:` and its ranges, `/`,
+  `:s`, `:g`, surround, buffers). It drives the `TextArea` through
+  `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects
   and the tags `it` and `at` find, `tagPair`, `=`'s indents, `reindent`,
   and `g=`'s, `guessIndents`, the lines they read, `codeScanner`,
