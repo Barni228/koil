@@ -28,12 +28,51 @@
   extra cursor's own `registers`. They're drawn like the main one (no cursor
   blinks), but only those in view
   (`visibleCursors`): drawing a block insert's 100,000 took minutes a key.
-  A normal-mode command at every cursor (`atEveryCursor`) is still an
-  edit per cursor, each going over all the text and moving every cursor:
+  A normal-mode command at every cursor one cursor at a time
+  (`atEveryCursor`) is an edit per cursor, each making the whole text
+  again (a new string of it, which V4 copies, and its line starts), so
   `g~iw` at 20,000 cursors (one a line) took 125 s, where `:%norm g~iw`
-  took 26 s and typing at them (one edit) 0.36 s. Operators work out
-  their range first (`operatorRange`), so their edits at every cursor
-  could be one `replaceRanges` too.
+  took 26 s and typing at them 0.36 s. So the operators `d`, `c`, `y`,
+  `g~`, `gu`, `gU`, `g?`, `>` and `<` (over characters or lines: `dd`,
+  `yy`, `cc`, `>>`), and `x`, `X`, `D`, `C`, `s`, `S`, `Y`, `~`, `r`,
+  `p`, `P`, `o`, `O`, `J`, `gJ`, `<C-a>` and `<C-x>`, are one edit
+  (`atOnce`; `J`'s line breaks are `parts` of a cursor's): `plannedEdit`
+  works out what each would do at its cursor on the text as it is
+  (`operatorRange`
+  from that cursor, as an operator works out its range before it edits;
+  `p` with that cursor's own registers), and `replaceRanges` makes them
+  all; each cursor then goes where the command would have put it, by the
+  text after (`at`), and gets the registers it would have (each extra
+  cursor its own, written last to first, as `atEveryCursor` writes them),
+  and the message is the one the first cursor would give. 0.6 s for the
+  20,000 `g~iw`s, `dd` at every line of them 0.24 s, `<C-a>` at 10,000
+  0.37 s, and `ga` then `g~gn` at 40,000 matches 1.2 s. Edits that overlap (two cursors in one word,
+  or on one line for `dd`, where one at a time the second took the next
+  line) or touch go one at a time: one at a time, a command reads up to
+  its range's end, so the one before reads the edit of the cursor after
+  it (`cw` on an icon right before a word whose `cw` went first changed
+  more). Not whole lines that touch (`dd`, `g~~`), which read only their
+  own lines, where a line going leaves the next one's as it was; and `dd`
+  on the last line takes the line break before it, so lines going
+  together up to there each take the one before them (`dLines`). There
+  it does better than one at a time: the cursors meet on the line left,
+  where one at a time, the one that went first was left past that line's
+  end. Otherwise it does what one at a time does, which the tests check
+  by turning it off (`cursorsAtOnce`). A motion that fails at a cursor
+  leaves it there, as one at a time, and fails the macro once. What it
+  can't plan goes one cursor at a time (`atEveryCursor`): `=`, surround,
+  a block's `p`, `r` with a line break, `X` at a
+  listing name's start (it takes the icon), `c` on a listing line
+  without a prefix (`prefixEmptyLine` gives it one). That runs as a long
+  command (`startTask`, a step a cursor), as `:normal` on lines does: in
+  chunks once it takes long, so the window goes on (at 20,000 cursors it
+  never waited over 73 ms), the status line counts the cursors
+  (`20000 cursors 5%`), keys do nothing meanwhile, and Esc stops it,
+  keeping what it did, one undo step. Not a command that ends in insert
+  mode (`typingActions`, and `c`): a run would drop the keys typed
+  meanwhile, and `.` types its insert right after it (`repeatDot`), so
+  it runs at once; `i`, `A` and the like edit nothing, and `o`, `O`,
+  `c`, `cc` and `s` are planned unless they overlap.
 - **Matches** (Matches in Vim.qml): `gn` and `gN` are vim's, on the last
   search (`matchRange`): the match the cursor is on (one starting on its
   line, at it or before, that ends after it or is empty at it, so one

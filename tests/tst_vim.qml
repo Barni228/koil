@@ -1191,6 +1191,137 @@ TestCase {
         compare(render(), "Xab\nXcd\nXef");
     }
 
+    // A command at many cursors is one edit where it can be (see
+    // Vim.atOnce), and does what it did one cursor at a time: the same
+    // text and hidden text, cursors, mode, registers (each cursor's own),
+    // message, and one undo step. Edits that overlap, and what it can't
+    // do at once, still go one cursor at a time.
+    function test_cursorsAtOnce() {
+        const run = (spec, at, ks, listing) => {
+            if (listing)
+                loadListing(spec);
+            else
+                load(spec);
+            vim.setCursor(at[0]);
+            for (const p of at.slice(1))
+                vim.toggleCursor(p);
+            keys(ks);
+            const r = { text: render(), cursor: vim.cursor, cursors: vim.cursors.map(c => c.pos), mode: vim.mode,
+                registers: JSON.stringify(vim.registers), theirs: JSON.stringify(vim.cursors.map(c => c.registers)),
+                message: vim.message };
+            keys("<Esc>u");
+            r.undone = render();
+            return r;
+        };
+        const same = (spec, at, list, listing) => {
+            for (const ks of list) {
+                vim.cursorsAtOnce = false;
+                const one = run(spec, at, ks, listing);
+                vim.cursorsAtOnce = true;
+                compare(JSON.stringify(run(spec, at, ks, listing)), JSON.stringify(one), ks + " on " + spec);
+            }
+        };
+        // The main cursor between the others, one on an empty line (where
+        // x fails), one at a line's end.
+        same("abc Def\nghi\n\nJkl mno", [4, 0, 8, 12, 19],
+            ["g~iw", "gUiw", "guiw", "g?iw", "diw", "daw", "dw", "de", "x", "3x", "X", "D", "Cz<Esc>", "sz<Esc>",
+                "~", "3~", "rZ", "2rZ", "yiw", "yw", "Y", "\"ayiw", "ciwNEW<Esc>", "cwA<Esc>", "x.", "g~iw.",
+                "dd", "x\"ap"]);
+        // Two cursors in one word overlap.
+        same("abc def", [0, 1], ["diw", "g~iw", "x"]);
+        // Commands on lines, a cursor on each of some (lines next to each
+        // other touch), the last one too, where dd takes the line break
+        // before it.
+        const lines = ["dd", "2dd", "3dd", "yy", "3yy", "ccZ<Esc>", "SZ<Esc>", ">>", "<<", "g~~", "dj", "dk",
+            "yyp", "yyP", "ddp", "oZ<Esc>", "OZ<Esc>", "2oZ<Esc>", "yiwp", "yiwP", "dd."];
+        same("a1\n  b2\nc3\nd4\ne5", [3, 0, 9, 15], lines);
+        same("a1\nb2\nc3", [0, 3, 6], lines);
+        // But where the lines from a cursor's to the end go, the cursors
+        // meet on the line left, where one at a time, the one that went
+        // first was left past that line's end (and p and . then acted
+        // there too).
+        same("a1\nb2\nc3", [3, 6], lines.filter(ks => !ks.startsWith("dd")));
+        same("a1\nb2\nc3\n", [3, 6, 9], lines.filter(ks => !ks.startsWith("dd")));
+        load("a1\nb2\nc3");
+        vim.setCursor(3);
+        vim.toggleCursor(6);
+        keys("dd");
+        compare(editor.text, "a1");
+        compare(vim.cursor, 0);
+        compare(vim.cursors, []);
+        // Two on one line: dd at each, one at a time, takes the next line.
+        same("a1 x\nb2\nc3", [0, 3, 8], ["dd", "yy", ">>", "p", "o<Esc>"]);
+        // J joins at each, lines next to each other too; <C-a> and <C-x>
+        // the number at each (two on one number add twice).
+        const joins = ["J", "gJ", "3J", "J.", "<C-a>", "<C-x>", "5<C-a>", "<C-a>."];
+        same("a1 (\n  b2\n)c3\n\nd4 0x0f\n  -e5", [0, 6, 12, 15, 25], joins);
+        same("a1\nb2\nc3\nd4", [0, 3, 6, 9], joins);
+        same("a1 b20\nc3", [0, 4, 5, 7], joins);
+        same("Ma1\nCb2\nMc3", [0, 4, 8], joins);
+        // Icons, with what they hide.
+        same("Mab cd\nCef", [2, 5, 10, 0, 8], ["x", "~", "g~iw", "diw", "yiw", "rZ", "cwX<Esc>"]);
+        // gn on every match, as after ga.
+        load("a_b x c_d\ne_f");
+        keys("/\\w+_\\w+<CR>ga");
+        vim.cursorsAtOnce = false;
+        keys("g~gn");
+        const one = render();
+        vim.cursorsAtOnce = true;
+        keys("u/\\w+_\\w+<CR>gacgnZ<Esc>");
+        compare(render(), "Z x Z\nZ");
+        keys("u/\\w+_\\w+<CR>gag~gn");
+        compare(render(), one);
+        // What it does at once, and what it doesn't.
+        const t = editor.text, at = ks => vim.plannedEdit(t, 0, vim.parse(Array.from(ks), false, false).cmd);
+        for (const ks of ["g~iw", "dgn", "cw", "x", "D", "~", "rZ", "s", "y$", "dd", "yy", "cc", "S", ">>", "<<",
+            "dj", "g~~", "p", "P", "o", "O", "J", "gJ", "3J"])
+            verify(at(ks) !== null, ks);
+        for (const ks of ["==", "r\n"])
+            compare(at(ks), null, ks);
+        // The listing: from the names, X at their starts takes the icon.
+        same("M  ab cd\nC  ef", [4, 7, 14], ["x", "X", "ciwZ<Esc>", "D", "~", "g~iw", "dw"], true);
+    }
+
+    // One cursor at a time, a command runs in chunks, so the window goes
+    // on, the status line counts the cursors, and Esc stops it, keeping
+    // what it did, as one undo step. One that ends in insert mode runs at
+    // once.
+    function test_cursorsInChunks() {
+        const lines = [];
+        for (let i = 0; i < 30; i++)
+            lines.push("a" + i);
+        const text = lines.join("\n"), all = () => {
+            load(text);
+            for (let i = 1; i < lines.length; i++)
+                vim.toggleCursor(Txt.lineToPos(editor.text, i + 1));
+        };
+        vim.chunkTime = 0; // a cursor a chunk
+        all();
+        keys("ysiw)"); // surround, which goes one cursor at a time
+        verify(vim.running);
+        compare(vim.progress, "30 cursors 3%");
+        keys("x"); // nothing, while it runs
+        tryCompare(vim, "running", null);
+        compare(editor.text, lines.map(l => "(" + l + ")").join("\n"));
+        compare(vim.cursors.length, 29);
+        keys("u");
+        compare(editor.text, text);
+        all();
+        keys("ysiw)<Esc>");
+        compare(vim.running, null);
+        compare(vim.message, "Interrupted");
+        compare(editor.text, text.slice(0, text.lastIndexOf("\n")) + "\n(a29)"); // the last line, done first
+        compare(vim.cursors.length, 29);
+        keys("u");
+        compare(editor.text, text);
+        all();
+        keys("A");
+        compare(vim.running, null);
+        compare(vim.mode, "insert");
+        keys("Z<Esc>");
+        compare(editor.text, lines.map(l => l + "Z").join("\n"));
+    }
+
     // Drawing a block gives only the lines asked for.
     function test_blockSpans() {
         load("ab\ncd\nef\ngh");

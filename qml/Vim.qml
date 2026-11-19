@@ -281,6 +281,8 @@ QtObject {
     // motions). "." does too, through the command it repeats.
     readonly property var everyCursorActions: ["i", "a", "I", "A", "gI", "o", "O", "x", "<Del>", "X", "s",
         "S", "C", "D", "Y", "p", "P", "J", "gJ", "~", "r", "R", "<C-a>", "<C-x>"]
+    // Those of them that end in insert mode (see atEveryCursor).
+    readonly property var typingActions: ["i", "a", "I", "A", "gI", "o", "O", "s", "S", "C", "R"]
     // The registers vim fills itself, and the actions that write a register.
     readonly property var readOnlyRegisters: [".", ":", "/", "%"]
     readonly property var writingActions: ["d", "c", "y", "x", "<Del>", "X", "s", "S", "C", "D", "Y"]
@@ -385,6 +387,9 @@ QtObject {
     // gets its edits, the status line its progress, and the user a chance
     // to stop it after each one.
     property int chunkTime: 50
+    // Whether a command at many cursors is one edit where it can be (see
+    // atOnce): the tests turn it off to compare.
+    property bool cursorsAtOnce: true
     // Qt draws only once nothing is waiting, which a timer that's due never
     // lets it: the chunks run back to back, but now and then the next one
     // waits drawTime ms, for Qt to show the edits and the progress. As it
@@ -1898,18 +1903,20 @@ QtObject {
             atEveryCursor(() => surround(cmd));
         else if (cmd.surround)
             surround(cmd);
-        else if (cmd.op && cursors.length && cmd.op !== "!" && cmd.op !== "g!")
-            atEveryCursor(() => executeOperator(cmd));
-        else if (cmd.op)
+        else if (cmd.op && cursors.length && cmd.op !== "!" && cmd.op !== "g!") {
+            if (!atOnce(cmd))
+                atEveryCursor(() => executeOperator(cmd), cmd.op === "c");
+        } else if (cmd.op)
             executeOperator(cmd);
         else if (cmd.motion && lineStep(cmd.motion.name)) {
             if (!browseLines(lineStep(cmd.motion.name), Math.max(cmd.count, 1)))
                 macroFails(); // as a motion that fails
         } else if (cmd.motion)
             moveBy(cmd); // moves the extra cursors itself
-        else if (cursors.length && everyCursorActions.includes(cmd.action))
-            atEveryCursor(() => executeAction(cmd));
-        else
+        else if (cursors.length && everyCursorActions.includes(cmd.action)) {
+            if (!atOnce(cmd))
+                atEveryCursor(() => executeAction(cmd), typingActions.includes(cmd.action));
+        } else
             executeAction(cmd);
         // What the status line calls the insert's repeat (see repeatInsert).
         if (insertSession && insertSession.count > 1)
@@ -1985,20 +1992,20 @@ QtObject {
         applyOperator(cmd.op, range, cmd.reg, range.linewise ? Math.min(cursor, range.target) : range.start);
     }
 
-    // What operator `cmd.op` goes over from the cursor, by cmd's motion or
-    // text object, or the operator again (linewise), as { start, end,
-    // linewise, regOne, target }, where `target` is where the motion went.
-    // Null if it fails.
-    function operatorRange(t, cmd, count) {
-        const n = t.length;
-        let range, target = cursor;
+    // What operator `cmd.op` goes over from the cursor (or `from`), by
+    // cmd's motion or text object, or the operator again (linewise), as {
+    // start, end, linewise, regOne, target }, where `target` is where the
+    // motion went. Null if it fails.
+    function operatorRange(t, cmd, count, from) {
+        const n = t.length, p = from === undefined ? cursor : from;
+        let range, target = p;
         if (cmd.linewise) {
-            let le = Txt.lineEnd(t, cursor);
+            let le = Txt.lineEnd(t, p);
             for (let i = 1; i < count && le < n; i++)
                 le = Txt.lineEnd(t, le + 1);
-            range = { start: Txt.lineStart(t, cursor), end: Math.min(le + 1, n), linewise: true };
+            range = { start: Txt.lineStart(t, p), end: Math.min(le + 1, n), linewise: true };
         } else if (cmd.textObj) {
-            range = textObject(t, cursor, cmd.textObj, count);
+            range = textObject(t, p, cmd.textObj, count);
             if (!range)
                 return null;
             target = range.start;
@@ -2009,18 +2016,18 @@ QtObject {
             // stays on the current word when the cursor is at its last letter
             // (not on an icon that's indentation, which is a blank).
             if (cmd.op === "c" && (cmd.motion.name === "w" || cmd.motion.name === "W")
-                    && Txt.classAt(t, cursor, false, blank) !== 0) {
+                    && Txt.classAt(t, p, false, blank) !== 0) {
                 const big = cmd.motion.name === "W";
-                const last = Txt.classAt(t, Txt.charEnd(t, cursor), big, blank) !== Txt.classAt(t, cursor, big, blank);
-                const end = steps(cursor, last ? count - 1 : count, q => wordStep(t, q, Txt.wordEnd, big));
+                const last = Txt.classAt(t, Txt.charEnd(t, p), big, blank) !== Txt.classAt(t, p, big, blank);
+                const end = steps(p, last ? count - 1 : count, q => wordStep(t, q, Txt.wordEnd, big));
                 r = { pos: end, type: "inclusive" };
             } else {
-                r = motion(t, cursor, cmd.motion, count, cmd.count > 0, true);
+                r = motion(t, p, cmd.motion, count, cmd.count > 0, true);
             }
             if (!r)
                 return null;
             target = r.pos;
-            const a = Math.min(cursor, r.pos), b = Math.max(cursor, r.pos);
+            const a = Math.min(p, r.pos), b = Math.max(p, r.pos);
             if (r.type === "linewise")
                 range = { start: Txt.lineStart(t, a), end: Math.min(Txt.lineEnd(t, b) + 1, n), linewise: true };
             else
@@ -3328,22 +3335,348 @@ QtObject {
         return main.pos;
     }
 
-    // Runs a normal-mode command (fn, which works at `cursor`) at every
-    // cursor, like editAll. Each extra cursor has registers of its own (the
-    // main ones at first), so "yyp" copies every cursor's own line.
-    function atEveryCursor(fn) {
+    // Runs the normal-mode command cmd at every cursor as one edit, if it's
+    // one atOnce can (see plannedEdit): each cursor's edit is worked out on
+    // the text as it is, and they're made together (replaceRanges), as
+    // typing at them is (editAtOnce). An edit per cursor (atEveryCursor)
+    // has vim make the whole text again each time, and Qt go over it:
+    // g~iw at 20,000 cursors took 125 s, `:%norm g~iw` 26 s, typing at them
+    // 0.36 s. Each cursor still gets registers of its own (p puts its own),
+    // written last to first, as atEveryCursor writes them, and the message
+    // is the first cursor's that has one, which atEveryCursor gives last.
+    // Returns false, having changed nothing, for a command it can't, or
+    // edits that would overlap (two cursors in one word, or on one line
+    // for dd) or touch, which then go one at a time: a command reads up to
+    // its range's end (cw and e whether a word goes on, aw where the next
+    // one starts), and one at a time, the one before would read the next
+    // one's edit. Not lines that touch, for dd (or g~~), which doesn't read
+    // past them, and whose lines going leaves the next one's as it was.
+    function atOnce(cmd) {
+        if (!cursorsAtOnce)
+            return false;
+        const t = bufferText(), main = cursor, plans = [];
         const mainRegisters = registers, initial = Object.assign({}, registers);
-        setCursor(editAll((p, c) => {
+        const pasting = cmd.action === "p" || cmd.action === "P";
+        for (const c of [{ pos: main, main: true }].concat(cursors.filter(c => c.pos !== main))) {
+            if (pasting && !c.main)
+                registers = c.registers || initial;
+            const plan = plannedEdit(t, c.pos, cmd);
+            registers = mainRegisters;
+            if (!plan)
+                return false;
+            plan.c = c;
+            plans.push(plan);
+        }
+        const sorted = sortedBy(plans, x => x.start);
+        // dd on the last line takes the line break before it, so lines
+        // going together up to there take the one before them instead,
+        // each the one before it, as one at a time they do.
+        for (let j = sorted.length - 1; j >= 0; j--) {
+            if (!sorted[j].dLines || !sorted[j].dLines.last)
+                continue;
+            for (let k = j; k > 0 && sorted[k - 1].dLines && sorted[k - 1].end === sorted[k].dLines.from; k--) {
+                sorted[k - 1].start = Math.max(0, sorted[k - 1].dLines.from - 1);
+                sorted[k - 1].end = sorted[k].start;
+            }
+            break;
+        }
+        for (let i = 1; i < sorted.length; i++) {
+            const x = sorted[i - 1], y = sorted[i];
+            if ((x.edit || y.edit) && (y.start < x.end || y.start === x.end && !(x.lines && y.lines)))
+                return false;
+        }
+        const extras = [];
+        for (let i = sorted.length - 1; i >= 0; i--) {
+            const x = sorted[i], y = x.yank;
+            const c = x.c.main ? x.c : Object.assign({}, x.c, { registers: x.c.registers || Object.assign({}, initial) });
+            if (y) {
+                registers = c.main ? mainRegisters : c.registers;
+                setRegister(cmd.reg, y.text, y.linewise, y.yanking, y.hidden, false, y.regOne);
+                registers = mainRegisters;
+            }
+            x.c = c;
+        }
+        const flashed = sorted.filter(x => x.flash).map(x => x.flash);
+        if (flashed.length)
+            flashYank(cmd.reg, flashed);
+        const edits = [];
+        for (const x of sorted) {
+            if (x.edit)
+                Array.prototype.push.apply(edits, x.parts || [x]);
+        }
+        if (edits.length)
+            replaceRanges(edits);
+        // Where each starts now: moved by the edits before it.
+        const u = bufferText();
+        let shift = 0, mainPos = main, failed = false;
+        for (const x of sorted) {
+            const p = x.at(u, x.start + shift);
+            for (const e of x.edit ? x.parts || [x] : [])
+                shift += edited(e);
+            failed = failed || !!x.failed;
+            if (x.c.main)
+                mainPos = p;
+            else
+                extras.push(Object.assign({}, x.c, { pos: outOfPrefix(u, p) }));
+        }
+        const typing = sorted.find(x => x.inserting);
+        if (typing)
+            startInsert(typing.inserting.count, mainPos, typing.inserting.openLine);
+        else
+            setCursor(mainPos);
+        setCursors(extras, cursor);
+        if (sorted.some(x => x.toLine))
+            colKept = true; // as toLine
+        const told = sorted.find(x => x.message);
+        if (told)
+            showMessage(told.message);
+        if (failed)
+            macroFails(); // as at each cursor it failed at
+        return true;
+    }
+
+    // How much longer the edit e ({ start, end, text }) makes the text.
+    function edited(e) {
+        return e.text.length - (e.end - e.start);
+    }
+
+    // The operators atOnce makes at every cursor, and the actions that are
+    // one of them, as executeAction runs them (S is cc).
+    readonly property var atOnceOperators: ["d", "c", "y", "g~", "gu", "gU", "g?", ">", "<"]
+    readonly property var actionOperators: ({ x: "dl", "<Del>": "dl", X: "dh", C: "c$", D: "d$", Y: "y$" })
+
+    // What cmd (an operator of atOnceOperators, an action of
+    // actionOperators, or S, s, ~, r, p, P, o, O, J, gJ, <C-a> or <C-x>)
+    // would do at p in t, as executeOperator or executeAction would,
+    // without doing it: { start, end, text, entries, parts, edit, yank,
+    // flash, message, inserting, toLine, lines, dLines, at }: `text` (with
+    // its hidden `entries`) in place of [start, end) of t, if `edit`, or
+    // for more than one edit (J's line breaks), `parts`, each such an
+    // edit, in order, which [start, end) goes over; what goes in the
+    // register, if `yank` ({ text, linewise, hidden, regOne, yanking }),
+    // and the span to flash for a yank; the message it gives; insert mode
+    // after, if `inserting` ({ count, openLine }, as startInsert takes
+    // them); a command on lines that keeps the column (`toLine`), and one
+    // on whole lines (`lines`), whose edits can touch, dd's with the start
+    // of its lines and whether it took the line break before them
+    // (`dLines`: { from, last }); and at(u, s), where the cursor goes in
+    // the new text u, the edit's start there being s. With nothing to do
+    // (an empty range), or `failed` (a motion that doesn't go, no number
+    // for <C-a>), an empty span at p, where the cursor stays. Null for
+    // what only one cursor at a time can do: =, a block's p, r with a line
+    // break, X at a listing name's start (which takes its icon), or c on a
+    // line of the listing without a prefix, which startInsert gives one.
+    function plannedEdit(t, p, cmd) {
+        const count = Math.max(cmd.count, 1), a = cmd.action;
+        const stay = { start: p, end: p, at: (u, s) => s };
+        const lineAt = (u, s) => clampNormal(u, Txt.atColumn(u, Txt.lineStart(u, Math.min(s, u.length)), wantCol));
+        switch (a) {
+        case "~": {
+            const e = Txt.advance(t, p, count, Txt.lineEnd(t, p));
+            if (e <= p)
+                return stay;
+            const text = Txt.toggleCase(t.slice(p, e));
+            return { start: p, end: e, text: text, entries: carriedHidden(p, e, text), edit: true,
+                at: (u, s) => clampNormal(u, s + text.length) };
+        }
+        case "r": {
+            if (cmd.ch === "\n")
+                return null;
+            const le = Txt.lineEnd(t, p);
+            let e = p, k = 0;
+            for (; k < count && e < le; k++)
+                e = Txt.charEnd(t, e);
+            if (k < count)
+                return stay;
+            return { start: p, end: e, text: cmd.ch.repeat(count), entries: [], edit: true,
+                at: (u, s) => s + cmd.ch.length * (count - 1) };
+        }
+        case "o": {
+            const le = Txt.lineEnd(t, p);
+            return { start: le, end: le, text: lineBreak, entries: [], edit: true,
+                inserting: { count: count, openLine: "o" }, at: (u, s) => s + lineBreak.length };
+        }
+        case "O": {
+            const ls = Txt.lineStart(t, p);
+            return { start: ls, end: ls, text: blankPrefix + "\n", entries: [], edit: true,
+                inserting: { count: count, openLine: "O" }, at: (u, s) => s + blankPrefix.length };
+        }
+        case "p":
+        case "P":
+            return plannedPaste(t, p, cmd.reg, a === "p", count, stay);
+        case "<C-a>":
+        case "<C-x>": {
+            const e = numberEdit(t, p, a === "<C-a>" ? count : -count);
+            if (!e)
+                return Object.assign({ failed: true }, stay);
+            return { start: e.start, end: e.end, text: e.text, entries: [], edit: true,
+                at: (u, s) => s + e.text.length - 1 };
+        }
+        case "J":
+        case "gJ": {
+            const parts = joinEdits(t, p, count, a === "J");
+            if (!parts.length)
+                return { start: p, end: p, at: (u, s) => clampNormal(u, s) };
+            // The last line break's place, from the first one's.
+            const last = parts[parts.length - 1];
+            const to = last.start - parts[0].start + parts.slice(0, -1).reduce((d, e) => d + edited(e), 0);
+            return { start: parts[0].start, end: last.end, parts: parts, edit: true,
+                at: (u, s) => clampNormal(u, s + to) };
+        }
+        case "s": {
+            const range = { start: p, end: Txt.advance(t, p, count, Txt.lineEnd(t, p)), linewise: false };
+            return plannedOperator(t, p, "c", range, stay, lineAt);
+        }
+        }
+        const c = a === "S" ? { op: "c", reg: cmd.reg, count: cmd.count, linewise: true }
+            : actionOperators[a] ? { op: actionOperators[a][0], reg: cmd.reg, count: cmd.count,
+                motion: { name: actionOperators[a][1] } } : cmd;
+        if (!atOnceOperators.includes(c.op)
+                || c.op === "d" && linePrefixes && c.motion && ["h", "<Left>", "<BS>"].includes(c.motion.name))
+            return null;
+        const range = operatorRange(t, c, count, p);
+        if (!range)
+            return Object.assign({ failed: true }, stay);
+        return plannedOperator(t, p, c.op, range, stay, lineAt);
+    }
+
+    // What operator `op` over `range` (see operatorRange) at p in t would
+    // do, as applyOperator would (see plannedEdit, `stay` and `lineAt`, where
+    // toLine puts the cursor).
+    function plannedOperator(t, p, op, range, stay, lineAt) {
+        const s = range.start, e = range.end, whole = !!range.linewise, slice = t.slice(s, e);
+        if (!whole && e <= s && op !== "c")
+            return stay;
+        const lines = whole ? Txt.spannedLines(slice) : 0;
+        const yank = deleting => ({ text: whole && !slice.endsWith("\n") ? slice + "\n" : slice, linewise: whole,
+            hidden: hiddenIn(hidden, s, e), regOne: range.regOne, yanking: !deleting });
+        switch (op) {
+        case "y": {
+            const q = whole ? Math.min(p, range.target) : s;
+            return { start: q, end: q, yank: yank(false), flash: { start: s, end: e },
+                message: lines > 2 ? lines + " lines yanked" : "", at: (u, x) => clampNormal(u, x) };
+        }
+        case "d": {
+            if (!whole)
+                return { start: s, end: e, text: "", entries: [], edit: true, yank: yank(true),
+                    at: (u, x) => clampNormal(u, x) };
+            const last = !slice.endsWith("\n");
+            return { start: last ? Math.max(0, s - 1) : s, end: e, text: "", entries: [], edit: true, yank: yank(true),
+                lines: true, toLine: true, dLines: { from: s, last: last },
+                message: lines > 2 ? lines + " fewer lines" : "", at: lineAt };
+        }
+        case "c": {
+            let cs = s, ce = e;
+            if (whole) {
+                if (ce > cs && t[ce - 1] === "\n")
+                    ce--; // keep an empty line to type on
+                cs = Math.min(prefixEnd(t, cs), ce);
+            }
+            const ls = Txt.lineStart(t, cs);
+            if (linePrefixes && prefixEnd(t, ls) === ls)
+                return null;
+            return { start: cs, end: ce, text: "", entries: [], edit: ce > cs, yank: yank(true),
+                inserting: { count: 1, openLine: null }, at: (u, x) => x };
+        }
+        case ">":
+        case "<": {
+            const ls = Txt.lineStart(t, s), le = Txt.lineEnd(t, Math.max(s, e - 1));
+            const text = shiftedLines(t, ls, le, op === ">" ? 1 : -1, 1);
+            return { start: ls, end: le, text: text, entries: carriedHidden(ls, le, text), edit: true, toLine: true,
+                at: lineAt };
+        }
+        }
+        const text = caseChanged(slice, op[1]);
+        return { start: s, end: e, text: text, entries: carriedHidden(s, e, text), edit: true, lines: whole,
+            at: (u, x) => clampNormal(u, x) };
+    }
+
+    // What p (`after`) or P of register `reg` at p in t would do, as paste
+    // would (see plannedEdit). Null for a block.
+    function plannedPaste(t, p, reg, after, count, stay) {
+        const r = registerToPaste(reg);
+        if (!r)
+            return stay;
+        if (r.blockwise)
+            return null;
+        let entries = repeated(r.hidden, r.text.length, count);
+        const told = x => {
+            const n = Txt.lineBreaks(x.text, 0, x.text.length).length;
+            return n > 2 ? n + " more lines" : "";
+        };
+        if (r.linewise) {
+            let body = r.text.repeat(count), at;
+            if (!after) {
+                at = Txt.lineStart(t, p);
+            } else {
+                const le = Txt.lineEnd(t, p);
+                if (le < t.length) {
+                    at = le + 1;
+                } else {
+                    at = t.length;
+                    body = "\n" + body.slice(0, -1);
+                    entries = shifted(entries, 1);
+                }
+            }
+            const x = prefixLines(at, at, body, entries), down = body[0] === "\n" ? 1 : 0;
+            return { start: at, end: at, text: x.text, entries: x.entries, edit: true, message: told(x),
+                at: (u, s) => clampNormal(u, firstNonBlank(u, s + down)) };
+        }
+        const at = after && p < Txt.lineEnd(t, p) ? Txt.charEnd(t, p) : p;
+        const x = prefixLines(at, at, r.text.repeat(count), entries);
+        return { start: at, end: at, text: x.text, entries: x.entries, edit: true, message: told(x),
+            at: (u, s) => clampNormal(u, s + Math.max(x.text.length - 1, 0)) };
+    }
+
+    // Runs a normal-mode command (fn, which works at `cursor`) at every
+    // cursor, one at a time, from the last to the first, so each edit moves
+    // only cursors that are done (see shiftCursors). Each extra cursor has
+    // registers of its own (the main ones at first), so "yyp" copies every
+    // cursor's own line. An edit per cursor has vim make the whole text
+    // again (see atOnce), which at many cursors took minutes, so unless the
+    // command ends in insert mode (`typing`), it runs as a long command
+    // (see startTask): after the first chunk, in chunks, as :normal on
+    // lines does, so the window goes on, the status line counts the
+    // cursors, and Esc stops it (what it did stays, one undo step). One
+    // that types runs at once: a run would drop the keys typed meanwhile,
+    // and . types its insert right after it.
+    function atEveryCursor(fn, typing) {
+        const mainRegisters = registers, initial = Object.assign({}, registers);
+        const main = { pos: cursor, main: true };
+        const all = [main].concat(cursors.filter(c => c.pos !== cursor).map(c => Object.assign({}, c)));
+        const order = all.slice().sort((x, y) => y.pos - x.pos);
+        let i = 0;
+        const step = () => {
+            const c = order[i++];
             if (!c.main)
                 registers = c.registers || Object.assign({}, initial);
-            setCursor(p);
+            setCursor(c.pos);
             fn();
             if (!c.main) {
                 c.registers = registers;
                 registers = mainRegisters;
             }
-            return cursor;
-        }));
+            c.pos = cursor;
+            return i < order.length;
+        };
+        // Also when it's stopped: the cursors not done yet stay where they
+        // went.
+        const finish = () => {
+            shifting = null;
+            setCursors(all.filter(c => c !== main), main.pos);
+            setCursor(main.pos);
+            if (!inserting && !colKept)
+                wantCol = Txt.column(bufferText(), cursor);
+        };
+        shifting = all;
+        if (!typing) {
+            startTask(counted(order.length, "cursor", "cursors"), order.length, step, finish);
+            return;
+        }
+        while (step()) {
+            // the next cursor
+        }
+        finish();
     }
 
     // Moves the extra cursors for an edit that replaced [start, end) with
@@ -5625,16 +5958,7 @@ QtObject {
     // J and gJ: joins `count` lines (at least two) from the cursor's, as one
     // edit (one per line break had 4000J take two minutes).
     function joinLines(count, spaces) {
-        const t = bufferText(), ls = Txt.lineStart(t, cursor), edits = [];
-        let le = Txt.lineEnd(t, ls);
-        const line = { filled: le > prefixEnd(t, ls), last: t[le - 1] };
-        for (let i = 1; i < Math.max(count, 2) && le < t.length; i++) {
-            const next = le + 1, end = Txt.lineEnd(t, next);
-            // The next line's prefix goes with the line break.
-            const part = joinPart(t, prefixEnd(t, next), end, spaces, line);
-            edits.push({ start: le, end: part.from, text: part.sep });
-            le = end;
-        }
+        const t = bufferText(), edits = joinEdits(t, cursor, count, spaces);
         if (!edits.length) {
             setCursor(clampNormal(t, cursor));
             return;
@@ -5642,6 +5966,23 @@ QtObject {
         // On the last line break.
         const ends = replaceRanges(edits);
         setCursor(clampNormal(bufferText(), ends[ends.length - 1] - edits[edits.length - 1].text.length));
+    }
+
+    // The edits of t that J (with `spaces`, else gJ) at p makes, in order:
+    // each line break and what it takes of the next line, none on the
+    // last line.
+    function joinEdits(t, p, count, spaces) {
+        const ls = Txt.lineStart(t, p), edits = [];
+        let le = Txt.lineEnd(t, ls);
+        const line = { filled: le > prefixEnd(t, ls), last: t[le - 1] };
+        for (let i = 1; i < Math.max(count, 2) && le < t.length; i++) {
+            const next = le + 1, end = Txt.lineEnd(t, next);
+            // The next line's prefix goes with the line break.
+            const part = joinPart(t, prefixEnd(t, next), end, spaces, line);
+            edits.push({ start: le, end: part.from, text: part.sep, entries: [] });
+            le = end;
+        }
+        return edits;
     }
 
     // What J joins of the line [s, end) (after its blanks, with `spaces`)
@@ -5668,18 +6009,27 @@ QtObject {
     // decimal (with an optional "-"), 0x hex or 0b binary. Hex and binary
     // numbers, and decimals with leading zeros, keep their width.
     function addToNumber(delta) {
-        const t = bufferText();
-        const ls = Txt.lineStart(t, cursor), le = Txt.lineEnd(t, cursor);
+        const e = numberEdit(bufferText(), cursor, delta);
+        if (!e) {
+            macroFails();
+            return;
+        }
+        replaceRange(e.start, e.end, e.text);
+        setCursor(e.start + e.text.length - 1);
+    }
+
+    // The edit addToNumber makes of t at p, as { start, end, text }, or
+    // null if there's no number there.
+    function numberEdit(t, p, delta) {
+        const ls = Txt.lineStart(t, p), le = Txt.lineEnd(t, p);
         const re = /0[xX][0-9a-fA-F]+|0[bB][01]+|-?(?!0[xX][0-9a-fA-F]|0[bB][01])[0-9]+/g;
         const line = t.slice(ls, le);
         let m;
         do
             m = re.exec(line);
-        while (m && ls + m.index + m[0].length <= cursor);
-        if (!m) {
-            macroFails();
-            return;
-        }
+        while (m && ls + m.index + m[0].length <= p);
+        if (!m)
+            return null;
         const s = m[0];
         let text;
         if (/^0[xXbB]/.test(s)) {
@@ -5697,8 +6047,7 @@ QtObject {
             text = (n < 0 ? "-" : "") + String(Math.abs(n)).padStart(width, "0");
         }
         const start = ls + m.index;
-        replaceRange(start, start + s.length, text);
-        setCursor(start + text.length - 1);
+        return { start: start, end: start + s.length, text: text };
     }
 
     // = and g=: the lines of `ranges` ({ start, end }, in order and apart,
