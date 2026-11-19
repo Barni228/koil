@@ -124,7 +124,7 @@
   under the sort button (see Sorting).
 - `qml/Vim.qml`: the vim emulation (modes, motions, operators, registers,
   undo, macros, visual block, multiple cursors, marked lines, hidden text,
-  the listing's prefixes, `:` and its ranges, `/`, `:s`, surround,
+  the listing's prefixes, `:` and its ranges, `/`, `:s`, `:g`, surround,
   buffers). It drives the `TextArea` through `insert`/`remove`/`select`.
 - `qml/text.js`: pure text helpers (lines, characters, words, text objects
   and the tags `it` and `at` find, `tagPair`, `=`'s indents, `reindent`,

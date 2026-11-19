@@ -2588,8 +2588,10 @@ TestCase {
         compare(vim.message, "E486: Pattern not found: z");
         keys(":s/z/x/e<CR>");
         compare(vim.message, "");
-        keys(":s/a/x/c<CR>");
-        compare(vim.message, "E488: Trailing characters: c");
+        keys(":s/a/x/p<CR>");
+        compare(vim.message, "E488: Trailing characters: p");
+        keys(":s/a/x/g 0<CR>");
+        compare(vim.message, "E939: Positive count required");
         keys(":3s/a/x/<CR>");
         compare(vim.message, "E16: Invalid range");
         compare(editor.text, "a\nb");
@@ -2599,6 +2601,10 @@ TestCase {
         keys(":set nonu<CR>");
         keys(":sx<CR>");
         compare(vim.message, "E492: Not an editor command: sx");
+        keys(":sil<CR>");
+        compare(vim.message, "E492: Not an editor command: sil");
+        keys(":sgx<CR>");
+        compare(vim.message, "E488: Trailing characters: gx");
         // n only counts.
         load("a a\na");
         keys(":%s/a//gn<CR>");
@@ -2627,6 +2633,271 @@ TestCase {
         // An empty pattern is the last search's.
         keys("u/a<CR>:%s//c/g<CR>");
         compare(editor.text, "b b\nb b\nc c\nb b");
+    }
+
+    // :sg is :s g, as in vim, and :~ (and r) take the last search's
+    // pattern, where :& takes the last :s's. r isn't kept with the flags.
+    function test_substituteFlags() {
+        load("a b a\na b a");
+        keys(":s/a/x/<CR>");
+        compare(editor.text, "x b a\na b a");
+        keys("j:sg<CR>");
+        compare(editor.text, "x b a\nx b x");
+        keys("u:sgI<CR>");
+        compare(editor.text, "x b a\nx b x");
+        // :& takes the last :s's pattern, :~, :&r and :sr the last search's
+        // (which a :s's then is).
+        keys("u/b<CR>2G:~<CR>");
+        compare(editor.text, "x b a\na x a");
+        compare(vim.lastSubstitute.pattern, "b");
+        keys("u/a<CR>2G:&<CR>");
+        compare(editor.text, "x b a\na x a");
+        keys("u/a<CR>2G:&r<CR>");
+        compare(editor.text, "x b a\nx b a");
+        keys("u/b<CR>2G:sr<CR>");
+        compare(editor.text, "x b a\na x a");
+        // r only picks the pattern: it isn't kept with the flags.
+        keys("u:s/b/y/gr<CR>");
+        compare(editor.text, "x b a\na y a");
+        compare(vim.lastSubstitute.flags, "g");
+        // Colored as :s.
+        const parts = line => vim.commandLineParts(line).map(p => line.slice(p.start, p.end) + ":" + p.kind);
+        compare(parts(":sgi"), ["sgi:command"]);
+        compare(parts(":%~&"), ["%:range", "~:command"]);
+        compare(parts(":sil"), []);
+    }
+
+    // :g marks the lines a match starts on (:v and :g! the others), in its
+    // range or on every line. Its pattern becomes the last search's.
+    function test_global() {
+        load("a1\nb\na2\nc\na3");
+        keys(":g/a/<CR>");
+        compare(vim.marked, [0, 5, 10]);
+        compare(vim.message, "3 lines marked");
+        compare(vim.lastSearch.pattern, "a");
+        compare(vim.highlightPattern, "");
+        keys("d");
+        compare(editor.text, "b\nc");
+        keys("u:v/a/<CR>");
+        compare(vim.marked, [3, 8]);
+        keys("<Esc>:g!/a/<CR>");
+        compare(vim.marked, [3, 8]);
+        keys("<Esc>:2,4g/a/<CR>");
+        compare(vim.marked, [5]);
+        compare(vim.message, "1 line marked");
+        keys("<Esc>:g/z/<CR>");
+        compare(vim.message, "Pattern not found: z");
+        verify(!vim.messageIsError);
+        compare(vim.marked, []);
+        keys(":v/./<CR>");
+        compare(vim.message, "Pattern found in every line: .");
+        // '<,'> after lines were marked is those lines.
+        load("a1\nb1\na2");
+        keys(":g/a/<CR>:");
+        compare(vim.commandLine, ":'<,'>");
+        keys("g/1/d<CR>");
+        compare(editor.text, "b1\na2");
+        // Errors.
+        keys(":g<CR>");
+        compare(vim.message, "E148: Regular expression missing from :global");
+        keys(":g a<CR>");
+        compare(vim.message, "E146: Regular expressions can't be delimited by letters");
+        keys(":gx<CR>");
+        compare(vim.message, "E492: Not an editor command: gx");
+        keys(":9g/a/<CR>");
+        compare(vim.message, "E16: Invalid range");
+        // Colored, with the command it runs.
+        const parts = line => vim.commandLineParts(line).map(p => line.slice(p.start, p.end) + ":" + p.kind);
+        compare(parts(":%g/a/s/b/c/"), ["%:range", "g:command", "s:command"]);
+        compare(parts(":v/a/ .,+1d"), ["v:command", ".,+1:range", "d:command"]);
+        compare(parts(":g!"), ["g!:command"]);
+        compare(parts(":global#a#norm x"), ["global:command", "norm:command"]);
+        // In the listing, from a line's name.
+        loadListing("M  ab\nC  ba");
+        keys(":g/^b/<CR>");
+        compare(vim.marked, [editor.text.indexOf("\n") + 1]);
+    }
+
+    // :g with a command runs it on each line, from the first, as one
+    // change: a line it takes away is left out, the others move with the
+    // edits. Its :s's are counted together once it's done, and one that
+    // finds nothing is no error. The command isn't in the history.
+    function test_globalCommand() {
+        load("a1\nb\na2\nc\na3");
+        keys(":g/a/d<CR>");
+        compare(editor.text, "b\nc");
+        compare(vim.running, null);
+        compare(vim.message, "3 fewer lines");
+        keys("u");
+        compare(editor.text, "a1\nb\na2\nc\na3");
+        keys(":v/a/s/$/!/<CR>");
+        compare(editor.text, "a1\nb!\na2\nc!\na3");
+        keys("u:g/a/norm A;<CR>");
+        compare(editor.text, "a1;\nb\na2;\nc\na3;");
+        const commands = vim.history[":"];
+        compare(commands[commands.length - 1], "g/a/norm A;");
+        keys("u");
+        compare(editor.text, "a1\nb\na2\nc\na3");
+        load("x\nx\n1\nx\n2\n3");
+        keys(":g/x/.,+1d<CR>");
+        compare(editor.text, "1\n3");
+        compare(vim.message, "4 fewer lines");
+        load("ab\nb\nab\nab");
+        keys(":g/b/s/a/x/<CR>");
+        compare(editor.text, "xb\nb\nxb\nxb");
+        compare(vim.message, "3 substitutions on 3 lines");
+        keys("u:g/b/s/a//n<CR>");
+        compare(vim.message, "3 matches on 3 lines");
+        compare(editor.text, "ab\nb\nab\nab");
+        keys(":g/b/s/a/x/c<CR>");
+        verify(vim.message.startsWith("Can't ask in :g"));
+        compare(editor.text, "ab\nb\nab\nab");
+        // An empty pattern is the last search's; any punctuation can stand
+        // for /; a :g in a :g is an error.
+        keys("/^b<CR>:g##d<CR>");
+        compare(editor.text, "ab\nab\nab");
+        keys(":g/a/g/b/d<CR>");
+        compare(vim.message, "E147: Cannot do :global recursive");
+        compare(editor.text, "ab\nab\nab");
+    }
+
+    // :d deletes the cursor's line, a range's, or `count` from its last,
+    // into a register, as one change, the cursor on the line after them.
+    function test_deleteCommand() {
+        load("1\n2\n3\n4\n5\n6");
+        keys("j:d<CR>");
+        compare(editor.text, "1\n3\n4\n5\n6");
+        compare(vim.registers["\""].text, "2\n");
+        compare(vim.registers["\""].linewise, true);
+        compare(cursorLine(), 2);
+        keys("u:3,4d a<CR>");
+        compare(editor.text, "1\n2\n5\n6");
+        compare(vim.registers["a"].text, "3\n4\n");
+        compare(cursorLine(), 3);
+        keys(":1d 2<CR>");
+        compare(editor.text, "5\n6");
+        keys("u:$d<CR>");
+        compare(editor.text, "1\n2\n5");
+        compare(cursorLine(), 3);
+        keys(":%de<CR>");
+        compare(editor.text, "");
+        compare(vim.message, "3 fewer lines");
+        keys("u:d 0<CR>");
+        compare(vim.message, "E939: Positive count required");
+        keys(":d a b<CR>");
+        compare(vim.message, "E488: Trailing characters: a b");
+        keys(":9d<CR>");
+        compare(vim.message, "E16: Invalid range");
+        compare(editor.text, "1\n2\n5");
+        // '<,'> after lines were marked is those lines.
+        keys("ggmGm:");
+        keys("d<CR>");
+        compare(editor.text, "2");
+    }
+
+    // A count after the flags: that many lines from the range's last, as
+    // far as there are.
+    function test_substituteCount() {
+        load("a\na\na\na\na");
+        keys("j:s/a/b/ 2<CR>");
+        compare(editor.text, "a\nb\nb\na\na");
+        keys("u:1,3s/a/c/2<CR>");
+        compare(editor.text, "a\na\nc\nc\na");
+        keys("u:4&&9<CR>");
+        compare(editor.text, "a\na\na\nc\nc");
+        // A :s with a count is previewed over its lines.
+        keys("gg:s/a/d/ 3");
+        compare(editor.text, "d\nd\nd\nc\nc");
+        keys("<Esc>");
+        compare(editor.text, "a\na\na\nc\nc");
+    }
+
+    // c asks about each match, as vim's: y replaces it, n leaves it, l
+    // replaces it and stops, a replaces it and all after, q and Esc stop.
+    // All it replaced is one change; the cursor stays on the last
+    // replacement. Keys answer it before anything else: a macro's too.
+    function test_substituteConfirm() {
+        load("a a a\na a\nb");
+        keys(":%s/a/xx/gc<CR>");
+        verify(vim.confirming);
+        compare(vim.message, "replace with xx (y/n/a/q/l/^E/^Y)?");
+        compare(vim.cursor, 0);
+        const shown = () => vim.searchHighlights().map(s => [editor.text.slice(s.start, s.end), s.current]);
+        compare(shown(), [["a", true], ["a", false], ["a", false], ["a", false], ["a", false]]);
+        keys("y");
+        compare(editor.text, "xx a a\na a\nb");
+        compare(vim.cursor, 3);
+        compare(shown(), [["a", true], ["a", false], ["a", false], ["a", false]]);
+        keys("n");
+        compare(vim.cursor, 5);
+        keys("dj"); // nothing, as in vim
+        compare(editor.text, "xx a a\na a\nb");
+        verify(vim.confirming);
+        keys("y");
+        compare(editor.text, "xx a xx\na a\nb");
+        compare(vim.cursor, 8);
+        keys("a");
+        compare(editor.text, "xx a xx\nxx xx\nb");
+        compare(vim.confirming, null);
+        compare(vim.message, "4 substitutions on 2 lines");
+        compare(vim.cursor, 11); // the last replacement's start
+        compare(vim.searchHighlights(), []);
+        keys("u");
+        compare(editor.text, "a a a\na a\nb");
+        // l replaces and stops, q and Esc only stop.
+        keys(":%s/a/y/gc<CR>nl");
+        compare(editor.text, "a y a\na a\nb");
+        compare(vim.confirming, null);
+        compare(vim.message, "");
+        compare(vim.cursor, 2);
+        keys("u:%s/a/y/gc<CR>yq");
+        compare(editor.text, "y a a\na a\nb");
+        compare(vim.confirming, null);
+        keys("u:%s/a/y/gc<CR>nn<Esc>");
+        compare(editor.text, "a a a\na a\nb");
+        compare(vim.cursor, 0); // back where it was
+        compare(vim.undoStack.length, 0); // nothing replaced, no change
+        // Through the end, the last one answered ends it; & asks again.
+        keys(":s/a/z/gc<CR>nyn");
+        compare(editor.text, "a z a\na a\nb");
+        compare(vim.confirming, null);
+        keys("j&");
+        verify(vim.confirming);
+        keys("a");
+        compare(editor.text, "a z a\nz z\nb");
+        // In a macro, its keys answer.
+        load("a a a\na a a");
+        keys("qq:s/a/w/gc<CR>ynyq");
+        compare(editor.text, "w a w\na a a");
+        keys("j@q");
+        compare(editor.text, "w a w\nw a w");
+        compare(vim.confirming, null);
+        // Something from outside (a click) ends it, keeping what was
+        // replaced; the listing as it's read again drops it.
+        load("a a a");
+        keys(":s/a/b/gc<CR>y");
+        vim.interrupt();
+        compare(vim.confirming, null);
+        compare(vim.message, "");
+        compare(editor.text, "b a a");
+        keys("u");
+        compare(editor.text, "a a a");
+        keys(":s/a/b/gc<CR>");
+        vim.reset([]);
+        compare(vim.confirming, null);
+        // Typed, it's previewed as n is: the matches only highlighted.
+        load("a a");
+        keys(":s/a/b/gc");
+        compare(editor.text, "a a");
+        compare(vim.searchHighlights().length, 2);
+        keys("<Esc>");
+        // A replacement with a line break, and in the listing, its prefix.
+        loadListing("M  ab\nC  ba");
+        keys(":%s/a/1\\r2/gc<CR>");
+        compare(vim.cursor, 4);
+        keys("ny");
+        compare(render(), "<M:h1>  ab\n<C:h2>  b1\n   2");
+        compare(vim.confirming, null);
     }
 
     // While a :s is typed, its matches are highlighted, and once its

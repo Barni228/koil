@@ -232,6 +232,9 @@ function sections(help) {
                 ["`:42`  `:$`  `:+3`", "Go to line 42, the last line, or 3 lines down."],
                 ["`:!cmd`", "Run a shell command (see `:h !`)."],
                 ["`:s/old/new/`  `:%s/old/new/g`", "Replace on the line, or every match in the file (see `:h s`)."],
+                ["`:g/pat/`  `:v/pat/`", "Mark the lines with a match, or without one, for `d`, `A` or `@q` to act "
+                    + "on them all; `:g/pat/d` runs a command on each (see `:h :g`)."],
+                ["`:d`  `:3,5d`  `:d a`", "Delete the line, or lines 3 to 5, as `dd` does (into register `a`)."],
                 ["`:noh`", "Clear the search highlights (so does `Esc` in normal mode)."],
                 ["`:reg`  `:reg [names]`", "List the registers to pick from, e.g. `:reg a0`, each with its first "
                     + "lines, after its name (`\"a`) and, dimmed before that, what it holds: `c` characters, "
@@ -359,7 +362,8 @@ function sections(help) {
         },
         {
             title: "Substitute",
-            tags: ["s", ":s", "substitute", "sub", "&", ":&", "&&", ":&&", "g&"],
+            tags: ["s", ":s", "substitute", "sub", "&", ":&", "&&", ":&&", "g&", ":~", "sg", "sc", "s_c", "s_r",
+                "s_flags"],
             intro: "`:s/old/new/` replaces the first match on the cursor's line, as in vim, and "
                 + "`:%s/old/new/g` every one in the file. As you type it, the matches are highlighted, then "
                 + "the text shows what it would become, and `Esc` puts it back. In the listing a line starts "
@@ -376,12 +380,42 @@ function sections(help) {
                     + "and so is `~` (unlike vim's)."],
                 ["`g`  `i`  `I`", "Flags, after the last `/`: every match on a line, not only the first; ignore "
                     + "case; don't."],
-                ["`n`  `e`", "Only count the matches; no error if there are none."],
+                ["`c`", "Ask about each match: `y` replaces it, `n` leaves it, `a` replaces it and all the rest, "
+                    + "`l` replaces it and stops, `q` or `Esc` stops, and `Ctrl-E` and `Ctrl-Y` scroll. "
+                    + "`u` undoes all it replaced."],
+                ["`n`  `e`", "Only count the matches (and highlight them, as `/` would); no error if there are none."],
+                ["`:s/a/b/ 3`", "A count after the flags: 3 lines from the cursor's (or the range's last) on."],
                 ["`:s#/#-#`", "Any punctuation can stand for `/`."],
                 ["`&`  `:&&`  `:s`", "Run the last one again on the cursor's line: `&` and `:&&` with its flags "
                     + "(as Neovim's `&`; Vim's drops them), `:s` and `:&` without."],
+                ["`:s g`  `:sg`  `:&&c`", "Run it again with these flags (`&` first keeps its own). As in vim, `:s` "
+                    + "can take the flags without a space: `:sg`, `:sgi`, `:sI`, `:sc`."],
+                ["`:~`  `:&r`  `:sr`", "Run it again for the last search, which may be a `/` since."],
                 ["`g&`", "Run it again on every line, with its flags, for the last search."]
             ]
+        },
+        {
+            title: "Lines with a match (:g)",
+            tags: [":g", "global", ":global", ":v", "vglobal", ":vglobal", ":g!", ":d", "delete", ":delete"],
+            intro: "`:g/pat/` marks every line with a match of `pat` (a regex, as `/` takes it; in the listing, "
+                + "from the name), so the keys for marked lines act on them all (see `:h m`): `d` deletes "
+                + "them, `A.bak<Esc>` types at their ends, `@q` runs a macro on each, and `:` then `s/a/b/` "
+                + "replaces in them.",
+            rows: [
+                ["`:v/pat/`  `:g!/pat/`", "Mark the lines without a match."],
+                ["`:g/pat/cmd`", "Run a command on each line instead, from the first, as one change for `u`: "
+                    + "`:g/^$/d` deletes the empty lines, `:g/x/s/a/b/g` replaces on those with an `x`, "
+                    + "`:g/x/norm A;` types at their ends."],
+                ["`:v/\\.rs$/d`", "Delete the lines without a match: in the listing, all but the `.rs` files."],
+                ["`:5,20g/pat/`", "Only lines 5 to 20 (`:'<,'>g` the selection's, or the marked ones); "
+                    + "without a range, every line."],
+                ["`:g//`  `:g#a/b#`", "The last search's pattern; any punctuation can stand for `/`."],
+                ["`:d`  `:3,5d`  `:d a`", "Delete the line, or lines 3 to 5, as `dd` does (into register `a`, "
+                    + "or `A` to add to it). `:d 3`: 3 lines from the cursor's."]
+            ],
+            note: "As in vim, the command's `:s`s say nothing on a line without a match, and once it's done, "
+                + "what they replaced is counted. Unlike vim's, an error stops it only on its line, as "
+                + "`:norm`'s does, and `:s` with `c` can't ask in it: mark the lines, then `:s` on them."
         },
         {
             title: "Surround",

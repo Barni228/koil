@@ -1509,7 +1509,7 @@ Item {
             Layer {
                 id: highlights
 
-                inputs: [view.active, view.vim.commandLine, view.vim.substitution, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
+                inputs: [view.active, view.vim.commandLine, view.vim.substitution, view.vim.confirming, view.vim.highlightPattern, view.vim.highlightTarget, view.findBar.active, view.findBar.matches, view.findBar.current, view.layout, view.viewport]
                 compute: () => {
                     if (!view.active)
                         return [];

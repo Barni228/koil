@@ -225,9 +225,31 @@
   the text without its prefixes, as a search (a line starts at its name,
   and a line a replacement starts gets one: `prefixLines`), and vim's
   replacement (`Txt.substitution`: `&`, `\1`, `\u`, `\r`; but `~` is only
-  a `~`, which paths have). Flags `g`, `i`, `I`, `n`, `e`, `&` first
-  keeping the last one's; `:s` alone, `:&`, `:&&`, `&` (`:&&`, as
-  Neovim's) and `g&` run `lastSubstitute` again. Its pattern becomes the
+  a `~`, which paths have). Flags `g`, `c`, `i`, `I`, `n`, `e`, `r`, `&`
+  first keeping the last one's, then a count (`substituteParts`): that
+  many lines from the range's last, as vim's. `:s` alone, `:&`, `:&&`,
+  `&` (`:&&`, as Neovim's) and `g&` run `lastSubstitute` again, and so
+  does `:~`, with the last search's pattern, as `r` makes `:&` and `:s`
+  do (it's left out of the flags kept). Vim's `:s` with flags right after
+  it (`:sg`, `:sgi`, `:sI`, `substituteName`) is `:s` and the flags, the
+  first `c`, `g`, `i`, `I` or `r`, but for vim's commands of those
+  letters (`:sil`, `:sre`…), as vim reads it. Left out: vim's flags `p`,
+  `#` and `l`, which print the last line changed as ex's `:p`, `:#` and
+  `:l` do (Koil has none of them, and the line is in view), and `:sno`
+  and `:sm`, which set vim's `magic` for the pattern, which PCRE2's
+  patterns don't have.
+  `c` (`confirmSubstitute`) asks about each match, as vim's: the cursor
+  goes to it, the status line asks, and the matches left are highlighted,
+  it the current one. Its answers go to `confirmKey` before anything
+  else (`keyPressed`, `runKey`), so a macro's keys answer it, as typed
+  ones do in vim. Each `y` replaces its match then, all in one change,
+  which ends with the questions, and the matches after it move by the
+  replacement's length (`confirming.shift`, one number, rather than each
+  match moved at each `y`). What moves vim from outside (`interrupt`: a
+  click, the find bar, the listing synced) ends the questions as `q`
+  does, keeping what was replaced; `reset` drops them, as the text is
+  new. While typed, a `:s` with `c` is previewed as one with `n` is: the
+  matches highlighted, as which it replaces is up to the answers. Its pattern becomes the
   last search's, as in vim, but unlike vim's it isn't highlighted after
   (`highlightPattern` cleared, as by `:noh`): it may match what replaced
   it (`s(?=;)` the `s` left of `ss;`), which looked like a match left
@@ -259,10 +281,42 @@
   `boxOpen` (nothing syncs, drops or saves meanwhile); `updateListing`
   ends it first (`endPreview`: an option button updates), and `reset`
   drops it without putting the text back, as the new text replaced it.
+- **Global** (`:g`, Global in Vim.qml): vim's `:g/pat/cmd`, `:g!` and
+  `:v`, over every line without a range (or the marked ones, for `'<,'>`
+  after lines were marked), with `/`'s patterns from a line's name, as
+  `:s`, a line matching if a match starts on it (`globalLines`, through
+  the text once with the first match on each line, so a match over
+  several lines leaves out the ones it goes on to, where vim's tries each
+  line). Without a command it marks the lines (see Marked lines): vim's
+  prints them, which shows nothing Koil hasn't, while marked, the keys
+  for marked lines act on them, and you see which entries they are
+  before `d` trashes them. With one, the command's keys (`:cmd<CR>`)
+  run on each line as `:normal`'s do with a range (`runKeys` with
+  `each.starts`, through `macroStep`), which is what vim does: one
+  change (a run's), the lines left moving with the edits and a line taken
+  away left out (`moveLineRuns`). Its frame's `each.global` holds what it
+  counts (`globalRun`): its `:s`s give no E486 and no count of their own,
+  and add to it, as do `n`'s matches, and its `:d`s say nothing, so that
+  once its last line is done (`globalDone`, as its frame goes), as vim's
+  `global_exe`, what was replaced is counted, or else the lines that came
+  or went (over two, as vim's `report`). Its command lines aren't added
+  to the history (vim's aren't typed), so `@:` runs the `:g` again. An
+  error stops it only on its line (`macroFails`, as for `:normal`):
+  vim's stops at the first error, but there a motion that fails isn't
+  one, and here it is, so `:g/x/norm f;x` would stop at the first line
+  without a `;`. `:s` with `c` can't ask in it (the run's own keys come
+  next), so it's an error that says to mark the lines and `:s` on them.
+  A `:g` in a `:g` is E147, as in vim. Its pattern becomes the last
+  search's but, as `:s`'s, isn't highlighted. `:d` (`deleteCommand`):
+  vim's `:[range]d [x] [count]` (a digit is the count, not a register),
+  through `deleteLines`, as marked lines' `d`, the cursor on the line
+  after them.
 - **Command line colors** (`Vim.commandLineParts`, `commandLineHtml` in
   StatusLine.qml, `theme.commandColor`): as a `:` command is typed, the status
   line colors its range, the name of a command `runEx` knows
-  (`exCommands`, `substituteNames`, `!`, `_!`, `_`, `_put`), a shell command's `%` and `<cfile>` with
+  (`exCommands`, `substituteName`, `globalParts`, `!`, `_!`, `_`,
+  `_put`), and after `:g`'s pattern, the command it runs, as one typed
+  alone (its range too), a shell command's `%` and `<cfile>` with
   their modifiers (in the dirs' color, as a path) and `\%` and
   `\<cfile>`, `:set`'s options and `:e`'s
   path. It's styled text (`<font color>`), where spaces are `&nbsp;`, as
