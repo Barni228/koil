@@ -6568,8 +6568,10 @@ QtObject {
     // Runs the :s `s` (see substituteParts) over `range` (see
     // substituteRange), as a change of its own, as in vim: the cursor goes
     // to the first non-blank of the last line it changed, its pattern is
-    // the last search's (highlighted, as after /), and over two
-    // replacements are counted in the status line.
+    // the last search's, and over two replacements are counted in the
+    // status line. Unlike vim's, it highlights nothing after: the pattern
+    // may match what replaced it (s(?=;) the s left of ss;). With n,
+    // which replaces nothing, it highlights the matches it counted, as /.
     function substitute(range, s) {
         const pattern = s.pattern || (lastSearch ? lastSearch.pattern : "");
         if (!pattern) {
@@ -6579,7 +6581,7 @@ QtObject {
         const replacement = s.replacement || "";
         lastSubstitute = { pattern: pattern, replacement: replacement, flags: s.flags };
         lastSearch = { pattern: pattern, forward: lastSearch ? lastSearch.forward : true };
-        highlightPattern = pattern;
+        highlightPattern = "";
         const t = bufferText();
         const found = substituteMatches(t, range.first, range.last, range.region,
             substituteRegExp(pattern, s.flags), s.flags.includes("g"));
@@ -6600,6 +6602,7 @@ QtObject {
             }
         }
         if (s.flags.includes("n")) {
+            highlightPattern = pattern;
             showMessage(counted(found.length, "match", "matches") + " on " + counted(lines, "line", "lines"));
             return;
         }

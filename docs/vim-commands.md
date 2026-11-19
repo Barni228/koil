@@ -227,7 +227,12 @@
   replacement (`Txt.substitution`: `&`, `\1`, `\u`, `\r`; but `~` is only
   a `~`, which paths have). Flags `g`, `i`, `I`, `n`, `e`, `&` first
   keeping the last one's; `:s` alone, `:&`, `:&&`, `&` (`:&&`, as
-  Neovim's) and `g&` run `lastSubstitute` again. With the range `'<,'>` it keeps to the last
+  Neovim's) and `g&` run `lastSubstitute` again. Its pattern becomes the
+  last search's, as in vim, but unlike vim's it isn't highlighted after
+  (`highlightPattern` cleared, as by `:noh`): it may match what replaced
+  it (`s(?=;)` the `s` left of `ss;`), which looked like a match left
+  over. The `n` flag (count only) highlights the matches, as `/` would,
+  and so does the `n` key after any `:s`. With the range `'<,'>` it keeps to the last
   selection (`selectionRegion`: its characters or block, where vim's takes
   the lines), whose `wantCol` `lastVisual` keeps for a `$` block. Typed,
   it's previewed as neovim's `inccommand` does (`previewSubstitute`, at

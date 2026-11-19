@@ -2527,9 +2527,23 @@ TestCase {
         keys(":1,2s/^/> /<CR>");
         compare(editor.text, "> x a\n> A a\n  c");
         compare(vim.message, "");
-        // Patterns are /'s, which they become, and highlight.
+        // Patterns are /'s, which they become, but don't highlight after,
+        // as they may match what replaced them; n's do, as a search's.
         compare(vim.lastSearch.pattern, "^");
-        compare(vim.highlightPattern, "^");
+        compare(vim.highlightPattern, "");
+        load("ss;");
+        keys("/s<CR>");
+        compare(vim.highlightPattern, "s");
+        keys(":s/s(?=;)//<CR>");
+        compare(editor.text, "s;");
+        compare(vim.lastSearch.pattern, "s(?=;)");
+        compare(vim.highlightPattern, "");
+        compare(vim.searchHighlights(), []);
+        keys(":s/s//n<CR>");
+        compare(vim.message, "1 match on 1 line");
+        compare(vim.highlightPattern, "s");
+        keys("n");
+        compare(vim.highlightPattern, "s");
     }
 
     // The replacement: & or \0 the match, \1 its groups, \u \l \U \L \E for
