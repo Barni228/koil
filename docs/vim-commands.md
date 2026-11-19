@@ -342,7 +342,13 @@
   on (`afterMatch`), and `:s` without `g` asks for the first on each line
   (`perLine`, an `l` in the flags). `engine` is `System`, which `Vim` and `HelpPanel` take as
   `regexEngine`; the tests have none, so there it's QML's `RegExp` behind
-  the same three functions (`scriptRegExp`), PCRE itself is tested in
+  the same three functions (`scriptRegExp`), one QML never compiles to
+  machine code (`interpretedRegExp`, as the stand-in's): compiled, on
+  x86-64 (Windows', Linux's; macOS's Qt compiles none), Qt 6.10's didn't
+  step back from a greedy loop with the `u` flag, so `\w+_\w+` found only
+  the match at the text's end once it had been asked a few times, and
+  only Windows' CI failed (6.11's and dev's Yarr, which compiles them,
+  is 6.10's, so this stays). PCRE itself is tested in
   ffi/tests.rs (a test can call native.cpp's functions that need no app),
   and `test_regexEngine` has a stand-in, for the reading of the numbers.
   A look behind can be of a few lengths (`(?<=ab|c)`), but not of any

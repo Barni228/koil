@@ -111,8 +111,10 @@ TestCase {
     QtObject {
         id: regexEngine
 
+        // With an empty group at the end, which next drops (see
+        // Txt.interpretedRegExp).
         function compiled(pattern, flags) {
-            return new RegExp(pattern, "gmu" + flags.replace("l", ""));
+            return Txt.interpretedRegExp(pattern, "gm" + flags.replace("l", ""));
         }
         function regexError(pattern, flags) {
             try {
@@ -126,7 +128,10 @@ TestCase {
             if (from > text.length)
                 return null;
             re.lastIndex = from;
-            return re.exec(text);
+            const m = re.exec(text);
+            if (m)
+                m.pop();
+            return m;
         }
         function after(m) {
             return m.index + Math.max(1, m[0].length);

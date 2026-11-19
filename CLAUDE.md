@@ -115,7 +115,13 @@ A line a file; `docs/layout.md` says what each has, by function.
   `CXXFLAGS="-include arm_acle.h"` (its `qyieldcpu.h` fails with newer
   Apple clang otherwise) and a `CARGO_TARGET_DIR` of its own.
   `QML_DISABLE_DISK_CACHE=1` runs the QML without what qmlcachegen
-  compiled, which tells a bug of the compiled code apart.
+  compiled, which tells a bug of the compiled code apart. macOS's Qt
+  compiles no regexes to machine code, so a bug of Windows' compiled
+  ones (see Regular expressions) shows on x86-64 Linux: in Docker
+  (`--platform linux/amd64`), Qt from aqtinstall (`linux desktop 6.10.3
+  linux_gcc_64`), the QML tests offscreen; with
+  `QV4_FORCE_INTERPRETER=1` it compiles none either, which tells such a
+  bug apart.
 - Checking the real app: `osascript` / System Events can send keys, click
   menus (process `koil`, or `Koil` from the bundle) and read the status
   line and the editor's text (`value of every UI element of window 1`).
@@ -190,7 +196,8 @@ A line a file; `docs/layout.md` says what each has, by function.
   aqtinstall supports it. Then keep `keepPopupClicks` (docs/platform.md,
   Windows), though 6.11 has Qt's fix: it still passes a click on a
   popup's padding to the window under it. Reword the filter's comments
-  and that note to say so.
+  and that note to say so. Keep `Txt.interpretedRegExp` too: 6.11
+  compiles regexes as 6.10 did (see Regular expressions).
 - Keep actions on Node 24 releases (checkout v7, upload-artifact v7,
   download-artifact v8, action-gh-release v3).
 - Releases: `cargo release <level> --execute`. `Cargo.toml` makes it skip

@@ -1396,11 +1396,27 @@ function nativeRegExp(source, flags, engine) {
     };
 }
 
+// new RegExp(source, flags + "u") (or an error), but one that QML never
+// compiles to machine code, with one more group, the last, empty: drop it
+// from a match. Compiled, Qt 6.10's (on x86-64, as on Windows; macOS's
+// compiles none) didn't step back from the end of a greedy loop with the
+// u flag where it stopped at a character it doesn't take: from about the
+// fourth time it was asked, \w+_\w+ found only e_f in "a_b x c_d\ne_f".
+// 6.11's and dev's compile the same way (their Yarr is 6.10's).
+// One with a backreference is never compiled, so this ends in one, to
+// that group. All the source's are to its own groups, with the u flag.
+function interpretedRegExp(source, flags) {
+    new RegExp(source, flags + "u");
+    const groups = new RegExp("(?:" + source + ")|", flags + "u").exec("").length;
+    return new RegExp("(?:" + source + ")()\\" + groups, flags + "u");
+}
+
 function scriptRegExp(source, flags) {
-    let re;
+    let re, extraGroup = false;
     try {
         // with the u flag if it can be, so . is an emoji, not half of one
-        re = new RegExp(source, flags + "u");
+        re = interpretedRegExp(source, flags);
+        extraGroup = true;
     } catch (e) {
         try {
             // e.g. "\-" or vim's "\<", which are fine without the u flag
@@ -1414,8 +1430,11 @@ function scriptRegExp(source, flags) {
             return null;
         re.lastIndex = from;
         const m = re.exec(t);
-        if (m)
+        if (m) {
+            if (extraGroup)
+                m.pop();
             m.end = m.index + m[0].length;
+        }
         return m;
     };
     return {
