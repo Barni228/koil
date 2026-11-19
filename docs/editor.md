@@ -131,7 +131,12 @@
   and the editor's are as long after `r`, and `===` hashed both, seconds a
   key. An edit carries the line starts found past it (`Txt.carryLines`),
   so the text isn't looked through again (0.5 s a key at the end of a
-  gigabyte). `isEdited` compares texts with `System.sameText`, which stops
+  gigabyte), and the text before loses them (copying them took as long).
+  Those past an edit move by a `shift` kept from where it starts
+  (`startAt` adds it), which an edit moves to start after itself, moving
+  only the starts between: moving all of them at each edit, `:%norm g~iw`
+  took 15 of its 23 s at 20,000 lines, where edits line after line now
+  move one or two each. `isEdited` compares texts with `System.sameText`, which stops
   at the first difference. A gigabyte still takes a second or two an edit:
   V4 copies all of the string to make the new one (slices and their
   concatenation), which only a text that isn't one JS string would avoid.

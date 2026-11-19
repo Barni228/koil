@@ -146,7 +146,10 @@
   frames under it go on too, as after `:normal`. The lines left move
   with the edits as the marked lines do (`moveLineRuns`, through
   `movedMarks`), rather than by number as `:normal`'s do, which has `yyp`
-  copy the copies. Koil's `:normal` (`:norm`, `normalCommand`) is such a
+  copy the copies. An edit before all of them (on the line the keys run
+  on, as they go on to the lines after) moves them alike, so it adds to
+  the frame's `shift` (which `macroStep` adds to the next one) instead of
+  moving each: `:%norm x` at 20,000 lines spent 9 s on that. Koil's `:normal` (`:norm`, `normalCommand`) is such a
   frame too, and so goes by the lines the same way: with a range, on each
   of its lines, and without one, at the cursor, with no lines (`starts`
   empty, not `due`), ending what its keys left half done, as vim's. That
@@ -225,6 +228,16 @@
   the next chunk usually starts at once, but now and then waits `drawTime`
   for a frame: as often as keeps drawing to about a fifth of the time (a
   frame of 40,000 lines takes over 100 ms), at most 4 times a second.
+  An edit in a run takes time in proportion to the text (V4 copies the
+  string to make the new one), but not to its lines or icons: the line
+  starts (`Txt.carryLines`), the lines a run has left (`moveLineRuns`)
+  and the hidden text (see Hidden text) past an edit move by a shift put
+  off till something reads them. At 20,000 lines, `:%norm x` took 33 s
+  and now 2.1 s (in the listing 67 s and 3.5 s), `:%norm g~iw` 23 s and
+  3.9 s, a macro on every line selected 34 s and 3.8 s, `19999@q` with
+  a `j` in it 22 s and 3.9 s. In the app, `:%norm x` on a listing of
+  5,000 entries took 12 s and now 4.2 s, of which the chunks take 1.6 s:
+  the rest is Qt and the app between them, after each chunk's flush.
 - **Word completion** (Word completion in Vim.qml): Ctrl-N and Ctrl-P in
   insert mode are vim's keyword completion (`:h ins-completion`), with
   its default `completeopt` (`menu`). The word before the cursor (the
@@ -312,7 +325,19 @@
   has entries (`vim.reset(entries)`, `vim.replaceText`); the user can't hide
   or reveal text, and an icon without an entry is a plain character. The
   tests use 🍄 and 🪑. `hidden` is replaced, never changed in place, so a reference is a
-  snapshot (undo relies on this).
+  snapshot (undo relies on this), once it's settled: in a batch (see
+  Batches and runs), an edit leaves the entries after it behind by a
+  shift (`hiddenPending`, read through `entryAt` by `firstAt`,
+  `hiddenIn` and `hiddenAt`), which the next edit moves to start after
+  itself, moving only the entries between, and changes in place the
+  list it made of `hidden` in the batch, which nothing else has
+  (`hiddenOwned`), replacing the entries it moves rather than changing
+  them, as an older list has them. What keeps the list (a change's
+  snapshot, leaving the buffer, `:s`'s preview) or the view (flush)
+  settles it first (`settleHidden`), so the next edit makes a list of its
+  own. In the listing, an edit moved every entry after it, and made a new
+  list: `:%norm x` at 20,000 lines took 67 s, 25 s of it moving them, and
+  now 3.5 s.
   - Vim's own edits go through `replaceRange(start, end, text, entries)`, which
     shifts the entries (`shiftHidden`): one whose icon the edit touches is
     dropped, `entries` (the inserted text's) are added. Callers that insert

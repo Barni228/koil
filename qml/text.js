@@ -8,12 +8,12 @@
 
 // Where the lines of long texts start, as far as they were looked for, for
 // the last two texts asked about (the listing's and the path field's,
-// say): { text, starts, done }, where starts[k] is where line k + 1
-// starts, and `done` says they're all there. Finding a line from the
-// text's start took over a millisecond at 40,000 lines, and the status
-// line, line numbers and highlights do it at every key. Shorter texts
-// (yanked lines, say) are looked through each time instead, and keep the
-// long ones in.
+// say): { text, starts, done, from, shift }, where line k + 1 starts at
+// starts[k], plus `shift` from k = `from` on (see startAt), and `done`
+// says they're all there. Finding a line from the text's start took over
+// a millisecond at 40,000 lines, and the status line, line numbers and
+// highlights do it at every key. Shorter texts (yanked lines, say) are
+// looked through each time instead, and keep the long ones in.
 const indexedLength = 10000;
 let lineIndexes = [];
 
@@ -28,7 +28,7 @@ function compareStringsWith(f) {
 }
 
 function lineIndex(t) {
-    const fresh = { text: t, starts: [0], done: false };
+    const fresh = { text: t, starts: [0], done: false, from: Infinity, shift: 0 };
     if (t.length < indexedLength)
         return fresh;
     // The same string, not only the same text, which is looked through
@@ -39,33 +39,56 @@ function lineIndex(t) {
     return x;
 }
 
+// Where line k + 1 of the text of x (see lineIndexes) starts.
+function startAt(x, k) {
+    return k < x.from ? x.starts[k] : x.starts[k] + x.shift;
+}
+
 // `after` is `before` with [start, end) replaced by `text`: the line starts
 // found in `before` go to `after`, moved past the edit, so a long text
 // isn't looked through again after each edit (a gigabyte took a second).
+// `before` loses them: copying them took as long as moving them. Those
+// past the edit move by its `shift`, all at once, from where they start
+// (`from`), which only the starts between where it was and there are
+// moved to: moving all of them at each edit, :%norm and macros on many
+// lines took time in proportion to the lines at each edit (15 s of
+// :%norm g~iw's 23 s at 20,000 lines), where edits line after line now
+// move one each.
 function carryLines(before, after, start, end, text) {
     if (after.length < indexedLength)
         return;
     const x = lineIndexes.find(x => x.text.length === before.length && sameString(x.text, before));
     if (!x)
         return;
+    x.text = after;
+    if (lineIndexes[0] !== x)
+        lineIndexes = [x].concat(lineIndexes.filter(y => y !== x)).slice(0, 2);
     const s = x.starts, d = text.length - (end - start);
     // Only as far as they were found, from where findLines goes on, so
     // none of the edit's if they weren't found as far as its start.
-    if (!x.done && s[s.length - 1] <= start) {
-        lineIndexes = [{ text: after, starts: s.slice(), done: false }, x];
+    if (!x.done && startAt(x, s.length - 1) <= start)
         return;
-    }
     // Those at the edit's start or before it stay, those past its end move,
     // and the line breaks it puts in start lines of their own.
-    const lo = partition(0, s.length, i => s[i] <= start);
-    const starts = s.slice(0, lo);
-    for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1))
-        starts.push(start + i + 1);
+    const lo = partition(0, s.length, i => startAt(x, i) <= start);
     let k = lo;
-    while (k < s.length && s[k] <= end)
+    while (k < s.length && startAt(x, k) <= end)
         k++;
-    const moved = s.slice(k).map(p => p + d);
-    lineIndexes = [{ text: after, starts: starts.concat(moved), done: x.done }, x];
+    if (x.shift) {
+        const a = Math.min(x.from, k), b = Math.min(Math.max(x.from, k), s.length);
+        for (let i = a; i < b; i++)
+            s[i] += x.from < k ? x.shift : -x.shift;
+    }
+    x.from = k;
+    x.shift += d;
+    const breaks = [];
+    for (let i = text.indexOf("\n"); i >= 0; i = text.indexOf("\n", i + 1))
+        breaks.push(start + i + 1);
+    if (breaks.length > 1000 || k - lo > 1000)
+        x.starts = s.slice(0, lo).concat(breaks, s.slice(k));
+    else if (breaks.length || k > lo)
+        Array.prototype.splice.apply(s, [lo, k - lo].concat(breaks));
+    x.from = lo + breaks.length;
 }
 
 // The first index in [from, to) that `before` is false for, where it's true
@@ -87,12 +110,12 @@ function partition(from, to, before) {
 // all of them).
 function findLines(x, count, p) {
     const t = x.text, s = x.starts;
-    while (!x.done && (s.length < count || s[s.length - 1] <= p)) {
-        const i = t.indexOf("\n", s[s.length - 1]);
+    while (!x.done && (s.length < count || startAt(x, s.length - 1) <= p)) {
+        const i = t.indexOf("\n", startAt(x, s.length - 1));
         if (i < 0)
             x.done = true;
         else
-            s.push(i + 1);
+            s.push(s.length < x.from ? i + 1 : i + 1 - x.shift);
     }
 }
 
@@ -143,15 +166,15 @@ function spannedLines(s) {
 function lineToPos(t, line) {
     const x = lineIndex(t);
     findLines(x, line, -1);
-    return x.starts[Math.max(0, Math.min(line, x.starts.length) - 1)];
+    return startAt(x, Math.max(0, Math.min(line, x.starts.length) - 1));
 }
 
 // The line number (from 1) of position p.
 function lineOf(t, p) {
-    const x = lineIndex(t), s = x.starts;
+    const x = lineIndex(t);
     findLines(x, 0, p);
     // How many lines start at p or before it.
-    return Math.max(1, partition(0, s.length, i => s[i] <= p));
+    return Math.max(1, partition(0, x.starts.length, i => startAt(x, i) <= p));
 }
 
 // ---- Characters ------------------------------------------------------------

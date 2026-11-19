@@ -32,7 +32,7 @@
   (`atEveryCursor`) is an edit per cursor, each making the whole text
   again (a new string of it, which V4 copies, and its line starts), so
   `g~iw` at 20,000 cursors (one a line) took 125 s, where `:%norm g~iw`
-  took 26 s and typing at them 0.36 s. So the operators `d`, `c`, `y`,
+  took 26 s (4 s since, see Batches and runs) and typing at them 0.36 s. So the operators `d`, `c`, `y`,
   `g~`, `gu`, `gU`, `g?`, `>` and `<` (over characters or lines: `dd`,
   `yy`, `cc`, `>>`), and `x`, `X`, `D`, `C`, `s`, `S`, `Y`, `~`, `r`,
   `p`, `P`, `o`, `O`, `J`, `gJ`, `<C-a>` and `<C-x>`, are one edit

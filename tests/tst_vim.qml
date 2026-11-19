@@ -1770,6 +1770,139 @@ TestCase {
         compare(render(), "ha");
     }
 
+    // A long text's line starts, found once, go on through its edits (see
+    // Txt.carryLines, which moves those past an edit only once it must):
+    // edits line after line, back, far apart, adding and taking away line
+    // breaks, before all of them were found, and as many again as lines.
+    function test_lineIndexCarried() {
+        const lines = [];
+        for (let i = 0; i < 3000; i++)
+            lines.push("line " + i);
+        let t = lines.join("\n"), seed = 7;
+        const random = n => {
+            seed = (seed * 1103515245 + 12345) % 2147483648;
+            return seed % n;
+        };
+        // What the index should give, counted.
+        const lineOf = p => {
+            let n = 1;
+            for (let i = t.indexOf("\n"); i >= 0 && i < p; i = t.indexOf("\n", i + 1))
+                n++;
+            return n;
+        };
+        const lineToPos = line => {
+            let p = 0;
+            for (let n = 1; n < line; n++) {
+                const i = t.indexOf("\n", p);
+                if (i < 0)
+                    break;
+                p = i + 1;
+            }
+            return p;
+        };
+        const check = (what, k) => {
+            const p = random(t.length + 1), line = 1 + random(lineOf(t.length) + 1);
+            compare(Txt.lineOf(t, p), lineOf(p), what + " " + k + ": lineOf " + p);
+            compare(Txt.lineToPos(t, line), lineToPos(line), what + " " + k + ": lineToPos " + line);
+        };
+        const edit = (s, e, text) => {
+            const after = t.slice(0, s) + text + t.slice(e);
+            Txt.carryLines(t, after, s, e, text);
+            t = after;
+        };
+        Txt.lineOf(t, 300); // found as far as line 50
+        for (let k = 0; k < 600; k++) {
+            const kind = k % 4;
+            let s;
+            if (kind === 0) // line after line
+                s = Txt.lineToPos(t, 1 + (k >> 2) % 2000) + random(4);
+            else if (kind === 1) // back
+                s = Txt.lineToPos(t, Math.max(1, 2000 - (k >> 2) * 3));
+            else // anywhere
+                s = random(t.length);
+            const e = Math.min(t.length, s + random(kind === 3 ? 30 : 4));
+            edit(s, e, ["", "x", "yz", "\n", "a\nb", "\n\n"][random(6)]);
+            check("edit", k);
+            if (k % 50 === 0)
+                compare(Txt.countLines(t), lineOf(t.length), "countLines " + k);
+        }
+        // An edit at each line, from the first to the last, as :%norm x.
+        for (let line = 1, n = Txt.countLines(t); line <= n; line++) {
+            const ls = Txt.lineToPos(t, line);
+            if (ls < t.length && t[ls] !== "\n")
+                edit(ls, ls + 1, "");
+        }
+        for (let k = 0; k < 20; k++)
+            check("after", k);
+    }
+
+    // :normal and a macro on many lines of a long text (where the lines'
+    // starts are kept, and the lines left to run on move all at once).
+    function test_normalOnLongText() {
+        const lines = [];
+        for (let i = 0; i < 2000; i++)
+            lines.push("a" + i);
+        const text = lines.join("\n");
+        load(text);
+        keys(":%norm Ax<CR>");
+        tryCompare(vim, "running", null, 60000);
+        compare(editor.text, lines.map(l => l + "x").join("\n"));
+        compare(Txt.lineToPos(editor.text, 1500), editor.text.indexOf("a1499x"));
+        keys("u");
+        compare(editor.text, text);
+        // A line joined to the one before goes with it (see Marked lines),
+        // so J goes on joining.
+        keys(":%norm J<CR>");
+        tryCompare(vim, "running", null, 60000);
+        compare(editor.text, lines.join(" "));
+        compare(Txt.countLines(editor.text), 1);
+        keys("u");
+        compare(Txt.lineToPos(editor.text, 700), editor.text.indexOf("a699"));
+        // Each line copied, in visual mode with a macro.
+        vim.registers.q = { text: "yypA!<Esc>", linewise: false, hidden: [] };
+        keys("ggVG@q");
+        tryCompare(vim, "running", null, 60000);
+        compare(Txt.countLines(editor.text), 4000);
+        compare(editor.text, lines.map(l => l + "\n" + l + "!").join("\n"));
+        compare(Txt.lineOf(editor.text, editor.text.indexOf("a1999!")), 4000);
+    }
+
+    // :normal, a macro on lines and :g on many lines of the listing, whose
+    // icons' hidden text moves by a shift put off till what reads it (see
+    // Vim.hiddenPending): each icon keeps its own, through edits on its
+    // line, lines added and taken away, and undo.
+    function test_hiddenThroughLongRuns() {
+        const n = 300, names = [], spec = [];
+        for (let i = 0; i < n; i++) {
+            names.push("ab" + i);
+            spec.push((i % 2 ? "C" : "M") + "  ab" + i);
+        }
+        const shown = f => names.map((name, i) => "<" + (i % 2 ? "C" : "M") + ":h" + (i + 1) + ">  " + f(name, i));
+        loadListing(spec.join("\n"));
+        const all = shown(s => s).join("\n");
+        compare(render(), all);
+        const each = (ks, want) => {
+            keys(ks);
+            tryCompare(vim, "running", null, 60000);
+            compare(render(), want, ks);
+            keys("u");
+            compare(render(), all, ks + " undone");
+        };
+        each(":%norm x<CR>", shown(s => s.slice(1)).join("\n"));
+        each(":%norm Afoo<CR>", shown(s => s + "foo").join("\n"));
+        each(":%norm $xIZ<CR>", shown(s => "Z" + s.slice(0, -1)).join("\n"));
+        each(":%norm yyp<CR>", shown(s => s).map(l => l + "\n" + l).join("\n"));
+        each(":g/b1/norm A!<CR>", shown(s => /b1/.test(s) ? s + "!" : s).join("\n"));
+        vim.registers.q = { text: "jddk", linewise: false, hidden: [] };
+        each("ggVG@q", shown(s => s).filter((l, i) => i % 2 === 0).join("\n"));
+        vim.registers.q = { text: "A?<Esc>0x", linewise: false, hidden: [] };
+        each("ggVG@q", shown(s => s.slice(1) + "?").join("\n"));
+        // Back on the line before (where k fails, on the first, the rest
+        // of the keys don't run).
+        vim.registers.q = { text: "A!<Esc>kA?<Esc>", linewise: false, hidden: [] };
+        each("ggVG@q", shown((s, i) => s + "!" + (i < n - 1 ? "?" : "")).join("\n"));
+    }
+
     // With a !, no shortcut takes :normal's keys, as no mapping takes
     // vim's.
     function test_normalCommandShortcuts() {

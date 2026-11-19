@@ -933,6 +933,7 @@ QtObject {
         toNormal();
         commitChange(true); // even in a macro: the step is this buffer's
         findScope = null;
+        settleHidden();
         return { cursor: cursor, wantCol: wantCol, undoStack: undoStack, redoStack: redoStack,
             hidden: hidden, lastVisual: lastVisual, marked: marked };
     }
@@ -2772,10 +2773,10 @@ QtObject {
         const parts = [], entries = [], ends = [];
         let at = first, length = 0, k = firstAt(list, first);
         for (const e of edits) {
-            for (; k < list.length && list[k].at < e.start; k++) {
+            for (let ha; k < list.length && (ha = entryAt(list, k)) < e.start; k++) {
                 const h = list[k];
-                if (h.at >= at && h.at + h.icon.length <= e.start)
-                    entries.push({ at: h.at - at + length, icon: h.icon, text: h.text });
+                if (ha >= at && ha + h.icon.length <= e.start)
+                    entries.push({ at: ha - at + length, icon: h.icon, text: h.text });
             }
             parts.push(t.slice(at, e.start), e.text);
             length += e.start - at;
@@ -2794,7 +2795,7 @@ QtObject {
             return list;
         };
         const marks = moved(marked);
-        moveLineRuns(moved);
+        moveLineRuns(moved, last, length - (last - first));
         // The editor's cursor moves to the end of the new text, and the view
         // follows it: keep the view where it was.
         const view = flickable && { x: flickable.contentX, y: flickable.contentY };
@@ -4519,7 +4520,7 @@ QtObject {
         const list = state ? state.hidden || [] : hidden, texts = [];
         for (const ls of state ? state.marked || [] : marked) {
             const i = firstAt(list, ls);
-            if (i < list.length && list[i].at === ls)
+            if (i < list.length && entryAt(list, i) === ls)
                 texts.push(list[i].text);
         }
         return texts;
@@ -4529,6 +4530,7 @@ QtObject {
     // and only those: Koil's listing shown again marks the entries that
     // were marked, wherever they are now (see markedTexts).
     function markTexts(texts) {
+        settleHidden();
         const want = new Set(texts), t = bufferText();
         setMarked(texts.length ? hidden.filter(h => want.has(h.text) && (h.at === 0 || t[h.at - 1] === "\n"))
             .map(h => h.at) : []);
@@ -4755,7 +4757,7 @@ QtObject {
         }
         const t = bufferText();
         e.due = false;
-        setCursor(clampNormal(t, Txt.lineStart(t, Math.min(e.starts.shift(), t.length))));
+        setCursor(clampNormal(t, Txt.lineStart(t, Math.min(e.starts.shift() + (e.shift || 0), t.length))));
         wantCol = Txt.column(t, cursor);
     }
 
@@ -4790,11 +4792,23 @@ QtObject {
     }
 
     // The lines that macros run on each line have yet to go to, `moved`
-    // as an edit moves them (see movedMarks).
-    function moveLineRuns(moved) {
+    // as an edit moves them (see movedMarks), one that ends at `end` and
+    // makes the text `d` longer. One before them all (on the line it runs
+    // on, as it goes on to the lines after) moves them all alike, so it
+    // adds to their `shift` (see macroStep) instead: moving each one at
+    // each edit, :%norm x took 9 s more at 20,000 lines.
+    function moveLineRuns(moved, end, d) {
         for (const f of typeahead) {
-            if (f.each && f.each.starts.length)
-                f.each.starts = moved(f.each.starts);
+            const e = f.each;
+            if (!e || !e.starts.length)
+                continue;
+            const shift = e.shift || 0;
+            if (e.starts[0] + shift > end) {
+                e.shift = shift + d;
+                continue;
+            }
+            e.starts = moved(shift ? e.starts.map(p => p + shift) : e.starts);
+            e.shift = 0;
         }
     }
 
@@ -5034,6 +5048,8 @@ QtObject {
     // what had been below). If none of them changed, the view stays where
     // it is, even if the mouse scrolled the cursor out of it.
     function flush() {
+        // The view reads `hidden` (see hiddenPending).
+        settleHidden();
         // Compared only where vim edited it (see unchanged): `!==` hashes
         // all of two texts that aren't the same string.
         const b = batch, old = editorText(), d = diff(old, b.text, [], [], b.same), edited = !!d;
@@ -5243,6 +5259,7 @@ QtObject {
 
     function beginChange() {
         if (!change) {
+            settleHidden();
             const t = bufferText();
             change = { before: t, hidden: hidden, cursor: cursor, same: unchanged(t) };
         }
@@ -5253,6 +5270,7 @@ QtObject {
     function commitChange(force) {
         if (!change || running && !force)
             return;
+        settleHidden();
         const before = change.before, after = bufferText();
         const c = change.cursor, bh = change.hidden, same = change.same;
         change = null;
@@ -5652,8 +5670,28 @@ QtObject {
     // entries for the text they hold (with `at` from its start), so an icon
     // yanks, pastes and undoes like any character. Files get the plain icon.
 
-    // Replaced, never changed in place, so a copy of the reference is a snapshot.
+    // Replaced, never changed in place, so a copy of the reference is a
+    // snapshot, once it's settled (see hiddenPending).
     property var hidden: []
+    // While a key or a chunk of a run edits (see Batches): how far the
+    // entries of `hidden` (`list`, while it's that one) from `from` on are
+    // behind, as { list, from, shift }, or null. An edit moves all the
+    // entries after it, so moving each one made :%norm and macros on many
+    // lines of the listing take time in proportion to its lines at each
+    // edit (25 s of :%norm x's 39 s at 20,000 lines): an edit in a batch
+    // instead moves this shift to start after it (see shiftHidden), and
+    // the entries between where it started and there, which for edits line
+    // after line are one or two. The positions are read through entryAt
+    // (firstAt, hiddenIn, hiddenAt), and what keeps or goes through the
+    // list settles it first (settleHidden): a change's snapshot, flush,
+    // leaving the buffer, :s's preview.
+    property var hiddenPending: null
+    // The list shiftHidden made for `hidden` in this batch, which nothing
+    // else has kept (settleHidden ends that), so the edits after it change
+    // it in place: a new list at each edit took 10 s of :%norm x at 20,000
+    // lines. Its entries are replaced, never changed, as a list kept
+    // before it has them.
+    property var hiddenOwned: null
     // The text `hidden` and `cursors` match, to diff the editor's own edits
     // against.
     property string trackedText: ""
@@ -5673,19 +5711,26 @@ QtObject {
     // The entries of `list` whose icon is in [start, end), from start.
     function hiddenIn(list, start, end) {
         const r = [];
-        for (let i = firstAt(list, start); i < list.length && list[i].at < end; i++) {
+        for (let i = firstAt(list, start), at; i < list.length && (at = entryAt(list, i)) < end; i++) {
             const h = list[i];
-            if (h.at + h.icon.length <= end)
-                r.push({ at: h.at - start, icon: h.icon, text: h.text });
+            if (at + h.icon.length <= end)
+                r.push({ at: at - start, icon: h.icon, text: h.text });
         }
         return r;
+    }
+
+    // Where the icon of list[i] is: its `at`, but for `hidden` while
+    // hiddenPending has it behind.
+    function entryAt(list, i) {
+        const p = hiddenPending;
+        return p && i >= p.from && list === p.list ? list[i].at + p.shift : list[i].at;
     }
 
     // The index of the first entry of `list` at p or after it (or its
     // length). Entries are sorted, so with thousands of them (a long
     // listing) edits look them up rather than going over them all.
     function firstAt(list, p) {
-        return Txt.partition(0, list.length, i => list[i].at < p);
+        return Txt.partition(0, list.length, i => entryAt(list, i) < p);
     }
 
     function shifted(list, by) {
@@ -5711,13 +5756,66 @@ QtObject {
 
     // Updates `hidden` for text [start, end) replaced by `length` characters
     // with the entries `entries`. An icon the edit touches loses its text.
+    // Those after it move by how much longer it makes the text: in a batch,
+    // only by hiddenPending's shift, which then starts after it, in a list
+    // of its own (see hiddenOwned).
     function shiftHidden(start, end, length, entries) {
-        const list = hidden, d = length - (end - start);
+        const d = length - (end - start);
+        if (!batch) {
+            settleHidden();
+            const list = hidden;
+            let i = firstAt(list, start);
+            if (i > 0 && list[i - 1].at + list[i - 1].icon.length > start)
+                i--;
+            const after = list.slice(firstAt(list, end));
+            hidden = list.slice(0, i).concat(shifted(entries, start), d ? shifted(after, d) : after);
+            return;
+        }
+        // What searches kept of the text and its icons (see withoutPrefixes).
+        unprefixed = null;
+        let list = hidden;
+        const p = hiddenPending && hiddenPending.list === list ? hiddenPending : null;
+        if (list !== hiddenOwned) {
+            list = list.slice();
+            hidden = list;
+            hiddenOwned = list;
+            if (p)
+                p.list = list;
+        }
         let i = firstAt(list, start);
-        if (i > 0 && list[i - 1].at + list[i - 1].icon.length > start)
+        if (i > 0 && entryAt(list, i - 1) + list[i - 1].icon.length > start)
             i--;
-        const after = list.slice(firstAt(list, end));
-        hidden = list.slice(0, i).concat(shifted(entries, start), d ? shifted(after, d) : after);
+        const j = firstAt(list, end), from = p ? p.from : list.length, shift = p ? p.shift : 0;
+        // Before the edit, where they are; from its end on, `shift` behind
+        // where they are (those the shift had start where it did).
+        const moved = (k, by) => {
+            const h = list[k];
+            list[k] = { at: h.at + by, icon: h.icon, text: h.text };
+        };
+        for (let k = from; k < i; k++)
+            moved(k, shift);
+        for (let k = j; k < from; k++)
+            moved(k, -shift);
+        const added = shifted(entries, start);
+        if (added.length > 1000 || j - i > 1000) {
+            list = list.slice(0, i).concat(added, list.slice(j));
+            hidden = list;
+            hiddenOwned = list;
+        } else if (added.length || j > i) {
+            Array.prototype.splice.apply(list, [i, j - i].concat(added));
+        }
+        hiddenPending = shift + d ? { list: list, from: i + added.length, shift: shift + d } : null;
+    }
+
+    // `hidden` with every entry where it is (see hiddenPending), for what
+    // keeps it or the view, so the next edit makes a list of its own (see
+    // hiddenOwned).
+    function settleHidden() {
+        const p = hiddenPending;
+        hiddenPending = null;
+        hiddenOwned = null;
+        if (p && p.list === hidden && p.shift)
+            hidden = hidden.slice(0, p.from).concat(shifted(hidden.slice(p.from), p.shift));
     }
 
     // Edits made by the editor itself, rather than through replaceRange.
@@ -5746,7 +5844,7 @@ QtObject {
             const m = marked.length ? movedMarks(marked, old, start, end, text) : marked;
             if (m !== marked)
                 marked = m;
-            moveLineRuns(list => movedMarks(list, old, start, end, text));
+            moveLineRuns(list => movedMarks(list, old, start, end, text), end, text.length - (end - start));
         }
         if (findScope)
             moveScope(start, end, text.length);
@@ -5831,7 +5929,7 @@ QtObject {
     // The entry of the icon at p, or null.
     function hiddenAt(p) {
         const list = hidden, i = firstAt(list, p);
-        return i < list.length && list[i].at === p ? list[i] : null;
+        return i < list.length && entryAt(list, i) === p ? list[i] : null;
     }
 
     // Replaces the whole text with `text`, whose icons hide `entries`, as
@@ -5839,6 +5937,7 @@ QtObject {
     // changes, so the view stays where it is.
     function replaceText(text, entries) {
         externalEdit(() => {
+            settleHidden();
             const d = diff(bufferText(), text, hidden, entries);
             if (d)
                 replaceRange(d.start, d.end1, text.slice(d.start, d.end2), hiddenIn(entries, d.start, d.end2));
@@ -5851,6 +5950,7 @@ QtObject {
     // read back from its file (see Document.writeScratchpad), which has the
     // icons alone.
     function replaceTextKeeping(text) {
+        settleHidden();
         const t = bufferText(), list = hidden, entries = [];
         // The entries of each line that has any, by its text, in order.
         const kept = new Map();
@@ -6143,7 +6243,7 @@ QtObject {
         while (q < t.length && Txt.isBlank(t[q]))
             q++;
         const i = firstAt(list, q);
-        if (i < list.length && list[i].at === q) {
+        if (i < list.length && entryAt(list, i) === q) {
             q += list[i].icon.length;
             while (q < t.length && Txt.isBlank(t[q]))
                 q++;
@@ -6168,8 +6268,8 @@ QtObject {
         if (linePrefixes || !list.length)
             return null;
         return i => {
-            const h = list[firstAt(list, i + 1) - 1];
-            return !!h && i < h.at + h.icon.length && atIndent(t, h.at);
+            const k = firstAt(list, i + 1) - 1, h = list[k];
+            return !!h && i < entryAt(list, k) + h.icon.length && atIndent(t, entryAt(list, k));
         };
     }
 
@@ -6178,6 +6278,8 @@ QtObject {
     // number, from 0: { line, hidden }. In the scratchpad, the entries
     // pasted with their IDs, whose lines are colored as the listing's.
     function indentIcons(t, list) {
+        if (!list)
+            settleHidden();
         const r = [];
         for (const h of list || hidden) {
             if (atIndent(t, h.at))
@@ -7867,6 +7969,7 @@ QtObject {
     // drawn and the find bar's scope stay on their characters, a
     // selection's end on the last of a replacement.
     function previewed(t, found, target, textFor) {
+        settleHidden();
         const before = { text: t, hidden: hidden, cursors: cursors, cursor: cursor, marked: marked,
             findScope: findScope };
         const near = previewWindow(t, found, target), replaced = found.slice(near.from, near.to);
