@@ -292,6 +292,17 @@ impl Sizes {
     /// starts any.
     pub fn want(&self, dirs: impl IntoIterator<Item = PathBuf>, measure: Measure) -> bool {
         let mut state = self.lock();
+        if cfg!(target_os = "emscripten") {
+            // The web has no threads: count here, at once, which its disk
+            // (in memory) makes quick. Nothing tells what changed there
+            // (see `koil::DiskWatcher`), so every dir is counted again.
+            state.forget();
+            let started = state.want(dirs, measure);
+            state.threads += 1;
+            drop(state);
+            count(&self.shared);
+            return !started.is_empty();
+        }
         let started = state.want(dirs, measure);
         let waits = |state: &State| {
             (started.iter()).any(|n| state.counts.get(n).is_some_and(|c| c.unknown))

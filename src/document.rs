@@ -304,6 +304,11 @@ impl FileWatcher {
     /// Watches `path`, emitting `file_changed` once for each burst of
     /// changes to it. None if it can't.
     fn new(path: PathBuf, thread: CxxQtThread<qobject::Document>) -> Option<FileWatcher> {
+        // The web has no threads to watch on, and nothing but Koil changes
+        // its disk.
+        if cfg!(target_os = "emscripten") {
+            return None;
+        }
         // Links followed, as the changes name it.
         let target = std::fs::canonicalize(&path).ok()?;
         let dir = target.parent()?.to_path_buf();

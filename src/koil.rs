@@ -419,6 +419,11 @@ impl Filter {
 
 impl DiskWatcher {
     fn new(thread: CxxQtThread<qobject::Koil>, sizes: Sizes) -> Option<DiskWatcher> {
+        // The web has no threads to watch on, and nothing but Koil changes
+        // its disk.
+        if cfg!(target_os = "emscripten") {
+            return None;
+        }
         let filter = Arc::new(Mutex::new(Filter::default()));
         let changed = Coalesced::new(thread);
         let read_filter = filter.clone();
@@ -667,10 +672,13 @@ impl qobject::Koil {
             files: rust.files.clone(),
         };
         let sizes = size_watches(rust.sizes.watches());
-        if let Some(watcher) = &mut rust.watcher {
-            for dir in watcher.set(filter, &sizes) {
-                rust.sizes.unwatched(&dir);
-            }
+        let unwatched = match &mut rust.watcher {
+            Some(watcher) => watcher.set(filter, &sizes),
+            // Nothing is watched (as on the web): no size can be kept.
+            None => sizes,
+        };
+        for dir in unwatched {
+            rust.sizes.unwatched(&dir);
         }
     }
 

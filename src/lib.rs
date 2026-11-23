@@ -32,7 +32,7 @@ const NERD_FONT: &[u8] = include_bytes!("../fonts/JetBrainsMonoNLNerdFont-Regula
 const WINDOW_ICON: &[u8] = include_bytes!("../packaging/window-icon.png");
 
 /// Starts Koil: reads the command line, then opens the window and runs
-/// until it closes.
+/// until it closes (on the web, returns once it's open).
 pub fn run() {
     // Before the app, so --help doesn't show it in the Dock, and a window
     // doesn't open for a command line Koil can't read.
@@ -81,6 +81,15 @@ pub fn run() {
         engine.load(&QUrl::from("qrc:/qt/qml/Koil/qml/main.qml"));
     }
 
+    // On the web, exec() throws to give the browser its loop back (Qt's
+    // runs in it), which Rust's frames would take for a panic: return
+    // instead, and keep the app and the engine, which run on.
+    #[cfg(target_os = "emscripten")]
+    {
+        std::mem::forget(engine);
+        std::mem::forget(app);
+    }
+    #[cfg(not(target_os = "emscripten"))]
     if let Some(app) = app.as_mut() {
         app.exec();
     }

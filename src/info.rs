@@ -39,8 +39,8 @@ pub struct Span {
 }
 
 /// What a part of what `K` shows is, which says its color. Permissions and
-/// owners are Unix's alone.
-#[cfg_attr(not(unix), allow(dead_code))]
+/// owners are Unix's alone, and the web has no owners.
+#[cfg_attr(any(not(unix), target_os = "emscripten"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Kind {
@@ -670,11 +670,16 @@ fn system_rows(meta: &Metadata, now: SystemTime) -> Rows {
         rows.push(("Changed", time_text(changed, now)));
     }
     rows.push(("Permissions", permissions(&meta.file_type(), meta.mode())));
-    let (uid, gid) = (meta.uid(), meta.gid());
-    let owner = owner_kind(uid, uid == uzers::get_effective_uid());
-    rows.push(("Owner", named(user_name(uid), uid, owner)));
-    let group = owner_kind(gid, in_group(gid));
-    rows.push(("Group", named(group_name(gid), gid, group)));
+    // The web has no users: every file there is root's.
+    #[cfg(not(target_os = "emscripten"))]
+    {
+        let (uid, gid) = (meta.uid(), meta.gid());
+        // SAFETY: geteuid can't fail.
+        let owner = owner_kind(uid, uid == unsafe { libc::geteuid() });
+        rows.push(("Owner", named(user_name(uid), uid, owner)));
+        let group = owner_kind(gid, in_group(gid));
+        rows.push(("Group", named(group_name(gid), gid, group)));
+    }
     if !meta.is_dir() {
         rows.push(("Hard links", Text::of(grouped(meta.nlink()), Kind::Number)));
     }
@@ -710,7 +715,7 @@ fn system_rows(_meta: &Metadata, _now: SystemTime) -> Rows {
 
 /// How an owner (or a group) `id` is colored: root's (0), the user's own
 /// (`yours`), or not at all.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "emscripten")))]
 fn owner_kind(id: u32, yours: bool) -> Kind {
     match () {
         _ if yours => Kind::You,
@@ -720,7 +725,7 @@ fn owner_kind(id: u32, yours: bool) -> Kind {
 }
 
 /// Whether the user Koil runs as is in the group `gid`.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "emscripten")))]
 fn in_group(gid: u32) -> bool {
     // SAFETY: getegid can't fail, and getgroups with no room says how many
     // groups there are.
@@ -737,7 +742,7 @@ fn in_group(gid: u32) -> bool {
 
 /// A name colored as `kind` and its number, like `andy (501)`, or the
 /// number alone if it has no name.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "emscripten")))]
 fn named(name: Option<String>, id: u32, kind: Kind) -> Text {
     match name {
         Some(name) => (Text::of(name, kind).and(" (", Kind::Muted))
@@ -790,14 +795,14 @@ fn permissions(kind: &FileType, mode: u32) -> Text {
 }
 
 /// The name of the user `uid`, if it has one.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "emscripten")))]
 fn user_name(uid: u32) -> Option<String> {
     let user = uzers::get_user_by_uid(uid)?;
     Some(user.name().to_string_lossy().into_owned())
 }
 
 /// The name of the group `gid`, if it has one.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "emscripten")))]
 fn group_name(gid: u32) -> Option<String> {
     let group = uzers::get_group_by_gid(gid)?;
     Some(group.name().to_string_lossy().into_owned())

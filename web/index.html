@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- The web version's page (see docs/platform.md, Web): Qt's loader starts
+     Koil's wasm in #screen, which fills the window. Until then, and if it
+     stops, #status says so. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- One CSS pixel a Qt pixel, as Qt's own page has it. -->
+  <meta name="viewport" content="width=device-width, height=device-height, user-scalable=0">
+  <title>Koil</title>
+  <link rel="icon" type="image/png" href="icon.png">
+  <style>
+    /* The editor's colors in Koil's light and dark themes (Fusion's), so
+       the page doesn't flash another color before Koil draws. */
+    :root { color-scheme: light dark; --base: #ffffff; --text: #6b6b6b; }
+    @media (prefers-color-scheme: dark) {
+      :root { --base: #2a2a2a; --text: #a8a8a8; }
+    }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: var(--base); color: var(--text);
+      font: 15px/1.5 system-ui, sans-serif;
+    }
+    #screen { position: fixed; inset: 0; }
+    #status {
+      position: fixed; inset: 0; padding: 16px;
+      display: flex; flex-direction: column; gap: 16px;
+      align-items: center; justify-content: center; text-align: center;
+    }
+    #status[hidden] { display: none; }
+    #status img { width: 64px; height: 64px; }
+  </style>
+</head>
+<body>
+  <div id="screen"></div>
+  <div id="status">
+    <img src="icon.png" alt="">
+    <div id="message">Loading Koil…</div>
+    <noscript>Koil needs JavaScript.</noscript>
+  </div>
+  <script src="qtloader.js"></script>
+  <script src="koil.js"></script>
+  <script>
+    const screen = document.getElementById("screen");
+    const status = document.getElementById("status");
+    const message = document.getElementById("message");
+
+    function stopped(why) {
+      message.textContent = "Koil stopped. Reload the page to start again."
+        + (why ? "\n(" + why + ")" : "");
+      message.style.whiteSpace = "pre-line";
+      screen.hidden = true;
+      status.hidden = false;
+    }
+
+    const loading = qtLoad({
+      qt: {
+        entryFunction: window.koil_entry,
+        containerElements: [screen],
+        onLoaded: () => { status.hidden = true; },
+        // A crash, or a panic, which aborts (see docs/platform.md, Web).
+        onExit: exit => stopped(exit.text),
+      },
+    });
+    // The instance, as `koil`, for the console and scripts/web-smoke.mjs
+    // (`koil.FS` is its disk).
+    loading.then(instance => { window.koil = instance; }, error => {
+      console.error(error);
+      stopped(String(error));
+    });
+  </script>
+</body>
+</html>

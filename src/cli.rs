@@ -161,6 +161,10 @@ fn line(n: &str) -> Option<u32> {
 /// and has something in it; either way, Koil then starts in the scratchpad.
 /// It's read to its end before the window opens, as vim's `-` does.
 pub fn read_stdin(args: &mut Args) {
+    // The web has no stdin: Emscripten would ask for it with a prompt.
+    if cfg!(target_os = "emscripten") {
+        return;
+    }
     let stdin = std::io::stdin();
     if !args.stdin && !piped(&stdin) {
         return;

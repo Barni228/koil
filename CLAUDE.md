@@ -56,6 +56,9 @@ A line a file; `docs/layout.md` says what each has, by function.
 - `tests/tst_vim.qml`, `tests/tst_shortcuts.qml`; Rust tests in
   `src/*/tests.rs`.
 - `scripts/`, `packaging/`, `fonts/`: bundling, icons, the Nerd Font.
+- `web/`: the web version's build (`CMakeLists.txt`, the `koil_web` crate,
+  `main.cpp`, the page `index.html`). `scripts/build-web.sh` builds it into
+  `target/web/`, `scripts/web-smoke.mjs` checks it (docs/platform.md, Web).
 
 ## Build and test
 
@@ -108,6 +111,19 @@ A line a file; `docs/layout.md` says what each has, by function.
   which it's transient for, still is), a moment before the system gives
   it the keys, so `keepKeys` also waits for the TestCase's window to lose
   its active focus (`hasKeys`): the first key went there.
+- The web version (docs/platform.md, Web) needs Qt for WebAssembly of the
+  host Qt's version (`uvx --from aqtinstall aqt install-qt all_os wasm
+  6.11.2 wasm_singlethread -O <dir>`), the Emscripten that Qt names
+  (`QT_EMCC_RECOMMENDED_VERSION` in its
+  `lib/cmake/Qt6/QtPublicWasmToolchainHelpers.cmake`: 4.0.7 for 6.11.2;
+  emsdk's `./emsdk install 4.0.7 && ./emsdk activate 4.0.7`) and `rustup
+  target add wasm32-unknown-emscripten`. `QT_WASM=<dir>/6.11.2/wasm_singlethread
+  EMSDK=<emsdk> scripts/build-web.sh` builds it (minutes; again, about
+  one), `node scripts/web-smoke.mjs` checks it in headless Chrome
+  (`--shots <dir>` saves screenshots, `VERBOSE=1` prints the console),
+  and `python3 -m http.server -d target/web` serves it to try. The page
+  has the Emscripten instance as `koil` (`koil.FS` is Koil's disk).
+  `brew upgrade qt` needs the wasm Qt of the new version.
 - `qmllint -I target/cxxqt/qml_modules qml/*.qml` should print nothing.
   cxx-qt-build writes `.qmlls.ini` (ignored by git) for qmlls.
 - Windows' Qt (6.10, see CI) can be tried on macOS, for a bug only

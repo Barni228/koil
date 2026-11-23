@@ -938,6 +938,10 @@ static ENVIRONMENT: OnceLock<Environment> = OnceLock::new();
 /// one needn't wait for it. Only while the setting is on, as it runs the
 /// user's shell.
 pub fn load_environment() {
+    // The web runs no commands, nor has threads.
+    if cfg!(target_os = "emscripten") {
+        return;
+    }
     thread::spawn(|| {
         environment();
     });

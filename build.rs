@@ -54,6 +54,9 @@ fn main() {
                 println!("cargo::rustc-link-lib={lib}");
             }
         }
+        // The web build's crate (`web/`) gets Koil's C++ and QML module
+        // from what `export` hands on (by the links key, in Cargo.toml).
+        Ok("emscripten") => builder.build().export(),
         _ => {
             builder.build();
         }

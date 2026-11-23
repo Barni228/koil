@@ -6,6 +6,9 @@ description = "File manager that works like a text editor, with vim"
 repository = "https://github.com/Barni228/koil"
 license = "MIT"
 publish = false
+# cxx-qt-build hands the C++ it builds (and the QML module) on to a crate
+# that depends on this one only by a links key: the web build's (`web/`).
+links = "koil"
 
 [dependencies]
 # First-party dependencies
@@ -31,7 +34,10 @@ serde_json = "1"
 # signals to stop a shell command and what it started (its process group),
 # and what's mounted where on macOS
 libc = "0.2"
-# the names of a file's owner and group, and the user's groups, which `K` shows
+
+# the names of a file's owner and group, which `K` shows (not on the web,
+# which has no users, and where uzers doesn't build)
+[target.'cfg(all(unix, not(target_os = "emscripten")))'.dependencies]
 uzers = { version = "0.12", default-features = false }
 
 # a drive's capacity and free space, which `K` shows

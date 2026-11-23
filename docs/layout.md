@@ -184,7 +184,15 @@
 - `scripts/`: `bundle-macos.sh` (makes the `.app`), `package-macos.sh` (the
   `.dmg`), `package-windows.ps1` (windeployqt, then the Inno Setup
   installer), `make-icons.sh` (the icons, from `packaging/icon.png`),
-  `qml-tests.sh` (the QML tests as CI runs them, a failed one again).
+  `qml-tests.sh` (the QML tests as CI runs them, a failed one again),
+  `build-web.sh` (the web version, into `target/web/`) and
+  `web-smoke.mjs` (which checks it in headless Chrome; see Web).
+- `web/`: the web version's build (see Web): `CMakeLists.txt` (Qt for
+  WebAssembly links Koil into `koil.wasm`), the `koil_web` crate
+  (`Cargo.toml`, `build.rs`, `lib.rs`: Koil as a static library, whose
+  `koil_main` starts it), `main.cpp` (the page's `main`, which calls
+  that), `cpp_exception_tag.S`, and `index.html`, the page, which loads
+  it with Qt's `qtloader.js` and says when Koil stopped.
 - `packaging/`: `icon.png` (the app's icon, as macOS draws it) and the
   icons made from it (committed, so building needs no ImageMagick):
   `macos/Koil.icns`, `windows/koil.ico` (in the exe through `koil.rc`,

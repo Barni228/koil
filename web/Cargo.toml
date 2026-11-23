@@ -1,0 +1,22 @@
+# The web build's crate: Koil as a static library, which CMakeLists.txt
+# links into the page's wasm, as cxx-qt builds for the web only through
+# CMake. A crate of its own, so desktop builds don't make the static
+# library too (400 MB, and seconds each build).
+[package]
+name = "koil_web"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "lib.rs"
+crate-type = ["staticlib"]
+
+[dependencies]
+koil = { path = ".." }
+
+[build-dependencies]
+cxx-qt-build = "0.10"
+
+# Not in a workspace: desktop's cargo commands leave it alone.
+[workspace]

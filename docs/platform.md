@@ -68,3 +68,60 @@
   `QTest::mouseClick` on the window under the list goes through it, as
   Windows' clicks do, and with Windows' Qt for macOS (CLAUDE.md's Build
   and test) shows the click reach the item under the row.
+- **Web**: the web version is the same code, built with Qt for
+  WebAssembly (single-threaded, the only one cxx-qt supports) into
+  `koil.wasm`, which `web/index.html` loads with Qt's `qtloader.js`.
+  `scripts/build-web.sh` builds it (CLAUDE.md's Build and test), and
+  `scripts/web-smoke.mjs` checks it in headless Chrome. What's odd about
+  the build, and why:
+  - cxx-qt builds for the web only through CMake (`web/CMakeLists.txt`,
+    with cxx-qt-cmake and Corrosion, which runs cargo): cargo alone can't
+    link Qt's wasm. CMake links a static library, and Koil is a binary,
+    so `web/` is a crate of its own (`koil_web`, a `staticlib`) whose
+    `koil_main` calls `koil::run`, and `web/main.cpp` is the page's
+    `main`, which calls that. Making Koil's own crate a `staticlib` too
+    would have built a 400 MB library on every desktop build. Koil's C++
+    and QML module reach `koil_web` by Koil's `links` key: `build.rs`
+    exports them (`.export()`) on the web, and `web/build.rs` collects
+    them into the initializers CMake links. `web/Cargo.lock` is a copy of
+    Koil's, made by the script, so both build the same versions.
+  - cxx-qt-build asks the qmake it's given for Qt's paths; the wasm Qt's
+    own runs the host's with aqt's `qt.conf`, which only works where aqt
+    put the host Qt. The script writes a `qt.conf` of its own, and a
+    `qmake` that runs the host's with it.
+  - The host's `rcc` compresses with zstd, which the wasm QtCore lacks
+    (`qResourceFeatureZstd` is undefined at the link). Qt's own CMake
+    passes `--no-zstd` for the web, but cxx-qt-build has no way to, so
+    the script's `qt.conf` gives it tools of its own (`host-libexec`):
+    the host's, but `rcc`, a script that adds `--no-zstd`.
+  - Qt for the web is built with Emscripten's JavaScript exceptions, and
+    Rust's std with wasm's own, which refer to a `__cpp_exception` tag
+    that nothing defines then. Linking with `-fwasm-exceptions` to get it
+    breaks Qt (`__resumeException`), so `web/cpp_exception_tag.S`
+    defines the tag, as Emscripten's compiler-rt does. Nothing can throw
+    it, so a panic can't unwind: it aborts Koil (the console says
+    "_Unwind_RaiseException is not correctly implemented"), and the page
+    says Koil stopped. If a Rust or Emscripten update breaks this, the
+    way out is nightly Rust with `-Zbuild-std=std,panic_abort
+    -Cpanic=abort`, or a Qt built with `-feature-wasm-exceptions`.
+  - `app.exec()` throws to give the browser its loop back (Qt's runs in
+    it), which Rust's frames take for a panic, so on the web `run`
+    forgets the app and the engine and returns.
+  - QML's imports are linked statically, those `qmlimportscanner` finds
+    in `qml/` (`QT_QML_IMPORT_SCANNER_EXTRA_ROOT_PATHS`, as `qml/` isn't
+    under `web/`). Without them, QtQuick's plugin isn't found.
+  - Qt, Emscripten and the host Qt must be the very versions that go
+    together: the host Qt's version is the wasm Qt's, and Emscripten is
+    the one Qt names (`QT_EMCC_RECOMMENDED_VERSION`); the script checks
+    both. `uzers` doesn't build for Emscripten, and the web has no users
+    anyway, so `K` shows no owner or group there.
+  - The web has no threads (`thread::spawn` fails, and unwrapping that
+    aborts) and runs no processes. So koil-core walks the listing in one
+    thread there; nothing watches the disk (`DiskWatcher`, `FileWatcher`:
+    nothing but Koil changes it); dirs' sizes are counted at once, in
+    the one thread, and again each time, as nothing tells what changed
+    (`Sizes::want`; its disk is in memory, so it's quick); and shell
+    commands, Open With and Reveal say the browser can't run other
+    programs.
+  - stdin isn't read (`cli::read_stdin`): Emscripten would ask for it
+    with a prompt.

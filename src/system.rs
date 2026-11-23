@@ -439,6 +439,9 @@ impl qobject::System {
     }
 
     fn reveal(&self, path: &QString) -> QString {
+        if cfg!(target_os = "emscripten") {
+            return QString::from(NOT_ON_THE_WEB);
+        }
         let path = PathBuf::from(path.to_string());
         let why = match gone(&path) {
             Some(why) => why,
@@ -451,6 +454,9 @@ impl qobject::System {
     }
 
     fn open_in_app(self: Pin<&mut Self>, path: &QString) -> QString {
+        if cfg!(target_os = "emscripten") {
+            return QString::from(NOT_ON_THE_WEB);
+        }
         let path = PathBuf::from(path.to_string());
         if let Some(why) = gone(&path) {
             return QString::from(why.as_str());
@@ -562,6 +568,9 @@ impl qobject::System {
     }
 
     fn run_shell(self: Pin<&mut Self>, request: &QString) -> QString {
+        if cfg!(target_os = "emscripten") {
+            return to_json(&json!({ "line": "", "error": NOT_ON_THE_WEB }));
+        }
         let started = serde_json::from_str::<shell::Request>(&request.to_string())
             .map_err(|e| e.to_string())
             .and_then(|request| shell::start(&request, &self.running));
@@ -754,6 +763,10 @@ fn run_open(command: &mut Command) -> Result<(), String> {
         _ => Err(output.status.to_string()),
     }
 }
+
+/// Why the web version can't run a shell command, open a file in another
+/// app, or show it in a file manager: a browser runs no programs.
+const NOT_ON_THE_WEB: &str = "The browser can't run other programs";
 
 /// Why an app named but not listed can't open a file: the system found
 /// none of that name (see `named`), as native.h's `openWithApp` says too.
