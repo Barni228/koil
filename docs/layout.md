@@ -1,8 +1,11 @@
 # Layout
 
-- `src/main.rs`: reads the command line (cli.rs), creates the app,
-  installs the "Settings…" translator, the Nerd Font and the window icon,
-  sets the Windows style, loads `qml/main.qml`.
+- `src/lib.rs`: the crate's modules, and `run`, the startup: reads the
+  command line (cli.rs), creates the app, installs the "Settings…"
+  translator, the Nerd Font and the window icon, sets the Windows style,
+  loads `qml/main.qml`. Koil is a library so the web build (`web/`) can
+  link it as a static one (see Web).
+- `src/main.rs`: the desktop app, which calls `koil::run`.
 - `src/cli.rs`: the command line, with clap's builder and `arg!`
   (`command`, `parse`), the scratchpad's text from stdin (`read_stdin`),
   and `ARGS`, which `Document` gives QML (see Command line).
@@ -73,7 +76,7 @@
   (`runShell`, `stopShell`, `shellDone`). Its methods that only hand a QML item to
   native.cpp are made by `forward!`.
 - `src/ffi.rs` + `cpp/native.{h,cpp}`: the C++ helpers behind `System` and
-  `main.rs` (menu title translator, Controls style, clipboard, fonts, the
+  `lib.rs` (menu title translator, Controls style, clipboard, fonts, the
   Nerd Font, the window icon, files macOS asks to open, Cmd+Backspace in
   text fields, clicks on a popup window kept from the window under it
   (`keepPopupClicks`, see Windows), Koil's text layout (`TextLayout`: `setLineFormat`, see

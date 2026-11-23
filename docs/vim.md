@@ -119,7 +119,7 @@
   search, the Settings and Shortcuts windows') deletes a word on it
   (Qt's Ctrl+Backspace, as Qt reads Cmd as Ctrl), so native.cpp's
   `LineDeleteFilter`, an application's event filter (`useLineDeleteKey`
-  in main.rs), has it delete back to the field's start, or the
+  in lib.rs), has it delete back to the field's start, or the
   selection, through `remove`, which Cmd+Z undoes. With nothing to
   delete, the field's Keys handlers have it (the help's search closes). Other Cmd
   keys (`<D-k>`, `<D-Left>`, see Shortcuts) do nothing but run a

@@ -48,7 +48,7 @@
   so its note (if any) is a short line. Only the name: anywhere on the row
   (and its note's), a tip showed wherever the pointer rested. They're
   stored in `~/Library/Preferences/io.github.barni228.Koil.plist` on macOS
-  (Qt's name for it, from the organization domain main.rs sets and the
+  (Qt's name for it, from the organization domain lib.rs sets and the
   app's name, is the bundle ID, so they're the app's own defaults: one
   that differed only in case would be the same file under two names), the
   registry (`HKEY_CURRENT_USER\Software\Koil\Koil`) on Windows.

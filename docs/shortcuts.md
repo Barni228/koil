@@ -192,6 +192,6 @@
   Linux use an in-window Controls `MenuBar` (`WindowMenuBar.qml`), with the
   same items (About in a Help menu), so a change to one goes in both. About
   Koil (main.qml's `about`) shows the version (`Qt.application.version`,
-  which main.rs sets from Cargo's) in the help's box. One is created in main.qml's
+  which lib.rs sets from Cargo's) in the help's box. One is created in main.qml's
   `Component.onCompleted`, so only one exists at a time. Qt titles the PreferencesRole item "Preferences..."; a `QTranslator`
   for the `MAC_APPLICATION_MENU` context renames it to "Settings…".

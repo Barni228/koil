@@ -37,7 +37,8 @@ the only record of why things are as they are. A section named elsewhere
 
 A line a file; `docs/layout.md` says what each has, by function.
 
-- `src/main.rs`: startup; loads `qml/main.qml`. `src/cli.rs`: the command line.
+- `src/lib.rs`: the modules and `run`, the startup; loads `qml/main.qml`.
+  `src/main.rs` calls it. `src/cli.rs`: the command line.
 - `src/listing.rs`: the listing as text, without Qt; most of Koil's logic.
 - `src/history.rs` (undo history's file), `info.rs` (`K`), `shell.rs`,
   `sizes.rs` (dirs' sizes, on threads), `syntax.rs`, `link.rs`,

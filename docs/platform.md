@@ -7,7 +7,7 @@
   gray one (in Finder, Launchpad, the Dock). A new picture must be put on
   the grid first, as `make-icons.sh` only scales it, and crops it for
   Windows, whose icons nearly fill their square (90%). Qt gives windows
-  the exe's `IDI_ICON1` on Windows; elsewhere `main.rs` sets
+  the exe's `IDI_ICON1` on Windows; elsewhere `lib.rs` sets
   `window-icon.png` (the macOS one) as the window icon, for Linux and
   `cargo run` on macOS (its Dock icon), but not in the bundle
   (`in_bundle`), as on macOS it's the Dock's icon too, which then
@@ -41,7 +41,7 @@
   what's loaded from the bundle with and without the deletes. A new
   import (`QtQuick.Particles`), a picture (an `Image`) or a network
   request needs what's deleted for it put back.
-- **Windows**: `main.rs` sets the Fusion style (`QQuickStyle::setStyle`, unless
+- **Windows**: `lib.rs` sets the Fusion style (`QQuickStyle::setStyle`, unless
   `QT_QUICK_CONTROLS_STYLE` is set; setting that variable from Rust doesn't
   reach Qt, which reads the C runtime's startup copy), because the default
   "Windows" style has no dark theme (FluentWinUI3 left the title bar and menus
@@ -59,7 +59,7 @@
   it. Qt 6.10's popup windows never take a press (QTBUG-141362, fixed in
   6.11), so an item under a row took it from the row: a click on a shell
   in Settings opened the `:h shortcuts` link under the list. So
-  `main.rs` installs native.cpp's `PopupClickFilter` (`keepPopupClicks`),
+  `lib.rs` installs native.cpp's `PopupClickFilter` (`keepPopupClicks`),
   which drops a press a window gets where a popup window of its own
   is, with its moves and release (also a press on a popup's padding,
   which 6.11 still passes on). macOS sends the clicks to the popup's own

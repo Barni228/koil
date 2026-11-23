@@ -304,7 +304,7 @@
   would narrow every row: a link's is cut off at the view's edge.
 - **Icon font**: devicons' icons are Nerd Font glyphs in the Private Use
   Area. Koil ships one, JetBrains Mono NL Nerd Font (Nerd Fonts v3.5.1,
-  `fonts/`), compiled into the binary (`include_bytes!` in main.rs), so no
+  `fonts/`), compiled into the binary (`include_bytes!` in lib.rs), so no
   packaging script copies it. Every character advances one column, but the
   icons are drawn up to ~1.75 columns wide, over the next one: that's why an
   entry has two spaces after its icon. Not the "Mono" variant, which shrinks
