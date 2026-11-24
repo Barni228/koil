@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtTest
@@ -155,7 +157,8 @@ TestCase {
         delegate: DropOption {
             required property string modelData
 
-            theme: theme
+            // Not `theme`: in here, that's this row's own.
+            theme: drop.theme
             text: modelData
         }
     }
