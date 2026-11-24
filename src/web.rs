@@ -18,8 +18,8 @@ const WELCOME: &str = "\
 Koil in your browser
 
 Edit with vim, as in the desktop app. Files stay in this browser.
-File > Import File… / Import Folder… brings in files from your computer.
-File > Export… downloads a file, or a folder as a .zip.
+File > Import File... / Import Folder... brings in files from your computer.
+File > Export... downloads a file, or a folder as a .zip.
 ";
 
 /// On the first visit (nothing in `home` says Koil ran there before),

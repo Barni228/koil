@@ -765,7 +765,7 @@ dependencies = [
 [[package]]
 name = "koil-core"
 version = "0.1.0"
-source = "git+https://github.com/Barni228/koil-core#3b0c15cdad5ea4ba6d683429cfccc5a14411daea"
+source = "git+https://github.com/Barni228/koil-core#6098ab6831b9b2072c29e52d8e4d0da320ec86d8"
 dependencies = [
  "dunce",
  "fancy-regex",
