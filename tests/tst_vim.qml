@@ -390,6 +390,27 @@ TestCase {
         signalName: "editRequested"
     }
 
+    SignalSpy {
+        id: saveAsCommands
+
+        target: vim
+        signalName: "saveAsRequested"
+    }
+
+    SignalSpy {
+        id: emptyTrashCommands
+
+        target: vim
+        signalName: "emptyTrashRequested"
+    }
+
+    SignalSpy {
+        id: clipboardWants
+
+        target: vim
+        signalName: "clipboardWanted"
+    }
+
     FindBar {
         id: findBar
 
@@ -1734,6 +1755,96 @@ TestCase {
 
     // :e asks Koil to open a path as written (spaces and quotes too), or
     // with none, to read what's shown again; :e! to drop unsaved changes.
+    // :sav path (and :sav! path) asks Koil to save what's shown there;
+    // :emptytrash to empty the trash.
+    function test_saveAsCommand() {
+        load("a");
+        saveAsCommands.clear();
+        keys(":sav ~/new.txt<CR>:saveas! \"a b\"<CR>:sav<CR>");
+        compare(saveAsCommands.signalArguments.map(a => [a[0], a[1]]), [["~/new.txt", false], ["\"a b\"", true]]);
+        compare(vim.message, "E471: Argument required");
+        emptyTrashCommands.clear();
+        keys(":emptytrash<CR>:emptyt<CR>");
+        compare(emptyTrashCommands.count, 2);
+        keys(":emptytrash x<CR>");
+        compare(vim.message, "E492: Not an editor command: emptytrash x");
+    }
+
+    // In a browser (asyncClipboard), a key that reads the "+ register waits
+    // for the browser's clipboard, with those typed after it, then they run
+    // with what it gave; Esc drops them, and if it can't be read, Koil's own
+    // is used.
+    function test_asyncClipboard() {
+        load("a");
+        vim.asyncClipboard = true;
+        try {
+            clipboardWants.clear();
+            clipboard.text = "old";
+            keys("\"+pu");
+            compare(clipboardWants.count, 1);
+            compare(editor.text, "a");
+            compare(vim.message, "Reading the clipboard…");
+            vim.clipboardReady("new", "");
+            compare(editor.text, "a", "u took the paste back");
+            keys("\"*p");
+            vim.clipboardReady("new\n", "");
+            compare(editor.text, "a\nnew");
+            compare(vim.message, "");
+            // the browser answers before the command is typed out
+            keys("u\"+");
+            vim.clipboardReady("early\n", "");
+            compare(editor.text, "a");
+            keys("p");
+            compare(editor.text, "a\nearly");
+            compare(vim.freshClipboard, null);
+            // Esc ends the command, and what the browser gave with it
+            keys("u\"*");
+            vim.clipboardReady("late\n", "");
+            keys("<Esc>");
+            compare(vim.freshClipboard, null);
+            compare(clipboardWants.count, 4);
+            keys("\"*p");
+            vim.clipboardReady("new\n", "");
+            compare(editor.text, "a\nnew");
+            // what Koil copied, with its data, if the browser has it still
+            keys("yy");
+            clipboard.text = "copied\n";
+            clipboard.data = JSON.stringify({ text: "copied\n", hidden: [], block: false, session: "" });
+            keys("\"+P");
+            vim.clipboardReady("copied\n", "");
+            compare(editor.text, "a\ncopied\nnew");
+            // Esc drops them
+            keys("\"+p");
+            keys("<Esc>");
+            compare(vim.message, "Interrupted");
+            vim.clipboardReady("late", "");
+            compare(editor.text, "a\ncopied\nnew");
+            keys("p");
+            compare(clipboardWants.count, 7);
+            compare(editor.text, "a\ncopied\nnew\nnew", "the \" was dropped too");
+            // can't be read: Koil's own
+            keys("u\"+p");
+            vim.clipboardReady("", "denied");
+            compare(editor.text, "a\ncopied\ncopied\nnew");
+            compare(vim.message, "Can't read the clipboard: denied");
+            // a register's name after " alone, and :reg
+            keys("u");
+            clipboardWants.clear();
+            keys("2+");
+            compare(clipboardWants.count, 0);
+            keys(":reg<CR>");
+            compare(clipboardWants.count, 1);
+            vim.clipboardReady("x", "");
+            // a macro's keys don't wait
+            clipboardWants.clear();
+            vim.registers.q = { text: "\"+p", linewise: false, hidden: [] };
+            keys("@q");
+            compare(clipboardWants.count, 0);
+        } finally {
+            vim.asyncClipboard = false;
+        }
+    }
+
     function test_editCommand() {
         load("a");
         editCommands.clear();

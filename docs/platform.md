@@ -123,6 +123,55 @@
     (`Sizes::want`; its disk is in memory, so it's quick); and shell
     commands, Open With and Reveal say the browser can't run other
     programs.
+  - The `trash` crate's freedesktop trash needs the system's mount
+    points, which it can't find there ("Mount points cannot be
+    determined on this operating system"), so a delete, and the undo of
+    a create, failed to trash anything. koil-core keeps the home trash
+    itself there (`trash::home`, see its CLAUDE.md): the same
+    `~/.local/share/Trash`, with its `files` and `info`. The home dir is
+    a file system of its own (see Web files), so what's trashed from
+    outside it (`/tmp`) is copied in and removed, as a move to another
+    disk is. Nothing else empties it, so `:emptytrash` does (see Web
+    files).
+  - Koil runs in one tab at a time (`index.html`): each tab has its own
+    copy of the files, and a save makes the browser's storage that copy,
+    deleting what it hasn't, so a tab left open erased what another
+    saved (even as it was hidden, which saves). The tab Koil runs in
+    holds the Web Lock "koil" while it runs; another says "Koil is open
+    in another tab", and starts once that tab lets go: when it closes,
+    or when its Use Koil Here posts "take" on the BroadcastChannel
+    "koil", which has the first save now (`koilSaveNow`), stop saving
+    for good (`koilStopped`) and say it's open elsewhere. That tab can't
+    start Koil again where it is (its wasm runs on), so its button loads
+    the page again, which asks (sessionStorage's `koil-take`). A browser
+    without locks starts Koil as it is.
+  - Saving: if the files can't be read as Koil starts, nothing is saved
+    (`koilReadFailed` in `pre.js`): saving the empty home dir would
+    delete them all. That, and a save that fails, show on the status
+    line (`System.watchWebStorage`, `storageFailed`, once startup's
+    messages are shown). After the first save, `pre.js` asks the browser
+    to keep the files (`navigator.storage.persist()`, unless it does
+    already): without it, a browser may delete a site's storage when the
+    disk runs low, and Safari does after a week without a visit. Firefox
+    asks the user then.
+  - Qt's file dialogs there are the browser's picker (Qt's
+    `QWasmFileDialogHelper`), which gives the picked file as a
+    `weblocalfile:` URL only Qt's `QFile` reads, never a path, and
+    Open Folder's picks files: so File > Open… and Open Folder… type
+    `:e ` (which opens a file or lists a dir on Koil's disk), Save As…
+    `:sav `, Settings' Start in has no folder button, and the Shortcuts
+    window's Export downloads its file and Import takes the browser's
+    picker's (see Shortcuts). Files come in from the computer with File
+    > Import, or a drop (see Web files).
+  - `"+p` asks the browser for its clipboard (see Clipboard), as Qt
+    learns of it only from the browser's paste.
+  - The sort menu has no Created there (see Sorting).
+  - Signals web.cpp emits on Koil's QObjects are emitted by name
+    (`QMetaObject::invokeMethod`), which Rust never calls, so each
+    file names them in an `emitted_by_web_cpp` (cxx-qt takes no
+    `allow` on a signal).
+  - `web-smoke.mjs` checks the trash (an undone create, a delete and
+    its undo, `:emptytrash`), a drop, `"+p`, and a second tab.
   - stdin isn't read (`cli::read_stdin`): Emscripten would ask for it
     with a prompt.
   - The web has no time zone files, which chrono's `Local` reads, so it

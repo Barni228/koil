@@ -214,7 +214,8 @@ function sections(help) {
             title: "Commands",
             tags: ["commands", "command", "ex", "w", "write", "quit", "wq", "x", "confirm", "conf", "noh",
                 "nohlsearch", "help", "h", "history", "e", "edit", "e!", "edit!", "reload", "favorite", "favorites",
-                "bookmark", "bookmarks", "norm", "normal", "norm!", "normal!", "-c", "startup"],
+                "bookmark", "bookmarks", "norm", "normal", "norm!", "normal!", "-c", "startup", "sav", "saveas",
+                "sav!", "saveas!", "save as"],
             rows: [
                 ["`:e path`", "Open a file, or list a dir or pattern, like `:e ~/src`, read as the path field "
                     + "reads it, from the open dir. As a shortcut (`:e ~/src<CR>`: see `:h shortcuts`), a key "
@@ -223,6 +224,8 @@ function sections(help) {
                     + "brings back). In the listing: update. A file that changes on disk is read again "
                     + "by itself, as a change `u` takes back, and if you changed it too, Koil asks first."],
                 ["`:w`", "Save (in the listing: update, as `" + cmdKey + "S`; `Space Space` applies)."],
+                ["`:sav path`", "Save as another file, from the open dir (`~` is the home dir), and show it in "
+                    + "its place, as File > Save As…: not over a file, but with `:sav! path`."],
                 ["`:wq`  `:x`", "Save and quit (in the listing: update and quit, as `:q`)."],
                 ["`ZZ`", "Save and quit (in the listing: `:confirm q`)."],
                 ["`:q`  `:qa`", "Quit, unless there are unsaved changes."],
@@ -777,7 +780,7 @@ function sections(help) {
         {
             title: "Files in the browser",
             tags: ["web", "import", "imp", ":import", ":imp", "export", "exp", ":export", ":exp", "upload",
-                "download", "zip", "storage"],
+                "download", "zip", "storage", "trash", "emptytrash", ":emptytrash", "drop", "tabs"],
             intro: "Koil in a browser (its web version) keeps its files in the browser's storage, apart from "
                 + "your computer's, until the site's data is cleared. Importing brings files in, and "
                 + "exporting downloads them. These are its keys alone.",
@@ -789,10 +792,17 @@ function sections(help) {
                     + "Folder…)."],
                 ["`Space e`  `:export`", "Download the entry on the line (in a file, the file; from the path "
                     + "field, the open dir): a file as it is, a dir as a `.zip` of it (File > Export…). "
-                    + "`:export path` downloads that path, from the open dir: `:export .` is all of it."]
+                    + "`:export path` downloads that path, from the open dir: `:export .` is all of it."],
+                ["Drop", "Files and folders dropped on the window are imported into the open dir, as `Space i`."],
+                ["`:emptytrash`", "Delete what's in the trash for good (File > Empty Trash…), which a delete, and "
+                    + "undoing a create, put there. Only this frees the space they take; undoing what put "
+                    + "them there can't bring them back after."]
             ],
-            note: "A browser runs no other programs, so there shell commands, `Space r`, `Space o` and "
-                + "`Space O` say they can't."
+            note: "Koil runs in one tab at a time, as each tab has a copy of the files: another tab says "
+                + "so, and Use Koil Here moves it there. File > Open… types `:e ` and Save As… `:sav `, "
+                + "for a path in the browser's files. `\"+p` asks the browser for the clipboard (it may "
+                + "ask you first). A browser runs no other programs, so there shell commands, `Space r`, "
+                + "`Space o` and `Space O` say they can't."
         },
         {
             // Last, so a key that's no topic (`:h x`) goes to vim's row

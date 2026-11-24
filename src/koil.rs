@@ -202,6 +202,11 @@ pub mod qobject {
         #[qinvokable]
         fn file_at(self: &Koil, location: &QString) -> QString;
 
+        /// Where `location` is, as written, from the open dir (see
+        /// `listing::written_path`): the file `:sav` saves to.
+        #[qinvokable]
+        fn path_from(self: &Koil, location: &QString) -> QString;
+
         /// Where the entry pasted with its ID on `line` of a file's or the
         /// scratchpad's text is on disk (see `listing::pasted_entry`),
         /// `hidden` being the line's: `{ path, message }`, as
@@ -919,6 +924,10 @@ impl qobject::Koil {
     fn file_at(&self, location: &QString) -> QString {
         let file = listing::file_at(&self.koil, &location.to_string());
         path_string(&file.unwrap_or_default())
+    }
+
+    fn path_from(&self, location: &QString) -> QString {
+        path_string(&listing::written_path(&self.koil, &location.to_string()))
     }
 
     fn id_path(&self, id: &QString) -> QString {

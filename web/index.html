@@ -1,7 +1,7 @@
 <!doctype html>
 <!-- The web version's page (see docs/platform.md, Web): Qt's loader starts
-     Koil's wasm in #screen, which fills the window. Until then, and if it
-     stops, #status says so. -->
+     Koil's wasm in #screen, which fills the window. Until then, if it
+     stops, and while it's open in another tab, #status says so. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -43,6 +43,12 @@
     }
     #status[hidden] { display: none; }
     #status img { width: 64px; height: 64px; }
+    #status button {
+      font: inherit; color: var(--window-text); background: var(--window);
+      border: 1px solid color-mix(in srgb, var(--window-text) 30%, transparent);
+      border-radius: 6px; padding: 6px 14px; cursor: pointer;
+    }
+    #status button[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -50,6 +56,7 @@
   <div id="status">
     <img src="icon.png" alt="">
     <div id="message">Loading Koil…</div>
+    <button id="use-here" type="button" hidden>Use Koil Here</button>
     <noscript>Koil needs JavaScript.</noscript>
   </div>
   <script src="qtloader.js"></script>
@@ -90,19 +97,95 @@
       window.koil = instance;
     }
 
-    const loading = qtLoad({
-      qt: {
-        entryFunction: window.koil_entry,
-        containerElements: [screen],
-        onLoaded: () => { status.hidden = true; },
-        // A crash, or a panic, which aborts (see docs/platform.md, Web).
-        onExit: exit => stopped(exit.text),
-      },
+    function start() {
+      const loading = qtLoad({
+        qt: {
+          entryFunction: window.koil_entry,
+          containerElements: [screen],
+          // Unless another tab took Koil over meanwhile.
+          onLoaded: () => { status.hidden = !window.koilStopped; },
+          // A crash, or a panic, which aborts (see docs/platform.md, Web).
+          onExit: exit => stopped(exit.text),
+        },
+      });
+      loading.then(started, error => {
+        console.error(error);
+        stopped(String(error));
+      });
+    }
+
+    // Koil runs in one tab at a time: each tab has its own copy of the
+    // files, and a save makes the browser's storage that copy (see
+    // web/pre.js), so two tabs would delete each other's work. The tab
+    // Koil runs in holds the lock "koil" while it runs. Another says it's
+    // open elsewhere, and starts once that tab lets go of the lock: when
+    // it closes, or when Use Koil Here asks it to (the channel's "take"),
+    // which it does once its files are saved, then stops saving. A tab
+    // that let go can't start Koil again where it is, so its button loads
+    // the page again, which then asks ("koil-take"). Without locks (a
+    // browser from before 2022), Koil starts as it is.
+    const useHere = document.getElementById("use-here");
+    const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("koil") : null;
+    // Lets go of the lock, while Koil runs in this tab.
+    let release = null;
+    let ranHere = false;
+
+    function runHere() {
+      useHere.hidden = true;
+      message.textContent = "Loading Koil…";
+      ranHere = true;
+      return new Promise(done => {
+        release = done;
+        start();
+      });
+    }
+
+    function openElsewhere(now) {
+      message.textContent = now ? "Koil is open in another tab now." : "Koil is open in another tab.";
+      useHere.hidden = false;
+      screen.hidden = true;
+      status.hidden = false;
+    }
+
+    useHere.addEventListener("click", () => {
+      if (ranHere) {
+        sessionStorage.setItem("koil-take", "1");
+        location.reload();
+        return;
+      }
+      useHere.hidden = true;
+      message.textContent = "Waiting for the other tab…";
+      channel?.postMessage("take");
     });
-    loading.then(started, error => {
-      console.error(error);
-      stopped(String(error));
+
+    channel?.addEventListener("message", async event => {
+      if (event.data !== "take" || !release)
+        return;
+      const done = release;
+      release = null;
+      await window.koil?.koilSaveNow?.();
+      window.koilStopped = true;
+      openElsewhere(true);
+      done();
     });
+
+    if (!navigator.locks) {
+      start();
+    } else {
+      navigator.locks.request("koil", { ifAvailable: true }, lock => {
+        if (lock)
+          return runHere();
+        openElsewhere(false);
+        if (sessionStorage.getItem("koil-take")) {
+          sessionStorage.removeItem("koil-take");
+          useHere.click();
+        }
+        navigator.locks.request("koil", () => {
+          screen.hidden = false;
+          return runHere();
+        });
+      });
+    }
   </script>
 </body>
 </html>

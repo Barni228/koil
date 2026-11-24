@@ -404,7 +404,20 @@
 - **Clipboard**: the `"+` data carries `session`, random per run; another
   Koil's hidden texts (IDs, which mean other paths there) are dropped on
   paste, so its lines become new entries rather than copies of whatever has
-  that ID here.
+  that ID here. On the web the system clipboard is the browser's, which Qt
+  learns of only from its paste event (Cmd+V, which so pastes what was
+  copied elsewhere), so `"+p` pasted what was copied before that: there
+  (`Vim.asyncClipboard`) a key that reads `"+` or `"*` (the `+` or `*`
+  after a `"`, which is only a register's name there, or `:reg`'s Enter;
+  `readsClipboard`) is held, with the keys typed after it
+  (`clipboardKeys`; Esc or Ctrl-C drops them), while `clipboardWanted`
+  has web.cpp's `readWebClipboard` ask the browser
+  (`navigator.clipboard.readText`, which may ask the user first: Chrome
+  once, Firefox and Safari with a Paste button each time); then
+  `clipboardRead` runs them (`clipboardReady`) with what it gave
+  (`freshClipboard`, which `getRegister` takes over Qt's, unless it's the
+  text Koil copied last, whose data has its entries), or, if it couldn't,
+  with Koil's own, saying why. A macro's keys aren't held.
 - **Paths that aren't Unicode** (only on Linux, or a malformed name on
   Windows; macOS keeps only UTF-8 names): a name shows with `�`
   (`to_string_lossy`), and the listing is read back through koil-core's

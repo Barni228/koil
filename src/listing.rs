@@ -1620,6 +1620,13 @@ pub fn file_at(koil: &Koil, location: &str) -> Option<PathBuf> {
     }
 }
 
+/// Where `location` is, as written (no pattern, no quotes), from the open dir,
+/// `~` being the home dir: the file `:sav` saves to.
+pub fn written_path(koil: &Koil, location: &str) -> PathBuf {
+    let written = link::home_expanded(Path::new(location.trim()));
+    link::normalized(&koil.current_dir().join(written))
+}
+
 /// Where the entry on `line` is on disk, for Space r to show: where its ID
 /// points, even if the line renames it (as Enter opens it); or else why
 /// there's none (see [`on_disk`]: it's new, or a copy), or no entry on the

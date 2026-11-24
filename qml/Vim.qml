@@ -226,6 +226,16 @@ QtObject {
     // (as written, quotes and all). :e alone (`path` ""): what's shown, read
     // again. `force` (:e!): unsaved changes are dropped, not asked about.
     signal editRequested(string path, bool force)
+    // :sav path (:saveas): Koil saves what's shown to `path` (as written,
+    // from the open dir), and shows that file in its place, as Save As
+    // does; `force` (:sav!) lets it be a file already.
+    signal saveAsRequested(string path, bool force)
+    // :emptytrash: Koil asks to delete what's in its trash for good (the web
+    // version's, which nothing else empties).
+    signal emptyTrashRequested()
+    // The keys read the "+ register (see asyncClipboard): Koil asks the
+    // browser for its clipboard, then calls clipboardReady.
+    signal clipboardWanted()
     // :reg, with the registers it names (all of them if blank), of which
     // some hold something (see registerList).
     signal registersRequested(string names)
@@ -318,6 +328,17 @@ QtObject {
     property string waiting: ""
     // The file or listing being edited (the "% register).
     property string fileName: ""
+    // In a browser, where the system clipboard is the browser's, which Qt
+    // learns of only from its paste (Cmd+V), so "+p would paste what was
+    // copied before that: a key that reads "+ or "* (`"+`, `"*`, `:reg`'s
+    // Enter) is held, with those typed after it (`clipboardKeys`), while
+    // Koil asks the browser for it (clipboardWanted), which may ask the
+    // user first; then they run (clipboardReady) with what it gave
+    // (`freshClipboard`, { text, ok }), which getRegister reads. A macro's
+    // keys aren't held, as nothing could be typed meanwhile.
+    property bool asyncClipboard: false
+    property var clipboardKeys: null
+    property var freshClipboard: null
     property var undoStack: []
     property var redoStack: []
     property var change: null
@@ -549,6 +570,18 @@ QtObject {
     // Returns whether the key was consumed; unconsumed keys go to the editor.
     function handleKey(event) {
         const tok = tokenFor(event);
+        // Esc or Ctrl-C drops them all (see asyncClipboard).
+        if (clipboardKeys) {
+            if (tok === "<Esc>" || tok === "<S-Esc>" || tok === "<C-c>") {
+                clipboardKeys = null;
+                if (commandLine === "")
+                    forgetKeys();
+                showMessage("Interrupted");
+            } else if (tok !== null) {
+                clipboardKeys.push(tok);
+            }
+            return true;
+        }
         if (waiting) {
             if (tok === "<Esc>" || tok === "<S-Esc>" || tok === "<C-c>")
                 stopRequested();
@@ -655,10 +688,57 @@ QtObject {
 
     // A key the user typed, which a macro being recorded keeps.
     function typedKey(tok, event) {
+        if (asyncClipboard && !freshClipboard && readsClipboard(tok)) {
+            clipboardKeys = [tok];
+            showMessage("Reading the clipboard…");
+            clipboardWanted();
+            return true;
+        }
         if (recording && tok !== null)
             recordKeys.push(tok);
         chainedRuns = 0;
-        return runKey(tok, event);
+        const ran = runKey(tok, event);
+        // The command that read the clipboard is done (see clipboardReady).
+        if (freshClipboard && !keys.length)
+            freshClipboard = null;
+        return ran;
+    }
+
+    // Whether `tok` reads the "+ register (or "*, the same): it names it
+    // after a " (which is only a register's name there, see parse), or runs
+    // a :reg, which lists it.
+    function readsClipboard(tok) {
+        if (commandLine !== "")
+            return tok === "<CR>" && /^:\s*(?:reg|di)/.test(commandLine);
+        return (tok === "+" || tok === "*") && keys.length === 1 && keys[0] === "\""
+            && mode !== "insert" && mode !== "replace" && !confirming;
+    }
+
+    // What the browser's clipboard has (see asyncClipboard), or why it
+    // couldn't be read: the held keys run, with Koil's own clipboard if it
+    // couldn't (what it copied, or the browser pasted, last). What it gave
+    // stays until the command that named the register is done, which may
+    // be after the held keys (the browser answered before `p` was typed).
+    function clipboardReady(text, error) {
+        const held = clipboardKeys;
+        if (!held)
+            return;
+        clipboardKeys = null;
+        if (message === "Reading the clipboard…")
+            message = "";
+        freshClipboard = { text: text, ok: !error };
+        try {
+            for (const tok of held) {
+                if (waiting || running)
+                    break;
+                batched(() => typedKey(tok, null));
+            }
+        } finally {
+            if (!keys.length)
+                freshClipboard = null;
+        }
+        if (error)
+            showError("Can't read the clipboard: " + error);
     }
 
     // Runs a typed key, or one from a macro (with no event).
@@ -5396,6 +5476,11 @@ QtObject {
         if (name === "+" || name === "*") {
             if (!clipboard)
                 return null;
+            // What the browser gave (see asyncClipboard), unless it's what
+            // Koil copied last, whose data has its entries.
+            const fresh = freshClipboard;
+            if (fresh && fresh.ok && fresh.text !== clipboard.clipboardText())
+                return fresh.text ? { text: fresh.text, linewise: fresh.text.endsWith("\n"), hidden: [] } : null;
             try {
                 const d = JSON.parse(clipboard.clipboardData() || "null");
                 if (d && typeof d.text === "string" && validHidden(d.text, d.hidden))
@@ -7018,6 +7103,10 @@ QtObject {
             { names: /^h(?:elp)?$/, takesArg: true, run: arg => outside(() => helpRequested(arg)) },
             { names: /^e(?:d|di|dit)?!?$/, takesArg: true,
                 run: (arg, name) => outside(() => editRequested(arg, name.endsWith("!"))) },
+            { names: /^sav(?:e|ea|eas)?!?$/, takesArg: true,
+                run: (arg, name) => arg ? outside(() => saveAsRequested(arg, name.endsWith("!")))
+                    : showError("E471: Argument required") },
+            { names: /^emptyt(?:r|ra|ras|rash)?$/, run: () => outside(() => emptyTrashRequested()) },
             { names: /^(?:reg(?:i|is|ist|iste|ister|isters)?|di(?:s|sp|spl|spla|splay)?)$/, takesArg: true,
                 run: arg => showRegisters(arg) },
             { names: /^norm(?:a|al)?!?$/, takesArg: true, takesRange: true,

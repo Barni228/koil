@@ -67,6 +67,12 @@ Platform.MenuBar {
             enabled: !menus.app.boxOpen
             onTriggered: menus.app.exportEntry("")
         }
+        Platform.MenuItem {
+            text: qsTr("Empty Trash…")
+            visible: menus.app.web
+            enabled: !menus.app.boxOpen
+            onTriggered: menus.app.emptyTrash()
+        }
         // First in the app menu, as macOS puts About.
         Platform.MenuItem {
             text: qsTr("About Koil")

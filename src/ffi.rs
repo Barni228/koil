@@ -91,6 +91,25 @@ mod bridge {
         #[cfg(target_os = "emscripten")]
         fn download_web_file(path: &QString, name: &QString, remove: bool);
 
+        /// Has the browser read its clipboard, then emits `clipboardRead`
+        /// on `system`, a System (see web.h). Web only.
+        #[cxx_name = "readWebClipboard"]
+        #[cfg(target_os = "emscripten")]
+        unsafe fn read_web_clipboard(system: *mut QObject);
+
+        /// Emits `storageFailed` on `system`, a System, when Koil's files
+        /// can't be kept in the browser's storage (see web.h). Web only.
+        #[cxx_name = "watchWebStorage"]
+        #[cfg(target_os = "emscripten")]
+        unsafe fn watch_web_storage(system: *mut QObject);
+
+        /// Has the page take what's dropped on it into `staging`, and emit
+        /// `filesDropped` and `webDragChanged` on `document`, a Document
+        /// (see web.h). Web only.
+        #[cxx_name = "watchWebDrops"]
+        #[cfg(target_os = "emscripten")]
+        unsafe fn watch_web_drops(document: *mut QObject, staging: &QString);
+
         /// Whether the browser runs on a Mac (see web.h). Web only.
         #[cxx_name = "webOnMac"]
         #[cfg(target_os = "emscripten")]

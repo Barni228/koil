@@ -365,7 +365,7 @@ Window {
         if (!pickedCount)
             return;
         exportOnly = null;
-        exportDialog.open();
+        chooseExportFile();
     }
     // Y: asks where to save the cursor's shortcut, or those v selected,
     // picked or not, as Y in a question takes the current line.
@@ -374,7 +374,26 @@ Window {
         if (!lines.length)
             return;
         exportOnly = lines;
-        exportDialog.open();
+        chooseExportFile();
+    }
+    // Where the export goes: a file the dialog asks for, but in a browser,
+    // whose files Koil can't write (see main.qml's openFile), the browser
+    // downloads it, from Koil's memory.
+    readonly property string webExport: "/tmp/koil_shortcuts.json"
+    function chooseExportFile() {
+        if (app.web)
+            writeExport(webExport);
+        else
+            exportDialog.open();
+    }
+    // Import's file: the dialog's, but in a browser, the browser's picker,
+    // which gives the file where it put it (see Document.pickFile).
+    function chooseImportFile() {
+        message = "";
+        if (app.web)
+            document.pickFile();
+        else
+            importDialog.open();
     }
     // The name of the file at `path`, as messages say it.
     function fileName(path) {
@@ -391,7 +410,8 @@ Window {
     // list, or if it can't, the export page says why.
     function writeExport(path) {
         const list = shortcuts.filter((s, i) => exportOnly ? exportOnly.includes(i) : exportPicks.picked[i]);
-        const error = document.writeText(path, JSON.stringify(list, null, 2) + "\n");
+        const error = document.writeText(path, JSON.stringify(list, null, 2) + "\n")
+            || (path === webExport ? document.exportPath("", path) : "");
         if (error) {
             say(error, true);
             return;
@@ -1011,10 +1031,7 @@ Window {
 
                     iconPath: "M8 2.5 V9.5 M5 6.5 L8 9.5 L11 6.5 M3 10.5 V13 H13 V10.5"
                     tip: qsTr("Import Shortcuts…")
-                    onClicked: {
-                        win.message = "";
-                        importDialog.open();
-                    }
+                    onClicked: win.chooseImportFile()
                 }
                 WindowButton {
                     id: exportStart
@@ -1502,6 +1519,21 @@ Window {
             win.writeExport(win.document.urlToPath(selectedFile));
         }
         onRejected: win.requestActivate()
+    }
+    // The browser's picker's file (see chooseImportFile).
+    Connections {
+        target: win.document
+        enabled: win.app.web
+        ignoreUnknownSignals: true
+
+        function onFilePicked(result) {
+            const r = JSON.parse(result);
+            win.requestActivate();
+            if (r.error)
+                win.say(r.error, true);
+            else if (r.path)
+                win.importFrom(r.path);
+        }
     }
     FileDialog {
         id: importDialog

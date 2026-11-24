@@ -61,11 +61,61 @@ pub mod qobject {
         #[qsignal]
         fn imported(self: Pin<&mut Document>, result: QString);
 
+        /// On the web, opens the browser's picker of files, for one file
+        /// (shortcuts to import): `file_picked` then gives it, where the
+        /// picker put it, as browsers give no paths. Nothing elsewhere.
+        #[qinvokable]
+        fn pick_file(self: Pin<&mut Document>);
+
+        /// Emitted once `pick_file`'s picker closes, with `{ path, error }`:
+        /// the file picked ("" if none was), or why it couldn't be read.
+        #[qsignal]
+        fn file_picked(self: Pin<&mut Document>, result: QString);
+
+        /// On the web, has the page take the files and folders dropped on
+        /// it (see web.h), which browsers give Qt no paths of: then
+        /// `files_dropped` says they're ready for `import_dropped`, and
+        /// `web_drag_changed` says when a drag of files is over the page.
+        /// Nothing elsewhere, where Qt's DropArea gets the paths.
+        #[qinvokable]
+        fn watch_web_drops(self: Pin<&mut Document>);
+
+        /// Emitted as a drag of files comes over the page (`on`) and
+        /// leaves it.
+        #[qsignal]
+        fn web_drag_changed(self: Pin<&mut Document>, on: bool);
+
+        /// Emitted once what was dropped on the page is read, with why it
+        /// couldn't be, or "": then `import_dropped` brings it in, or
+        /// `forget_dropped` drops it.
+        #[qsignal]
+        fn files_dropped(self: Pin<&mut Document>, error: QString);
+
+        /// Brings what was dropped into the dir `dir` (see `web::import`),
+        /// as `imported` gives an import: `{ paths, error }`.
+        #[qinvokable]
+        fn import_dropped(self: &Document, dir: &QString) -> QString;
+
+        /// Deletes what was dropped, unbrought.
+        #[qinvokable]
+        fn forget_dropped(self: &Document);
+
         /// On the web, downloads `path` (from the dir `dir`, if relative; `~`
         /// is the home dir): a file as it is, a dir as a `.zip` of it (see
         /// `web::export`). Returns why it can't, or "".
         #[qinvokable]
         fn export_path(self: &Document, dir: &QString, path: &QString) -> QString;
+
+        /// What's in the web's trash (see `web::trash_contents`), as
+        /// `{ count, size }`: how many items, and the space their files
+        /// take, as the listing shows a size.
+        #[qinvokable]
+        fn trash_contents(self: &Document) -> QString;
+
+        /// Deletes what's in the web's trash for good (see
+        /// `web::empty_trash`), and gives why it can't, or "".
+        #[qinvokable]
+        fn empty_trash(self: &Document) -> QString;
 
         /// Emitted when writing fails, with why.
         #[qsignal]
@@ -259,9 +309,17 @@ pub struct DocumentRust {
     /// the line break at its end was added.
     scratch_dir: Option<PathBuf>,
     scratch_break: bool,
-    /// The dir what the browser's picker gives goes into, while it's open
-    /// (see `import_files`).
-    importing: Option<PathBuf>,
+    /// What the browser's picker is open for, while it is.
+    picking: Option<Picking>,
+}
+
+/// What the browser's picker was opened for.
+#[cfg_attr(not(target_os = "emscripten"), allow(dead_code))]
+enum Picking {
+    /// Bringing what's picked into this dir (see `import_files`).
+    Import(PathBuf),
+    /// One file, for `file_picked` (see `pick_file`).
+    File,
 }
 
 impl DocumentRust {
@@ -395,7 +453,8 @@ impl qobject::Document {
             let mut this = self;
             // What a picker left, that was never brought in.
             let _ = std::fs::remove_dir_all(web::STAGING);
-            this.as_mut().rust_mut().importing = Some(PathBuf::from(dir.to_string()));
+            this.as_mut().rust_mut().picking =
+                Some(Picking::Import(PathBuf::from(dir.to_string())));
             // SAFETY: the pointer is to this Document, a live QObject, which
             // web.cpp hands back to web_files_picked.
             unsafe { ffi::pick_web_files(this.object(), &QString::from(web::STAGING), folder) };
@@ -404,22 +463,81 @@ impl qobject::Document {
         let _ = (self, dir, folder);
     }
 
+    fn pick_file(self: Pin<&mut Self>) {
+        #[cfg(target_os = "emscripten")]
+        {
+            let mut this = self;
+            let _ = std::fs::remove_dir_all(web::STAGING);
+            this.as_mut().rust_mut().picking = Some(Picking::File);
+            // SAFETY: as in import_files.
+            unsafe { ffi::pick_web_files(this.object(), &QString::from(web::STAGING), false) };
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        let _ = self;
+    }
+
     /// What the browser's picker gave, which `web_files_picked` calls:
-    /// brings it in, and emits `imported`.
+    /// brings it in, and emits `imported`, or gives the file `pick_file`
+    /// asked for, with `file_picked`.
     fn files_picked(mut self: Pin<&mut Self>, error: &str) {
-        let Some(dir) = self.as_mut().rust_mut().importing.take() else {
-            return;
-        };
-        let imported = match error {
-            "" => web::import(Path::new(web::STAGING), &dir)
-                .map_err(|e| format!("Can't import into “{}”: {e}", listing::show_path(&dir))),
-            error => Err(format!("Can't read what was picked: {error}")),
-        };
-        let result = match imported {
-            Ok(paths) => json!({ "paths": paths, "error": "" }),
-            Err(error) => json!({ "paths": [], "error": error }),
-        };
-        self.imported(to_json(&result));
+        match self.as_mut().rust_mut().picking.take() {
+            Some(Picking::Import(dir)) => {
+                let result = imported(
+                    match error {
+                        "" => Ok(()),
+                        error => Err(format!("Can't read what was picked: {error}")),
+                    },
+                    web::STAGING,
+                    &dir,
+                );
+                self.imported(result);
+            }
+            Some(Picking::File) => {
+                let picked = web::picked_file(Path::new(web::STAGING));
+                let result = match error {
+                    "" => json!({ "path": picked.unwrap_or_default(), "error": "" }),
+                    error => {
+                        json!({ "path": "", "error": format!("Can't read what was picked: {error}") })
+                    }
+                };
+                self.file_picked(to_json(&result));
+            }
+            None => {}
+        }
+    }
+
+    fn watch_web_drops(self: Pin<&mut Self>) {
+        #[cfg(target_os = "emscripten")]
+        {
+            // What a drop left, that was never brought in.
+            let _ = std::fs::remove_dir_all(web::DROPPED);
+            // SAFETY: the pointer is to this Document, a live QObject, which
+            // filesDropped and webDragChanged are emitted on.
+            unsafe { ffi::watch_web_drops(self.object(), &QString::from(web::DROPPED)) };
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        let _ = self;
+    }
+
+    fn import_dropped(&self, dir: &QString) -> QString {
+        imported(Ok(()), web::DROPPED, Path::new(&dir.to_string()))
+    }
+
+    fn forget_dropped(&self) {
+        let _ = std::fs::remove_dir_all(web::DROPPED);
+    }
+
+    fn trash_contents(&self) -> QString {
+        let (count, bytes) = web::trash_contents(&std::env::home_dir().unwrap_or_default());
+        to_json(&json!({ "count": count, "size": listing::show_size(bytes) }))
+    }
+
+    fn empty_trash(&self) -> QString {
+        let emptied = web::empty_trash(&std::env::home_dir().unwrap_or_default());
+        QString::from(&emptied.map_or_else(
+            |e| format!("Can't empty the trash: {e}"),
+            |()| String::new(),
+        ))
     }
 
     fn export_path(&self, dir: &QString, path: &QString) -> QString {
@@ -699,6 +817,32 @@ pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString, f
     if let Some(document) = unsafe { as_document(document) } {
         document.folder_requested(path.clone(), file);
     }
+}
+
+/// Names the signals web.cpp emits by name (`QMetaObject::invokeMethod`),
+/// which nothing in Rust emits, so they aren't taken for dead code.
+#[allow(dead_code)]
+fn emitted_by_web_cpp(mut document: Pin<&mut qobject::Document>) {
+    document.as_mut().web_drag_changed(false);
+    document.files_dropped(QString::default());
+}
+
+/// What an import into `dir` of what's in `staging` (the picker's, or a
+/// drop's) gives QML, as JSON `{ paths, error }`: the paths made there (none
+/// if nothing came), or why it couldn't be, `read` being whether what came
+/// could be read.
+fn imported(read: Result<(), String>, staging: &str, dir: &Path) -> QString {
+    let brought = read.and_then(|()| {
+        web::import(Path::new(staging), dir)
+            .map_err(|e| format!("Can't import into “{}”: {e}", listing::show_path(dir)))
+    });
+    if brought.is_err() {
+        let _ = std::fs::remove_dir_all(staging);
+    }
+    to_json(&match brought {
+        Ok(paths) => json!({ "paths": paths, "error": "" }),
+        Err(error) => json!({ "paths": [], "error": error }),
+    })
 }
 
 /// Brings what the browser's picker gave into the dir `document` (a

@@ -5,6 +5,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 
 use cxx_qt::Threading;
+#[cfg(target_os = "emscripten")]
+use cxx_qt::casting::Upcast;
 use cxx_qt_lib::{QByteArray, QList, QString, QStringList};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -52,6 +54,30 @@ pub mod qobject {
 
         #[qinvokable]
         fn set_clipboard_text(self: &System, text: &QString, data: &QString);
+
+        /// On the web, has the browser read its clipboard (it may ask the
+        /// user first), then emits `clipboard_read`: Qt there learns of
+        /// the clipboard only from the browser's paste (Cmd+V). Nothing
+        /// elsewhere, where Qt has the clipboard as it is.
+        #[qinvokable]
+        fn read_web_clipboard(self: Pin<&mut System>);
+
+        /// What `read_web_clipboard` read: the text, or why it couldn't
+        /// ("" and the error).
+        #[qsignal]
+        fn clipboard_read(self: Pin<&mut System>, text: QString, error: QString);
+
+        /// On the web, emits `storage_failed` from now on when Koil's files
+        /// can't be kept in the browser's storage (see web/pre.js). Nothing
+        /// elsewhere.
+        #[qinvokable]
+        fn watch_web_storage(self: Pin<&mut System>);
+
+        /// Why Koil's files can't be kept in the browser's storage: a save
+        /// failed, or they couldn't be read as Koil started, and then
+        /// nothing is saved.
+        #[qsignal]
+        fn storage_failed(self: Pin<&mut System>, why: QString);
 
         /// The installed monospaced font families (the fonts the editor offers).
         #[qinvokable]
@@ -407,6 +433,16 @@ pub mod qobject {
     impl cxx_qt::Threading for System {}
 }
 
+/// Names the signals web.cpp emits by name (`QMetaObject::invokeMethod`),
+/// which nothing in Rust emits, so they aren't taken for dead code.
+#[allow(dead_code)]
+fn emitted_by_web_cpp(mut system: Pin<&mut qobject::System>) {
+    system
+        .as_mut()
+        .clipboard_read(QString::default(), QString::default());
+    system.storage_failed(QString::default());
+}
+
 #[derive(Default)]
 pub struct SystemRust {
     /// The shell command running, if any.
@@ -444,6 +480,34 @@ impl qobject::System {
 
     fn set_clipboard_text(&self, text: &QString, data: &QString) {
         ffi::set_clipboard_text(text, data);
+    }
+
+    fn read_web_clipboard(self: Pin<&mut Self>) {
+        // SAFETY: the pointer is to this System, a live QObject, which
+        // clipboardRead is emitted on (it's in its meta-object).
+        #[cfg(target_os = "emscripten")]
+        unsafe {
+            ffi::read_web_clipboard(self.object())
+        };
+        #[cfg(not(target_os = "emscripten"))]
+        let _ = self;
+    }
+
+    fn watch_web_storage(self: Pin<&mut Self>) {
+        // SAFETY: as in read_web_clipboard, for storageFailed.
+        #[cfg(target_os = "emscripten")]
+        unsafe {
+            ffi::watch_web_storage(self.object())
+        };
+        #[cfg(not(target_os = "emscripten"))]
+        let _ = self;
+    }
+
+    /// This System as the QObject web.cpp emits its signals on.
+    #[cfg(target_os = "emscripten")]
+    fn object(self: Pin<&mut Self>) -> &mut cxx_qt::QObject {
+        // SAFETY: the QObject is only used where it is.
+        unsafe { Pin::into_inner_unchecked(self.upcast_pin()) }
     }
 
     fn monospace_families(&self) -> QStringList {

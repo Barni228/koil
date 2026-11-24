@@ -61,8 +61,12 @@
   row hands them to the list's handler before its own (`pressed`: as a
   button, Space would click it). Then a `FileDialog` asks where, and
   `writeExport` saves them as JSON: a list of them as `settings.shortcuts` has it, so a
-  file can be edited, or put in the settings, by hand. Its import button
-  asks for one, and `importFrom` adds what `app.readShortcuts` reads of it
+  file can be edited, or put in the settings, by hand (on the web,
+  `chooseExportFile` writes it to `/tmp/koil_shortcuts.json` and the
+  browser downloads it, as `:export` does). Its import button
+  asks for one (on the web, `chooseImportFile`: the browser's picker,
+  through `Document.pickFile`, whose `filePicked` gives where it put the
+  file), and `importFrom` adds what `app.readShortcuts` reads of it
   after the user's, but those already there (the same keys running the
   same keys in the same modes); one that's on, but whose keys can't be
   used there (`problemOf` against the list so far: a built-in's, like

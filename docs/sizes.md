@@ -77,7 +77,8 @@
   one: `gsn` name, `gsv` natural (`a2` before `a10`), `gse` extension,
   `gss` size (biggest first; a dir's is counted, see below), `gsd` size
   on disk (koil-core's `SortBy::Disk`; a dir's counted too), `gsm`
-  modified, `gsc` created, `gsa` accessed (newest first), shifted the
+  modified, `gsc` created (not on the web, which keeps no creation
+  times: Rust's std reads none there), `gsa` accessed (newest first), shifted the
   other way round (`gsS`). They're `commandKeys` of three keys
   (`root.sorts`, `sortKeys`: `"gss": "sort:size"`), so a key it doesn't
   know after `gs` is a bad command, and macros and counts work as for the

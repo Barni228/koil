@@ -69,6 +69,13 @@ MenuBar {
             enabled: !menus.app.boxOpen
             onTriggered: menus.app.exportEntry("")
         }
+        MenuItem {
+            text: qsTr("Empty T&rash…")
+            visible: menus.app.web
+            height: visible ? implicitHeight : 0
+            enabled: !menus.app.boxOpen
+            onTriggered: menus.app.emptyTrash()
+        }
         MenuSeparator {}
         Action {
             text: qsTr("Se&ttings")

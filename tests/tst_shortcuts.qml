@@ -32,6 +32,8 @@ TestCase {
     QtObject {
         id: app
 
+        // Koil in a browser (see test_webImportExport).
+        property bool web: false
         property var shortcuts: []
         readonly property var ownShortcuts: [
             { keys: "  ", name: "Apply", normal: true, visual: false, where: "" },
@@ -125,7 +127,20 @@ TestCase {
         id: doc
 
         property var files: ({})
+        // What the web's Export downloaded, and what its picker gives.
+        property var downloaded: []
+        property string picked: ""
 
+        signal filePicked(string result)
+
+        function exportPath(dir, path) {
+            downloaded.push(path);
+            return "";
+        }
+        function pickFile() {
+            filePicked(JSON.stringify(picked === "denied" ? { path: "", error: "Can't read what was picked: denied" }
+                : { path: picked, error: "" }));
+        }
         function readText(path) {
             return JSON.stringify(path in files ? { text: files[path] } : { error: "Can't open `" + path + "`" });
         }
@@ -814,6 +829,37 @@ TestCase {
         // Typing a search drops the message.
         type("c");
         compare(win.message, "");
+    }
+
+    // In a browser, Export downloads the file, from Koil's memory, and
+    // Import takes the one the browser's picker gives.
+    function test_webImportExport() {
+        app.web = true;
+        try {
+            win.startExport();
+            win.exportPicked();
+            verify(!win.exporting);
+            compare(doc.downloaded, ["/tmp/koil_shortcuts.json"]);
+            compare(JSON.parse(doc.files["/tmp/koil_shortcuts.json"]).length, app.shortcuts.length);
+            compare(win.message, "Exported " + app.shortcuts.length + " shortcuts to “koil_shortcuts.json”.");
+            doc.files["/tmp/koil-import/in.json"] = JSON.stringify([
+                { name: "Web", keys: " w", macro: "yy", normal: true, visual: false, enabled: true }
+            ]);
+            doc.picked = "/tmp/koil-import/in.json";
+            win.chooseImportFile();
+            compare(app.shortcuts[app.shortcuts.length - 1].name, "Web");
+            compare(win.message, "Imported 1 shortcut from “in.json”.");
+            // nothing picked, or it can't be read
+            doc.picked = "";
+            win.chooseImportFile();
+            compare(win.message, "");
+            doc.picked = "denied";
+            win.chooseImportFile();
+            compare(win.message, "Can't read what was picked: denied");
+            verify(win.failed);
+        } finally {
+            app.web = false;
+        }
     }
 
     // + makes a new one, and Esc goes back to the list.

@@ -88,7 +88,9 @@ ApplicationWindow {
         { key: "m", by: "modified", label: qsTr("Modified"), first: qsTr("Newest first"), other: qsTr("Oldest first") },
         { key: "c", by: "created", label: qsTr("Created"), first: qsTr("Newest first"), other: qsTr("Oldest first") },
         { key: "a", by: "accessed", label: qsTr("Accessed"), first: qsTr("Newest first"), other: qsTr("Oldest first") }
-    ]
+    // The web keeps no creation times (Rust's std reads none there), so
+    // nothing would be sorted.
+    ].filter(s => !(web && s.by === "created"))
     // The keys of `sorts`, as Vim.commandKeys: "gss" is "sort:size", "gsS"
     // "sortReverse:size".
     readonly property var sortKeys: {
@@ -1301,6 +1303,52 @@ ApplicationWindow {
             vim.showError(why);
     }
 
+    // :emptytrash and File > Empty Trash…, in the web version: deletes what's
+    // in the trash for good, once the user says so (see
+    // Document.emptyTrash), as nothing else there can.
+    function emptyTrash() {
+        if (!web) {
+            vim.showError(":emptytrash is for Koil in a browser: here the system empties its trash");
+            return;
+        }
+        const trash = JSON.parse(doc.trashContents());
+        if (!trash.count) {
+            vim.showMessage("The trash is empty");
+            return;
+        }
+        const one = trash.count === 1;
+        confirmDialog.ask("Empty the trash?",
+            (one ? "Its item (" : "Its " + trash.count + " items (") + trash.size + ") will be deleted for good: "
+                + "undoing what put " + (one ? "it" : "them") + " there can't bring " + (one ? "it" : "them")
+                + " back.", () => {
+            const why = doc.emptyTrash();
+            if (why)
+                vim.showError(why);
+            else
+                vim.showMessage("The trash is empty");
+        }, null, null, { yes: "Empty Trash", cancel: true });
+    }
+
+    // Files and folders dropped on the page, in the web version (see
+    // Document.watchWebDrops), whose paths browsers don't give: they're
+    // imported into the open dir, as Space i would (see imported), where a
+    // drop on desktop opens what's dropped. Not while a dialog is open, as
+    // the DropArea takes nothing then.
+    property bool webDragging: false
+
+    function webDropped(error) {
+        if (error) {
+            doc.forgetDropped();
+            vim.showError("Can't read what was dropped: " + error);
+        } else if (!dropArea.enabled) {
+            doc.forgetDropped();
+            vim.showError("Nothing can be dropped while a question is open");
+        } else {
+            usedHere();
+            imported(JSON.parse(doc.importDropped(koil.currentDir())));
+        }
+    }
+
     // K: everything there is to know of the entry on the cursor's line (the
     // file, in one) where it is on disk, as Space r takes it, in K's box
     // (see info.rs), read again if it's open. The box doesn't take the keys,
@@ -2420,8 +2468,24 @@ ApplicationWindow {
             vim.showMessage("Not quitting: the listing has changes that aren't applied");
     }
 
+    // File > Open… and Open Folder…: Qt's dialogs, but on the web, where
+    // they're the browser's picker, whose files Koil can't read where they
+    // are (Qt gives them as weblocalfile: URLs, which only its QFile reads),
+    // `:e ` is typed for a path on Koil's disk (it opens a file or lists a
+    // dir); files come in from the computer with File > Import.
     function openFile() {
-        openDialog.open();
+        if (web)
+            typeExCommand("e ");
+        else
+            openDialog.open();
+    }
+
+    // Opens the command line with `text` typed, as `:` would, out of
+    // insert or visual mode first.
+    function typeExCommand(text) {
+        vim.startCommand([]);
+        vim.openCommandLine(":", text);
+        activeView.textArea.forceActiveFocus();
     }
 
     // Runs `open`, which shows something else in place of the file, once
@@ -2538,8 +2602,45 @@ ApplicationWindow {
         }
     }
 
+    // File > Save As…: Qt's dialog, but on the web (see openFile) `:sav `
+    // is typed for a path on Koil's disk.
     function saveAs() {
-        saveDialog.open();
+        if (web)
+            typeExCommand("sav ");
+        else
+            saveDialog.open();
+    }
+
+    // Saves what's shown to the file `path` and shows that in its place, as
+    // Save As does: in the scratchpad, saveScratch; else over a file
+    // applying copies, once the copies are made.
+    function saveTo(path) {
+        if (scratchpad) {
+            askToSave(() => saveScratch(path));
+            return;
+        }
+        copyFirst(path, () => {
+            if (doc.saveFile(path, editorView.textArea.latest.text)) {
+                filePath = path;
+                markUnedited();
+            }
+        });
+    }
+
+    // :sav path (:saveas): Save As to `arg`, a path from the open dir (see
+    // Koil.pathFrom), which must not be a file already, unless `force`
+    // (:sav!), as in vim. Not in the listing, which applying saves.
+    function saveAsPath(arg, force) {
+        if (listing) {
+            vim.showError("The listing is saved by applying its changes, not as a file");
+            return;
+        }
+        const path = koil.pathFrom(arg);
+        if (!force && doc.isFile(path)) {
+            vim.showError("E13: File exists (add ! to override)");
+            return;
+        }
+        saveTo(path);
     }
 
     // Save As in the scratchpad: writes its text to the file `path`, and
@@ -2778,6 +2879,9 @@ ApplicationWindow {
         onOpenFailed: message => vim.showError(message)
         onShellDone: result => root.shellDone(JSON.parse(result))
         onShellOutput: output => root.shellOutput(JSON.parse(output))
+        // The web's (see readWebClipboard and watchWebStorage).
+        onClipboardRead: (text, error) => vim.clipboardReady(text, error)
+        onStorageFailed: why => vim.showError(why)
     }
 
     // -p on the command line prints the scratchpad's text as Koil quits,
@@ -2794,6 +2898,9 @@ ApplicationWindow {
         id: doc
 
         onImported: result => root.imported(JSON.parse(result))
+        // The web's (see watchWebDrops).
+        onWebDragChanged: on => root.webDragging = on
+        onFilesDropped: error => root.webDropped(error)
         onLoaded: (path, text) => root.loadFile(text, path)
         onFailed: message => vim.showError(message)
         onFileChanged: {
@@ -3040,6 +3147,12 @@ ApplicationWindow {
         onKeyCommand: (name, count, arg) => root.runKeyCommand(name, count, arg)
         onLinkRequested: (at, text, external) => root.openLink(at, text, external)
         onEditRequested: (path, force) => root.edit(path, force)
+        onSaveAsRequested: (path, force) => root.saveAsPath(path, force)
+        onEmptyTrashRequested: root.emptyTrash()
+        // On the web, `"+` and `"*` wait for the browser's clipboard (see
+        // Vim.asyncClipboard).
+        asyncClipboard: root.web
+        onClipboardWanted: system.readWebClipboard()
         onShellRequested: (command, range, scratchpad) => root.runShell(command, range, scratchpad)
         onScratchRequested: {
             if (!root.scratchpad)
@@ -3294,7 +3407,7 @@ ApplicationWindow {
 
         Rectangle {
             anchors.fill: parent
-            visible: dropArea.containsDrag
+            visible: dropArea.containsDrag || root.webDragging && dropArea.enabled
             color: Qt.rgba(theme.accent.r, theme.accent.g, theme.accent.b, 0.08)
             border.color: theme.accent
             border.width: 2 * theme.zoom
@@ -3309,7 +3422,8 @@ ApplicationWindow {
                     id: dropLabel
 
                     padding: 10 * theme.zoom
-                    text: qsTr("Open “%1”").arg(dropArea.name)
+                    text: root.webDragging ? qsTr("Import into “%1”").arg(doc.shownPath(koil.currentDir()))
+                        : qsTr("Open “%1”").arg(dropArea.name)
                     font.pixelSize: Math.round(13 * theme.zoom)
                     color: theme.text
                     textFormat: Text.PlainText
@@ -3463,21 +3577,7 @@ ApplicationWindow {
         id: saveDialog
 
         fileMode: FileDialog.SaveFile
-        onAccepted: {
-            const path = doc.urlToPath(selectedFile);
-            // Shown in its place, as File > Open shows one.
-            if (root.scratchpad) {
-                root.askToSave(() => root.saveScratch(path));
-                return;
-            }
-            // Over a file applying copies, once the copies are made.
-            root.copyFirst(path, () => {
-                if (doc.saveFile(path, editorView.textArea.latest.text)) {
-                    root.filePath = path;
-                    root.markUnedited();
-                }
-            });
-        }
+        onAccepted: root.saveTo(doc.urlToPath(selectedFile))
     }
 
     // The menus: macOS's own, or in the window elsewhere (see Component.onCompleted).
@@ -3499,7 +3599,10 @@ ApplicationWindow {
 
     // What the menus do, but for the window's functions.
     function openFolderDialog() {
-        folderDialog.open();
+        if (web)
+            typeExCommand("e ");
+        else
+            folderDialog.open();
     }
 
     function openSettings() {
@@ -3566,6 +3669,11 @@ ApplicationWindow {
         // Before any text is looked through (see Txt.lineIndex).
         Txt.compareStringsWith((a, b) => system.sameString(a, b));
         startUp();
+        if (web) {
+            doc.watchWebDrops();
+            // After startUp, whose messages would hide one already due.
+            Qt.callLater(() => system.watchWebStorage());
+        }
         // The editor sits in a ScrollView, which is its own focus scope, so
         // `focus: true` alone doesn't give it the keyboard.
         editorView.textArea.forceActiveFocus();

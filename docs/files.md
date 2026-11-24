@@ -56,7 +56,14 @@
   opens as those would (`openDropped`; the first local one of several):
   `dropArea` is in the overlay, so the status line takes drops too, and
   opens it with `Qt.callLater`, so the app it came from isn't kept
-  waiting while a long file or listing opens. A file is UTF-8, or UTF-16
+  waiting while a long file or listing opens. On the web a drop is an
+  import instead (see Web files). `:sav path` (`:saveas`, `saveAsPath`,
+  vim's `saveAsRequested`) is Save As to a typed path (`saveTo`, what the
+  dialog's accept runs too), from the open dir with `~` the home dir, as
+  written (`Koil.pathFrom`, `listing::written_path`: no pattern, unlike
+  `:e`), and not over a file but with `:sav!` (`E13`, as vim); not in the
+  listing, which applying saves. On the web, File > Open…, Open Folder…
+  and Save As… type `:e ` and `:sav ` (`typeExCommand`), see docs/platform.md, Web. A file is UTF-8, or UTF-16
   after a BOM (what Windows PowerShell 5 writes), and saving writes it
   back as it was, BOM and all (`Document`'s `encoding`; Save As too).
   Other encodings aren't opened: without a BOM they can't be told apart,
@@ -284,7 +291,10 @@
   `matchPair`, goes through all the text). Brackets in strings and
   comments count.
 - **Web files** (web.rs, web.cpp, `web/pre.js`): the web version's home
-  dir is kept in the browser's storage: Emscripten's IndexedDB file
+  dir (where Koil starts, `run` making it the current dir, as
+  Emscripten's is `/`, which the welcome file's open dir was, so `:e
+  name` and `:sav name` went outside it) is kept in the browser's
+  storage: Emscripten's IndexedDB file
   system (IDBFS), which `pre.js` mounts at the home dir before Koil
   starts, and reads in first (a run dependency holds back `main` until
   it's read). It's saved to IndexedDB a moment (300 ms) after Koil writes
@@ -295,9 +305,10 @@
   import picked before it's in place, a folder's `.zip` before it
   downloads) and Qt's caches (`XDG_CACHE_HOME` is `/tmp/cache`, set in
   lib.rs, as QML's compiled code went in `~/.cache` and would have been
-  saved). The undo history, the trash (`~/.local/share/Trash`, the
-  `trash` crate's freedesktop one) and `visited` are in the home dir, so
-  they're kept. The first visit (no `~/.local/share/koil/visited`) writes
+  saved). The undo history, the trash (`~/.local/share/Trash`, a
+  freedesktop trash, which koil-core keeps itself there, see
+  docs/platform.md, Web) and `visited` are in the home dir, so they're
+  kept. The first visit (no `~/.local/share/koil/visited`) writes
   `~/welcome.txt`, unless there's one, and opens it, as if it were on the
   command line (`web::first_visit`, in `run`). `Space i` and `Space I`
   (`:import`, `:import!`, File > Import File… and Import Folder…, in the
@@ -327,3 +338,24 @@
   `downloadWebFile` hands it to the browser as a `Blob` and an `<a
   download>`, deleting the `.zip`. On desktop the keys and commands do
   nothing (they aren't Koil's keys there), and the menu items are hidden.
+  Files and folders dropped on the page are imported into the open dir,
+  as `Space i` does (`webDropped`, then `imported`): browsers give Qt no
+  paths of them, so web.cpp's `watchWebDrops` (`Document.watchWebDrops`,
+  at startup) takes the drag first (capturing on the window, which Qt
+  then never sees; one of anything but files still goes to Qt), writes
+  each into `/tmp/koil-drop` (`web::DROPPED`; a folder with what's in it,
+  its empty folders too, through `webkitGetAsEntry`), and emits
+  `filesDropped`; `Document.importDropped` brings it in, or
+  `forgetDropped` drops it while a dialog is open (as the DropArea is
+  off then). Meanwhile `webDragChanged` has the DropArea's highlight show
+  "Import into ~/dir" (`webDragging`): a drag is taken to have left once
+  `dragover` stops coming (a browser sends one every few hundred ms at
+  most), or the pointer leaves the window. `:emptytrash` (File > Empty
+  Trash…, `emptyTrash`, vim's `emptyTrashRequested`) deletes what's in the
+  trash for good, once a question says how many items and how much space
+  (`Document.trashContents`, `web::trash_contents`; `web::empty_trash`
+  removes `~/.local/share/Trash`): nothing else on the web can, as a
+  delete there trashes it again; undoing what put it there then says
+  it's no longer in the trash. On desktop it says the system empties its
+  trash. Koil runs in one tab at a time, and keeps its files only as it
+  can (see docs/platform.md, Web).

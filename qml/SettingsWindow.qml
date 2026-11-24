@@ -748,7 +748,7 @@ Window {
                         id: startInput
 
                         x: 8 * win.zoom
-                        width: parent.width - x - folderButton.width - 2 * win.zoom
+                        width: parent.width - x - (folderButton.visible ? folderButton.width : 6 * win.zoom) - 2 * win.zoom
                         height: parent.height
                         clip: true
                         text: win.settings.startDir
@@ -783,6 +783,9 @@ Window {
                         anchors.verticalCenter: parent.verticalCenter
                         iconPath: "M2 4.5 Q2 3.5 3 3.5 H6 L7.5 5 H13 Q14 5 14 6 V12 Q14 13 13 13 H3 Q2 13 2 12 Z"
                         tip: qsTr("Choose Folder")
+                        // Not in a browser, whose picker gives no paths
+                        // (see main.qml's openFile): the path is typed.
+                        visible: !win.app.web
                         onClicked: folderPicker.open()
                     }
 

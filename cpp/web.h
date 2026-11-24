@@ -35,3 +35,22 @@ void pickWebFiles(QObject* document, const QString& staging, bool folder);
 // Has the browser download the file `path` as `name`, deleting it once it's
 // read if `remove`.
 void downloadWebFile(const QString& path, const QString& name, bool remove);
+
+// Has the browser read its clipboard (which it may ask the user first),
+// then emits clipboardRead(text, error) on `system`: the text, or why it
+// couldn't. Qt for the web learns of the clipboard only from the browser's
+// paste (Cmd+V), so "+p would have what was copied before that.
+void readWebClipboard(QObject* system);
+
+// Emits storageFailed(why) on `system` when Koil's files can't be kept in
+// the browser's storage: a save failed, or they couldn't be read as Koil
+// started (then nothing is saved, see web/pre.js), which is said at once
+// if it happened already.
+void watchWebStorage(QObject* system);
+
+// Has the page take the files and folders dropped on it, which browsers
+// give Qt no paths of: each goes in the dir `staging` (a folder with
+// what's in it), then filesDropped(why it couldn't, or "") is emitted on
+// `document`. webDragChanged(on) is emitted as a drag of files comes over
+// the page, and leaves it.
+void watchWebDrops(QObject* document, const QString& staging);

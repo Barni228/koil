@@ -209,3 +209,32 @@ fn test_first_visit() {
         fs::read_to_string(temp.path().join("welcome.txt")).unwrap()
     );
 }
+
+#[test]
+fn test_picked_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let staging = temp.path().join("staging");
+    assert_eq!(picked_file(&staging), None);
+    make(&staging, &["dir/inside.json", "b.json", "a.json"]);
+    assert_eq!(picked_file(&staging), Some(staging.join("a.json")));
+}
+
+#[test]
+fn test_empty_trash() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    assert_eq!(trash_contents(home), (0, 0));
+    // emptying no trash is fine
+    empty_trash(home).unwrap();
+    let trash = trash_dir(home);
+    make(&trash.join("files"), &["a.txt", "dir/x", "dir/sub/y"]);
+    make(&trash.join("info"), &["a.txt.trashinfo", "dir.trashinfo"]);
+    let bytes = ["a.txt", "dir/x", "dir/sub/y"]
+        .iter()
+        .map(|p| fs::metadata(trash.join("files").join(p)).unwrap().len())
+        .sum();
+    assert_eq!(trash_contents(home), (2, bytes));
+    empty_trash(home).unwrap();
+    assert!(!trash.exists());
+    assert_eq!(trash_contents(home), (0, 0));
+}

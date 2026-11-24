@@ -34,7 +34,8 @@
   startup, with no path on the command line, so the Settings window writes
   it to `settings` alone. It's a dir or pattern as the path field takes it,
   read from the home dir (`Document.startDir`), so it can't open a file;
-  the folder button puts a picked one in with `~`. The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
+  the folder button puts a picked one in with `~` (not on the web, whose
+  picker gives no paths: see docs/platform.md, Web). The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
   also switches the palette, title bar and menus; "system" unsets it. On
   the web, Qt reads no scheme from the browser (it's Unknown in both
   modes) and then gives windows a light palette but text areas a dark

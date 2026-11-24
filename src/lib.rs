@@ -43,6 +43,13 @@ pub fn run() {
         err.exit()
     });
     cli::read_stdin(&mut args);
+    // Emscripten starts in `/`, which Koil would take for the dir it started
+    // in: the open dir, as the welcome file opens, that `:e name` and
+    // `:sav name` read from, in memory alone (see docs/files.md, Web files).
+    #[cfg(target_os = "emscripten")]
+    if let Some(home) = std::env::home_dir() {
+        let _ = std::env::set_current_dir(home);
+    }
     // The web's first visit opens the welcome file, as if it were on the
     // command line, which the web has none of.
     #[cfg(target_os = "emscripten")]

@@ -1,7 +1,8 @@
 //! What only the web version does with files (see docs/files.md, Web
 //! files): the welcome file of a first visit (`first_visit`), bringing in
-//! what the browser's picker gave (`import`), and the `.zip` of a folder
-//! to download (`zip_dir`). The browser's side (the picker, downloads,
+//! what the browser's picker gave or was dropped (`import`), the `.zip` of
+//! a folder to download (`zip_dir`), and emptying the trash
+//! (`empty_trash`). The browser's side (the picker, downloads,
 //! saving the disk to the browser's storage) is web.cpp's. Built
 //! everywhere, so the tests run on desktop.
 
@@ -12,6 +13,10 @@ use std::path::{Path, PathBuf};
 /// Where the picker puts what's picked, before `import` moves it into place:
 /// in the browser's memory, not in its storage.
 pub const STAGING: &str = "/tmp/koil-import";
+
+/// Where what's dropped on the page goes, before `import` moves it into
+/// place, as STAGING (a drop can come while the picker is open).
+pub const DROPPED: &str = "/tmp/koil-drop";
 
 /// What a first visit opens (see `first_visit`).
 const WELCOME: &str = "\
@@ -47,6 +52,19 @@ pub fn first_visit(home: &Path) -> Option<PathBuf> {
 pub fn disk_changed() {
     #[cfg(target_os = "emscripten")]
     crate::ffi::save_web_disk();
+}
+
+/// The first file the picker put in `staging` (by name), which it then has
+/// in place of a file of the user's, as browsers give no paths: shortcuts
+/// to import. None if nothing was picked.
+pub fn picked_file(staging: &Path) -> Option<PathBuf> {
+    let mut files: Vec<_> = fs::read_dir(staging)
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|path| path.is_file())
+        .collect();
+    files.sort();
+    files.into_iter().next()
 }
 
 /// Brings what the picker put in `staging` (each file picked, or the folder,
@@ -204,13 +222,50 @@ pub fn export(dir: &Path, path: &str) -> Result<(), String> {
         return Ok(());
     }
     // Koil's own: its undo history (and `visited`), and the trash.
-    let data = home.join(".local/share");
-    let left_out = [data.join("koil"), data.join("Trash")];
+    let left_out = [home.join(".local/share/koil"), trash_dir(&home)];
     let zip = std::env::temp_dir().join(format!("{name}.zip"));
     let file = fs::File::create(&zip).map_err(cannot)?;
     zip_dir(&path, &name, &left_out, io::BufWriter::new(file)).map_err(cannot)?;
     download(&zip, &format!("{name}.zip"), true);
     Ok(())
+}
+
+/// The trash koil-core keeps on the web (its `trash::home`), in the home
+/// dir `home`.
+pub fn trash_dir(home: &Path) -> PathBuf {
+    home.join(".local/share/Trash")
+}
+
+/// How many items the trash in `home` has (see `trash_dir`), and how many
+/// bytes their files take, those in a dir too.
+pub fn trash_contents(home: &Path) -> (usize, u64) {
+    fn bytes(path: &Path) -> u64 {
+        match path.symlink_metadata() {
+            Ok(meta) if meta.is_dir() => fs::read_dir(path)
+                .map(|entries| entries.flatten().map(|e| bytes(&e.path())).sum())
+                .unwrap_or(0),
+            Ok(meta) => meta.len(),
+            Err(_) => 0,
+        }
+    }
+    let Ok(entries) = fs::read_dir(trash_dir(home).join("files")) else {
+        return (0, 0);
+    };
+    let items: Vec<_> = entries.flatten().map(|entry| entry.path()).collect();
+    (items.len(), items.iter().map(|item| bytes(item)).sum())
+}
+
+/// Deletes what's in the trash in `home` for good (see `trash_dir`), which
+/// the web has no other way to: deleting it there would trash it again.
+/// Undoing what put it there then says it's no longer in the trash.
+pub fn empty_trash(home: &Path) -> io::Result<()> {
+    let trash = trash_dir(home);
+    let emptied = match fs::remove_dir_all(&trash) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    };
+    disk_changed();
+    emptied
 }
 
 /// Has the browser download the file `path` as `name`, deleting it once it's

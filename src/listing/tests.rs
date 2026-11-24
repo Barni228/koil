@@ -730,6 +730,21 @@ fn test_file_at() {
 }
 
 #[test]
+fn test_written_path() {
+    let (_temp, koil) = koil();
+    let root = koil.current_dir().to_path_buf();
+    let home = std::env::home_dir().unwrap();
+    let path = |location| written_path(&koil, location);
+    assert_eq!(path("new.txt"), root.join("new.txt"));
+    assert_eq!(path(" dir/../a b.txt "), root.join("a b.txt"));
+    assert_eq!(path("~/notes.md"), home.join("notes.md"));
+    assert_eq!(path("~x"), root.join("~x"));
+    // as written: not a pattern, and no quotes taken off
+    assert_eq!(path("*.rs"), root.join("*.rs"));
+    assert_eq!(path("/tmp/x"), PathBuf::from("/tmp/x"));
+}
+
+#[test]
 fn test_path_on_line() {
     let (_temp, koil) = koil();
     let rendered = render(&koil);
