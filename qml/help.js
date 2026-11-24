@@ -680,10 +680,12 @@ function sections(help) {
                 ["`Space o`  `:open`", "Open the entry on the line (in a file, the file) in its default app."],
                 ["`Space O`  `:openwith`", "Open it with an app picked from those that can, or with "
                     + "`:openwith app`, the app of that name, listed or not (see `:h openwith`)."],
-                ["`Space q`  `:shortcuts`", "List your shortcuts, and the built-in ones (see `:h shortcuts`)."]
+                ["`Space q`  `:shortcuts`", "List your shortcuts, and the built-in ones (see `:h shortcuts`)."],
+                ["`Space i`  `Space I`  `Space e`", "In a browser: import files or a folder, or export (see "
+                    + "`:h import`)."]
             ],
             note: "Shortcuts of yours can start with `Space` too, like `Space c`. The commands can be cut "
-                + "short, as vim's: `:ap`, `:undol`, `:rev`, `:o`, `:openw`, `:sho`."
+                + "short, as vim's: `:ap`, `:undol`, `:rev`, `:o`, `:openw`, `:sho`, `:imp`, `:exp`."
         },
         {
             title: "Ctrl keys",
@@ -771,6 +773,26 @@ function sections(help) {
                     + "selection, theme, folders first, when applying asks, start dir, shell and more. The "
                     + "pointer on a setting's name shows what it does."]
             ]
+        },
+        {
+            title: "Files in the browser",
+            tags: ["web", "import", "imp", ":import", ":imp", "export", "exp", ":export", ":exp", "upload",
+                "download", "zip", "storage"],
+            intro: "Koil in a browser (its web version) keeps its files in the browser's storage, apart from "
+                + "your computer's, until the site's data is cleared. Importing brings files in, and "
+                + "exporting downloads them. These are its keys alone.",
+            rows: [
+                ["`Space i`  `:import`", "Bring in files from your computer, picked in the browser's list, into "
+                    + "the open dir (File > Import File…). One whose name is taken there gets another, like "
+                    + "`notes (2).txt`: nothing is replaced. A file alone opens."],
+                ["`Space I`  `:import!`", "Bring in a folder, with all that's in it, and list it (File > Import "
+                    + "Folder…)."],
+                ["`Space e`  `:export`", "Download the entry on the line (in a file, the file; from the path "
+                    + "field, the open dir): a file as it is, a dir as a `.zip` of it (File > Export…). "
+                    + "`:export path` downloads that path, from the open dir: `:export .` is all of it."]
+            ],
+            note: "A browser runs no other programs, so there shell commands, `Space r`, `Space o` and "
+                + "`Space O` say they can't."
         },
         {
             // Last, so a key that's no topic (`:h x`) goes to vim's row

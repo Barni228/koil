@@ -44,6 +44,29 @@ Platform.MenuBar {
             shortcut: StandardKey.SaveAs
             onTriggered: menus.app.saveAs()
         }
+        // The web version's, which never has this menu bar (see
+        // WindowMenuBar), but would show them here.
+        Platform.MenuSeparator {
+            visible: menus.app.web
+        }
+        Platform.MenuItem {
+            text: qsTr("Import File…")
+            visible: menus.app.web
+            enabled: menus.app.listing && !menus.app.boxOpen
+            onTriggered: menus.app.importFiles(false)
+        }
+        Platform.MenuItem {
+            text: qsTr("Import Folder…")
+            visible: menus.app.web
+            enabled: menus.app.listing && !menus.app.boxOpen
+            onTriggered: menus.app.importFiles(true)
+        }
+        Platform.MenuItem {
+            text: qsTr("Export…")
+            visible: menus.app.web
+            enabled: !menus.app.boxOpen
+            onTriggered: menus.app.exportEntry("")
+        }
         // First in the app menu, as macOS puts About.
         Platform.MenuItem {
             text: qsTr("About Koil")

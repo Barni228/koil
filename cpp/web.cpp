@@ -1,4 +1,5 @@
 #include "web.h"
+#include "koil/src/ffi.cxx.h"
 
 #include <QtCore/QEvent>
 #include <QtGui/QGuiApplication>
@@ -9,6 +10,7 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
+#include <cstdint>
 #include <string>
 
 using emscripten::val;
@@ -69,18 +71,72 @@ protected:
   }
 };
 
+// What the picker gave (see pickWebFiles): `document` is the Document's
+// address, which went through JavaScript as a number.
+void
+filesPicked(std::uintptr_t document, std::string error)
+{
+  webFilesPicked(reinterpret_cast<QObject*>(document), QString::fromStdString(error));
+}
+
 } // namespace
 
 // What the JavaScript below calls (on `Module`).
 EMSCRIPTEN_BINDINGS(koil_web)
 {
   emscripten::function("koilColorSchemeChanged", &colorSchemeChanged);
+  emscripten::function("koilFilesPicked", &filesPicked);
 }
 
 // clang-format off
 EM_JS(void, koilJsListenToColorScheme, (), {
   matchMedia("(prefers-color-scheme: dark)")
     .addEventListener("change", event => Module.koilColorSchemeChanged(event.matches));
+});
+
+EM_JS(void, koilJsSaveDisk, (), {
+  Module.koilSaveDisk?.();
+});
+
+// Each file goes in `staging` at its path in what's picked (a folder's
+// files under its name); a part that could climb out (`..`) is left out.
+EM_JS(void, koilJsOpenPicker, (std::uintptr_t document, const char* staging, bool folder), {
+  const dir = UTF8ToString(staging);
+  const input = window.document.createElement("input");
+  input.type = "file";
+  input.multiple = true;
+  input.webkitdirectory = folder;
+  input.addEventListener("change", async () => {
+    let error = "";
+    try {
+      for (const file of input.files) {
+        const parts = (folder && file.webkitRelativePath || file.name).split("/")
+          .filter(part => part && part !== "." && part !== "..");
+        if (!parts.length)
+          continue;
+        FS.mkdirTree([dir].concat(parts.slice(0, -1)).join("/"));
+        FS.writeFile([dir].concat(parts).join("/"), new Uint8Array(await file.arrayBuffer()));
+      }
+    } catch (e) {
+      error = String(e?.message ?? e);
+    }
+    Module.koilFilesPicked(document, error);
+  });
+  input.click();
+});
+
+EM_JS(void, koilJsDownload, (const char* path, const char* name, bool remove), {
+  const at = UTF8ToString(path);
+  const data = FS.readFile(at);
+  if (remove)
+    FS.unlink(at);
+  const url = URL.createObjectURL(new Blob([data]));
+  const link = window.document.createElement("a");
+  link.href = url;
+  link.download = UTF8ToString(name);
+  link.click();
+  // Once the download has it.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 });
 // clang-format on
 
@@ -111,4 +167,22 @@ followBrowserColorScheme(bool on)
   }
   followsScheme = on;
   colorSchemeChanged(browserDark());
+}
+
+void
+saveWebDisk()
+{
+  koilJsSaveDisk();
+}
+
+void
+pickWebFiles(QObject* document, const QString& staging, bool folder)
+{
+  koilJsOpenPicker(reinterpret_cast<std::uintptr_t>(document), staging.toStdString().c_str(), folder);
+}
+
+void
+downloadWebFile(const QString& path, const QString& name, bool remove)
+{
+  koilJsDownload(path.toStdString().c_str(), name.toStdString().c_str(), remove);
 }

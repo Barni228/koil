@@ -251,6 +251,9 @@ ApplicationWindow {
             own(" O", qsTr("Open the entry with an app picked from those that can (in a file, the file)")),
             own("K", qsTr("Show all about the entry: size, times, permissions… (in a file, the file)")),
             own(" q", qsTr("List your shortcuts")),
+            ...(web ? [own(" i", qsTr("Import files from your computer into the open dir"), listing),
+                own(" I", qsTr("Import a folder from your computer into the open dir"), listing),
+                own(" e", qsTr("Download the entry (in a file, the file; a dir as a .zip)"))] : []),
             own("<CR>", qsTr("Open the dir or file on the line"), listing),
             own("<S-CR>", qsTr("Update, staying in the path field"), qsTr("Path field")),
             own("-", qsTr("The dir above (in a file, back to the listing)")),
@@ -1036,7 +1039,10 @@ ApplicationWindow {
             leave: () => leaveFile(false),
             scratch: () => scratchpad ? leaveFile(false) : openScratch(),
             shell: () => bangLines(count),
-            shortcuts: () => openShortcuts(true)
+            shortcuts: () => openShortcuts(true),
+            importFiles: () => importFiles(false),
+            importFolder: () => importFiles(true),
+            export: () => exportEntry(arg)
         };
         if (commands[name])
             commands[name]();
@@ -1245,6 +1251,51 @@ ApplicationWindow {
         if (path)
             usedHere();
         const why = path && system.reveal(path);
+        if (why)
+            vim.showError(why);
+    }
+
+    // Space i and Space I (:import, :import!), in the web version: the
+    // browser's list of files to pick, or of folders (`folder`), whose
+    // files go into the open dir (see Document.importFiles), then
+    // `imported`.
+    function importFiles(folder) {
+        usedHere();
+        doc.importFiles(koil.currentDir(), folder);
+    }
+
+    // What importFiles brought in (`r`: { paths, error }), now in the
+    // listing, with the user's edits kept, as a change on disk is (which
+    // nothing watches for on the web): a file alone opens, and a folder
+    // alone is listed.
+    function imported(r) {
+        if (r.error) {
+            vim.showError(r.error);
+            return;
+        }
+        if (!r.paths.length) {
+            vim.showMessage("Nothing to import");
+            return;
+        }
+        diskChanged = true;
+        syncListing();
+        if (r.paths.length === 1) {
+            edit(r.paths[0], false);
+            return;
+        }
+        vim.showMessage(r.paths.length + " entries imported");
+    }
+
+    // Space e (:export), in the web version: downloads the entry on the
+    // cursor's line, as Space o takes it (the file, in one), or the path
+    // `arg` (:export path, from the open dir): a file as it is, a dir as a
+    // .zip (see Document.exportPath).
+    function exportEntry(arg) {
+        const path = arg || entryPath();
+        if (!path)
+            return;
+        usedHere();
+        const why = doc.exportPath(koil.currentDir(), path);
         if (why)
             vim.showError(why);
     }
@@ -2732,6 +2783,7 @@ ApplicationWindow {
     Document {
         id: doc
 
+        onImported: result => root.imported(JSON.parse(result))
         onLoaded: (path, text) => root.loadFile(text, path)
         onFailed: message => vim.showError(message)
         onFileChanged: {
@@ -2935,6 +2987,10 @@ ApplicationWindow {
             "!": "shell"
         }, root.sortKeys, root.activeView === pathView ? {
             "<S-CR>": "update"
+        } : {}, root.web ? {
+            " i": "importFiles",
+            " I": "importFolder",
+            " e": "export"
         } : {}) : Object.assign({
             "  ": "save",
             " q": "shortcuts",
@@ -2947,7 +3003,9 @@ ApplicationWindow {
             "-": "back",
             "[": "leave",
             "_": "scratch"
-        } : root.scratchpad ? {
+        } : {}, root.filePath && root.web ? {
+            " e": "export"
+        } : {}, !root.filePath && root.scratchpad ? {
             " r": "reveal",
             " o": "openInApp",
             " O": "openWith",

@@ -640,7 +640,7 @@ fn contents(path: &Path) -> Text {
 /// `time` in the local time zone, to the second, and how long before
 /// `now` it was (see `listing::time_ago`), unless that's the time again.
 fn time_text(time: SystemTime, now: SystemTime) -> Text {
-    let local = chrono::DateTime::<chrono::Local>::from(time);
+    let local = crate::listing::local_time(time);
     let full = Text::of(local.format("%Y-%m-%d").to_string(), Kind::Date)
         .and(" ", Kind::Plain)
         .and(local.format("%H:%M:%S").to_string(), Kind::Time);

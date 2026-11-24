@@ -7036,7 +7036,12 @@ QtObject {
             { names: /^openw(?:i|it|ith)?$/, takesArg: true, run: (arg, name) => commandKey(" O", name, arg) },
             // And K, :info.
             { names: /^inf(?:o)?$/, run: (arg, name) => commandKey("K", name) },
-            { names: /^sho(?:r|rt|rtc|rtcu|rtcut|rtcuts)?$/, run: (arg, name) => commandKey(" q", name) }
+            { names: /^sho(?:r|rt|rtc|rtcu|rtcut|rtcuts)?$/, run: (arg, name) => commandKey(" q", name) },
+            // The web version's: :import! is Space I, a folder, and
+            // :export path downloads that path.
+            { names: /^imp(?:o|or|ort)?!?$/,
+                run: (arg, name) => commandKey(name.endsWith("!") ? " I" : " i", name) },
+            { names: /^exp(?:o|or|ort)?$/, takesArg: true, run: (arg, name) => commandKey(" e", name, arg) }
         ];
     }
 

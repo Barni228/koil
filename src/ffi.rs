@@ -2,7 +2,7 @@
 
 pub use bridge::*;
 
-use crate::document::{file_opened, folder_requested};
+use crate::document::{file_opened, folder_requested, web_files_picked};
 use crate::syntax;
 
 #[cxx_qt::bridge]
@@ -36,6 +36,12 @@ mod bridge {
         #[cxx_name = "folderRequested"]
         unsafe fn folder_requested(document: *mut QObject, path: &QString, file: bool);
 
+        /// Brings what the browser's picker gave into the dir `document`
+        /// (a Document) asked for (see `Document::import_files`); `error`
+        /// is why it couldn't be read, if it couldn't. Web only.
+        #[cxx_name = "webFilesPicked"]
+        unsafe fn web_files_picked(document: *mut QObject, error: &QString);
+
         /// Puts the parts of a file's `line` to color in `spans` (see
         /// `syntax::spans`), apart (`syntax::apart`), for a line that
         /// starts in `state`, and gives the state it ends in
@@ -65,6 +71,25 @@ mod bridge {
         #[cxx_name = "useWebPage"]
         #[cfg(target_os = "emscripten")]
         fn use_web_page();
+
+        /// Saves the home dir to the browser's storage a moment from now
+        /// (see web.h). Web only.
+        #[cxx_name = "saveWebDisk"]
+        #[cfg(target_os = "emscripten")]
+        fn save_web_disk();
+
+        /// Opens the browser's picker of files (or of a folder, with
+        /// `folder`), which puts what's picked in `staging`, then calls
+        /// `web_files_picked` with `document` (see web.h). Web only.
+        #[cxx_name = "pickWebFiles"]
+        #[cfg(target_os = "emscripten")]
+        unsafe fn pick_web_files(document: *mut QObject, staging: &QString, folder: bool);
+
+        /// Has the browser download the file `path` as `name`, deleting it
+        /// once it's read if `remove` (see web.h). Web only.
+        #[cxx_name = "downloadWebFile"]
+        #[cfg(target_os = "emscripten")]
+        fn download_web_file(path: &QString, name: &QString, remove: bool);
 
         /// Whether the browser runs on a Mac (see web.h). Web only.
         #[cxx_name = "webOnMac"]

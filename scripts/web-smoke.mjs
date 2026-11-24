@@ -1,8 +1,9 @@
 // Checks the web build (target/web, from build-web.sh) in headless Chrome:
-// loads it, makes a file in the listing (`ihello.txt`, Esc, Space Space
-// to apply, `y` to confirm), and fails if the file isn't on Koil's disk
-// after, or if Koil stopped (a panic or a crash aborts it, see
-// docs/platform.md, Web).
+// loads it, which opens the welcome file (a first visit), goes to the
+// listing (`-`), makes a file there (`ohello.txt`, Esc, Space Space to
+// apply, `y` to confirm), and fails if either file isn't on Koil's disk,
+// or if Koil stopped (a panic or a crash aborts it, see docs/platform.md,
+// Web).
 //
 //   node scripts/web-smoke.mjs [--shots <dir>] [--dark]
 //
@@ -125,10 +126,15 @@ try {
   await sleep(1500);
   await shot("loaded");
 
+  const exists = path => evaluate(`window.koil?.FS?.analyzePath("/home/web_user/${path}").exists`);
+  if (await exists("welcome.txt") !== true) problems.push("welcome.txt wasn't made");
+
   await send("Input.dispatchMouseEvent", { type: "mousePressed", x: 400, y: 120, button: "left", clickCount: 1 });
   await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 400, y: 120, button: "left", clickCount: 1 });
   await sleep(300);
-  await type("ihello.txt");
+  await type("-");
+  await sleep(500);
+  await type("ohello.txt");
   await key("Escape");
   await type("  ");
   await sleep(800);
@@ -137,8 +143,7 @@ try {
   await sleep(800);
   await shot("applied");
 
-  const made = await evaluate("window.koil?.FS?.analyzePath('/home/web_user/hello.txt').exists");
-  if (made !== true) problems.push(`hello.txt wasn't made (${made})`);
+  if (await exists("hello.txt") !== true) problems.push("hello.txt wasn't made");
 } catch (error) {
   problems.push(String(error));
 }

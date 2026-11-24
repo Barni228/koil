@@ -283,3 +283,47 @@
   only when both are in view, which is as far as it looks (vim's `%`,
   `matchPair`, goes through all the text). Brackets in strings and
   comments count.
+- **Web files** (web.rs, web.cpp, `web/pre.js`): the web version's home
+  dir is kept in the browser's storage: Emscripten's IndexedDB file
+  system (IDBFS), which `pre.js` mounts at the home dir before Koil
+  starts, and reads in first (a run dependency holds back `main` until
+  it's read). It's saved to IndexedDB a moment (300 ms) after Koil writes
+  it (`web::disk_changed`, after an apply, undo or create, `Koil.history`'s
+  merge, a file saved and an import), one save at a time, and as the page
+  is hidden or closed. What's outside the home dir is in memory alone:
+  `/tmp` (the scratchpad's file, which desktop never keeps either, what an
+  import picked before it's in place, a folder's `.zip` before it
+  downloads) and Qt's caches (`XDG_CACHE_HOME` is `/tmp/cache`, set in
+  lib.rs, as QML's compiled code went in `~/.cache` and would have been
+  saved). The undo history, the trash (`~/.local/share/Trash`, the
+  `trash` crate's freedesktop one) and `visited` are in the home dir, so
+  they're kept. The first visit (no `~/.local/share/koil/visited`) writes
+  `~/welcome.txt`, unless there's one, and opens it, as if it were on the
+  command line (`web::first_visit`, in `run`). `Space i` and `Space I`
+  (`:import`, `:import!`, File > Import File… and Import Folder…, in the
+  listing) open the browser's list of files to pick (an `<input
+  type="file">`, `webkitdirectory` for a folder, which every browser has
+  as a one-time copy): `Document.importFiles` remembers the open dir, and
+  web.cpp's `pickWebFiles` writes what's picked into `/tmp/koil-import`
+  (each file, or the folder with its files, by their
+  `webkitRelativePath`, without parts that could climb out), then calls
+  back `web_files_picked`, where `web::import` copies each into the dir
+  (`/tmp` is another file system, which `rename` can't move from), a name
+  that's taken getting ` (2)` (` (3)`…) before its extension, as browsers
+  name downloads: an import never replaces anything. A browser gives a
+  folder's files alone, so its empty dirs don't come. Then `imported`
+  shows them in the listing, keeping its edits (`syncListing`, as a change
+  on disk does), opens a file alone and lists a folder alone. A browser
+  opens its list only right after a key or click, which these are. `Space
+  e` (`:export`, `:export path`, File > Export…) downloads the entry on
+  the line (the file, in one) or a path from the open dir: a file as it
+  is, a dir as a `.zip` that `web::zip_dir` makes in `/tmp` (deflated by
+  `zip` with flate2's miniz_oxide, Rust alone, which builds for the web),
+  named as the dir (`home.zip`, and a `home` folder in it, for the home
+  dir, which is `web_user`), with what's hidden in it but Koil's own (its
+  undo history and the trash, in `~/.local/share`), each entry with the
+  time it was modified (zip's are local times; without one it's 1980);
+  links are followed to files and left out to dirs. web.cpp's
+  `downloadWebFile` hands it to the browser as a `Blob` and an `<a
+  download>`, deleting the `.zip`. On desktop the keys and commands do
+  nothing (they aren't Koil's keys there), and the menu items are hidden.

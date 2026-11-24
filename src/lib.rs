@@ -16,6 +16,8 @@ mod shell;
 mod sizes;
 mod syntax;
 mod system;
+#[cfg_attr(not(target_os = "emscripten"), allow(dead_code))]
+mod web;
 
 use cxx_qt_lib::{QByteArray, QGuiApplication, QQmlApplicationEngine, QString, QUrl};
 
@@ -41,7 +43,23 @@ pub fn run() {
         err.exit()
     });
     cli::read_stdin(&mut args);
+    // The web's first visit opens the welcome file, as if it were on the
+    // command line, which the web has none of.
+    #[cfg(target_os = "emscripten")]
+    if args.path.is_none()
+        && let Some(welcome) = std::env::home_dir().and_then(|home| web::first_visit(&home))
+    {
+        args.path = Some(welcome.to_string_lossy().into_owned());
+    }
     *cli::ARGS.lock().unwrap() = args;
+
+    // Qt's caches (QML's compiled code, the graphics pipeline's) in memory,
+    // not in the home dir that the browser keeps (see web/pre.js).
+    #[cfg(target_os = "emscripten")]
+    // SAFETY: the web has one thread.
+    unsafe {
+        std::env::set_var("XDG_CACHE_HOME", "/tmp/cache")
+    };
 
     let mut app = QGuiApplication::new();
     if let Some(mut app) = app.as_mut() {

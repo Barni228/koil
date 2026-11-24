@@ -39,6 +39,11 @@ qt_add_executable(koil main.cpp cpp_exception_tag.S)
 set_source_files_properties(cpp_exception_tag.S
     PROPERTIES COMPILE_OPTIONS "-mexception-handling")
 target_link_libraries(koil PRIVATE koil_qml_module ${QT_MODULES})
+# Koil's home dir is kept in the browser's storage (IndexedDB): pre.js
+# mounts it before main, and saves it (see there).
+target_link_options(koil PRIVATE
+    -lidbfs.js "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/pre.js")
+set_property(TARGET koil APPEND PROPERTY LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/pre.js)
 # What Koil's QML imports (QtQuick.Controls and the rest) is linked
 # statically, and only what it imports: what the scanner finds in qml/,
 # which isn't under this dir.

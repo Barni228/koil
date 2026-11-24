@@ -125,6 +125,11 @@
     programs.
   - stdin isn't read (`cli::read_stdin`): Emscripten would ask for it
     with a prompt.
+  - The web has no time zone files, which chrono's `Local` reads, so it
+    would show times in UTC: `listing::local_time` takes the offset from
+    libc's `localtime_r` there, which Emscripten asks the browser for.
+  - Its files are kept in the browser (see Web files): `-lidbfs.js` and
+    `web/pre.js` (`--pre-js`, run in the module before `main`).
 - **Web, keys**: in a browser on a Mac, Qt hands keys as macOS's Qt does
   (Cmd as Ctrl, Ctrl as Meta), so the web version acts as the Mac app
   there (`isMac`, from `System.webOnMac`, which reads `navigator`): Cmd

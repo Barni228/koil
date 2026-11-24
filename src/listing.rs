@@ -600,6 +600,28 @@ const WEEK: u64 = 7 * DAY;
 const MONTH: u64 = 30 * DAY;
 const YEAR: u64 = 365 * DAY;
 
+/// `time` in the local time zone. The web has no time zone files, which
+/// chrono reads (it would show UTC), so there its offset at that time is
+/// libc's, which Emscripten asks the browser for.
+pub fn local_time(time: SystemTime) -> chrono::DateTime<chrono::FixedOffset> {
+    let utc = chrono::DateTime::<chrono::Utc>::from(time);
+    #[cfg(target_os = "emscripten")]
+    {
+        let secs = utc.timestamp() as libc::time_t;
+        // SAFETY: a tm is plain numbers (and a pointer, which localtime_r
+        // sets).
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        // SAFETY: both point to these locals.
+        unsafe { libc::localtime_r(&secs, &mut tm) };
+        let offset = i32::try_from(tm.tm_gmtoff)
+            .ok()
+            .and_then(chrono::FixedOffset::east_opt);
+        utc.with_timezone(&offset.unwrap_or(chrono::FixedOffset::east_opt(0).unwrap()))
+    }
+    #[cfg(not(target_os = "emscripten"))]
+    utc.with_timezone(&chrono::Local).fixed_offset()
+}
+
 /// How old `time` is at `now`, by what [`time_ago`] counts it in, which
 /// the undo history colors it by: `today` (under a day), `days`, `weeks`,
 /// `months`, or `years` (a year or more, or a time after `now`, both
@@ -637,7 +659,7 @@ pub fn time_ago(time: SystemTime, now: SystemTime) -> (String, Option<u64>) {
         WEEK..MONTH => (WEEK, MONTH, "week"),
         MONTH..YEAR => (MONTH, YEAR, "month"),
         YEAR.. => {
-            let time = chrono::DateTime::<chrono::Local>::from(time);
+            let time = local_time(time);
             return (time.format("%Y-%m-%d %H:%M").to_string(), None);
         }
     };

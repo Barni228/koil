@@ -19,6 +19,7 @@ use crate::history::History;
 use crate::info::{self, Info};
 use crate::listing::{self, Hidden, Notes};
 use crate::sizes::{Measure, SizeOf, Sizes};
+use crate::web;
 
 /// Koil itself (koil-core): the dir or pattern that's open, the changes
 /// written in its listings so far, and applying and undoing them. Takes and
@@ -1003,6 +1004,7 @@ impl qobject::Koil {
             }
         }
         this.history.merge(&mut this.koil);
+        web::disk_changed();
         let (ok, message) = match applied {
             Ok(message) => (true, message),
             Err(message) => (false, message),
@@ -1035,6 +1037,7 @@ impl qobject::Koil {
             rust.sizes.changed(path);
         }
         rust.history.merge(&mut rust.koil);
+        web::disk_changed();
         outcome(created)
     }
 
@@ -1051,6 +1054,7 @@ impl qobject::Koil {
         let rust = &mut *rust;
         // With what other Koils applied or undid.
         rust.history.merge(&mut rust.koil);
+        web::disk_changed();
         let mut list = listing::history(&rust.koil);
         if let Ok(list) = &mut list {
             rust.shown_history = std::mem::take(&mut list.applied);
@@ -1067,6 +1071,7 @@ impl qobject::Koil {
         let steps = picked_steps(&rust.shown_history, &rust.shown_steps, picked);
         // Those another Koil undid since aren't undone again.
         rust.history.merge(&mut rust.koil);
+        web::disk_changed();
         let undone = rust.koil.undo_some(&steps);
         let undone = undo_message(&rust.koil, undone);
         // The sizes kept that it changed, before the watcher tells.
@@ -1076,6 +1081,7 @@ impl qobject::Koil {
             }
         }
         rust.history.merge(&mut rust.koil);
+        web::disk_changed();
         outcome(undone)
     }
 
@@ -1092,6 +1098,7 @@ impl qobject::Koil {
         let rust = &mut *rust;
         // As another Koil left it (undone there, it isn't here).
         rust.history.merge(&mut rust.koil);
+        web::disk_changed();
         let applied = rust.koil.history().iter().find(|a| a.time == time).cloned();
         let undone = (applied.as_ref().ok_or(KoilError::NothingToUndo))
             .and_then(|applied| rust.koil.unapply(applied, pending));
@@ -1109,6 +1116,7 @@ impl qobject::Koil {
             rust.sizes.changed(path);
         }
         rust.history.merge(&mut rust.koil);
+        web::disk_changed();
         outcome(undone)
     }
 

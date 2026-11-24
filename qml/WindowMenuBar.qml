@@ -41,6 +41,34 @@ MenuBar {
             shortcut: StandardKey.SaveAs
             onTriggered: menus.app.saveAs()
         }
+        // The web version's: files in and out of the browser's storage
+        // (see main.qml's importFiles and exportEntry). Hidden items keep
+        // their height in a menu, so they lose it too.
+        MenuSeparator {
+            visible: menus.app.web
+            height: visible ? implicitHeight : 0
+        }
+        MenuItem {
+            text: qsTr("&Import File…")
+            visible: menus.app.web
+            height: visible ? implicitHeight : 0
+            enabled: menus.app.listing && !menus.app.boxOpen
+            onTriggered: menus.app.importFiles(false)
+        }
+        MenuItem {
+            text: qsTr("Import Fol&der…")
+            visible: menus.app.web
+            height: visible ? implicitHeight : 0
+            enabled: menus.app.listing && !menus.app.boxOpen
+            onTriggered: menus.app.importFiles(true)
+        }
+        MenuItem {
+            text: qsTr("&Export…")
+            visible: menus.app.web
+            height: visible ? implicitHeight : 0
+            enabled: !menus.app.boxOpen
+            onTriggered: menus.app.exportEntry("")
+        }
         MenuSeparator {}
         Action {
             text: qsTr("Se&ttings")

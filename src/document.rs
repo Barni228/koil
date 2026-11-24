@@ -12,7 +12,7 @@ use serde_json::json;
 use crate::convert::{Coalesced, path_string, to_json};
 #[cfg(target_os = "macos")]
 use crate::install;
-use crate::{cli, ffi, listing};
+use crate::{cli, ffi, listing, web};
 
 /// Files the editor opens and saves, and the path on the command line.
 #[cxx_qt::bridge]
@@ -47,6 +47,25 @@ pub mod qobject {
         /// a file), whose folder then opens.
         #[qsignal]
         fn folder_requested(self: Pin<&mut Document>, path: QString, file: bool);
+
+        /// On the web, opens the browser's picker of files (or of a folder,
+        /// with `folder`), to bring what's picked into the dir `dir` (see
+        /// `web::import`), which `imported` says once it's in. Nothing
+        /// elsewhere.
+        #[qinvokable]
+        fn import_files(self: Pin<&mut Document>, dir: &QString, folder: bool);
+
+        /// Emitted once what `import_files` picked is in its dir, with
+        /// `{ paths, error }`: the paths made there (none if nothing was
+        /// picked), or why it couldn't be.
+        #[qsignal]
+        fn imported(self: Pin<&mut Document>, result: QString);
+
+        /// On the web, downloads `path` (from the dir `dir`, if relative; `~`
+        /// is the home dir): a file as it is, a dir as a `.zip` of it (see
+        /// `web::export`). Returns why it can't, or "".
+        #[qinvokable]
+        fn export_path(self: &Document, dir: &QString, path: &QString) -> QString;
 
         /// Emitted when writing fails, with why.
         #[qsignal]
@@ -240,6 +259,9 @@ pub struct DocumentRust {
     /// the line break at its end was added.
     scratch_dir: Option<PathBuf>,
     scratch_break: bool,
+    /// The dir what the browser's picker gives goes into, while it's open
+    /// (see `import_files`).
+    importing: Option<PathBuf>,
 }
 
 impl DocumentRust {
@@ -365,6 +387,44 @@ impl qobject::Document {
         // SAFETY: the pointer is to this Document, a live QObject, which
         // fileOpened is emitted on (it's in its meta-object).
         unsafe { ffi::watch_file_opens(self.object()) };
+    }
+
+    fn import_files(self: Pin<&mut Self>, dir: &QString, folder: bool) {
+        #[cfg(target_os = "emscripten")]
+        {
+            let mut this = self;
+            // What a picker left, that was never brought in.
+            let _ = std::fs::remove_dir_all(web::STAGING);
+            this.as_mut().rust_mut().importing = Some(PathBuf::from(dir.to_string()));
+            // SAFETY: the pointer is to this Document, a live QObject, which
+            // web.cpp hands back to web_files_picked.
+            unsafe { ffi::pick_web_files(this.object(), &QString::from(web::STAGING), folder) };
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        let _ = (self, dir, folder);
+    }
+
+    /// What the browser's picker gave, which `web_files_picked` calls:
+    /// brings it in, and emits `imported`.
+    fn files_picked(mut self: Pin<&mut Self>, error: &str) {
+        let Some(dir) = self.as_mut().rust_mut().importing.take() else {
+            return;
+        };
+        let imported = match error {
+            "" => web::import(Path::new(web::STAGING), &dir)
+                .map_err(|e| format!("Can't import into “{}”: {e}", listing::show_path(&dir))),
+            error => Err(format!("Can't read what was picked: {error}")),
+        };
+        let result = match imported {
+            Ok(paths) => json!({ "paths": paths, "error": "" }),
+            Err(error) => json!({ "paths": [], "error": error }),
+        };
+        self.imported(to_json(&result));
+    }
+
+    fn export_path(&self, dir: &QString, path: &QString) -> QString {
+        let exported = web::export(Path::new(&dir.to_string()), &path.to_string());
+        QString::from(exported.err().unwrap_or_default().as_str())
     }
 
     fn watch_file(self: Pin<&mut Self>, path: &QString) {
@@ -496,6 +556,7 @@ impl qobject::Document {
         let path = path.to_string();
         match std::fs::write(&path, encode(text, encoding)) {
             Ok(()) => {
+                web::disk_changed();
                 let path = PathBuf::from(path);
                 let stamp = Stamp::of(&path);
                 self.as_mut().rust_mut().known = Some((path, stamp));
@@ -637,6 +698,21 @@ pub unsafe fn folder_requested(document: *mut cxx_qt::QObject, path: &QString, f
     // SAFETY: the caller's.
     if let Some(document) = unsafe { as_document(document) } {
         document.folder_requested(path.clone(), file);
+    }
+}
+
+/// Brings what the browser's picker gave into the dir `document` (a
+/// Document) asked for, and emits its `imported` (see `import_files`):
+/// what web.cpp calls once the picker's files are read, with why they
+/// couldn't be, if they couldn't.
+///
+/// # Safety
+///
+/// `document` must point to a live QObject.
+pub unsafe fn web_files_picked(document: *mut cxx_qt::QObject, error: &QString) {
+    // SAFETY: the caller's.
+    if let Some(document) = unsafe { as_document(document) } {
+        document.files_picked(&error.to_string());
     }
 }
 
