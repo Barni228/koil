@@ -185,8 +185,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Only the installers: the web job's github-pages artifact (a tar)
+      # is for the pages job.
       - uses: actions/download-artifact@v8
         with:
+          pattern: "{windows-installer,macos-dmg}"
           path: dist
           merge-multiple: true
 
