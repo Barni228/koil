@@ -741,7 +741,10 @@ fn test_written_path() {
     assert_eq!(path("~x"), root.join("~x"));
     // as written: not a pattern, and no quotes taken off
     assert_eq!(path("*.rs"), root.join("*.rs"));
-    assert_eq!(path("/tmp/x"), PathBuf::from("/tmp/x"));
+    // an absolute one as it is (on Windows, one with a drive: `/tmp/x` is on
+    // the open dir's)
+    let absolute = home.join("x.txt");
+    assert_eq!(path(absolute.to_str().unwrap()), absolute);
 }
 
 #[test]
