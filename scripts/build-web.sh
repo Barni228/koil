@@ -37,8 +37,15 @@ version=$(sed -n 's/^QT_VERSION = //p' "$QT_WASM/mkspecs/qconfig.pri")
     fail "the desktop Qt is $(query QT_VERSION), but QT_WASM is $version: they must be the same"
 
 if [ -n "${EMSDK:-}" ]; then
+    [ -f "$EMSDK/emsdk_env.sh" ] || fail "EMSDK ($EMSDK) has no emsdk_env.sh"
+    # emsdk_env.sh finds its own dir by the shell's name for the file being
+    # sourced, which dash (Ubuntu's sh) hasn't; without one it takes the
+    # current dir, so it's sourced from there.
+    here=$(pwd)
+    cd "$EMSDK"
     # shellcheck disable=SC1091
-    . "$EMSDK/emsdk_env.sh" >/dev/null 2>&1
+    . ./emsdk_env.sh >/dev/null 2>&1
+    cd "$here"
 fi
 command -v emcc >/dev/null || fail "no emcc: set EMSDK to the Emscripten SDK"
 wanted=$(sed -n 's/.*set(QT_EMCC_RECOMMENDED_VERSION "\(.*\)").*/\1/p' \
