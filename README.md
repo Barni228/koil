@@ -158,6 +158,12 @@ xattr -cr "/Applications/Koil.app"
 **Windows**: run the setup `.exe`. If SmartScreen blocks it, choose
 _More info → Run anyway_.
 
+**In a browser**: [barni228.github.io/koil](https://barni228.github.io/koil/)
+runs Koil with nothing to install. Its files stay in the browser: File >
+Import File… and Import Folder… bring in yours, and File > Export… downloads
+a file, or a folder as a `.zip`. A browser runs no other programs, so shell
+commands and opening files in other apps are the desktop app's alone.
+
 ## Open a folder from Finder or Explorer
 
 **macOS**: in Finder, right-click a folder and choose _Services → Open in
@@ -221,6 +227,9 @@ cargo run -- path            # a directory, a pattern, or a file to edit
 cargo test                   # the listing's tests
 QT_QPA_PLATFORM=offscreen qmltestrunner -input tests   # the editor's tests, without windows
 ```
+
+`scripts/build-web.sh` builds the web version, with Qt for WebAssembly and
+Emscripten (the script says which).
 
 ## License
 

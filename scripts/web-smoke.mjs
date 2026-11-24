@@ -51,10 +51,11 @@ if (!chromePath) {
   process.exit();
 }
 const profile = mkdtempSync(join(tmpdir(), "koil-smoke-"));
+// CI's Linux has no sandbox for it.
 const chrome = spawn(chromePath, ["--headless=new", `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check", "--enable-unsafe-swiftshader",
   "--use-angle=swiftshader", "--window-size=1100,700", "--remote-debugging-port=0",
-  "about:blank"], { stdio: "ignore" });
+  ...(process.env.CI ? ["--no-sandbox"] : []), "about:blank"], { stdio: "ignore" });
 
 // Chrome writes the port it took to the profile.
 let port;

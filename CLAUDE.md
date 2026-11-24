@@ -201,7 +201,13 @@ A line a file; `docs/layout.md` says what each has, by function.
 ## CI and releases
 
 - `.github/workflows/build.yml` builds a `.dmg` (macos-latest, arm64 only) and
-  a setup `.exe` (windows-latest) on every push. Its `test` job runs
+  a setup `.exe` (windows-latest) on every push, and the web version
+  (ubuntu-latest, its `web` job: Qt for WebAssembly and Linux's desktop Qt
+  from aqt, the Emscripten that Qt names, `build-web.sh`, then
+  `web-smoke.mjs`), whose `pages` job publishes it to GitHub Pages for a
+  `v*` tag (the repo's Pages source must be GitHub Actions, and its
+  `github-pages` environment must allow `v*` tags). The web job's Qt is
+  pinned in its `QT_VERSION`, and cached with Emscripten by it. Its `test` job runs
   `cargo test` and the QML tests, with windows, on both, through
   `scripts/qml-tests.sh`: some tests fail now and then for timing alone,
   so it runs a failed test again, alone, up to twice, and fails only if
@@ -217,7 +223,8 @@ A line a file; `docs/layout.md` says what each has, by function.
   and that note to say so. Keep `Txt.interpretedRegExp` too: 6.11
   compiles regexes as 6.10 did (see Regular expressions).
 - Keep actions on Node 24 releases (checkout v7, upload-artifact v7,
-  download-artifact v8, action-gh-release v3).
+  download-artifact v8, action-gh-release v3, cache v6, setup-node v7,
+  upload-pages-artifact v5, deploy-pages v5).
 - Releases: `cargo release <level> --execute`. `Cargo.toml` makes it skip
   crates.io (`publish = false`) and run only on `main`, and it needs a clean
   working tree.
