@@ -80,11 +80,19 @@ MenuBar {
             text: qsTr("S&hortcuts…")
             onTriggered: menus.app.openShortcuts(false)
         }
-        MenuSeparator {}
-        Action {
-            text: qsTr("E&xit")
-            shortcut: "Ctrl+Q"
-            onTriggered: Qt.quit()
+        // Not in the web version, which the tab's close button quits.
+        MenuSeparator {
+            visible: !menus.app.web
+            height: visible ? implicitHeight : 0
+        }
+        MenuItem {
+            visible: !menus.app.web
+            height: visible ? implicitHeight : 0
+            action: Action {
+                text: qsTr("E&xit")
+                shortcut: "Ctrl+Q"
+                onTriggered: menus.app.quitKoil()
+            }
         }
     }
     Menu {

@@ -796,7 +796,9 @@ Window {
                     key: "startDir"
                 }
 
+                // Not in the web version: a browser runs no shell.
                 SettingLabel {
+                    visible: !win.app.web
                     text: qsTr("Shell")
                     about: qsTr("The shell `:!` runs commands in: a path, or a name on the `PATH`. Empty for the system's, which shows dimmed. The button lists those installed.")
                 }
@@ -806,6 +808,7 @@ Window {
                 Rectangle {
                     id: shellPicker
 
+                    visible: !win.app.web
                     // The shells installed: { name, path }.
                     property var shells: []
 
@@ -897,6 +900,7 @@ Window {
                     }
                 }
                 Reset {
+                    visible: !win.app.web
                     key: "shell"
                 }
 

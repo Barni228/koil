@@ -128,6 +128,10 @@
   - The web has no time zone files, which chrono's `Local` reads, so it
     would show times in UTC: `listing::local_time` takes the offset from
     libc's `localtime_r` there, which Emscripten asks the browser for.
+  - Quitting would leave a blank page, so there it says the tab's close
+    button quits (`quitKoil` in main.qml), and File > Exit is hidden;
+    so is the Shell setting, and Koil's own keys in the shortcuts' list
+    leave out those that run other programs.
   - Its files are kept in the browser (see Web files): `-lidbfs.js` and
     `web/pre.js` (`--pre-js`, run in the module before `main`).
 - **Web, keys**: in a browser on a Mac, Qt hands keys as macOS's Qt does

@@ -487,6 +487,9 @@ impl qobject::System {
     }
 
     fn apps_to_open(&self, path: &QString, name: &QString) -> QString {
+        if cfg!(target_os = "emscripten") {
+            return to_json(&json!({ "apps": [], "message": NOT_ON_THE_WEB }));
+        }
         let path = PathBuf::from(path.to_string());
         let shown = listing::show_path(&path);
         let name = name.to_string();
@@ -805,7 +808,8 @@ fn run_open(command: &mut Command) -> Result<(), String> {
 }
 
 /// Why the web version can't run a shell command, open a file in another
-/// app, or show it in a file manager: a browser runs no programs.
+/// app (or list those that can), or show it in a file manager: a browser
+/// runs no programs.
 const NOT_ON_THE_WEB: &str = "The browser can't run other programs";
 
 /// Why an app named but not listed can't open a file: the system found

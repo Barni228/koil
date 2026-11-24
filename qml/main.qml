@@ -266,7 +266,8 @@ ApplicationWindow {
             own("gs", qsTr("Sort the listing, by the key after it"), listing),
             own("_", qsTr("The scratchpad (in it, back)")),
             own("!", qsTr("Run a shell command on the entry"))
-        ];
+        // A browser runs no other programs: these only say so there.
+        ].filter(s => !web || ![" r", " o", " O", "!"].includes(s.keys));
     }
     // The keys Koil's menus (and the editor's copy, paste and undo, and
     // back and forward's Cmd+[ and Cmd+]) take before vim gets them, as vim
@@ -1905,14 +1906,14 @@ ApplicationWindow {
     function applyChanges(quit, ask) {
         if (!updateListing()) {
             if (quit)
-                confirmDialog.ask("The changes can't be applied. Quit without them?", vim.message, () => Qt.quit(), null, null,
+                confirmDialog.ask("The changes can't be applied. Quit without them?", vim.message, () => quitKoil(), null, null,
                     { yes: "Quit", cancel: true });
             return;
         }
         const actions = JSON.parse(koil.actions());
         if (!actions.length) {
             if (quit)
-                Qt.quit();
+                quitKoil();
             else
                 vim.showMessage("Nothing to apply");
             return;
@@ -1940,7 +1941,7 @@ ApplicationWindow {
         const question = picked => !picked ? "Pick what to " + (quit ? "apply before quitting" : "apply or discard")
             : (picked === total ? "Apply " + these : "Apply " + picked + " of " + these)
             + (!quit ? "?" : picked === total ? " before quitting?" : " and quit without the rest?");
-        confirmDialog.ask(question, actions, lines => applyLines(lines, quit), quit ? () => Qt.quit() : null, null, {
+        confirmDialog.ask(question, actions, lines => applyLines(lines, quit), quit ? () => quitKoil() : null, null, {
             keywords: changeKeywords,
             yes: "Apply",
             no: "Don't Apply",
@@ -1985,7 +1986,7 @@ ApplicationWindow {
         showListing(true, "", spot);
         report(r);
         if (r.ok && quit)
-            Qt.quit();
+            quitKoil();
         else if (r.ok && asked)
             askAgain(place);
     }
@@ -2369,9 +2370,18 @@ ApplicationWindow {
     // `force` (:q!) drops, and with `all` (:qa!) the listing's changes
     // too. In the scratchpad opened over a file, it goes back to the file
     // first, whose unsaved changes it kept.
+    // Quits, but in the web version, which a page can't end (it would be
+    // left blank): there the tab's close button quits, which it says.
+    function quitKoil() {
+        if (web)
+            vim.showMessage("Koil runs until its tab is closed");
+        else
+            Qt.quit();
+    }
+
     function quitCommand(force, confirm, all) {
         if (force && all) {
-            Qt.quit();
+            quitKoil();
             return;
         }
         if (scratchpad && scratchFromFile)
@@ -2398,7 +2408,7 @@ ApplicationWindow {
     // (:confirm q, ZZ) asks to apply them before quitting.
     function quitApp(confirm) {
         if (listing || !koil.hasChanges()) {
-            Qt.quit();
+            quitKoil();
             return;
         }
         leaveFile(true);

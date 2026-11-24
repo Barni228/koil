@@ -90,7 +90,7 @@ Platform.MenuBar {
             text: qsTr("Quit Koil")
             role: Platform.MenuItem.QuitRole
             shortcut: StandardKey.Quit
-            onTriggered: Qt.quit()
+            onTriggered: menus.app.quitKoil()
         }
     }
     Platform.Menu {
