@@ -185,12 +185,20 @@
   menu uses "Ctrl+=" plus a `Shortcut` for Ctrl++. The Windows/Linux menu
   writes "Ctrl+," and "Ctrl+Q" as plain strings, because `Preferences` and
   `Quit` have no Ctrl binding on Windows. "Ctrl+0" has no `StandardKey`. In
-  strings, Qt maps Ctrl to Cmd on macOS.
+  strings, Qt maps Ctrl to Cmd on macOS, and in the web version on a Mac
+  (see Web), which is why main.qml's `isMac` (macOS's keys and key names,
+  passed to Vim, FindBar, the help, the dialogs' lists and the Shortcuts
+  window, whose own default is the platform's, for the tests) is apart
+  from `macApp` (the desktop app on macOS: its menu bar, Finder, the
+  `koil` command).
 - **Menus**: QtQuick Controls menus have no `role` property, so macOS uses
   `Qt.labs.platform` MenuBar with `AboutRole`/`PreferencesRole`/`QuitRole`,
   which moves the items into the app menu (`MacMenuBar.qml`). Windows and
   Linux use an in-window Controls `MenuBar` (`WindowMenuBar.qml`), with the
-  same items (About in a Help menu), so a change to one goes in both. About
+  same items (About in a Help menu), so a change to one goes in both. So
+  does the web version, also on a Mac, where there's no menu bar of the
+  system's: its `Shortcut`s that add Ctrl++ and Ctrl+G go with
+  `WindowMenuBar` (`!macApp`). About
   Koil (main.qml's `about`) shows the version (`Qt.application.version`,
   which lib.rs sets from Cargo's) in the help's box. One is created in main.qml's
   `Component.onCompleted`, so only one exists at a time. Qt titles the PreferencesRole item "Preferences..."; a `QTranslator`

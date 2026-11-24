@@ -41,7 +41,8 @@ Window {
     required property var document
 
     readonly property real zoom: theme.zoom
-    readonly property bool isMac: Qt.platform.os === "osx"
+    // macOS's keys (see main.qml's isMac).
+    property bool isMac: Qt.platform.os === "osx"
     // Whether this window has the keys, which its shortcuts are only for.
     // A Shortcut takes its window as active while any of the main
     // window's has the keys (Settings, or the main one): Esc there closed
@@ -72,6 +73,7 @@ Window {
     // cursor's (see showExportRow).
     property bool exporting: false
     readonly property PickList exportPicks: PickList {
+        isMac: win.isMac
         pageRows: Math.max(1, Math.floor(exportList.height / (30 * win.zoom)))
         onReplaced: win.showExportRow()
         onRowChanged: win.showExportRow()

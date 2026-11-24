@@ -331,4 +331,7 @@
   font list, or `:set gfn` via `vim.fontFamiliesNeeded`). The Settings font
   picker is a field that searches, with the list in a `Popup.Window` (so the
   Settings window doesn't cut it off); the field keeps the keys, but the popup
-  takes Esc, so it closes on Esc itself.
+  takes Esc, so it closes on Esc itself. A browser gives pages none of the
+  system's fonts, so the web version has the Nerd Font Koil ships and
+  Qt's own DejaVu Sans, which is its UI's font there (the user chose it
+  over bundling another).

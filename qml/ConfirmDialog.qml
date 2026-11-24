@@ -58,6 +58,8 @@ ModalBox {
 
     // The clipboard, for Copy (main.qml's System); none in the tests.
     property var system: null
+    // macOS's keys (see main.qml's isMac).
+    property bool isMac: Qt.platform.os === "osx"
 
     // The question, or a function of how many lines are picked (and which)
     // that gives it (see ask).
@@ -78,6 +80,7 @@ ModalBox {
     // out. A page is the rows the list has room for, if they take a line
     // each.
     readonly property PickList picks: PickList {
+        isMac: dialog.isMac
         property real keptY: 0
 
         pickBlocked: dialog.extra !== null

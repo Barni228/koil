@@ -57,6 +57,25 @@ mod bridge {
         type QList_i32 = cxx_qt_lib::QList<i32>;
 
         include!("native.h");
+        #[cfg(target_os = "emscripten")]
+        include!("web.h");
+
+        /// Gives the page Koil's colors, as they change (see web.h). Web
+        /// only.
+        #[cxx_name = "useWebPage"]
+        #[cfg(target_os = "emscripten")]
+        fn use_web_page();
+
+        /// Whether the browser runs on a Mac (see web.h). Web only.
+        #[cxx_name = "webOnMac"]
+        #[cfg(target_os = "emscripten")]
+        fn web_on_mac() -> bool;
+
+        /// While `on`, has Qt's color scheme follow the browser's light or
+        /// dark mode (see web.h). Web only.
+        #[cxx_name = "followBrowserColorScheme"]
+        #[cfg(target_os = "emscripten")]
+        fn follow_browser_color_scheme(on: bool);
 
         /// Titles the macOS app-menu PreferencesRole item "Settings…".
         #[cxx_name = "useSettingsMenuTitle"]

@@ -217,6 +217,22 @@ pub mod qobject {
         #[qinvokable]
         fn regex_error(self: &System, pattern: &QString, flags: &QString) -> QString;
 
+        /// Whether Koil runs in a browser (the web version, see
+        /// docs/platform.md, Web).
+        #[qinvokable]
+        fn web(self: &System) -> bool;
+
+        /// Whether the web version runs on a Mac, where it acts as the Mac
+        /// app does (Qt hands Cmd as Ctrl there too). False on desktop.
+        #[qinvokable]
+        fn web_on_mac(self: &System) -> bool;
+
+        /// On the web, while `on`, has the color scheme follow the
+        /// browser's light or dark mode, which Qt doesn't read there, and
+        /// returns `on`. False on desktop, which does nothing.
+        #[qinvokable]
+        fn follow_browser_color_scheme(self: &System, on: bool) -> bool;
+
         /// The matches of `pattern` in `text` that start from `from` up to
         /// `to` (UTF-16 indexes), at most `limit`, and with an `l` in
         /// `flags` only the first that starts on each line: how many
@@ -600,6 +616,30 @@ impl qobject::System {
     fn same_string(&self, a: &QString, b: &QString) -> bool {
         let (a, b) = (a.as_slice(), b.as_slice());
         a.len() == b.len() && a.as_ptr() == b.as_ptr()
+    }
+
+    fn web(&self) -> bool {
+        cfg!(target_os = "emscripten")
+    }
+
+    fn web_on_mac(&self) -> bool {
+        #[cfg(target_os = "emscripten")]
+        return ffi::web_on_mac();
+        #[cfg(not(target_os = "emscripten"))]
+        false
+    }
+
+    fn follow_browser_color_scheme(&self, on: bool) -> bool {
+        #[cfg(target_os = "emscripten")]
+        {
+            ffi::follow_browser_color_scheme(on);
+            on
+        }
+        #[cfg(not(target_os = "emscripten"))]
+        {
+            let _ = on;
+            false
+        }
     }
 
     fn same_text(&self, a: &QString, b: &QString) -> bool {

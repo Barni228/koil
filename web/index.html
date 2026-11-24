@@ -10,11 +10,25 @@
   <title>Koil</title>
   <link rel="icon" type="image/png" href="icon.png">
   <style>
-    /* The editor's colors in Koil's light and dark themes (Fusion's), so
-       the page doesn't flash another color before Koil draws. */
-    :root { color-scheme: light dark; --base: #ffffff; --text: #6b6b6b; }
+    /* Koil's colors in its light and dark themes (Fusion's), so the page
+       doesn't flash another color before Koil draws: the editor's, and the
+       windows' (with their frames, see frames below). The browser's mode
+       until Koil gives its own (these variables, inline on the root, and
+       data-theme, see cpp/web.h). */
+    :root {
+      color-scheme: light dark;
+      --base: #ffffff; --text: #6b6b6b; --window: #efefef; --window-text: #303030;
+      --button: none; --button-hover: invert(0.45);
+    }
     @media (prefers-color-scheme: dark) {
-      :root { --base: #2a2a2a; --text: #a8a8a8; }
+      :root:not([data-theme="light"]) {
+        --base: #242424; --text: #a8a8a8; --window: #323232; --window-text: #e0e0e0;
+        --button: invert(0.85); --button-hover: invert(0.6);
+      }
+    }
+    :root[data-theme="dark"] {
+      --base: #242424; --text: #a8a8a8; --window: #323232; --window-text: #e0e0e0;
+      --button: invert(0.85); --button-hover: invert(0.6);
     }
     html, body {
       margin: 0; height: 100%; overflow: hidden;
@@ -53,6 +67,29 @@
       status.hidden = false;
     }
 
+    // Qt draws the frames of Koil's other windows (Settings, Shortcuts,
+    // the help's) in the page, in its shadow DOM, light gray in either
+    // theme: these draw them in Koil's window color.
+    const frames = `
+      .qt-decorated-window { background-color: var(--window); }
+      .qt-decorated-window.has-border { border-color: var(--window); }
+      .title-bar .window-name { font: 12px system-ui, sans-serif; color: var(--window-text); }
+      .title-bar .action-button img { filter: var(--button); }
+      .title-bar .action-button:hover img { filter: var(--button-hover); }`;
+
+    // Once Koil runs: Qt makes its shadow DOM as it starts.
+    function started(instance) {
+      const shadow = screen.querySelector("div")?.shadowRoot;
+      if (shadow) {
+        const style = document.createElement("style");
+        style.textContent = frames;
+        shadow.append(style);
+      }
+      // As `koil`, for the console and scripts/web-smoke.mjs (`koil.FS`
+      // is its disk).
+      window.koil = instance;
+    }
+
     const loading = qtLoad({
       qt: {
         entryFunction: window.koil_entry,
@@ -62,9 +99,7 @@
         onExit: exit => stopped(exit.text),
       },
     });
-    // The instance, as `koil`, for the console and scripts/web-smoke.mjs
-    // (`koil.FS` is its disk).
-    loading.then(instance => { window.koil = instance; }, error => {
+    loading.then(started, error => {
       console.error(error);
       stopped(String(error));
     });

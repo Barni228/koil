@@ -60,6 +60,8 @@ pub fn run() {
     ffi::use_nerd_font(&QByteArray::from(NERD_FONT));
     ffi::use_line_delete_key();
     ffi::keep_popup_clicks();
+    #[cfg(target_os = "emscripten")]
+    ffi::use_web_page();
     // In a bundle, macOS draws the Dock's icon from the bundle's, as Finder
     // does; a window icon would replace it.
     #[cfg(not(windows))]
@@ -69,9 +71,10 @@ pub fn run() {
 
     // Qt Quick's default Windows style has no dark theme. Fusion follows the
     // system's light or dark mode, title bar and menus included (FluentWinUI3
-    // left those light). Setting QT_QUICK_CONTROLS_STYLE from here doesn't
-    // work: Qt reads the C runtime's copy of the environment, made at startup.
-    #[cfg(windows)]
+    // left those light), and looks the same on the web. Setting
+    // QT_QUICK_CONTROLS_STYLE from here doesn't work: Qt reads the C
+    // runtime's copy of the environment, made at startup.
+    #[cfg(any(windows, target_os = "emscripten"))]
     if std::env::var_os("QT_QUICK_CONTROLS_STYLE").is_none() {
         ffi::set_controls_style(&QString::from("Fusion"));
     }

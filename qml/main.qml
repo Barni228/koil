@@ -14,7 +14,15 @@ import "text.js" as Txt
 ApplicationWindow {
     id: root
 
-    readonly property bool isMac: Qt.platform.os === "osx"
+    // The desktop app on macOS: its own menu bar, Finder, the `koil`
+    // command.
+    readonly property bool macApp: Qt.platform.os === "osx"
+    // macOS's keys and their names (Cmd for Ctrl, <D-…>): the Mac app's,
+    // and the web version's on a Mac, where Qt hands Koil the keys as
+    // macOS's Qt does (docs/platform.md, Web).
+    readonly property bool isMac: macApp || system.webOnMac()
+    // The web version (docs/platform.md, Web).
+    readonly property bool web: system.web()
     property string filePath: ""
     readonly property string fileName: filePath ? filePath.split(/[\\/]/).pop() : "Untitled"
     // Whether the editor shows Koil's listing of `location`, rather than a
@@ -236,7 +244,7 @@ ApplicationWindow {
             own("  ", qsTr("Apply the changes (in a file, save)")),
             own(" a", qsTr("Apply, listing the changes first"), listing),
             own(" u", qsTr("List the applies to undo"), listing),
-            own(" r", (isMac ? qsTr("Show the entry in Finder") : Qt.platform.os === "windows"
+            own(" r", (macApp ? qsTr("Show the entry in Finder") : Qt.platform.os === "windows"
                 ? qsTr("Show the entry in Explorer") : qsTr("Show the entry in the file manager"))
                 + qsTr(" (in a file, the file)")),
             own(" o", qsTr("Open the entry in its default app (in a file, the file)")),
@@ -270,7 +278,7 @@ ApplicationWindow {
             key("O", qsTr("Open Folder…")), key("S", qsTr("Save As…")), key(",", qsTr("Settings…")),
             key("G", qsTr("Find Previous")), key("=", qsTr("Zoom In")), key("+", qsTr("Zoom In")),
             key("-", qsTr("Zoom Out")), key("0", qsTr("Actual Size")), key("Z", qsTr("Redo"))];
-        return both.concat(isMac ? [key("x", qsTr("Cut")), key("v", qsTr("Paste")), key("a", qsTr("Select All")),
+        return both.concat(macApp ? [key("x", qsTr("Cut")), key("v", qsTr("Paste")), key("a", qsTr("Select All")),
             key("h", qsTr("Hide Koil")), key("[", qsTr("Back")), key("]", qsTr("Forward")),
             key("M-D-f", qsTr("Replace…"))]
             : [key("h", qsTr("Replace…"))]);
@@ -2507,6 +2515,10 @@ ApplicationWindow {
     // Qt 6.8 and later can override the system's light or dark mode, which
     // also changes the palette, the title bar and the menus.
     function applyColorScheme() {
+        // On the web, the system's is the browser's, which Qt doesn't read
+        // there (see docs/ui.md, Theme and zoom).
+        if (system.followBrowserColorScheme(colorScheme !== "light" && colorScheme !== "dark"))
+            return;
         Application.styleHints.colorScheme = colorScheme === "light" ? Qt.ColorScheme.Light : colorScheme === "dark" ? Qt.ColorScheme.Dark : Qt.ColorScheme.Unknown;
     }
 
@@ -2856,6 +2868,7 @@ ApplicationWindow {
     Vim {
         id: vim
 
+        isMac: root.isMac
         editor: root.activeView.textArea
         flickable: root.activeView.flickable
         singleLine: root.activeView === pathView
@@ -3170,6 +3183,7 @@ ApplicationWindow {
         FindBar {
             id: findBar
 
+            isMac: root.isMac
             anchors.right: parent.right
             anchors.rightMargin: 16 // clear of the scroll bar
             editor: root.activeView.textArea
@@ -3279,6 +3293,7 @@ ApplicationWindow {
     HelpPanel {
         id: help
 
+        isMac: root.isMac
         // Whether it had the keys as it closed: if something else took
         // them (see keepHelpKeys), that keeps them.
         property bool hadKeys
@@ -3305,6 +3320,7 @@ ApplicationWindow {
     ConfirmDialog {
         id: confirmDialog
 
+        isMac: root.isMac
         theme: theme
         system: system
         onClosed: root.activeView.textArea.forceActiveFocus()
@@ -3334,6 +3350,7 @@ ApplicationWindow {
     ShortcutsWindow {
         id: shortcutsWindow
 
+        isMac: root.isMac
         app: root
         theme: theme
         document: doc
@@ -3449,7 +3466,7 @@ ApplicationWindow {
     // Windows / Linux: the menu's Zoom In is Ctrl+=; this keeps Ctrl++ too.
     // On macOS, StandardKey.ZoomIn already covers both.
     Shortcut {
-        enabled: !root.isMac
+        enabled: !root.macApp
         sequences: [StandardKey.ZoomIn]
         onActivated: root.zoom(1)
     }
@@ -3457,18 +3474,18 @@ ApplicationWindow {
     // Windows / Linux: the menu's Find Next and Find Previous are F3 and
     // Shift+F3; these add Ctrl+G and Ctrl+Shift+G, like Cmd+G on macOS.
     Shortcut {
-        enabled: !root.isMac && !confirmDialog.opened
+        enabled: !root.macApp && !confirmDialog.opened
         sequence: "Ctrl+G"
         onActivated: root.findNext(1)
     }
     Shortcut {
-        enabled: !root.isMac && !confirmDialog.opened
+        enabled: !root.macApp && !confirmDialog.opened
         sequence: "Ctrl+Shift+G"
         onActivated: root.findNext(-1)
     }
 
     Component.onCompleted: {
-        if (isMac)
+        if (macApp)
             macMenuBar.createObject(root, {
                 window: root
             });

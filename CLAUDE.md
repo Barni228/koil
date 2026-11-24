@@ -57,7 +57,8 @@ A line a file; `docs/layout.md` says what each has, by function.
   `src/*/tests.rs`.
 - `scripts/`, `packaging/`, `fonts/`: bundling, icons, the Nerd Font.
 - `web/`: the web version's build (`CMakeLists.txt`, the `koil_web` crate,
-  `main.cpp`, the page `index.html`). `scripts/build-web.sh` builds it into
+  `main.cpp`, the page `index.html`); `cpp/web.{h,cpp}`: what only the
+  browser's JavaScript can do. `scripts/build-web.sh` builds it into
   `target/web/`, `scripts/web-smoke.mjs` checks it (docs/platform.md, Web).
 
 ## Build and test

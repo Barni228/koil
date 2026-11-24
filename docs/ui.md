@@ -35,7 +35,13 @@
   it to `settings` alone. It's a dir or pattern as the path field takes it,
   read from the home dir (`Document.startDir`), so it can't open a file;
   the folder button puts a picked one in with `~`. The color scheme sets `Application.styleHints.colorScheme` (Qt 6.8+), which
-  also switches the palette, title bar and menus; "system" unsets it. The
+  also switches the palette, title bar and menus; "system" unsets it. On
+  the web, Qt reads no scheme from the browser (it's Unknown in both
+  modes) and then gives windows a light palette but text areas a dark
+  one, so "system" there has the scheme follow the browser's
+  `prefers-color-scheme`, now and as it changes
+  (`System.followBrowserColorScheme`, in web.cpp), which makes every
+  palette match. The
   Settings window's size follows the zoom, so it isn't resizable. Its
   settings scroll (`scroller`, a `WheelFlickable`, as a drag selects in a
   field) past

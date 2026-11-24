@@ -26,7 +26,8 @@ ModalBox {
     // Vim's regexEngine).
     property var regexEngine: null
 
-    readonly property bool isMac: Qt.platform.os === "osx"
+    // macOS's keys (see main.qml's isMac).
+    property bool isMac: Qt.platform.os === "osx"
     readonly property bool isWindows: Qt.platform.os === "windows"
     readonly property string monoFamily: theme.font.family
     // Modifier keys as the OS writes them.

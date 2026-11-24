@@ -113,7 +113,9 @@ QtObject {
     // list has room for, which it says.
     property int pageRows: 10
     // Ctrl is Meta on macOS, where Qt calls Cmd Ctrl.
-    readonly property int ctrlKey: Qt.platform.os === "osx" ? Qt.MetaModifier : Qt.ControlModifier
+    // macOS's keys (see main.qml's isMac), whose Ctrl Qt hands as Meta.
+    property bool isMac: Qt.platform.os === "osx"
+    readonly property int ctrlKey: isMac ? Qt.MetaModifier : Qt.ControlModifier
 
     // The rows are made again: `replacing` before, where what draws them
     // can keep how far it's scrolled, and `replaced` after, where it

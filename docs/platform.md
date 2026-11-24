@@ -125,3 +125,24 @@
     programs.
   - stdin isn't read (`cli::read_stdin`): Emscripten would ask for it
     with a prompt.
+- **Web, keys**: in a browser on a Mac, Qt hands keys as macOS's Qt does
+  (Cmd as Ctrl, Ctrl as Meta), so the web version acts as the Mac app
+  there (`isMac`, from `System.webOnMac`, which reads `navigator`): Cmd
+  for the menus' keys, `<D-…>` names, Ctrl for vim's. Its menus are
+  WindowMenuBar's all the same (see Menus). There Qt gives Ctrl and a
+  letter the letter as its text, where macOS gives a control character,
+  so the editor would type it: insert mode drops one that the editor has
+  no use for (`Vim.insertKey`, `macEditorKeys`: macOS's Ctrl-A, Ctrl-K…
+  stay the editor's). Browsers keep some keys from pages, which then
+  never reach Koil: Cmd+W, Cmd+T, Cmd+N and Cmd+Q on a Mac (Ctrl+W,
+  Ctrl+T, Ctrl+N elsewhere), with Shift too, and Brave on a Mac keeps
+  Ctrl+W (vim's `<C-w>`) as well. Koil doesn't fight them.
+- **Web, windows**: Settings, Shortcuts and the help's window are windows
+  of Qt's in the page, whose frames (a title bar with Qt's buttons, which
+  moves them) Qt draws in its shadow DOM, light gray in either theme.
+  `index.html` adds a style there that draws them in Koil's window color
+  (`--window`). Koil gives the page its colors as they change (CSS
+  variables and `data-theme` on the page's root, from web.cpp's
+  `useWebPage`, at each change of the palette, as Qt's
+  `colorSchemeChanged` doesn't come on the web), which the page's own
+  colors follow too, the browser's mode until then.

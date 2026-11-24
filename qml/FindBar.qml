@@ -57,7 +57,8 @@ FocusScope {
     // How deep in unpreviewed the bar is.
     property int unpreviewing: 0
 
-    readonly property bool isMac: Qt.platform.os === "osx"
+    // macOS's keys (see main.qml's isMac).
+    property bool isMac: Qt.platform.os === "osx"
     readonly property real zoom: theme.zoom
     // Room left beside the chevron, the count and four buttons.
     readonly property real fieldWidth: width - (25 + 4 + 72 + 4 * 22 + 5 * 2) * zoom

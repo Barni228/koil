@@ -67,6 +67,7 @@ Window {
     HelpPanel {
         id: panel
 
+        isMac: win.app.isMac
         theme: win.theme
         defaultFontFamily: win.defaultFontFamily
         // All of the window, with nothing behind it to dim or to click.

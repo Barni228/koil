@@ -254,7 +254,8 @@ QtObject {
     // apply.
     signal nothingToUndo()
 
-    readonly property bool isMac: Qt.platform.os === "osx"
+    // macOS's keys (see main.qml's isMac).
+    property bool isMac: Qt.platform.os === "osx"
     readonly property var operators: ["d", "c", "y", ">", "<", "=", "g=", "g~", "gu", "gU", "g?", "!", "g!"]
     readonly property var motions: ["h", "j", "k", "l", "<Left>", "<Right>", "<Up>", "<Down>", "<BS>", " ",
         "w", "W", "b", "B", "e", "E", "ge", "gE", "0", "^", "$", "<Home>", "<End>", "gg", "G", "gj", "gk",
@@ -1140,8 +1141,23 @@ QtObject {
             typeKey(tok);
             return true;
         }
+        // Ctrl and a key on a Mac (Qt's Meta) that the editor has no use
+        // for: macOS gives it a control character, which it doesn't type,
+        // but the web version's Qt gives it the key's own, which it would.
+        if (isMac && event.modifiers & Qt.MetaModifier && /^[ -~]$/.test(event.text)
+                && !macEditorKeys.some(k => event.matches(k)))
+            return true;
         return false;
     }
+
+    // What a Mac's text fields do with Ctrl and a key, as Qt's editor does
+    // there (Ctrl-A to the line's start, Ctrl-K deletes to its end).
+    readonly property var macEditorKeys: [StandardKey.Backspace, StandardKey.Delete, StandardKey.DeleteEndOfLine,
+        StandardKey.MoveToNextChar, StandardKey.MoveToPreviousChar, StandardKey.MoveToNextLine,
+        StandardKey.MoveToPreviousLine, StandardKey.MoveToStartOfBlock, StandardKey.MoveToEndOfBlock,
+        StandardKey.MoveToNextPage, StandardKey.InsertLineSeparator, StandardKey.SelectStartOfBlock,
+        StandardKey.SelectEndOfBlock, StandardKey.SelectNextChar, StandardKey.SelectPreviousChar,
+        StandardKey.SelectNextLine, StandardKey.SelectPreviousLine, StandardKey.SelectNextPage]
 
     // In Koil's listing, the insert-mode key `event` as vim's <CR>, <BS> or
     // <Del> if vim must type it to keep the prefixes (see Prefixes): Enter,

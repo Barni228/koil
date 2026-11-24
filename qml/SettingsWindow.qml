@@ -209,7 +209,7 @@ Window {
     }
 
     onActiveChanged: {
-        if (active && app.isMac) {
+        if (active && app.macApp) {
             finderShortcut = document.finderServiceShortcut();
             commandStatus = document.commandStatus();
         }
@@ -939,7 +939,7 @@ Window {
                 Item {}
 
                 SettingLabel {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     text: qsTr("Open from Finder")
                     about: qsTr("Opens the folder selected in Finder here, even if Koil isn't open; it's also in a folder's right-click menu, under Services. In System Settings' Keyboard Shortcuts, it's under Services > Files and Folders.")
                 }
@@ -950,7 +950,7 @@ Window {
                 // Services: Spotlight is the row under it (?Shortcuts lands on
                 // Modifier Keys, the last row, and ?Services opens nothing).
                 Row {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     spacing: 8 * win.zoom
 
                     Rectangle {
@@ -979,14 +979,14 @@ Window {
                     }
                 }
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
 
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
                 CodeLabel {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     Layout.fillWidth: true
                     Layout.preferredWidth: 0
                     Layout.topMargin: -4 * win.zoom
@@ -997,11 +997,11 @@ Window {
                     opacity: 0.6
                 }
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
 
                 SettingLabel {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     text: qsTr("Command line")
                     about: qsTr("Puts `koil` in `/usr/local/bin`, so that typed in a terminal, it opens Koil (`koil --help` says how). macOS asks for your password.")
                 }
@@ -1010,7 +1010,7 @@ Window {
                 // admin's password to put there or take away.
                 TextButton {
                     theme: win.theme
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     enabled: !win.changingCommand
                     text: win.commandStatus === "installed" ? qsTr("Remove “koil” Command")
                         : win.commandStatus === "missing" ? qsTr("Install “koil” Command") : qsTr("Replace “koil” Command")
@@ -1021,14 +1021,14 @@ Window {
                     }
                 }
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
 
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
                 CodeLabel {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     Layout.fillWidth: true
                     Layout.preferredWidth: 0
                     Layout.topMargin: -4 * win.zoom
@@ -1039,11 +1039,11 @@ Window {
                     opacity: win.commandError ? 1 : 0.6
                 }
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
 
                 SettingLabel {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     text: qsTr("Shell environment")
                     about: qsTr("Shell commands (`:!`) get the `PATH` and other variables your shell has in a terminal, `.zshrc`'s too, read once as Koil opens (which runs your shell): an app opened from Finder has only the system's `PATH`. Off, they run in a login shell, which reads only the profile (`.zprofile`, not `.zshrc`): turn it on if a command your terminal finds isn't found, like Homebrew's.")
                 }
@@ -1051,19 +1051,19 @@ Window {
                 // (see shell.rs's `environment`), only on macOS, where an app
                 // opened from Finder has only the system's PATH.
                 OnOff {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     key: "shellEnvironment"
                 }
                 Reset {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     key: "shellEnvironment"
                 }
 
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
                 CodeLabel {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                     Layout.fillWidth: true
                     Layout.preferredWidth: 0
                     Layout.topMargin: -4 * win.zoom
@@ -1074,7 +1074,7 @@ Window {
                     opacity: 0.6
                 }
                 Item {
-                    visible: win.app.isMac
+                    visible: win.app.macApp
                 }
             }
         }
